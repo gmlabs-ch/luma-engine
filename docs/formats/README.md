@@ -7,3 +7,4 @@ files only (see the clean-room rule in [CONTRIBUTING.md](../../CONTRIBUTING.md))
 | Format | Document | Status |
 |--------|----------|--------|
 | Game packages (`.dcp`) | [dcp.md](dcp.md) | Implemented in `luma-archive` |
+| Definition files (`.game`, `.scene`, `.sprite`, `.window`, `.font`, ...) | [definition-files.md](definition-files.md) | Syntax implemented in `luma-formats` |
