@@ -41,8 +41,8 @@ SCENE {
 ## Syntax
 
 A file is a sequence of **statements**. Each statement starts with a
-**key**, an identifier made of ASCII letters, digits and underscores, and
-continues with one of:
+**key**, an identifier made of ASCII letters, digits and underscores (it
+may start with a digit: `2D_ONLY`), and continues with one of:
 
 | Form | Example | Meaning |
 |------|---------|---------|
@@ -105,8 +105,8 @@ games are plain ASCII.
 closing brace by counting braces without regard to quotes, so a `{` or `}`
 inside a string must be balanced (`GUID="{665ADE9A-...}"` is fine).
 
-When the content of a block is scalars separated by commas and whitespace,
-with no `=` and no nested block, it is a **list**: `POINT {521,720}`,
+When the content of a block starts with a number, it is a **list** of
+scalars separated by commas and whitespace: `POINT {521,720}`,
 `AREA { 12, 0, 1012, 100 }`, `RESOLUTION { 1024,768 }`. The loader reads it
 with the number of elements it expects (`%D` reads integers until a value
 is not followed by a comma); extra elements are ignored, missing ones keep
