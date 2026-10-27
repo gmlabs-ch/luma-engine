@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use luma_archive::{Package, PackagedFile, Vfs};
+use luma_formats::Document;
 
 const USAGE: &str = "\
 luma - command-line tools for Luma Engine
@@ -16,6 +17,8 @@ USAGE:
 COMMANDS:
     list <game>            List the files contained in a game's packages
     unpack <game> <dir>    Extract every file from a game's packages
+    dump <file>            Parse a definition file and print it in canonical form
+    dump <game> <name>     Same, for a file inside a game's packages
     help                   Show this message
     version                Show the version
 
@@ -41,6 +44,11 @@ fn main() -> ExitCode {
         Some("unpack") => match args.as_slice() {
             [_, game, dir] => unpack(Path::new(game), Path::new(dir)),
             _ => usage_error("unpack takes exactly two arguments: <game> <dir>"),
+        },
+        Some("dump") => match args.as_slice() {
+            [_, file] => dump(Path::new(file), None),
+            [_, game, name] => dump(Path::new(game), Some(name)),
+            _ => usage_error("dump takes <file> or <game> <name>"),
         },
         Some(other) => usage_error(&format!("unknown command `{other}`")),
     };
@@ -146,6 +154,22 @@ fn unpack(game: &Path, dir: &Path) -> Result<(), Failure> {
         total,
         dir.display()
     );
+    Ok(())
+}
+
+fn dump(path: &Path, name: Option<&str>) -> Result<(), Failure> {
+    let (label, bytes) = match name {
+        Some(name) => {
+            let vfs = open(path)?;
+            (name.to_string(), vfs.read(name)?)
+        }
+        None => (path.display().to_string(), fs::read(path)?),
+    };
+    let doc = Document::parse(&bytes).map_err(|err| Failure::Error(format!("{label}: {err}")))?;
+    let stdout = io::stdout();
+    let mut out = BufWriter::new(stdout.lock());
+    write!(out, "{doc}")?;
+    out.flush()?;
     Ok(())
 }
 

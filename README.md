@@ -73,10 +73,13 @@ luma list path/to/game
 
 # Extract everything into a directory
 luma unpack path/to/game path/to/output
+
+# Parse a definition file (scene, sprite, window, ...) and print it
+luma dump path/to/game scenes/intro/intro.scene
 ```
 
-Both commands also accept a single `.dcp` file. The package format is
-documented in [docs/formats/dcp.md](docs/formats/dcp.md).
+`list` and `unpack` also accept a single `.dcp` file, and `dump` a file on
+disk. The formats are documented in [docs/formats](docs/formats/README.md).
 
 ## Games
 

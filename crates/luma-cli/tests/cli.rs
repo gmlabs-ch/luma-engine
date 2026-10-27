@@ -32,7 +32,7 @@ fn sample_game() -> PathBuf {
     fs::create_dir_all(game.join("data")).unwrap();
 
     let mut base = PackageBuilder::new("data");
-    base.add_file("default.game", b"GAME { base }".to_vec());
+    base.add_file("default.game", b"GAME { NAME=\"base\" }".to_vec());
     base.add_file(
         "scenes\\Room\\room.scene",
         "SCENE { }".repeat(200).into_bytes(),
@@ -43,7 +43,7 @@ fn sample_game() -> PathBuf {
 
     let mut patch = PackageBuilder::new("patch");
     patch.priority(1);
-    patch.add_file("DEFAULT.GAME", b"GAME { patched }".to_vec());
+    patch.add_file("DEFAULT.GAME", b"GAME { NAME=\"patched\" }".to_vec());
     fs::write(game.join("data/patch.dcp"), patch.build()).unwrap();
 
     fs::write(game.join("readme.txt"), b"loose file, not a package").unwrap();
@@ -83,10 +83,10 @@ fn list_shows_resolved_files() {
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines.len(), 3);
     // Sorted by normalised name; the patch wins for default.game.
-    assert_eq!(lines[0].trim(), "16\tpatch\tDEFAULT.GAME");
+    assert_eq!(lines[0].trim(), "23\tpatch\tDEFAULT.GAME");
     assert_eq!(lines[1].trim(), "1800\tdata\tscenes/Room/room.scene");
     assert_eq!(lines[2].trim(), "3\tdata\tsounds/beep.ogg");
-    assert!(String::from_utf8_lossy(&out.stderr).contains("3 files, 1819 bytes, in 2 package(s)"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("3 files, 1826 bytes, in 2 package(s)"));
     fs::remove_dir_all(&game).unwrap();
 }
 
@@ -113,7 +113,7 @@ fn unpack_extracts_everything() {
     );
     assert_eq!(
         fs::read(target.join("DEFAULT.GAME")).unwrap(),
-        b"GAME { patched }"
+        b"GAME { NAME=\"patched\" }"
     );
     assert_eq!(
         fs::read(target.join("scenes/Room/room.scene")).unwrap(),
@@ -161,4 +161,34 @@ fn reports_missing_games_and_packages() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("not a WME package"));
     fs::remove_dir_all(&empty).unwrap();
+}
+
+#[test]
+fn dump_prints_canonical_form_from_disk_and_from_packages() {
+    let game = sample_game();
+    let out = luma(&["dump", game.to_str().unwrap(), "default.game"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "GAME {\n  NAME = \"patched\"\n}\n"
+    );
+
+    let file = game.join("x.sprite");
+    fs::write(&file, "SPRITE{LOOPING=TRUE\nFRAME{HOTSPOT{1,2}}}").unwrap();
+    let out = luma(&["dump", file.to_str().unwrap()]);
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "SPRITE {\n  LOOPING = TRUE\n  FRAME {\n    HOTSPOT { 1, 2 }\n  }\n}\n"
+    );
+
+    fs::write(&file, "SPRITE {\n  BROKEN = \"\n").unwrap();
+    let out = luma(&["dump", file.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("line 2"));
+    fs::remove_dir_all(&game).unwrap();
 }

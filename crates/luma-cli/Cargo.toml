@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 luma-archive.workspace = true
+luma-formats.workspace = true
 
 [lints]
 workspace = true
