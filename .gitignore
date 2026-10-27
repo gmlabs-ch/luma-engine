@@ -4,3 +4,7 @@
 
 # Local game data for testing: never commit games.
 /testdata/local/
+
+# Local session notes: never commit.
+/handoff-*.md
+/reprise-*.md
