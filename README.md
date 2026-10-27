@@ -90,6 +90,7 @@ conditions.
 
 ---
 
-Luma Engine is a [GMLabs](https://gmlabs.ch) project. It is not affiliated
+Luma Engine is a [GMLabs](https://gmlabs.ch) project. Contact:
+[contact@gmlabs.ch](mailto:contact@gmlabs.ch). It is not affiliated
 with Wintermute Engine, Dead:Code Software, or the authors of the games it can
 run.
