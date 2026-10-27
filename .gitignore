@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+.DS_Store
+
+# Local game data for testing: never commit games.
+/testdata/local/

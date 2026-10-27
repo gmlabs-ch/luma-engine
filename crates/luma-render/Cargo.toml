@@ -1,0 +1,13 @@
+[package]
+name = "luma-render"
+description = "2D and 2.5D renderer built on wgpu (Metal on Apple platforms, Vulkan/DirectX 12/WebGPU elsewhere)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

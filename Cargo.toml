@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/gmlabs-ch/luma-engine"
+homepage = "https://github.com/gmlabs-ch/luma-engine"
+authors = ["The Luma Engine authors"]
+publish = false
+
+[workspace.dependencies]
+luma-archive = { path = "crates/luma-archive" }
+luma-formats = { path = "crates/luma-formats" }
+luma-script = { path = "crates/luma-script" }
+luma-render = { path = "crates/luma-render" }
+luma-audio = { path = "crates/luma-audio" }
+luma-adventure = { path = "crates/luma-adventure" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

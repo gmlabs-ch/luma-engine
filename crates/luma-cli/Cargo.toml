@@ -1,0 +1,20 @@
+[package]
+name = "luma-cli"
+description = "Command-line tools for Luma Engine: inspect and unpack game data."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "luma"
+path = "src/main.rs"
+
+[dependencies]
+luma-archive.workspace = true
+
+[lints]
+workspace = true
