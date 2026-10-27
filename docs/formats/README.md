@@ -6,4 +6,4 @@ files only (see the clean-room rule in [CONTRIBUTING.md](../../CONTRIBUTING.md))
 
 | Format | Document | Status |
 |--------|----------|--------|
-| Game packages (`.dcp`) | `dcp.md` | Planned (milestone 1) |
+| Game packages (`.dcp`) | [dcp.md](dcp.md) | Implemented in `luma-archive` |
