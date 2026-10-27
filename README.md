@@ -76,6 +76,9 @@ luma unpack path/to/game path/to/output
 
 # Parse a definition file (scene, sprite, window, ...) and print it
 luma dump path/to/game scenes/intro/intro.scene
+
+# Describe a sprite: frames, images, sizes, hotspots
+luma sprite path/to/game actors/hero/walk.sprite
 ```
 
 `list` and `unpack` also accept a single `.dcp` file, and `dump` a file on

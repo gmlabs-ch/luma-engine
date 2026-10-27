@@ -406,7 +406,9 @@ impl Parser<'_> {
                     return Ok(nodes);
                 }
                 Some(b'}') => return Err(self.error("unexpected `}`")),
-                Some(c) if c.is_ascii_alphabetic() || c == b'_' => nodes.push(self.statement()?),
+                Some(c) if c.is_ascii_alphanumeric() || c == b'_' => {
+                    nodes.push(self.statement()?);
+                }
                 Some(c) => {
                     return Err(self.error(format!(
                         "unexpected character `{}`, expected a key",
@@ -491,15 +493,24 @@ impl Parser<'_> {
         })
     }
 
-    /// After `{`: a list when the content is scalars separated by commas,
-    /// else nested statements.
+    /// After `{`: a list when the content starts with a number, else
+    /// nested statements. Keys may start with a digit (`2D_ONLY`), so the
+    /// whole first token is examined, not only its first character.
     fn block(&mut self) -> Result<Value, ParseError> {
         self.skip_whitespace();
-        match self.peek() {
-            Some(c) if c.is_ascii_digit() || matches!(c, b'-' | b'+' | b'.') => {
-                self.list().map(Value::List)
-            }
-            _ => self.statements(true).map(Value::Block),
+        let token = self.src[self.pos..]
+            .iter()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'+' | b'-'))
+            .copied()
+            .collect::<Vec<u8>>();
+        let numeric = !token.is_empty()
+            && token
+                .iter()
+                .all(|c| c.is_ascii_digit() || matches!(c, b'.' | b'+' | b'-'));
+        if numeric {
+            self.list().map(Value::List)
+        } else {
+            self.statements(true).map(Value::Block)
         }
     }
 
@@ -616,6 +627,16 @@ mod tests {
         assert_eq!(b.get_int("X"), Some(1));
         assert_eq!(doc.get("C").unwrap().value, Value::Block(vec![]));
         assert_eq!(doc.get_int("D"), Some(5));
+    }
+
+    #[test]
+    fn keys_may_start_with_a_digit() {
+        let doc = parse("FRAME {\n  2D_ONLY=TRUE\n  HOTSPOT {1,2}\n  3D_ONLY = FALSE\n}");
+        let frame = doc.get("frame").unwrap();
+        assert_eq!(frame.get_bool("2D_ONLY"), Some(true));
+        assert_eq!(frame.get_bool("3d_only"), Some(false));
+        assert_eq!(frame.get_ints("hotspot"), Some(vec![1, 2]));
+        assert_eq!(frame.children().unwrap().len(), 3);
     }
 
     #[test]

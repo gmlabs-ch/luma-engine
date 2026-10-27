@@ -21,6 +21,7 @@ luma-audio = { path = "crates/luma-audio" }
 luma-adventure = { path = "crates/luma-adventure" }
 
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "jpeg", "tga"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

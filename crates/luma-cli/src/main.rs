@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use luma_archive::{Package, PackagedFile, Vfs};
-use luma_formats::Document;
+use luma_formats::{Document, Sprite};
 
 const USAGE: &str = "\
 luma - command-line tools for Luma Engine
@@ -19,6 +19,7 @@ COMMANDS:
     unpack <game> <dir>    Extract every file from a game's packages
     dump <file>            Parse a definition file and print it in canonical form
     dump <game> <name>     Same, for a file inside a game's packages
+    sprite <game> <name>   Describe a sprite and the images it uses
     help                   Show this message
     version                Show the version
 
@@ -44,6 +45,10 @@ fn main() -> ExitCode {
         Some("unpack") => match args.as_slice() {
             [_, game, dir] => unpack(Path::new(game), Path::new(dir)),
             _ => usage_error("unpack takes exactly two arguments: <game> <dir>"),
+        },
+        Some("sprite") => match args.as_slice() {
+            [_, game, name] => sprite(Path::new(game), name),
+            _ => usage_error("sprite takes exactly two arguments: <game> <name>"),
         },
         Some("dump") => match args.as_slice() {
             [_, file] => dump(Path::new(file), None),
@@ -169,6 +174,81 @@ fn dump(path: &Path, name: Option<&str>) -> Result<(), Failure> {
     let stdout = io::stdout();
     let mut out = BufWriter::new(stdout.lock());
     write!(out, "{doc}")?;
+    out.flush()?;
+    Ok(())
+}
+
+fn sprite(game: &Path, name: &str) -> Result<(), Failure> {
+    let vfs = Vfs::open_game(game)?;
+    let sprite = if Sprite::is_image_path(name) {
+        Sprite::from_image(name)
+    } else {
+        let bytes = vfs.read(name)?;
+        Sprite::parse(&bytes).map_err(|err| Failure::Error(format!("{name}: {err}")))?
+    };
+    let stdout = io::stdout();
+    let mut out = BufWriter::new(stdout.lock());
+    writeln!(out, "{name}: {:?}", sprite.name)?;
+    let mut flags = Vec::new();
+    for (set, label) in [
+        (sprite.looping, "looping"),
+        (sprite.continuous, "continuous"),
+        (sprite.precise, "precise"),
+        (sprite.streamed, "streamed"),
+    ] {
+        if set {
+            flags.push(label);
+        }
+    }
+    writeln!(
+        out,
+        "  {} frame(s), {} ms total, flags: {}",
+        sprite.frames.len(),
+        sprite
+            .frames
+            .iter()
+            .map(|f| u64::from(f.delay_ms))
+            .sum::<u64>(),
+        if flags.is_empty() {
+            "none".to_string()
+        } else {
+            flags.join(" ")
+        }
+    )?;
+    for (i, frame) in sprite.frames.iter().enumerate() {
+        writeln!(out, "  frame {i}: {} ms", frame.delay_ms)?;
+        for sub in &frame.subframes {
+            let Some(image) = &sub.image else {
+                writeln!(out, "    (no image)")?;
+                continue;
+            };
+            let size = match vfs.read(image) {
+                Ok(bytes) => match luma_formats::image::decode(&bytes, sub.color_key) {
+                    Ok(img) => format!(
+                        "{}x{} {}",
+                        img.width,
+                        img.height,
+                        if img.has_alpha_channel {
+                            "alpha"
+                        } else {
+                            "color key"
+                        }
+                    ),
+                    Err(err) => format!("ERROR: {err}"),
+                },
+                Err(err) => format!("ERROR: {err}"),
+            };
+            let rect = sub
+                .rect
+                .map(|r| format!(" rect {},{},{},{}", r.left, r.top, r.right, r.bottom))
+                .unwrap_or_default();
+            writeln!(
+                out,
+                "    {image} ({size}) hotspot {},{}{rect}",
+                sub.hotspot_x, sub.hotspot_y
+            )?;
+        }
+    }
     out.flush()?;
     Ok(())
 }

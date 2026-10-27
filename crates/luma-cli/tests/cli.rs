@@ -192,3 +192,52 @@ fn dump_prints_canonical_form_from_disk_and_from_packages() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("line 2"));
     fs::remove_dir_all(&game).unwrap();
 }
+
+/// A 2x1 RGB PNG: a magenta pixel then a dark one.
+const TINY_PNG: [u8; 72] = [
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x7b, 0x40, 0xe8,
+    0xdd, 0x00, 0x00, 0x00, 0x0f, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xf0, 0x9f,
+    0x4b, 0x44, 0x0e, 0x00, 0x0a, 0x61, 0x02, 0x3b, 0xa5, 0xaa, 0xb2, 0xee, 0x00, 0x00, 0x00, 0x00,
+    0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+];
+
+#[test]
+fn sprite_describes_frames_and_images() {
+    let game = temp_dir();
+    let mut pkg = PackageBuilder::new("data");
+    pkg.add_stored_file("sprites\\dot.png", TINY_PNG.to_vec());
+    pkg.add_file(
+        "sprites\\blink.sprite",
+        b"SPRITE {\n NAME=\"blink\"\n LOOPING=TRUE\n FRAME { DELAY=100\n IMAGE=\"sprites\\dot.png\"\n HOTSPOT {1, 0} }\n FRAME { DELAY=50 }\n}"
+            .to_vec(),
+    );
+    fs::write(game.join("data.dcp"), pkg.build()).unwrap();
+
+    let out = luma(&["sprite", game.to_str().unwrap(), "sprites/BLINK.sprite"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("\"blink\""), "{text}");
+    assert!(
+        text.contains("2 frame(s), 150 ms total, flags: looping precise"),
+        "{text}"
+    );
+    assert!(
+        text.contains("sprites\\dot.png (2x1 color key) hotspot 1,0"),
+        "{text}"
+    );
+    assert!(text.contains("(no image)"), "{text}");
+
+    // An image path is a one-frame sprite.
+    let out = luma(&["sprite", game.to_str().unwrap(), "sprites/dot.png"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("1 frame(s), 0 ms total"));
+
+    let out = luma(&["sprite", game.to_str().unwrap(), "sprites/missing.sprite"]);
+    assert_eq!(out.status.code(), Some(1));
+    fs::remove_dir_all(&game).unwrap();
+}
