@@ -33,8 +33,8 @@ Luma Engine reads the same game data with a new engine built for today:
 
 | # | Milestone | Status |
 |---|-----------|--------|
-| 0 | Workspace, licensing and CI | 🚧 In progress |
-| 1 | Read and unpack WME game packages (`luma list`, `luma unpack`) | Planned |
+| 0 | Workspace, licensing and CI | ✅ Done |
+| 1 | Read and unpack WME game packages (`luma list`, `luma unpack`) | ✅ Done |
 | 2 | Display a static scene | Planned |
 | 3 | Run compiled game scripts | Planned |
 | 4 | A complete game playable from start to finish on macOS | Planned |
@@ -61,6 +61,22 @@ You need a recent stable Rust toolchain ([rustup](https://rustup.rs)).
 cargo build --release
 ./target/release/luma help
 ```
+
+## Using the tools
+
+`luma` reads a game's `.dcp` packages the way the engine does, including
+the priority rules between packages:
+
+```sh
+# List every file, with its size and the package it comes from
+luma list path/to/game
+
+# Extract everything into a directory
+luma unpack path/to/game path/to/output
+```
+
+Both commands also accept a single `.dcp` file. The package format is
+documented in [docs/formats/dcp.md](docs/formats/dcp.md).
 
 ## Games
 
