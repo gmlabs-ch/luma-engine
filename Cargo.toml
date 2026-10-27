@@ -20,6 +20,8 @@ luma-render = { path = "crates/luma-render" }
 luma-audio = { path = "crates/luma-audio" }
 luma-adventure = { path = "crates/luma-adventure" }
 
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"

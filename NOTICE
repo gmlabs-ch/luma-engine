@@ -22,6 +22,14 @@ source code of WME Lite and Wintermute Engine 1.x:
 Files containing code derived from these projects carry a header saying so,
 and keep the original copyright notice as required by the MIT License.
 
+Written with reference to those sources (format layout and lookup rules,
+no code copied):
+
+  docs/formats/dcp.md
+  crates/luma-archive/src/package.rs
+  crates/luma-archive/src/builder.rs
+  crates/luma-archive/src/vfs.rs
+
 Luma Engine is an independent project. It is not affiliated with, endorsed
 by, or sponsored by Jan Nedoma, Dead:Code Software, or the authors of any
 game it can run. "Wintermute Engine" is used only to describe compatibility.
