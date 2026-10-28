@@ -6,6 +6,8 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use luma_archive::PackageBuilder;
+use luma_script::Instruction;
+use luma_script::asm::Assembler;
 
 fn luma(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_luma"))
@@ -39,6 +41,7 @@ fn sample_game() -> PathBuf {
     )
     .modified(1_000_000_000);
     base.add_stored_file("sounds/beep.ogg", vec![1, 2, 3]);
+    base.add_file("scripts\\room.script", sample_script());
     fs::write(game.join("data.dcp"), base.build()).unwrap();
 
     let mut patch = PackageBuilder::new("patch");
@@ -48,6 +51,61 @@ fn sample_game() -> PathBuf {
 
     fs::write(game.join("readme.txt"), b"loose file, not a package").unwrap();
     game
+}
+
+/// `var x = 1 + 2; on "LeftClick" { Sleep(10); }` as the compiler lays
+/// it out.
+fn sample_script() -> Vec<u8> {
+    let mut a = Assembler::new("scripts\\room.script");
+    a.emit(Instruction::DbgLine(1));
+    a.def_var("x");
+    a.push_int(2);
+    a.push_int(1);
+    a.emit(Instruction::Add);
+    a.pop_var("x");
+    let end = a.label();
+    a.jmp(end);
+    a.event("LeftClick");
+    a.emit(Instruction::Scope);
+    a.push_int(10);
+    a.push_int(1);
+    a.external_call("Sleep");
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    a.bind(end);
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
+#[test]
+fn script_disassembles_a_compiled_script() {
+    let game = sample_game();
+    let out = luma(&["script", game.to_str().unwrap(), "scripts/room.script"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.starts_with("scripts\\room.script: version 1.2, "),
+        "{text}"
+    );
+    assert!(text.contains("2 symbol(s), 0 function(s), 1 event(s), 0 method(s), 0 external(s)\n"));
+    assert!(text.contains("  event LeftClick at "), "{text}");
+    assert!(text.contains("event \"LeftClick\":\n"), "{text}");
+    assert!(text.contains("  EXTERNAL_CALL Sleep\n"), "{text}");
+    assert!(text.contains("  DEF_VAR x\n"), "{text}");
+    assert!(text.trim_end().ends_with("RET"), "{text}");
+
+    // Not a script.
+    let out = luma(&["script", game.to_str().unwrap(), "default.game"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not a compiled script"));
+
+    // Usage.
+    let out = luma(&["script", game.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
 }
 
 #[test]
@@ -81,12 +139,13 @@ fn list_shows_resolved_files() {
     );
     let stdout = String::from_utf8(out.stdout).unwrap();
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 3);
+    assert_eq!(lines.len(), 4);
     // Sorted by normalised name; the patch wins for default.game.
     assert_eq!(lines[0].trim(), "23\tpatch\tDEFAULT.GAME");
     assert_eq!(lines[1].trim(), "1800\tdata\tscenes/Room/room.scene");
-    assert_eq!(lines[2].trim(), "3\tdata\tsounds/beep.ogg");
-    assert!(String::from_utf8_lossy(&out.stderr).contains("3 files, 1826 bytes, in 2 package(s)"));
+    assert!(lines[2].trim().ends_with("\tdata\tscripts/room.script"));
+    assert_eq!(lines[3].trim(), "3\tdata\tsounds/beep.ogg");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("4 files, "));
     fs::remove_dir_all(&game).unwrap();
 }
 
@@ -96,7 +155,7 @@ fn list_accepts_a_single_package() {
     let out = luma(&["list", game.join("data.dcp").to_str().unwrap()]);
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert_eq!(stdout.lines().count(), 3);
+    assert_eq!(stdout.lines().count(), 4);
     assert!(stdout.contains("\tdata\tdefault.game"));
     fs::remove_dir_all(&game).unwrap();
 }

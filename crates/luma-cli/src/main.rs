@@ -7,6 +7,7 @@ use std::process::ExitCode;
 
 use luma_archive::{Package, PackagedFile, Vfs};
 use luma_formats::{Document, Scene, SceneNode, Sprite};
+use luma_script::Program;
 
 const USAGE: &str = "\
 luma - command-line tools for Luma Engine
@@ -21,6 +22,7 @@ COMMANDS:
     dump <game> <name>     Same, for a file inside a game's packages
     sprite <game> <name>   Describe a sprite and the images it uses
     scene <game> <name>    Describe a scene: layers, entities, regions
+    script <game> <name>   Disassemble a compiled script
     help                   Show this message
     version                Show the version
 
@@ -54,6 +56,10 @@ fn main() -> ExitCode {
         Some("scene") => match args.as_slice() {
             [_, game, name] => scene(Path::new(game), name),
             _ => usage_error("scene takes exactly two arguments: <game> <name>"),
+        },
+        Some("script") => match args.as_slice() {
+            [_, game, name] => script(Path::new(game), name),
+            _ => usage_error("script takes exactly two arguments: <game> <name>"),
         },
         Some("dump") => match args.as_slice() {
             [_, file] => dump(Path::new(file), None),
@@ -254,6 +260,64 @@ fn sprite(game: &Path, name: &str) -> Result<(), Failure> {
             )?;
         }
     }
+    out.flush()?;
+    Ok(())
+}
+
+fn script(game: &Path, name: &str) -> Result<(), Failure> {
+    let vfs = open(game)?;
+    let bytes = vfs.read(name)?;
+    let program = Program::parse(bytes).map_err(|err| Failure::Error(format!("{name}: {err}")))?;
+    let stdout = io::stdout();
+    let mut out = BufWriter::new(stdout.lock());
+    writeln!(
+        out,
+        "{}: version {}, {} bytes",
+        program.filename(),
+        program.version(),
+        program.bytes().len()
+    )?;
+    writeln!(
+        out,
+        "  code at {}..{} ({} bytes)",
+        program.code_start(),
+        program.code_end(),
+        program.code_end() - program.code_start()
+    )?;
+    writeln!(
+        out,
+        "  {} symbol(s), {} function(s), {} event(s), {} method(s), {} external(s)",
+        program.symbols().len(),
+        program.functions().len(),
+        program.events().len(),
+        program.methods().len(),
+        program.externals().len()
+    )?;
+    for (kind, entries) in [
+        ("function", program.functions()),
+        ("event", program.events()),
+        ("method", program.methods()),
+    ] {
+        for entry in entries {
+            writeln!(out, "  {kind} {} at {}", entry.name, entry.position)?;
+        }
+    }
+    for external in program.externals() {
+        writeln!(
+            out,
+            "  external {}!{} {:?} -> {:?} ({} parameter(s))",
+            external.dll,
+            external.name,
+            external.call_type,
+            external.returns,
+            external.params.len()
+        )?;
+    }
+    writeln!(out)?;
+    let listing = program
+        .listing()
+        .map_err(|err| Failure::Error(format!("{name}: {err}")))?;
+    out.write_all(listing.as_bytes())?;
     out.flush()?;
     Ok(())
 }

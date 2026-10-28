@@ -82,6 +82,9 @@ luma sprite path/to/game actors/hero/walk.sprite
 
 # Describe a scene: layers, entities, regions, and whether their sprites exist
 luma scene path/to/game scenes/room/room.scene
+
+# Disassemble a compiled script: tables, then one line per instruction
+luma script path/to/game scenes/room/scr/scene_init.script
 ```
 
 `list` and `unpack` also accept a single `.dcp` file, and `dump` a file on
