@@ -14,6 +14,8 @@
 //!   `.entity`), documented in `docs/formats/scene.md`.
 //! - [`actor`]: walking characters with a sprite per direction
 //!   (`.actor`), documented in `docs/formats/actor.md`.
+//! - [`font`]: bitmap and TrueType fonts (`.font`), documented in
+//!   `docs/formats/font.md`.
 //! - [`game`] and [`strings`]: the game definition and its string tables,
 //!   documented in `docs/formats/game.md`.
 //! - [`image`]: decoding of PNG, BMP, JPEG and TGA files to RGBA with the
@@ -27,6 +29,7 @@
 pub mod actor;
 pub mod def;
 mod error;
+pub mod font;
 pub mod game;
 pub mod image;
 pub mod scene;
@@ -36,6 +39,9 @@ pub mod strings;
 pub use actor::{Actor, SpriteSet};
 pub use def::{Document, Node, Nodes, ParseError, Scalar, Value};
 pub use error::{Error, Result};
+pub use font::{
+    BitmapFontDef, BitmapLayout, BitmapLine, FontFile, FontLayer, TextAlign, TrueTypeFontDef,
+};
 pub use game::GameFile;
 pub use image::{DEFAULT_COLOR_KEY, Image, Rgb, Rgba};
 pub use scene::{
