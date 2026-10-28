@@ -22,15 +22,19 @@
 
 pub mod def;
 mod error;
+pub mod game;
 pub mod image;
 pub mod scene;
 pub mod sprite;
+pub mod strings;
 
 pub use def::{Document, Node, Nodes, ParseError, Scalar, Value};
 pub use error::{Error, Result};
+pub use game::GameFile;
 pub use image::{DEFAULT_COLOR_KEY, Image, Rgb, Rgba};
 pub use scene::{
     Direction, Entity, EntityKind, Layer, Point, Property, Region, RotationLevel, ScaleLevel,
     Scene, SceneNode, WaypointGroup,
 };
 pub use sprite::{Frame, Rect, Sprite, SubFrame};
+pub use strings::StringTable;

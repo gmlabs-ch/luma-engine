@@ -11,3 +11,4 @@ files only (see the clean-room rule in [CONTRIBUTING.md](../../CONTRIBUTING.md))
 | Sprites (`.sprite`) and images | [sprite.md](sprite.md) | Implemented in `luma-formats` |
 | Scenes (`.scene`) and entities (`.entity`) | [scene.md](scene.md) | Implemented in `luma-formats` |
 | Compiled scripts (`.script`) | [script.md](script.md) | Loader and disassembler in `luma-script` |
+| Game definition (`default.game`) and string tables (`string.tab`) | [game.md](game.md) | Implemented in `luma-formats` |

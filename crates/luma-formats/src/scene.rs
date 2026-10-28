@@ -836,7 +836,7 @@ impl RotationLevel {
 
 impl Property {
     /// A `PROPERTY` block needs both `NAME` and `VALUE`.
-    fn from_node(node: &Node) -> Result<Option<Property>> {
+    pub fn from_node(node: &Node) -> Result<Option<Property>> {
         let name = node.get_str("NAME");
         let value = node.get_str("VALUE");
         match (name, value) {
