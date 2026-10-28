@@ -42,16 +42,19 @@ Luma Engine reads the same game data with a new engine built for today:
 
 ## Workspace
 
-| Crate | Purpose |
-|-------|---------|
-| `luma-archive` | Game packages (`.dcp`) and a virtual file system |
-| `luma-formats` | Definition files, sprites, scenes, fonts and images |
-| `luma-script` | Virtual machine for compiled game scripts |
-| `luma-render` | 2D/2.5D renderer on wgpu |
-| `luma-audio` | Music, sound effects and voice |
-| `luma-adventure` | Actors, scenes, inventory, dialogue, pathfinding, saves |
-| `luma-cli` | The `luma` command-line tool |
-| `luma-player` | The desktop player |
+| Crate | Purpose | Depends on |
+|-------|---------|------------|
+| `luma-archive` | Game packages (`.dcp`) and a virtual file system | `flate2` |
+| `luma-formats` | Definition files, sprites, scenes, actors, fonts and images | `image` |
+| `luma-script` | Virtual machine for compiled game scripts | nothing |
+| `luma-render` | 2D/2.5D renderer on wgpu | `luma-formats`, `wgpu`, `winit` |
+| `luma-audio` | Music, sound effects and voice | `cpal`, `lewton` |
+| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the five core crates, `fontdue` |
+| `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script` |
+| `luma-player` | The desktop player | `luma-adventure`, `luma-archive`, `luma-formats`, `luma-render` |
+
+The first five are the core; `luma-adventure` is the first optional
+module, and the front-ends depend on the modules they use.
 
 ## Building
 
@@ -119,6 +122,9 @@ luma-player path/to/game --headless --scene scenes/room/room.scene --at 120,420 
 
 # Make the main actor say something with a given font
 luma-player path/to/game --headless --scene scenes/room/room.scene --say "Hello" --font fonts/big.font --ticks 10 --screenshot hello.png
+
+# The same without sound (the sounds still run on the game clock)
+luma-player path/to/game --headless --mute
 ```
 
 ## Games

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use luma_adventure::{Camera, GameSettings, Runtime, SceneView};
+use luma_adventure::{Audio, Camera, GameSettings, Runtime, SceneView};
 use luma_archive::Vfs;
 use luma_formats::Rgba;
 use luma_formats::font::TextAlign;
@@ -34,6 +34,7 @@ OPTIONS:
     --at <x>,<y>          In headless mode, place the main actor there once the scene is up
     --say <text>          In headless mode, make the main actor say a sentence once the scene is up
     --font <file>         With --say, the font the actor talks with
+    --mute                Play no sound (the sounds still run, silently, on the game clock)
     --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
                           node once the scene is up, e.g. --click Door or --click Freezer:LookAt
     --help                Show this message
@@ -67,6 +68,7 @@ struct Options {
     at: Option<(i32, i32)>,
     say: Option<String>,
     font: Option<String>,
+    mute: bool,
 }
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -82,6 +84,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut at = None;
     let mut say = None;
     let mut font = None;
+    let mut mute = false;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -105,6 +108,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--click" => click = Some(value(&mut i)?.clone()),
             "--say" => say = Some(value(&mut i)?.clone()),
             "--font" => font = Some(value(&mut i)?.clone()),
+            "--mute" => mute = true,
             "--at" => {
                 let v = value(&mut i)?;
                 let (x, y) = v
@@ -147,6 +151,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         at,
         say,
         font,
+        mute,
     })
 }
 
@@ -201,13 +206,19 @@ fn load(vfs: &Vfs, renderer: &Renderer, scene: &str) -> Result<SceneView, String
 
 /// Runs the game's scripts without a window, printing the log.
 fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
-    let mut runtime = Runtime::new(vfs).map_err(|e| e.to_string())?;
+    let audio = if options.mute {
+        Audio::null()
+    } else {
+        Audio::new()
+    };
+    let mut runtime = Runtime::with_audio(vfs, audio).map_err(|e| e.to_string())?;
     let game = runtime.world.game_file();
     println!(
-        "game {:?}: {} script(s), {} strings",
+        "game {:?}: {} script(s), {} strings, audio {}",
         game.name,
         game.scripts.len(),
-        runtime.world.strings().len()
+        runtime.world.strings().len(),
+        runtime.world.audio().device().unwrap_or("off")
     );
     runtime.start();
     let mut clicked = false;
@@ -243,7 +254,9 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                                 if ok { "loaded" } else { "failed" }
                             );
                         }
-                        let ok = runtime.world.talk(main, text, 0, None, TextAlign::Center);
+                        let ok = runtime
+                            .world
+                            .talk(main, text, None, 0, None, TextAlign::Center);
                         println!(
                             "[{tick}] main actor says {text:?}: {}",
                             if ok { "started" } else { "no main actor" }
@@ -301,6 +314,20 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 actor.state,
                 if actor.def.active { "" } else { ", inactive" },
                 actor.current_sprite().unwrap_or("none")
+            );
+        }
+    }
+    for channel in 0..luma_adventure::MUSIC_CHANNELS {
+        if let Some(music) = runtime.world.music(channel) {
+            println!(
+                "music channel {channel}: {} ({}, at {} ms)",
+                music.filename,
+                if runtime.world.is_music_playing(channel) {
+                    "playing"
+                } else {
+                    "stopped"
+                },
+                runtime.world.music_position(channel)
             );
         }
     }
