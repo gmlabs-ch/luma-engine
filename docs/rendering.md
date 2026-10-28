@@ -42,6 +42,10 @@ Wintermute format; the formats are in [docs/formats](formats/README.md).
 3. The window presents the swap chain texture; an `Offscreen` can be
    read back.
 
+The composition of a scene into a draw list (layers, parallax, free
+entities sorted into the floor regions, sprite frames, hotspots, scale and
+tint) lives in `luma-adventure` (`SceneView`), not in the renderer.
+
 ## Coordinates
 
 The draw list has a logical size, usually the game's resolution

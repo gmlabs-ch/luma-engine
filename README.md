@@ -35,7 +35,7 @@ Luma Engine reads the same game data with a new engine built for today:
 |---|-----------|--------|
 | 0 | Workspace, licensing and CI | ✅ Done |
 | 1 | Read and unpack WME game packages (`luma list`, `luma unpack`) | ✅ Done |
-| 2 | Display a static scene | Planned |
+| 2 | Display a static scene (`luma-player <game> --scene ...`) | ✅ Done |
 | 3 | Run compiled game scripts | Planned |
 | 4 | A complete game playable from start to finish on macOS | Planned |
 | 5 | Playable in the browser, then on iOS | Planned |
@@ -86,12 +86,20 @@ luma scene path/to/game scenes/room/room.scene
 
 `list` and `unpack` also accept a single `.dcp` file, and `dump` a file on
 disk. The formats are documented in [docs/formats](docs/formats/README.md),
-and the renderer in [docs/rendering.md](docs/rendering.md). To see the
-renderer draw something, run its demo:
+and the renderer in [docs/rendering.md](docs/rendering.md).
+
+The player shows one scene of a game, without running its scripts yet:
 
 ```sh
-cargo run -p luma-render --example quads
+# Open a window on a scene (arrow keys scroll, Escape quits)
+luma-player path/to/game --scene scenes/room/room.scene
+
+# Render the same scene to a PNG file, without a window
+luma-player path/to/game --scene scenes/room/room.scene --screenshot room.png
 ```
+
+The scene is given on the command line because `default.game` names no
+starting scene: the game script picks it, which is milestone 3.
 
 ## Games
 

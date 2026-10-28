@@ -253,9 +253,10 @@ impl<A: App> Runner<A> {
 
 impl<A: App> ApplicationHandler for Runner<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.state.is_none()
-            && let Err(err) = self.open(event_loop)
-        {
+        if self.state.is_some() {
+            return;
+        }
+        if let Err(err) = self.open(event_loop) {
             self.result = Err(err);
             event_loop.exit();
         }
