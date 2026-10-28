@@ -89,7 +89,8 @@ luma script path/to/game scenes/room/scr/scene_init.script
 
 `list` and `unpack` also accept a single `.dcp` file, and `dump` a file on
 disk. The formats are documented in [docs/formats](docs/formats/README.md),
-and the renderer in [docs/rendering.md](docs/rendering.md).
+the renderer in [docs/rendering.md](docs/rendering.md) and the script
+engine in [docs/scripting.md](docs/scripting.md).
 
 The player shows one scene of a game, without running its scripts yet:
 
