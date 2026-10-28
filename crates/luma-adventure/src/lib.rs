@@ -16,12 +16,14 @@
 //! - [`Actor`]: a walking character, with its path finding in [`path`].
 //! - [`Font`] and [`FontBank`]: bitmap and TrueType fonts, and text drawn
 //!   with them; [`Sentence`]: what an object says (`Talk`).
+//! - [`Sounds`]: the objects' sound effects, the music channels and the
+//!   speech of sentences, played through `luma_audio`.
 //! - [`World`]: the game as scripts see it (`Game`, `Scene`, layers,
 //!   entities, regions, sprites, actors), the script engine's host.
 //! - [`Runtime`]: a script engine and a world, driven once per frame.
 //!
-//! Sound, inventory, windows and saved games come with the later tickets
-//! of the milestone.
+//! Inventory, windows and saved games come with the later tickets of the
+//! milestone.
 
 #![forbid(unsafe_code)]
 
@@ -29,16 +31,19 @@ pub mod actor;
 mod error;
 mod natives;
 mod natives_actor;
+mod natives_sound;
 pub mod objects;
 pub mod path;
 pub mod scene_view;
 pub mod settings;
+pub mod sound;
 pub mod talk;
 pub mod text;
 pub mod world;
 
 pub use actor::{Actor, ActorEvent, ActorState, WalkContext};
 pub use error::{Error, Result};
+pub use luma_audio::Audio;
 pub use objects::{Kind, Native, Objects};
 pub use path::Floor;
 pub use scene_view::{
@@ -46,6 +51,7 @@ pub use scene_view::{
     draw_object, frame_height, place,
 };
 pub use settings::{GameSettings, SETTINGS_FILE};
+pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, Sounds};
 pub use talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
 pub use text::{BitmapFont, Font, FontBank, TrueTypeFont};
 pub use world::{Runtime, World};

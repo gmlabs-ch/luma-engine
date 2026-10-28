@@ -57,6 +57,11 @@ no code copied):
   crates/luma-adventure/src/path.rs
   crates/luma-adventure/src/text.rs
   crates/luma-adventure/src/talk.rs
+  crates/luma-adventure/src/sound.rs
+  crates/luma-adventure/src/natives_sound.rs
+  docs/audio.md
+  crates/luma-audio/src/audio.rs
+  crates/luma-audio/src/mixer.rs
 
 Luma Engine is an independent project. It is not affiliated with, endorsed
 by, or sponsored by Jan Nedoma, Dead:Code Software, or the authors of any

@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 luma-archive.workspace = true
+luma-audio.workspace = true
 luma-formats.workspace = true
 luma-render.workspace = true
 luma-script.workspace = true

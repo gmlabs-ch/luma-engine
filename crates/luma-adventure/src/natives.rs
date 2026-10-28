@@ -46,38 +46,6 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 
 /// Methods the engine has that later milestones implement.
 const GAME_STUBS: &[&str] = &[
-    "PlayMusic",
-    "PlayMusicChannel",
-    "StopMusic",
-    "StopMusicChannel",
-    "PauseMusic",
-    "PauseMusicChannel",
-    "ResumeMusic",
-    "ResumeMusicChannel",
-    "GetMusic",
-    "GetMusicChannel",
-    "SetMusicPosition",
-    "SetMusicChannelPosition",
-    "GetMusicPosition",
-    "GetMusicChannelPosition",
-    "IsMusicPlaying",
-    "IsMusicChannelPlaying",
-    "SetMusicVolume",
-    "SetMusicChannelVolume",
-    "GetMusicVolume",
-    "GetMusicChannelVolume",
-    "MusicCrossfade",
-    "GetSoundLength",
-    "PlaySound",
-    "PlaySoundEvent",
-    "StopSound",
-    "PauseSound",
-    "ResumeSound",
-    "IsSoundPlaying",
-    "SetGlobalSFXVolume",
-    "SetGlobalSpeechVolume",
-    "SetGlobalMusicVolume",
-    "SetGlobalMasterVolume",
     "SetMousePos",
     "LockMouseRect",
     "RegWriteNumber",
@@ -125,8 +93,6 @@ const GAME_STUBS: &[&str] = &[
     "LoadResponseBox",
     "LoadInventoryBox",
     "LoadItems",
-    "AddSpeechDir",
-    "RemoveSpeechDir",
     "SetSceneViewport",
     "LoadEntity",
     "CreateEntity",
@@ -140,17 +106,6 @@ const GAME_STUBS: &[&str] = &[
 ];
 
 const OBJECT_STUBS: &[&str] = &[
-    "PlaySound",
-    "PlaySoundEvent",
-    "LoadSound",
-    "StopSound",
-    "PauseSound",
-    "ResumeSound",
-    "SetSoundPosition",
-    "SetSoundVolume",
-    "SoundFXNone",
-    "SoundFXEcho",
-    "SoundFXReverb",
     "SetCursor",
     "RemoveCursor",
     "PlayAnim",
@@ -388,6 +343,13 @@ impl World {
 
     fn game_call(&mut self, name: &str, args: &[Value], ctx: Context<'_>) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        if let Some(ret) = self.game_sound_call(name, args) {
+            return Some(ret);
+        }
+        let game_id = self.game_id;
+        if let Some(ret) = self.object_sound_call(game_id, name, args) {
+            return Some(ret);
+        }
         Some(match name {
             "ChangeScene" => {
                 let path = arg(0).get_string(self);
@@ -455,10 +417,6 @@ impl World {
                 self.stub(&format!("Game.{name}"));
                 Return::value(0)
             }
-            "GetGlobalSFXVolume"
-            | "GetGlobalSpeechVolume"
-            | "GetGlobalMusicVolume"
-            | "GetGlobalMasterVolume" => Return::value(100),
             "GetFadeColor" => Return::value(0),
             "GetItem"
             | "GetResponse"
@@ -917,6 +875,9 @@ impl World {
         args: &[Value],
     ) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        if let Some(ret) = self.object_sound_call(id, name, args) {
+            return Some(ret);
+        }
         Some(match name {
             "SkipTo" => {
                 let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
@@ -989,14 +950,6 @@ impl World {
             ),
             "HasItem" | "HasCursor" => Return::value(false),
             "GetCursor" | "GetCursorObject" | "GetItem" | "GetAttachment" => Return::null(),
-            "IsSoundPlaying" => {
-                self.stub(&format!("Entity.{name}"));
-                Return::value(false)
-            }
-            "GetSoundPosition" | "GetSoundVolume" => {
-                self.stub(&format!("Entity.{name}"));
-                Return::value(0)
-            }
             _ if OBJECT_STUBS.contains(&name) => {
                 self.stub(&format!("Entity.{name}"));
                 Return::null()
@@ -1011,9 +964,10 @@ impl World {
     pub(crate) fn talk_call(&mut self, id: NativeId, sync: bool, args: &[Value]) -> Return {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         let text = arg(0).get_string(self);
-        if !arg(1).is_null() {
-            self.stub("Talk with a sound file");
-        }
+        let sound = match arg(1) {
+            Value::Null => None,
+            v => Some(v.get_string(self)).filter(|s| !s.is_empty()),
+        };
         let duration = arg(2).get_int(self);
         let stances = match arg(3) {
             Value::Null => None,
@@ -1023,7 +977,7 @@ impl World {
             Value::Null => TextAlign::Center,
             v => TextAlign::from_code(v.get_int(self)),
         };
-        if self.talk(id, &text, duration, stances, align) && sync {
+        if self.talk(id, &text, sound.as_deref(), duration, stances, align) && sync {
             Return::effect(Effect::WaitForExclusive(id))
         } else {
             Return::null()

@@ -144,6 +144,8 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | Entities | `Name`, `Caption`, `X`, `Y`, `Height`, `Active`, `Interactive`, `Scalable`, `Scale`, `RelativeScale`, `AlphaColor`, `Colorable`, `Item`, `Subtype`, `WalkToX`, `WalkToY`, `WalkToDirection`, `SaveState`, `IgnoreItems`... | `SkipTo`, `SetSprite`, `GetSprite`, `GetSpriteObject`, `Reset`, `Caption` |
 | Actors (`Game.LoadActor`, `Scene.LoadActor`) | The entities' properties, plus `Direction`, `Ready`, `ActorIsBlocked`, `TalkAnimName`, `IdleAnimName`, `WalkAnimName`, `TurnLeftAnimName`, `TurnRightAnimName` | `GoTo`, `GoToAsync`, `GoToObject`, `GoToObjectAsync`, `TurnTo`, `TurnToAsync`, `IsWalking`, `SkipTo`, `Reset`, `PlayAnim`, `PlayAnimAsync`, `SetSprite`, `GetSprite`, `HasAnim`, `MergeAnims`, `UnloadAnim`, `SetStopOnBlocked`, `GetStopOnBlocked` |
 | Actors and entities, speech | `SubtitlesWidth`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosRelative`, `SubtitlesPosXCenter` | `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`, `SetFont`, `GetFont` |
+| `Game`, actors and entities, sound | `SoundPanning` | `LoadSound`, `PlaySound`, `PlaySoundEvent`, `StopSound`, `PauseSound`, `ResumeSound`, `IsSoundPlaying`, `SetSoundPosition`, `GetSoundPosition`, `SetSoundVolume`, `GetSoundVolume` |
+| `Game`, music and volumes | | `PlayMusic`, `PlayMusicChannel`, `StopMusic`, `StopMusicChannel`, `PauseMusic`, `ResumeMusic`, `GetMusic`, `SetMusicPosition`, `GetMusicPosition`, `IsMusicPlaying`, `SetMusicVolume`, `GetMusicVolume` (and their `...Channel` forms), `MusicCrossfade`, `GetSoundLength`, `SetGlobalSFXVolume`, `SetGlobalSpeechVolume`, `SetGlobalMusicVolume`, `SetGlobalMasterVolume` and their getters, `AddSpeechDir`, `RemoveSpeechDir` |
 | Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
 | Sprite objects | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner` | `Reset`, `Pause`, `Play` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
@@ -173,11 +175,16 @@ object with its font (or the game's `SYSTEM_FONT`) while
 the sentence ends, or when a click skips it while the game is not
 interactive.
 
+Sound (see [docs/audio.md](audio.md)) is owned by the objects: each has
+one sound effect, the game has five music channels, and a sentence plays
+its speech file, which then times it. The sounds advance with the game
+clock when no audio device is there, so scripts behave the same in
+headless runs.
+
 What later milestones implement is accepted and logged once as "not
-implemented": sound and music (a `Talk` with a sound file logs it and
-times the sentence from the text), inventory, windows (`LoadWindow`
-returns an inert object that keeps the properties scripts set, so that
-game scripts run through), saving, videos and transitions.
+implemented": inventory, windows (`LoadWindow` returns an inert object
+that keeps the properties scripts set, so that game scripts run
+through), saving, videos and transitions.
 
 ## Not yet
 
@@ -189,5 +196,6 @@ game scripts run through), saving, videos and transitions.
 - `GetSpriteObject` on actors, and `PlayAnim` on entities.
 - `.talk` files timing talk sprites to a sound, `ForceTalkAnim`, and
   `AddTalkSprite`; text in UTF-8 string tables is drawn as Latin-1.
+- The echo and reverb sound effects, and streaming of long sounds.
 - Saving and restoring running scripts.
 - The debugger protocol (`DBG_LINE` is read but only used for messages).

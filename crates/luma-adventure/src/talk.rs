@@ -32,6 +32,8 @@ pub struct Sentence {
     pub align: TextAlign,
     /// Whether the box stays put while the scene scrolls.
     pub fixed_pos: bool,
+    /// The speech sound playing with the sentence, if any.
+    pub sound: Option<luma_audio::SoundId>,
 }
 
 impl Sentence {
@@ -213,6 +215,7 @@ mod tests {
             width: 100,
             align: TextAlign::Center,
             fixed_pos: false,
+            sound: None,
         }
     }
 

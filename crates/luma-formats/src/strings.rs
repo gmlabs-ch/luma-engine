@@ -94,6 +94,25 @@ impl StringTable {
         self.strings.is_empty()
     }
 
+    /// The identifier of a `/ID/fallback` reference, lower-cased
+    /// (`CBStringTable::GetKey`); when the table's text for it is itself
+    /// a reference, that one's identifier. `None` for plain text.
+    pub fn key_of(&self, text: &str) -> Option<String> {
+        let mut text = text.to_string();
+        for _ in 0..16 {
+            let rest = text.strip_prefix('/')?;
+            let at = rest.find('/')?;
+            let key = rest[..at].to_ascii_lowercase();
+            match self.get(&key) {
+                Some(value) if value.starts_with('/') && value[1..].contains('/') => {
+                    text = value.to_string();
+                }
+                _ => return Some(key),
+            }
+        }
+        None
+    }
+
     /// Resolves a `/ID/fallback` reference: the table's text for `ID`, or
     /// the fallback when the table has none. Text not starting with `/`
     /// is returned as is, and a resolved text that is itself a reference
@@ -155,6 +174,16 @@ mod tests {
         assert_eq!(table.load(b"D\t5\n", true), 1);
         assert_eq!(table.get("A"), None);
         assert_eq!(table.get("D"), Some("5"));
+    }
+
+    #[test]
+    fn finds_keys() {
+        let table = StringTable::parse(b"HELLO\tBonjour\nREF\t/HELLO/x\n");
+        assert_eq!(table.key_of("/HELLO/Hello").as_deref(), Some("hello"));
+        assert_eq!(table.key_of("/REF/x").as_deref(), Some("hello"));
+        assert_eq!(table.key_of("/NOPE/text").as_deref(), Some("nope"));
+        assert_eq!(table.key_of("plain"), None);
+        assert_eq!(table.key_of("/unterminated"), None);
     }
 
     #[test]

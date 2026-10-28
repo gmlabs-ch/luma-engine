@@ -4,8 +4,9 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use luma_adventure::{Kind, Runtime};
+use luma_adventure::{Audio, Kind, Runtime};
 use luma_archive::{PackageBuilder, Vfs};
+use luma_audio::Clip;
 use luma_formats::Image;
 use luma_script::asm::Assembler;
 use luma_script::{Instruction, Natives, State, Value};
@@ -253,6 +254,12 @@ fn lamp_script() -> Vec<u8> {
     get(&mut a, "this", "Name");
     store(&mut a, "looked");
     a.emit(Instruction::RetEvent);
+    a.event("BeepDone");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.push_bool(true);
+    store(&mut a, "beepDone");
+    a.emit(Instruction::RetEvent);
     a.bind(end);
     a.emit(Instruction::Ret);
     a.build()
@@ -419,6 +426,93 @@ fn talk_script() -> Vec<u8> {
     a.build()
 }
 
+/// Plays sounds on the game, a sound entity and the lamp, music on a
+/// channel, and a sentence with its speech file.
+fn sound_script() -> Vec<u8> {
+    let mut a = Assembler::new("sound.script");
+    a.def_glob_var("result");
+    a.def_glob_var("Scene");
+    a.def_glob_var("actor");
+    get(&mut a, "Game", "Scene");
+    a.pop_var("Scene");
+    call(
+        &mut a,
+        "Game",
+        "GetSoundLength",
+        &[Arg::Str("audio\\beep.wav")],
+    );
+    store(&mut a, "len");
+    call(&mut a, "Game", "PlaySound", &[Arg::Str("audio\\beep.wav")]);
+    store(&mut a, "started");
+    call(&mut a, "Game", "IsSoundPlaying", &[]);
+    store(&mut a, "playing");
+    a.def_var("hum");
+    call(&mut a, "Scene", "GetNode", &[Arg::Str("hum")]);
+    a.pop_var("hum");
+    call(&mut a, "hum", "GetSoundVolume", &[]);
+    store(&mut a, "humVol");
+    call(&mut a, "hum", "IsSoundPlaying", &[]);
+    store(&mut a, "humPlaying0");
+    call(&mut a, "hum", "PlaySound", &[]);
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "hum", "IsSoundPlaying", &[]);
+    store(&mut a, "humPlaying1");
+    a.def_var("lamp");
+    call(&mut a, "Scene", "GetNode", &[Arg::Str("lamp")]);
+    a.pop_var("lamp");
+    call(
+        &mut a,
+        "lamp",
+        "PlaySoundEvent",
+        &[Arg::Str("audio\\beep.wav"), Arg::Str("BeepDone")],
+    );
+    store(&mut a, "eventStarted");
+    call(
+        &mut a,
+        "Game",
+        "PlayMusicChannel",
+        &[Arg::Int(1), Arg::Str("audio\\beep.wav"), Arg::Int(1)],
+    );
+    store(&mut a, "musicStarted");
+    call(&mut a, "Game", "IsMusicChannelPlaying", &[Arg::Int(1)]);
+    store(&mut a, "music");
+    call(&mut a, "Game", "GetMusicChannel", &[Arg::Int(1)]);
+    store(&mut a, "musicFile");
+    call(&mut a, "Game", "SetGlobalMusicVolume", &[Arg::Int(40)]);
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "Game", "GetGlobalMusicVolume", &[]);
+    store(&mut a, "musicVol");
+    call(&mut a, "Game", "AddSpeechDir", &[Arg::Str("voices")]);
+    store(&mut a, "dirAdded");
+    call(
+        &mut a,
+        "Game",
+        "LoadActor",
+        &[Arg::Str("actors\\bob.actor")],
+    );
+    a.pop_var("actor");
+    call(&mut a, "actor", "SkipTo", &[Arg::Int(100), Arg::Int(24)]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "Game", "CurrentTime");
+    store(&mut a, "t0");
+    // The speech file voices\GREET.wav lasts 250 ms: shorter than the
+    // text would take.
+    call(&mut a, "actor", "Talk", &[Arg::Str("/GREET/x")]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "Game", "CurrentTime");
+    store(&mut a, "t1");
+    call(&mut a, "Game", "IsMusicChannelPlaying", &[Arg::Int(1)]);
+    store(&mut a, "musicLater");
+    call(&mut a, "Game", "StopMusicChannel", &[Arg::Int(1)]);
+    store(&mut a, "musicStopped");
+    call(&mut a, "Game", "IsMusicChannelPlaying", &[Arg::Int(1)]);
+    store(&mut a, "musicAfter");
+    a.push_bool(true);
+    store(&mut a, "done");
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
 fn game() -> std::path::PathBuf {
     let dir = temp_dir();
     let mut pkg = PackageBuilder::new("data");
@@ -443,6 +537,15 @@ fn game() -> std::path::PathBuf {
             .to_vec(),
     );
     pkg.add_file("talk.script", talk_script());
+    pkg.add_file("sound.script", sound_script());
+    pkg.add_file(
+        "audio\\beep.wav",
+        luma_audio::encode_wav(&Clip::silence(8000, 1, 300)),
+    );
+    pkg.add_file(
+        "voices\\GREET.wav",
+        luma_audio::encode_wav(&Clip::silence(8000, 2, 250)),
+    );
     pkg.add_file("string.tab", b"GREET\tHello\r\n".to_vec());
     pkg.add_file("game.script", game_script());
     pkg.add_file("scenes\\room\\scene_init.script", scene_init_script());
@@ -485,6 +588,7 @@ fn game() -> std::path::PathBuf {
     REGION { NAME=\"floor\" SCRIPT=\"scenes\\room\\floor.script\" POINT {0,16} POINT {200,16} POINT {200,32} POINT {0,32} }
     ENTITY { NAME=\"lamp\" X=20 Y=20 WALK_TO_X=30 WALK_TO_Y=20 WALK_TO_DIR=4 SCRIPT=\"scenes\\room\\lamp.script\" }
   }
+  ENTITY { NAME=\"hum\" SUBTYPE=\"sound\" SOUND=\"audio\\beep.wav\" SOUND_VOLUME=50 }
 }"
         .to_vec(),
     );
@@ -504,7 +608,7 @@ fn result(runtime: &Runtime, key: &str) -> Value {
 fn scripts_drive_the_game_and_its_scene() {
     let dir = game();
     let vfs = Vfs::open_game(&dir).unwrap();
-    let mut runtime = Runtime::new(vfs).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
     assert_eq!(runtime.world.strings().get("greet"), Some("Hello"));
     runtime.start();
     assert_eq!(
@@ -529,10 +633,13 @@ fn scripts_drive_the_game_and_its_scene() {
         .iter()
         .filter(|l| l.contains("not implemented"))
         .collect();
+    assert_eq!(stubs.len(), 1, "LoadWindow, once: {log:?}");
     assert_eq!(
-        stubs.len(),
+        log.iter()
+            .filter(|l| l.starts_with("Error opening sound file"))
+            .count(),
         2,
-        "LoadWindow and PlaySound, once each: {log:?}"
+        "the two sounds are missing: {log:?}"
     );
     assert!(
         log.iter().all(|l| !l.starts_with("Runtime error")),
@@ -622,7 +729,7 @@ fn scripts_drive_the_game_and_its_scene() {
 fn sprite_objects_follow_the_animation() {
     let dir = game();
     let vfs = Vfs::open_game(&dir).unwrap();
-    let mut runtime = Runtime::new(vfs).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
     runtime.change_scene("scenes\\room.scene").unwrap();
     // Let the scene scripts run (they deactivate the prop); reactivate it.
     runtime.tick(1);
@@ -673,7 +780,7 @@ fn sprite_objects_follow_the_animation() {
 fn actors_walk_turn_and_scroll_the_view() {
     let dir = game();
     let vfs = Vfs::open_game(&dir).unwrap();
-    let mut runtime = Runtime::new(vfs).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
     runtime.change_scene("scenes\\room.scene").unwrap();
     runtime.tick(16);
     let game = runtime.world.game_id();
@@ -760,7 +867,7 @@ fn actors_walk_turn_and_scroll_the_view() {
 fn objects_talk_with_fonts_and_subtitles() {
     let dir = game();
     let vfs = Vfs::open_game(&dir).unwrap();
-    let mut runtime = Runtime::new(vfs).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
     assert_eq!(runtime.world.system_font(), Some("fonts\\sys.font"));
     assert!(runtime.world.fonts().get("FONTS/SYS.FONT").is_some());
     runtime.change_scene("scenes\\room.scene").unwrap();
@@ -847,10 +954,94 @@ fn objects_talk_with_fonts_and_subtitles() {
 }
 
 #[test]
+fn sounds_music_and_speech_play_on_the_game_clock() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    assert!(runtime.world.audio().device().is_none());
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    // The sound entity loaded its sound without playing it.
+    let hum = runtime.world.find_node("hum").unwrap();
+    assert!(runtime.world.sfx_of(hum).is_some());
+    assert!(!runtime.world.is_sfx_playing(hum));
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "sound.script")
+    );
+    let mut log = Vec::new();
+    let mut ticks = 0;
+    while result(&runtime, "done") != Value::Bool(true) && ticks < 200 {
+        log.extend(runtime.tick(16));
+        ticks += 1;
+    }
+    assert_eq!(result(&runtime, "done"), Value::Bool(true), "{log:?}");
+    assert_eq!(result(&runtime, "len"), Value::Int(300));
+    assert_eq!(result(&runtime, "started"), Value::Bool(true));
+    assert_eq!(result(&runtime, "playing"), Value::Bool(true));
+    assert_eq!(result(&runtime, "humVol"), Value::Int(50));
+    assert_eq!(result(&runtime, "humPlaying0"), Value::Bool(false));
+    assert_eq!(result(&runtime, "humPlaying1"), Value::Bool(true));
+    assert_eq!(result(&runtime, "eventStarted"), Value::Bool(true));
+    assert_eq!(result(&runtime, "musicStarted"), Value::Bool(true));
+    assert_eq!(result(&runtime, "music"), Value::Bool(true));
+    assert_eq!(
+        result(&runtime, "musicFile"),
+        Value::from("audio\\beep.wav")
+    );
+    assert_eq!(result(&runtime, "musicVol"), Value::Int(40));
+    assert_eq!(result(&runtime, "dirAdded"), Value::Bool(true));
+    let (Value::Int(t0), Value::Int(t1)) = (result(&runtime, "t0"), result(&runtime, "t1")) else {
+        panic!("times");
+    };
+    assert!(
+        (250..300).contains(&(t1 - t0)),
+        "the sentence lasted its speech file: {} ms",
+        t1 - t0
+    );
+    assert_eq!(
+        result(&runtime, "musicLater"),
+        Value::Bool(true),
+        "music loops"
+    );
+    assert_eq!(result(&runtime, "musicStopped"), Value::Bool(true));
+    assert_eq!(result(&runtime, "musicAfter"), Value::Bool(false));
+    assert!(
+        log.iter().all(|l| !l.starts_with("Runtime error")),
+        "{log:?}"
+    );
+    // The beeps end after 300 ms; the lamp's sound event fires then.
+    for _ in 0..10 {
+        runtime.tick(16);
+    }
+    assert!(!runtime.world.is_sfx_playing(game));
+    assert!(!runtime.world.is_sfx_playing(hum));
+    assert_eq!(result(&runtime, "beepDone"), Value::Bool(true));
+    // The speech sound was unloaded with its sentence; the music with
+    // its channel.
+    assert!(runtime.world.music(1).is_none());
+    assert_eq!(
+        runtime.world.audio().len(),
+        3,
+        "game, hum and lamp sounds stay loaded"
+    );
+    // A scene change drops the sounds of the scene's objects.
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    assert_eq!(
+        runtime.world.audio().len(),
+        2,
+        "the game's sound and the new hum"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn quitting_and_missing_scenes() {
     let dir = game();
     let vfs = Vfs::open_game(&dir).unwrap();
-    let mut runtime = Runtime::new(vfs).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
     assert!(!runtime.world.quit_requested());
     assert!(runtime.change_scene("scenes\\nope.scene").is_err());
     runtime.world.schedule_scene("scenes\\nope.scene", true);
@@ -875,7 +1066,7 @@ fn runs_the_local_game() {
         return;
     }
     let vfs = Vfs::open_game(&root).unwrap();
-    let mut runtime = Runtime::new(vfs).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
     runtime.start();
     let mut log = Vec::new();
     for _ in 0..30 {
@@ -893,6 +1084,34 @@ fn runs_the_local_game() {
     }
     assert_eq!(runtime.world.scene().unwrap().scene.name, "StoreRoom");
     assert!(log.iter().all(|l| !l.starts_with("Fatal")), "{log:?}");
+    // Speech: the main actor says a line whose Ogg file the game has.
+    runtime.world.sounds_mut().add_speech_dir("english");
+    let actor = runtime.world.main_object().expect("the main actor");
+    assert!(runtime.world.talk(
+        actor,
+        "/STORER0032/It's an ID card scanner for the gate",
+        None,
+        0,
+        None,
+        luma_formats::font::TextAlign::Center,
+    ));
+    let sentence = runtime
+        .world
+        .actor(actor)
+        .unwrap()
+        .sentence
+        .clone()
+        .unwrap();
+    assert!(
+        sentence.sound.is_some(),
+        "the speech file was found and decoded"
+    );
+    assert!(
+        sentence.duration > 1000 && sentence.duration < 10000,
+        "the sentence lasts its sound: {} ms",
+        sentence.duration
+    );
+    eprintln!("speech sound: {} ms", sentence.duration);
     let errors: Vec<&String> = log
         .iter()
         .filter(|l| l.starts_with("Runtime error"))

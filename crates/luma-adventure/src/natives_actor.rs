@@ -19,17 +19,6 @@ const ACTOR_STUBS: &[&str] = &[
     "SetTalkSprite",
     "SetCursor",
     "RemoveCursor",
-    "PlaySound",
-    "PlaySoundEvent",
-    "LoadSound",
-    "StopSound",
-    "PauseSound",
-    "ResumeSound",
-    "SetSoundPosition",
-    "SetSoundVolume",
-    "SoundFXNone",
-    "SoundFXEcho",
-    "SoundFXReverb",
     "TakeItem",
     "DropItem",
     "StickToRegion",
@@ -173,6 +162,9 @@ impl World {
         ctx: Context<'_>,
     ) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        if let Some(ret) = self.object_sound_call(id, name, args) {
+            return Some(ret);
+        }
         let wait = |sync: bool| {
             if sync {
                 Return::effect(Effect::WaitForExclusive(id))
@@ -345,14 +337,6 @@ impl World {
             ),
             "HasItem" | "HasCursor" => Return::value(false),
             "GetCursor" | "GetCursorObject" | "GetItem" | "GetAttachment" => Return::null(),
-            "IsSoundPlaying" => {
-                self.stub(&format!("Actor.{name}"));
-                Return::value(false)
-            }
-            "GetSoundPosition" | "GetSoundVolume" => {
-                self.stub(&format!("Actor.{name}"));
-                Return::value(0)
-            }
             _ if ACTOR_STUBS.contains(&name) => {
                 self.stub(&format!("Actor.{name}"));
                 Return::null()

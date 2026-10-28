@@ -19,14 +19,16 @@ use crate::objects::{Kind, Native, Objects};
 use crate::path::Floor;
 use crate::scene_view::{Camera, Drawable, SceneView};
 use crate::settings::GameSettings;
+use crate::sound::Sounds;
 use crate::talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
 use crate::text::FontBank;
+use luma_audio::Audio;
 use luma_formats::font::TextAlign;
 
 /// The game as scripts see it. Implements the script engine's [`Host`].
 pub struct World {
     pub(crate) vfs: Vfs,
-    settings: GameSettings,
+    pub(crate) settings: GameSettings,
     game_file: GameFile,
     strings: StringTable,
     pub(crate) objects: Objects,
@@ -49,7 +51,8 @@ pub struct World {
     last_scroll_x: u64,
     last_scroll_y: u64,
     pub(crate) actors: Vec<(NativeId, Actor)>,
-    pending_events: Vec<(NativeId, &'static str)>,
+    pending_events: Vec<(NativeId, String)>,
+    pub(crate) sounds: Sounds,
     pub(crate) fonts: FontBank,
     pub(crate) system_font: Option<String>,
     pub(crate) subtitles: bool,
@@ -62,7 +65,7 @@ pub struct World {
     pub(crate) name: String,
     pub(crate) caption: String,
     timer: u64,
-    clock: u64,
+    pub(crate) clock: u64,
     log: Vec<String>,
     stubs: HashSet<String>,
     rng: u64,
@@ -70,8 +73,15 @@ pub struct World {
 
 impl World {
     /// Opens a game: its settings, `default.game` and, if the game names
-    /// one, its string table.
+    /// one, its string table; sound goes to the default audio device, or
+    /// nowhere when there is none.
     pub fn new(vfs: Vfs) -> Result<World> {
+        World::with_audio(vfs, Audio::new())
+    }
+
+    /// Opens a game with a given audio system (`Audio::null()` for tests
+    /// and silent runs).
+    pub fn with_audio(vfs: Vfs, audio: Audio) -> Result<World> {
         let settings = GameSettings::load(&vfs)?;
         let bytes = vfs.read(&settings.game_file)?;
         let game_file = GameFile::parse(&bytes).map_err(|source| Error::Format {
@@ -110,6 +120,7 @@ impl World {
             last_scroll_y: 0,
             actors: Vec::new(),
             pending_events: Vec::new(),
+            sounds: Sounds::new(audio),
             fonts: FontBank::new(),
             system_font: None,
             subtitles: true,
@@ -401,6 +412,8 @@ impl World {
         for script in engine.scripts_of(id) {
             engine.finish(script, true);
         }
+        self.stop_sfx(id, true);
+        self.sounds.objects.remove(&id);
         self.actors.retain(|(i, _)| *i != id);
         if self.main_object == Some(id) {
             self.main_object = None;
@@ -458,18 +471,24 @@ impl World {
     pub(crate) fn queue_events(&mut self, owner: NativeId, events: Vec<ActorEvent>) {
         for event in events {
             match event {
-                ActorEvent::OnActor(name) => self.pending_events.push((owner, name)),
+                ActorEvent::OnActor(name) => self.pending_events.push((owner, name.to_string())),
                 ActorEvent::OnRegion {
                     layer,
                     index,
                     event,
                 } => {
                     if let Some(region) = self.region_id(layer, index) {
-                        self.pending_events.push((region, event));
+                        self.pending_events.push((region, event.to_string()));
                     }
                 }
             }
         }
+    }
+
+    /// Queues an event on an object, applied by
+    /// [`World::apply_pending_events`].
+    pub(crate) fn queue_event(&mut self, owner: NativeId, event: String) {
+        self.pending_events.push((owner, event));
     }
 
     /// One frame of every active actor (`CAdScene::UpdateFreeObjects`):
@@ -520,7 +539,7 @@ impl World {
     pub fn apply_pending_events(&mut self, engine: &mut Engine) {
         for (owner, event) in std::mem::take(&mut self.pending_events) {
             if self.objects.contains(owner) {
-                engine.apply_event(self, owner, event, false);
+                engine.apply_event(self, owner, &event, false);
             }
         }
     }
@@ -665,6 +684,7 @@ impl World {
         for id in gone {
             self.objects.remove(id);
         }
+        self.drop_orphan_sounds();
         if let Some(scene) = self.objects.get_mut(self.scene_id) {
             scene.props.clear();
         }
@@ -728,6 +748,7 @@ impl World {
                     }
                 };
                 let id = self.objects.insert(kind);
+                self.load_entity_sound(id);
                 for script in scripts {
                     self.attach(engine, id, &script);
                 }
@@ -741,12 +762,33 @@ impl World {
             let id = self
                 .objects
                 .insert(Kind::Entity(crate::scene_view::EntityRef::Free(i)));
+            self.load_entity_sound(id);
             let scripts = self.scene().unwrap().scene.free_entities[i].scripts.clone();
             for script in scripts {
                 self.attach(engine, id, &script);
             }
         }
         Ok(())
+    }
+
+    /// Loads the `SOUND` of an entity without playing it (`CAdEntity`
+    /// reads `SOUND`, `SOUND_START_TIME` and `SOUND_VOLUME`).
+    fn load_entity_sound(&mut self, id: NativeId) {
+        let Some(Kind::Entity(r)) = self.objects.get(id).map(|n| n.kind.clone()) else {
+            return;
+        };
+        let Some((sound, start, volume)) = self
+            .scene()
+            .and_then(|v| v.entity(r))
+            .map(|e| (e.sound.clone(), e.sound_start_ms, e.sound_volume))
+        else {
+            return;
+        };
+        if let Some(sound) = sound {
+            self.set_sfx_time(id, start.max(0) as u64);
+            self.set_sfx_volume(id, volume);
+            self.play_sfx(id, Some(&sound), false, false, None, 0);
+        }
     }
 
     /// The fonts loaded.
@@ -882,6 +924,7 @@ impl World {
         &mut self,
         id: NativeId,
         text: &str,
+        sound_file: Option<&str>,
         duration: i32,
         stances: Option<String>,
         align: TextAlign,
@@ -890,9 +933,31 @@ impl World {
             Some(kind @ (Kind::Actor | Kind::Entity(_))) => kind,
             _ => return false,
         };
+        // End the sentence being said, with its sound.
+        self.stop_talk(id);
+        self.stop_speech();
+        let raw = text.to_string();
         let text = self.expand(text);
         let font = self.font_of(id);
         let mut duration = u64::try_from(duration).unwrap_or(0);
+        // The speech file: the one given, else the one named after the
+        // string identifier in a speech directory.
+        let speech_file = match sound_file {
+            Some(file) => Some(file.to_string()),
+            None => self
+                .strings
+                .key_of(&raw)
+                .and_then(|key| self.find_speech_file(&key)),
+        };
+        let mut sound = None;
+        if let Some(file) = speech_file {
+            if let Some((id, length)) = self.start_speech(&file) {
+                sound = Some(id);
+                if duration == 0 && length != 0 {
+                    duration = length;
+                }
+            }
+        }
         if duration == 0 {
             let length = text.chars().count() as u64;
             duration = (self.subtitles_speed.max(0) as u64 * length).max(1000);
@@ -951,6 +1016,7 @@ impl World {
             width,
             align,
             fixed_pos: !mods.relative,
+            sound,
         };
         match kind {
             Kind::Actor => {
@@ -1014,6 +1080,7 @@ impl World {
         if let Some(view) = self.scene.as_mut() {
             view.skip_sentences(timer);
         }
+        self.stop_speech();
     }
 
     /// A left or right click while the game is not interactive skips
@@ -1297,9 +1364,14 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Opens a game.
+    /// Opens a game, with sound on the default audio device.
     pub fn new(vfs: Vfs) -> Result<Runtime> {
-        let world = World::new(vfs)?;
+        Runtime::with_audio(vfs, Audio::new())
+    }
+
+    /// Opens a game with a given audio system.
+    pub fn with_audio(vfs: Vfs, audio: Audio) -> Result<Runtime> {
+        let world = World::with_audio(vfs, audio)?;
         let mut engine = Engine::new();
         // The engine publishes the game object to every script.
         engine.set_global("Game", Value::Native(world.game_id));
@@ -1325,11 +1397,12 @@ impl Runtime {
         self.world.load_scene(&mut self.engine, path)
     }
 
-    /// One frame: the clocks advance by `dt` milliseconds, a scheduled
-    /// scene change happens, the scripts run, the scene's animations and
-    /// the actors advance, the view follows the main object, and the
-    /// events the actors raised reach their scripts. Returns the log
-    /// lines of the frame.
+    /// One frame: the clocks advance by `dt` milliseconds (the sounds too
+    /// without an audio device), a scheduled scene change happens, the
+    /// scripts run, the scene's animations and the actors advance, the
+    /// view follows the main object, the sounds follow their objects,
+    /// and the events raised reach their scripts. Returns the log lines
+    /// of the frame.
     pub fn tick(&mut self, dt: u64) -> Vec<String> {
         self.world.advance_time(dt);
         if let Some((path, _fade_in)) = self.world.scheduled_scene.take() {
@@ -1338,10 +1411,13 @@ impl Runtime {
                     .log(format!("cannot change scene to '{path}': {err}"));
             }
         }
+        self.world.sounds.audio.tick(dt);
+        self.world.update_speech();
         self.engine.tick(&mut self.world);
         self.world.update_scene();
         self.world.update_actors();
         self.world.scroll_step();
+        self.world.update_sounds();
         self.world.apply_pending_events(&mut self.engine);
         self.world.take_log()
     }

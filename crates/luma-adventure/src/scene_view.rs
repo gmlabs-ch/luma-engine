@@ -547,6 +547,11 @@ impl SceneView {
             .map(|(r, t)| (*r, &t.sentence))
     }
 
+    /// Every sentence being said, mutable.
+    pub fn sentences_mut(&mut self) -> impl Iterator<Item = &mut Sentence> {
+        self.talks.values_mut().map(|t| &mut t.sentence)
+    }
+
     /// Ends every sentence older than 300 ms (`FinishSentences`).
     pub fn skip_sentences(&mut self, timer: u64) {
         for talk in self.talks.values_mut() {
