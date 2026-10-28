@@ -170,6 +170,41 @@ impl Sprite {
         }
     }
 
+    /// Total duration of one pass through the frames, in milliseconds.
+    pub fn duration_ms(&self) -> u64 {
+        self.frames.iter().map(|f| u64::from(f.delay_ms)).sum()
+    }
+
+    /// The frame shown `elapsed_ms` after the animation started: frames
+    /// follow each other after their delays, the animation restarts when
+    /// `looping` and stays on the last frame otherwise. A sprite whose
+    /// delays are all zero stays on its first frame. `None` without
+    /// frames.
+    pub fn frame_index_at(&self, elapsed_ms: u64) -> Option<usize> {
+        if self.frames.is_empty() {
+            return None;
+        }
+        let total = self.duration_ms();
+        if total == 0 {
+            return Some(0);
+        }
+        let mut t = if self.looping {
+            elapsed_ms % total
+        } else if elapsed_ms >= total {
+            return Some(self.frames.len() - 1);
+        } else {
+            elapsed_ms
+        };
+        for (i, frame) in self.frames.iter().enumerate() {
+            let delay = u64::from(frame.delay_ms);
+            if t < delay {
+                return Some(i);
+            }
+            t -= delay;
+        }
+        Some(self.frames.len() - 1)
+    }
+
     /// Parses a `.sprite` file.
     pub fn parse(bytes: &[u8]) -> Result<Sprite> {
         Self::from_document(&Document::parse(bytes)?)
@@ -446,6 +481,30 @@ SPRITE {
             }
         );
         assert_eq!(sub.tint.a, 255);
+    }
+
+    #[test]
+    fn picks_frames_by_elapsed_time() {
+        let mut sprite = Sprite::parse(WALK.as_bytes()).unwrap();
+        assert_eq!(sprite.frames.len(), 2);
+        let d0 = u64::from(sprite.frames[0].delay_ms);
+        let total = sprite.duration_ms();
+        assert!(d0 > 0 && total > d0);
+        sprite.looping = false;
+        assert_eq!(sprite.frame_index_at(0), Some(0));
+        assert_eq!(sprite.frame_index_at(d0), Some(1));
+        assert_eq!(
+            sprite.frame_index_at(total + 1000),
+            Some(1),
+            "stays on the last frame"
+        );
+        sprite.looping = true;
+        assert_eq!(sprite.frame_index_at(total), Some(0), "restarts");
+        assert_eq!(sprite.frame_index_at(total + d0), Some(1));
+
+        let still = Sprite::from_image("a.png");
+        assert_eq!(still.frame_index_at(12345), Some(0));
+        assert_eq!(Sprite::default().frame_index_at(0), None);
     }
 
     #[test]
