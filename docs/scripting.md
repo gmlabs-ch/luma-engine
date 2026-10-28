@@ -128,10 +128,41 @@ script's path and source line, and the operation yields `null` or
 `false`. A corrupt program (an instruction that cannot be decoded, a
 symbol index past the table) is fatal for that script only.
 
+## Native objects
+
+The adventure layer (`luma-adventure`) implements the `Host` trait: its
+`World` owns the game, the current scene and their parts, and answers
+property reads, writes and method calls for them. Scripts hold these
+objects by handle; a handle to an object of a previous scene is simply
+invalid, so `Game.ValidObject` says no and its properties read as `null`.
+
+| Object | Properties | Methods |
+|--------|------------|---------|
+| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
+| `Scene` | `Name`, `Width`, `Height`, `NumLayers`, `MainLayer`, `OffsetX`, `OffsetY`, `MouseX`, `MouseY`, `NumFreeNodes` | `GetNode`, `GetLayer`, `GetFreeNode`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `SkipTo`, `ScrollTo`, `IsPointInViewport` |
+| Layers | `Name`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active` | `GetNode` |
+| Entities | `Name`, `Caption`, `X`, `Y`, `Height`, `Active`, `Interactive`, `Scalable`, `Scale`, `RelativeScale`, `AlphaColor`, `Colorable`, `Item`, `Subtype`, `WalkToX`, `WalkToY`, `WalkToDirection`, `SaveState`, `IgnoreItems`... | `SkipTo`, `SetSprite`, `GetSprite`, `GetSpriteObject`, `Reset`, `Caption` |
+| Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
+| Sprite objects | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner` | `Reset`, `Pause`, `Play` |
+| Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
+
+Scripts are attached by the `SCRIPT` keys of `default.game`, `.scene`,
+`.entity`, layers and regions, and by `AttachScript`. Changing scene
+raises `SceneShutdown` (unbreakable) on the old scene, ends the scripts
+of its objects, loads the new scene and attaches its scripts in file
+order: the scene's first, then each layer's and its nodes'. The change
+itself happens at the start of the next frame, as in the engine.
+
+What later milestones implement is accepted and logged once as "not
+implemented": sound and music, `Talk` and `PlayAnim`, inventory,
+windows (`LoadWindow` returns an inert object that keeps the properties
+scripts set, so that game scripts run through), actors (`LoadActor`
+likewise), saving, videos and transitions.
+
 ## Not yet
 
-- The `String`, `Array`, `Date`, `File` and `MemBuffer` classes and the
-  engine objects (`Game`, `Scene`, entities, actors): they are natives,
-  provided by the adventure layer through the `Host` trait.
+- The `String`, `Array`, `Date`, `File` and `MemBuffer` classes: `new`
+  returns an inert object.
+- Persistent scene state (`PERSISTENT_STATE`) across scene changes.
 - Saving and restoring running scripts.
 - The debugger protocol (`DBG_LINE` is read but only used for messages).

@@ -36,7 +36,7 @@ Luma Engine reads the same game data with a new engine built for today:
 | 0 | Workspace, licensing and CI | ✅ Done |
 | 1 | Read and unpack WME game packages (`luma list`, `luma unpack`) | ✅ Done |
 | 2 | Display a static scene (`luma-player <game> --scene ...`) | ✅ Done |
-| 3 | Run compiled game scripts | Planned |
+| 3 | Run compiled game scripts | In progress |
 | 4 | A complete game playable from start to finish on macOS | Planned |
 | 5 | Playable in the browser, then on iOS | Planned |
 
@@ -103,7 +103,16 @@ luma-player path/to/game --scene scenes/room/room.scene --screenshot room.png
 ```
 
 The scene is given on the command line because `default.game` names no
-starting scene: the game script picks it, which is milestone 3.
+starting scene: the game script picks it. The scripts already run, without
+a window for now:
+
+```sh
+# Run the game's scripts for 60 frames and print what they did
+luma-player path/to/game --headless
+
+# The same, jumping to a scene after the game script ran
+luma-player path/to/game --headless --scene scenes/room/room.scene --ticks 200
+```
 
 ## Games
 
