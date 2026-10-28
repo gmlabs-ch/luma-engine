@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use luma_archive::{Package, PackagedFile, Vfs};
-use luma_formats::{Document, Sprite};
+use luma_formats::{Document, Scene, SceneNode, Sprite};
 
 const USAGE: &str = "\
 luma - command-line tools for Luma Engine
@@ -20,6 +20,7 @@ COMMANDS:
     dump <file>            Parse a definition file and print it in canonical form
     dump <game> <name>     Same, for a file inside a game's packages
     sprite <game> <name>   Describe a sprite and the images it uses
+    scene <game> <name>    Describe a scene: layers, entities, regions
     help                   Show this message
     version                Show the version
 
@@ -49,6 +50,10 @@ fn main() -> ExitCode {
         Some("sprite") => match args.as_slice() {
             [_, game, name] => sprite(Path::new(game), name),
             _ => usage_error("sprite takes exactly two arguments: <game> <name>"),
+        },
+        Some("scene") => match args.as_slice() {
+            [_, game, name] => scene(Path::new(game), name),
+            _ => usage_error("scene takes exactly two arguments: <game> <name>"),
         },
         Some("dump") => match args.as_slice() {
             [_, file] => dump(Path::new(file), None),
@@ -255,6 +260,165 @@ fn sprite(game: &Path, name: &str) -> Result<(), Failure> {
 
 /// Builds the extraction path of an entry, refusing names that would land
 /// outside `dir`.
+fn scene(game: &Path, name: &str) -> Result<(), Failure> {
+    let vfs = open(game)?;
+    let bytes = vfs.read(name)?;
+    let scene = Scene::parse(&bytes).map_err(|err| Failure::Error(format!("{name}: {err}")))?;
+    let stdout = io::stdout();
+    let mut out = BufWriter::new(stdout.lock());
+    writeln!(
+        out,
+        "{name}: {:?} {}x{}{}",
+        scene.name,
+        scene.width(),
+        scene.height(),
+        if scene.main_layer().is_none() {
+            " (no main layer)"
+        } else {
+            ""
+        }
+    )?;
+    writeln!(
+        out,
+        "  {} script(s), {} waypoint group(s), {} scale level(s), {} rotation level(s){}",
+        scene.scripts.len(),
+        scene.waypoint_groups.len(),
+        scene.scale_levels.len(),
+        scene.rotation_levels.len(),
+        if scene.persistent_state {
+            ", persistent state"
+        } else {
+            ""
+        }
+    )?;
+    for (i, layer) in scene.layers.iter().enumerate() {
+        let mut flags = Vec::new();
+        for (set, label) in [
+            (layer.main, "main"),
+            (!layer.active, "inactive"),
+            (layer.close_up, "close-up"),
+        ] {
+            if set {
+                flags.push(label);
+            }
+        }
+        writeln!(
+            out,
+            "  layer {i}: {:?} {}x{} {}, {} entities, {} regions",
+            layer.name,
+            layer.width,
+            layer.height,
+            if flags.is_empty() {
+                "-".to_string()
+            } else {
+                flags.join(" ")
+            },
+            layer.entities().count(),
+            layer.regions().count()
+        )?;
+        for node in &layer.nodes {
+            match node {
+                SceneNode::Entity(entity) => describe_entity(&mut out, &vfs, "    ", entity)?,
+                SceneNode::Region(region) => {
+                    let mut flags = Vec::new();
+                    for (set, label) in [
+                        (region.blocked, "blocked"),
+                        (region.decoration, "decoration"),
+                        (!region.active, "inactive"),
+                    ] {
+                        if set {
+                            flags.push(label);
+                        }
+                    }
+                    if let Some(zoom) = region.zoom {
+                        flags.push(if zoom == 100.0 {
+                            "scale 100%"
+                        } else {
+                            "scaled"
+                        });
+                    }
+                    writeln!(
+                        out,
+                        "    region {:?}: {} points{}{}",
+                        region.name,
+                        region.points.len(),
+                        if flags.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" {}", flags.join(" "))
+                        },
+                        region
+                            .zoom
+                            .filter(|z| *z != 100.0)
+                            .map(|z| format!(" {z}%"))
+                            .unwrap_or_default()
+                    )?;
+                }
+            }
+        }
+    }
+    if !scene.free_entities.is_empty() {
+        writeln!(out, "  free entities: {}", scene.free_entities.len())?;
+        for entity in &scene.free_entities {
+            describe_entity(&mut out, &vfs, "    ", entity)?;
+        }
+    }
+    let paths = scene.sprite_paths();
+    let missing: Vec<&str> = paths.iter().copied().filter(|p| !vfs.exists(p)).collect();
+    writeln!(
+        out,
+        "  sprites: {} referenced, {} missing",
+        paths.len(),
+        missing.len()
+    )?;
+    for path in missing {
+        writeln!(out, "    missing: {path}")?;
+    }
+    Ok(())
+}
+
+fn describe_entity(
+    out: &mut impl Write,
+    vfs: &Vfs,
+    indent: &str,
+    entity: &luma_formats::Entity,
+) -> Result<(), Failure> {
+    let mut flags = Vec::new();
+    for (set, label) in [
+        (!entity.active, "inactive"),
+        (entity.kind == luma_formats::EntityKind::Sound, "sound"),
+        (entity.scalable, "scalable"),
+        (entity.interactive, "interactive"),
+        (entity.colorable, "colorable"),
+        (entity.rotatable, "rotatable"),
+        (entity.region.is_some(), "hotspot"),
+    ] {
+        if set {
+            flags.push(label);
+        }
+    }
+    let sprite = match &entity.sprite {
+        Some(path) if vfs.exists(path) => format!(" sprite {path}"),
+        Some(path) => format!(" sprite {path} (MISSING)"),
+        None => String::new(),
+    };
+    writeln!(
+        out,
+        "{indent}entity {:?} at {},{}{} [{}]{}",
+        entity.name,
+        entity.x,
+        entity.y,
+        sprite,
+        flags.join(" "),
+        entity
+            .cursor
+            .as_deref()
+            .map(|c| format!(" cursor {c}"))
+            .unwrap_or_default()
+    )?;
+    Ok(())
+}
+
 fn target_path(dir: &Path, file: &PackagedFile<'_>) -> Result<PathBuf, Failure> {
     let name = file.entry.path_name();
     let mut target = dir.to_path_buf();

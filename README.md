@@ -79,6 +79,9 @@ luma dump path/to/game scenes/intro/intro.scene
 
 # Describe a sprite: frames, images, sizes, hotspots
 luma sprite path/to/game actors/hero/walk.sprite
+
+# Describe a scene: layers, entities, regions, and whether their sprites exist
+luma scene path/to/game scenes/room/room.scene
 ```
 
 `list` and `unpack` also accept a single `.dcp` file, and `dump` a file on

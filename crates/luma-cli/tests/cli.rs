@@ -203,6 +203,54 @@ const TINY_PNG: [u8; 72] = [
 ];
 
 #[test]
+fn scene_describes_layers_entities_and_regions() {
+    let game = temp_dir();
+    let mut pkg = PackageBuilder::new("data");
+    pkg.add_stored_file("scenes\\bg.png", TINY_PNG.to_vec());
+    pkg.add_file(
+        "scenes\\room.scene",
+        b"SCENE {\n NAME=\"Room\"\n PERSISTENT_STATE=TRUE\n SCALE_LEVEL { Y=10 SCALE=50 }\n LAYER {\n NAME=\"main\"\n MAIN=TRUE\n WIDTH=640\n HEIGHT=480\n ENTITY { NAME=\"bg\" SPRITE=\"scenes\\bg.png\" }\n REGION { NAME=\"floor\" BLOCKED=FALSE POINT {0,0} POINT {10,0} POINT {0,10} }\n ENTITY { NAME=\"door\" X=5 Y=5 SPRITE=\"scenes\\door.sprite\" INTERACTIVE=TRUE REGION { POINT {0,0} } }\n }\n ENTITY { NAME=\"free\" }\n}"
+            .to_vec(),
+    );
+    fs::write(game.join("data.dcp"), pkg.build()).unwrap();
+
+    let out = luma(&["scene", game.to_str().unwrap(), "scenes/ROOM.scene"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("\"Room\" 640x480"), "{text}");
+    assert!(
+        text.contains("1 scale level(s), 0 rotation level(s), persistent state"),
+        "{text}"
+    );
+    assert!(
+        text.contains("layer 0: \"main\" 640x480 main, 2 entities, 1 regions"),
+        "{text}"
+    );
+    assert!(
+        text.contains("entity \"bg\" at 0,0 sprite scenes\\bg.png ["),
+        "{text}"
+    );
+    assert!(text.contains("region \"floor\": 3 points"), "{text}");
+    assert!(
+        text.contains("sprite scenes\\door.sprite (MISSING) [interactive colorable hotspot]"),
+        "{text}"
+    );
+    assert!(text.contains("free entities: 1"), "{text}");
+    assert!(text.contains("sprites: 2 referenced, 1 missing"), "{text}");
+    assert!(text.contains("missing: scenes\\door.sprite"), "{text}");
+
+    let out = luma(&["scene", game.to_str().unwrap(), "scenes/missing.scene"]);
+    assert_eq!(out.status.code(), Some(1));
+    let out = luma(&["scene", game.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
+    fs::remove_dir_all(&game).unwrap();
+}
+
+#[test]
 fn sprite_describes_frames_and_images() {
     let game = temp_dir();
     let mut pkg = PackageBuilder::new("data");
