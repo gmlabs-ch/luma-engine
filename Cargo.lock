@@ -779,6 +779,7 @@ dependencies = [
  "luma-archive",
  "luma-formats",
  "luma-render",
+ "luma-script",
 ]
 
 [[package]]

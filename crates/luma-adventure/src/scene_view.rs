@@ -1,17 +1,18 @@
-//! A scene loaded with its sprites and textures, composed into a draw
-//! list the way the engine draws it (see `docs/formats/scene.md`,
-//! section "Drawing").
+//! A scene loaded with its sprites and the animation state of its
+//! entities, composed into a draw list the way the engine draws it (see
+//! `docs/formats/scene.md`, section "Drawing"). Textures are uploaded
+//! separately, so that a scene can be loaded and run without a GPU.
 
 use std::collections::HashMap;
 
 use luma_archive::Vfs;
-use luma_formats::scene::{Entity, EntityKind, Layer, SceneNode};
+use luma_formats::scene::{Entity, EntityKind, Layer, Region, SceneNode};
 use luma_formats::{Rgb, Rgba, Scene, Sprite, SubFrame};
 use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
 
 use crate::error::{Error, Result};
 
-/// A sprite with its images uploaded.
+/// A sprite definition loaded from the game.
 #[derive(Debug)]
 pub struct LoadedSprite {
     /// The sprite definition.
@@ -71,10 +72,65 @@ impl Camera {
     }
 }
 
-/// A scene and everything needed to draw it.
+/// Identifies an entity of a scene: a node of a layer, or a free entity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EntityRef {
+    /// The node `index` of layer `layer`.
+    Node {
+        /// The layer's index.
+        layer: usize,
+        /// The node's index in the layer.
+        index: usize,
+    },
+    /// A free entity of the scene, by index.
+    Free(usize),
+}
+
+/// The animation state of an entity's sprite, advanced like the engine's
+/// `CBSprite::GetCurrentFrame`: a frame lasts its delay from the moment
+/// the previous one was shown; a non-looping sprite stops on its last
+/// frame and is then `finished`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnimState {
+    /// The sprite path this state belongs to (normalised).
+    pub sprite: String,
+    /// The frame shown.
+    pub current_frame: usize,
+    /// When the current frame started, on the game timer; 0 before the
+    /// first update.
+    pub last_frame_time: u64,
+    /// Whether a non-looping sprite has played to its end.
+    pub finished: bool,
+    /// Whether the animation is paused.
+    pub paused: bool,
+    /// A `Looping` set by a script, overriding the sprite's.
+    pub looping: Option<bool>,
+}
+
+impl AnimState {
+    fn new(sprite: String) -> AnimState {
+        AnimState {
+            sprite,
+            current_frame: 0,
+            last_frame_time: 0,
+            finished: false,
+            paused: false,
+            looping: None,
+        }
+    }
+
+    /// Back to the first frame (`CBSprite::Reset`).
+    pub fn reset(&mut self) {
+        self.current_frame = 0;
+        self.last_frame_time = 0;
+        self.finished = false;
+    }
+}
+
+/// A scene and everything needed to run and draw it.
 #[derive(Debug)]
 pub struct SceneView {
-    /// The scene definition.
+    /// The scene definition, which scripts modify.
     pub scene: Scene,
     /// Path the scene was loaded from.
     pub path: String,
@@ -83,10 +139,11 @@ pub struct SceneView {
     /// Files referenced by the scene that could not be loaded, with the
     /// reason; the scene is still shown without them.
     pub missing: Vec<(String, String)>,
+    anims: HashMap<EntityRef, AnimState>,
 }
 
 /// Case-insensitive key of a game path.
-fn key(path: &str) -> String {
+pub(crate) fn key(path: &str) -> String {
     path.replace('\\', "/").to_ascii_lowercase()
 }
 
@@ -101,10 +158,10 @@ fn texture_key(path: &str, color_key: Rgb) -> String {
 }
 
 impl SceneView {
-    /// Loads a scene file from the game and the sprites and images of its
-    /// entities. A missing or broken sprite is recorded in `missing`, not
-    /// an error.
-    pub fn load(vfs: &Vfs, renderer: &Renderer, path: &str) -> Result<SceneView> {
+    /// Loads a scene file from the game and the sprites of its entities.
+    /// A missing or broken sprite is recorded in `missing`, not an error.
+    /// Images are decoded and uploaded later by [`SceneView::upload`].
+    pub fn load(vfs: &Vfs, path: &str) -> Result<SceneView> {
         let bytes = vfs.read(path)?;
         let scene = Scene::parse(&bytes).map_err(|source| Error::Format {
             path: path.to_string(),
@@ -116,6 +173,7 @@ impl SceneView {
             sprites: HashMap::new(),
             textures: HashMap::new(),
             missing: Vec::new(),
+            anims: HashMap::new(),
         };
         let paths: Vec<String> = view
             .scene
@@ -124,15 +182,18 @@ impl SceneView {
             .filter_map(|e| e.sprite.clone())
             .collect();
         for sprite_path in paths {
-            view.load_sprite(vfs, renderer, &sprite_path);
+            view.add_sprite(vfs, &sprite_path);
         }
         Ok(view)
     }
 
-    fn load_sprite(&mut self, vfs: &Vfs, renderer: &Renderer, path: &str) {
+    /// Loads a sprite definition if it is not loaded yet, for an entity
+    /// whose sprite a script changed. Returns whether the sprite is
+    /// available.
+    pub fn add_sprite(&mut self, vfs: &Vfs, path: &str) -> bool {
         let k = key(path);
         if self.sprites.contains_key(&k) {
-            return;
+            return true;
         }
         let sprite = if Sprite::is_image_path(path) {
             Sprite::from_image(path)
@@ -145,31 +206,41 @@ impl SceneView {
                 Ok(sprite) => sprite,
                 Err(reason) => {
                     self.missing.push((path.to_string(), reason));
-                    return;
+                    return false;
                 }
             }
         };
-        for sub in sprite.frames.iter().flat_map(|f| &f.subframes) {
-            if let Some(image) = &sub.image {
-                self.load_image(vfs, renderer, image, sub.color_key);
-            }
-        }
         self.sprites.insert(k, LoadedSprite { sprite });
+        true
     }
 
-    fn load_image(&mut self, vfs: &Vfs, renderer: &Renderer, path: &str, color_key: Rgb) {
-        let k = texture_key(path, color_key);
-        if self.textures.contains_key(&k) {
-            return;
-        }
-        let decoded = vfs.read(path).map_err(|e| e.to_string()).and_then(|bytes| {
-            luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
-        });
-        match decoded {
-            Ok(image) => {
-                self.textures.insert(k, renderer.texture(path, &image));
+    /// Decodes and uploads the images of every loaded sprite that has no
+    /// texture yet. Safe to call every frame.
+    pub fn upload(&mut self, vfs: &Vfs, renderer: &Renderer) {
+        let images: Vec<(String, Rgb)> = self
+            .sprites
+            .values()
+            .flat_map(|s| s.sprite.frames.iter())
+            .flat_map(|f| f.subframes.iter())
+            .filter_map(|sub| sub.image.as_ref().map(|i| (i.clone(), sub.color_key)))
+            .collect();
+        for (image, color_key) in images {
+            let k = texture_key(&image, color_key);
+            if self.textures.contains_key(&k) || self.missing.iter().any(|(p, _)| *p == image) {
+                continue;
             }
-            Err(reason) => self.missing.push((path.to_string(), reason)),
+            let decoded = vfs
+                .read(&image)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| {
+                    luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
+                });
+            match decoded {
+                Ok(decoded) => {
+                    self.textures.insert(k, renderer.texture(&image, &decoded));
+                }
+                Err(reason) => self.missing.push((image, reason)),
+            }
         }
     }
 
@@ -178,7 +249,7 @@ impl SceneView {
         self.sprites.get(&key(path))
     }
 
-    /// The texture of an image, if it loaded.
+    /// The texture of an image, if it was uploaded.
     pub fn texture(&self, path: &str, color_key: Rgb) -> Option<&Texture> {
         self.textures.get(&texture_key(path, color_key))
     }
@@ -188,21 +259,195 @@ impl SceneView {
         self.textures.len()
     }
 
-    /// Fills a draw list with the scene as seen by `camera`, `elapsed_ms`
-    /// after the scene started (which selects the frame of animated
-    /// sprites; `0` shows every first frame).
-    pub fn draw<'a>(&'a self, list: &mut DrawList<'a>, camera: &Camera, elapsed_ms: u64) {
+    /// Every entity of the scene: layer nodes in order, then free ones.
+    pub fn entity_refs(&self) -> Vec<EntityRef> {
+        let mut refs = Vec::new();
+        for (layer, l) in self.scene.layers.iter().enumerate() {
+            for (index, node) in l.nodes.iter().enumerate() {
+                if matches!(node, SceneNode::Entity(_)) {
+                    refs.push(EntityRef::Node { layer, index });
+                }
+            }
+        }
+        refs.extend((0..self.scene.free_entities.len()).map(EntityRef::Free));
+        refs
+    }
+
+    /// A node of a layer.
+    pub fn node(&self, layer: usize, index: usize) -> Option<&SceneNode> {
+        self.scene.layers.get(layer)?.nodes.get(index)
+    }
+
+    /// An entity.
+    pub fn entity(&self, r: EntityRef) -> Option<&Entity> {
+        match r {
+            EntityRef::Node { layer, index } => match self.node(layer, index)? {
+                SceneNode::Entity(e) => Some(e),
+                SceneNode::Region(_) => None,
+            },
+            EntityRef::Free(i) => self.scene.free_entities.get(i),
+        }
+    }
+
+    /// An entity, mutable.
+    pub fn entity_mut(&mut self, r: EntityRef) -> Option<&mut Entity> {
+        match r {
+            EntityRef::Node { layer, index } => {
+                match self.scene.layers.get_mut(layer)?.nodes.get_mut(index)? {
+                    SceneNode::Entity(e) => Some(e),
+                    SceneNode::Region(_) => None,
+                }
+            }
+            EntityRef::Free(i) => self.scene.free_entities.get_mut(i),
+        }
+    }
+
+    /// A region node of a layer.
+    pub fn region(&self, layer: usize, index: usize) -> Option<&Region> {
+        match self.node(layer, index)? {
+            SceneNode::Region(r) => Some(r),
+            SceneNode::Entity(_) => None,
+        }
+    }
+
+    /// A region node of a layer, mutable.
+    pub fn region_mut(&mut self, layer: usize, index: usize) -> Option<&mut Region> {
+        match self.scene.layers.get_mut(layer)?.nodes.get_mut(index)? {
+            SceneNode::Region(r) => Some(r),
+            SceneNode::Entity(_) => None,
+        }
+    }
+
+    /// The first layer node (entity or region) with this name, ignoring
+    /// case, as `(layer, index)`.
+    pub fn find_node(&self, name: &str) -> Option<(usize, usize)> {
+        for (li, layer) in self.scene.layers.iter().enumerate() {
+            for (ni, node) in layer.nodes.iter().enumerate() {
+                let node_name = match node {
+                    SceneNode::Entity(e) => &e.name,
+                    SceneNode::Region(r) => &r.name,
+                };
+                if node_name.eq_ignore_ascii_case(name) {
+                    return Some((li, ni));
+                }
+            }
+        }
+        None
+    }
+
+    /// The first free entity with this name, ignoring case.
+    pub fn find_free(&self, name: &str) -> Option<usize> {
+        self.scene
+            .free_entities
+            .iter()
+            .position(|e| e.name.eq_ignore_ascii_case(name))
+    }
+
+    /// The animation state of an entity, if it has been shown.
+    pub fn anim(&self, r: EntityRef) -> Option<&AnimState> {
+        self.anims.get(&r)
+    }
+
+    /// The animation state of an entity, created for its current sprite.
+    pub fn anim_mut(&mut self, r: EntityRef) -> Option<&mut AnimState> {
+        let sprite = key(self.entity(r)?.sprite.as_deref()?);
+        let state = self
+            .anims
+            .entry(r)
+            .or_insert_with(|| AnimState::new(sprite.clone()));
+        if state.sprite != sprite {
+            *state = AnimState::new(sprite);
+        }
+        Some(state)
+    }
+
+    /// Restarts an entity's animation (`Reset`).
+    pub fn reset_anim(&mut self, r: EntityRef) {
+        if let Some(state) = self.anim_mut(r) {
+            state.reset();
+        }
+    }
+
+    /// Advances the animations of the active entities to `timer` (the
+    /// game timer, in milliseconds).
+    pub fn advance(&mut self, timer: u64) {
+        for r in self.entity_refs() {
+            let Some(entity) = self.entity(r) else {
+                continue;
+            };
+            if !entity.active || entity.kind != EntityKind::Normal {
+                continue;
+            }
+            let Some(path) = entity.sprite.clone() else {
+                continue;
+            };
+            let (frames, looping, delay_of): (usize, bool, Vec<u64>) = match self.sprite(&path) {
+                Some(loaded) => (
+                    loaded.sprite.frames.len(),
+                    loaded.sprite.looping,
+                    loaded
+                        .sprite
+                        .frames
+                        .iter()
+                        .map(|f| u64::from(f.delay_ms))
+                        .collect(),
+                ),
+                None => continue,
+            };
+            if frames == 0 {
+                continue;
+            }
+            let Some(state) = self.anim_mut(r) else {
+                continue;
+            };
+            let looping = state.looping.unwrap_or(looping);
+            state.current_frame = state.current_frame.min(frames - 1);
+            if !state.paused
+                && !state.finished
+                && state.last_frame_time != 0
+                && timer >= state.last_frame_time + delay_of[state.current_frame]
+            {
+                if state.current_frame < frames - 1 {
+                    state.current_frame += 1;
+                } else if looping {
+                    state.current_frame = 0;
+                } else {
+                    state.finished = true;
+                }
+                state.last_frame_time = timer;
+            }
+            if state.last_frame_time == 0 {
+                state.last_frame_time = timer;
+            }
+        }
+    }
+
+    /// The frame an entity shows.
+    pub fn frame_of(&self, r: EntityRef) -> usize {
+        self.anims.get(&r).map_or(0, |a| a.current_frame)
+    }
+
+    /// Fills a draw list with the scene as seen by `camera`, showing the
+    /// frames the animations are at (see [`SceneView::advance`]).
+    pub fn draw<'a>(&'a self, list: &mut DrawList<'a>, camera: &Camera) {
         let scene = &self.scene;
         let mut drawn = vec![false; scene.free_entities.len()];
-        for layer in &scene.layers {
+        for (li, layer) in scene.layers.iter().enumerate() {
             if !layer.active {
                 continue;
             }
             let (ox, oy) = camera.layer_offset(scene, layer);
             list.set_offset(-ox, -oy);
-            for node in &layer.nodes {
+            for (ni, node) in layer.nodes.iter().enumerate() {
                 match node {
-                    SceneNode::Entity(entity) => self.draw_entity(list, entity, elapsed_ms),
+                    SceneNode::Entity(entity) => self.draw_entity(
+                        list,
+                        EntityRef::Node {
+                            layer: li,
+                            index: ni,
+                        },
+                        entity,
+                    ),
                     SceneNode::Region(region) => {
                         if region.blocked || region.decoration || !region.active {
                             continue;
@@ -216,7 +461,7 @@ impl SceneView {
                         inside.sort_by_key(|&i| scene.free_entities[i].y);
                         for i in inside {
                             drawn[i] = true;
-                            self.draw_entity(list, &scene.free_entities[i], elapsed_ms);
+                            self.draw_entity(list, EntityRef::Free(i), &scene.free_entities[i]);
                         }
                     }
                 }
@@ -228,23 +473,24 @@ impl SceneView {
                 rest.sort_by_key(|&i| scene.free_entities[i].y);
                 for i in rest {
                     drawn[i] = true;
-                    self.draw_entity(list, &scene.free_entities[i], elapsed_ms);
+                    self.draw_entity(list, EntityRef::Free(i), &scene.free_entities[i]);
                 }
             }
         }
         list.set_offset(0.0, 0.0);
     }
 
-    fn draw_entity<'a>(&'a self, list: &mut DrawList<'a>, entity: &Entity, elapsed_ms: u64) {
+    fn draw_entity<'a>(&'a self, list: &mut DrawList<'a>, r: EntityRef, entity: &Entity) {
         if !entity.active || entity.kind != EntityKind::Normal {
             return;
         }
         let Some(loaded) = entity.sprite.as_deref().and_then(|p| self.sprite(p)) else {
             return;
         };
-        let Some(frame) = loaded.sprite.frame_index_at(elapsed_ms) else {
+        if loaded.sprite.frames.is_empty() {
             return;
-        };
+        }
+        let frame = self.frame_of(r).min(loaded.sprite.frames.len() - 1);
         let scale = self.scene.entity_scale(entity) / 100.0;
         let tint = self.scene.entity_tint(entity);
         for sub in &loaded.sprite.frames[frame].subframes {

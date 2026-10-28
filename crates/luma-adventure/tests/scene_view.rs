@@ -150,8 +150,10 @@ fn loads_and_draws_a_scene_from_a_package() {
         return;
     };
     let renderer = Renderer::new(gpu);
-    let view = SceneView::load(&vfs, &renderer, "scenes/room.scene").unwrap();
+    let mut view = SceneView::load(&vfs, "scenes/room.scene").unwrap();
     assert_eq!(view.scene.name, "Room");
+    assert_eq!(view.texture_count(), 0, "nothing uploaded yet");
+    view.upload(&vfs, &renderer);
     assert_eq!(view.texture_count(), 3, "bg, red, green");
     assert_eq!(view.missing.len(), 1);
     assert!(
@@ -172,7 +174,7 @@ fn loads_and_draws_a_scene_from_a_package() {
 
     let target = Offscreen::new(renderer.gpu(), 32, 32);
     let mut list = DrawList::new(32.0, 32.0);
-    view.draw(&mut list, &camera, 0);
+    view.draw(&mut list, &camera);
     assert_eq!(list.quads().len(), 3, "bg, prop frame 0, free entity");
     renderer
         .render(
@@ -204,8 +206,21 @@ fn loads_and_draws_a_scene_from_a_package() {
     // Scroll to the right: the free entity (drawn by the floor region)
     // and the second frame of the prop come into view.
     camera.offset_x = 32.0;
+    // The prop's first frame starts on the first update and lasts 100 ms.
+    view.advance(1);
+    view.advance(50);
+    let prop = view.find_node("prop").unwrap();
+    let prop = luma_adventure::EntityRef::Node {
+        layer: prop.0,
+        index: prop.1,
+    };
+    assert_eq!(view.frame_of(prop), 0);
+    view.advance(151);
+    assert_eq!(view.frame_of(prop), 1);
+    view.advance(300);
+    assert!(view.anim(prop).unwrap().finished, "two frames, not looping");
     let mut list = DrawList::new(32.0, 32.0);
-    view.draw(&mut list, &camera, 150);
+    view.draw(&mut list, &camera);
     renderer
         .render(
             target.target(),

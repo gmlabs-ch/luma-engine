@@ -1,0 +1,1150 @@
+//! The properties and methods of the native objects, as scripts call
+//! them: `Game`, `Scene`, layers, entities, regions, sprites and the
+//! keyboard. Methods of later milestones (sound, walking, talking,
+//! inventory, windows, saving) are accepted and logged once.
+//!
+//! Written with reference to the `ScGetProperty`, `ScSetProperty` and
+//! `ScCallMethod` methods of `BGame.cpp`, `AdGame.cpp`, `AdScene.cpp`,
+//! `AdLayer.cpp`, `BObject.cpp`, `AdObject.cpp`, `AdEntity.cpp`,
+//! `AdTalkHolder.cpp`, `AdRegion.cpp`, `BRegion.cpp`, `BSprite.cpp`,
+//! `BKeyboardState.cpp` and `BScriptHolder.cpp` of WME Lite (MIT
+//! License, Copyright (c) 2011 Jan Nedoma); see `NOTICE`.
+
+use luma_formats::Rgba;
+use luma_formats::scene::Direction;
+use luma_script::{Context, NativeId, Return, State, Value, rgba};
+
+use crate::objects::Kind;
+use crate::scene_view::EntityRef;
+use crate::world::World;
+
+/// `AlphaColor`: the engine's `0xAARRGGBB` integer.
+fn color_int(c: Rgba) -> i32 {
+    rgba(
+        i32::from(c.r),
+        i32::from(c.g),
+        i32::from(c.b),
+        i32::from(c.a),
+    )
+}
+
+fn color_of(v: i32) -> Rgba {
+    Rgba {
+        r: ((v >> 16) & 0xff) as u8,
+        g: ((v >> 8) & 0xff) as u8,
+        b: (v & 0xff) as u8,
+        a: ((v >> 24) & 0xff) as u8,
+    }
+}
+
+fn native_or_null(id: Option<NativeId>) -> Value {
+    id.map_or(Value::Null, Value::Native)
+}
+
+/// Methods the engine has that later milestones implement.
+const GAME_STUBS: &[&str] = &[
+    "PlayMusic",
+    "PlayMusicChannel",
+    "StopMusic",
+    "StopMusicChannel",
+    "PauseMusic",
+    "PauseMusicChannel",
+    "ResumeMusic",
+    "ResumeMusicChannel",
+    "GetMusic",
+    "GetMusicChannel",
+    "SetMusicPosition",
+    "SetMusicChannelPosition",
+    "GetMusicPosition",
+    "GetMusicChannelPosition",
+    "IsMusicPlaying",
+    "IsMusicChannelPlaying",
+    "SetMusicVolume",
+    "SetMusicChannelVolume",
+    "GetMusicVolume",
+    "GetMusicChannelVolume",
+    "MusicCrossfade",
+    "GetSoundLength",
+    "PlaySound",
+    "PlaySoundEvent",
+    "StopSound",
+    "PauseSound",
+    "ResumeSound",
+    "IsSoundPlaying",
+    "SetGlobalSFXVolume",
+    "SetGlobalSpeechVolume",
+    "SetGlobalMusicVolume",
+    "SetGlobalMasterVolume",
+    "SetMousePos",
+    "LockMouseRect",
+    "RegWriteNumber",
+    "RegWriteString",
+    "SaveGame",
+    "LoadGame",
+    "EmptySaveSlot",
+    "SetActiveCursor",
+    "RemoveActiveCursor",
+    "SetWaitCursor",
+    "RemoveWaitCursor",
+    "FadeOut",
+    "FadeOutAsync",
+    "FadeIn",
+    "FadeInAsync",
+    "SystemFadeOut",
+    "SystemFadeOutAsync",
+    "SystemFadeIn",
+    "SystemFadeInAsync",
+    "Screenshot",
+    "ScreenshotEx",
+    "DeleteWindow",
+    "OpenDocument",
+    "SetLoadingScreen",
+    "SetSavingScreen",
+    "DisplayLoadingIcon",
+    "HideLoadingIcon",
+    "StoreSaveThumbnail",
+    "DeleteSaveThumbnail",
+    "ShowStatusLine",
+    "HideStatusLine",
+    "PlayTheora",
+    "StopTheora",
+    "PlayVideo",
+    "StopVideo",
+    "TakeItem",
+    "DropItem",
+    "AddResponse",
+    "AddResponseOnce",
+    "AddResponseOnceGame",
+    "ResetResponse",
+    "ClearResponses",
+    "StartDlgBranch",
+    "EndDlgBranch",
+    "LoadResponseBox",
+    "LoadInventoryBox",
+    "LoadItems",
+    "AddSpeechDir",
+    "RemoveSpeechDir",
+    "SetSceneViewport",
+    "LoadEntity",
+    "CreateEntity",
+    "CreateItem",
+    "DeleteItem",
+    "Reset",
+    "AccOutputText",
+    "DumpTextureStats",
+    "EnableScriptProfiling",
+    "DisableScriptProfiling",
+];
+
+const OBJECT_STUBS: &[&str] = &[
+    "PlaySound",
+    "PlaySoundEvent",
+    "LoadSound",
+    "StopSound",
+    "PauseSound",
+    "ResumeSound",
+    "SetSoundPosition",
+    "SetSoundVolume",
+    "SoundFXNone",
+    "SoundFXEcho",
+    "SoundFXReverb",
+    "SetCursor",
+    "RemoveCursor",
+    "PlayAnim",
+    "PlayAnimAsync",
+    "Talk",
+    "TalkAsync",
+    "StopTalk",
+    "ForceTalkAnim",
+    "StickToRegion",
+    "SetFont",
+    "TakeItem",
+    "DropItem",
+    "CreateParticleEmitter",
+    "DeleteParticleEmitter",
+    "AddAttachment",
+    "RemoveAttachment",
+    "AddTalkSprite",
+    "RemoveTalkSprite",
+    "SetTalkSprite",
+    "CreateRegion",
+    "DeleteRegion",
+    "SetCaption",
+];
+
+impl World {
+    /// A built-in property of a native, if the native defines it.
+    pub(crate) fn native_get(&self, id: NativeId, name: &str) -> Option<Value> {
+        let kind = self.native(id)?.kind.clone();
+        match kind {
+            Kind::Game => self.game_get(name),
+            Kind::Keyboard => match name {
+                "Type" => Some(Value::from("keyboard")),
+                "Key" => Some(Value::from("")),
+                "Printable" | "IsShift" | "IsAlt" | "IsControl" => Some(Value::Bool(false)),
+                "KeyCode" => Some(Value::Int(0)),
+                _ => None,
+            },
+            Kind::Scene => self.scene_get(name),
+            Kind::Layer(index) => self.layer_get(index, name),
+            Kind::Entity(r) => self.entity_get(r, name),
+            Kind::Region { layer, index } => self.region_get(layer, index, name),
+            Kind::Sprite(owner) => self.sprite_get(owner, name),
+            Kind::Inert(kind) => match name {
+                "Type" => Some(Value::from(kind.to_ascii_lowercase())),
+                "Name" => Some(Value::from(kind)),
+                _ => None,
+            },
+        }
+    }
+
+    /// Sets a built-in property; `false` when the native has no such
+    /// property and it should be stored as a script property.
+    pub(crate) fn native_set(&mut self, id: NativeId, name: &str, value: &Value) -> bool {
+        let kind = match self.native(id) {
+            Some(native) => native.kind.clone(),
+            None => return false,
+        };
+        match kind {
+            Kind::Game => self.game_set(name, value),
+            Kind::Scene => self.scene_set(name, value),
+            Kind::Layer(index) => self.layer_set(index, name, value),
+            Kind::Entity(r) => self.entity_set(r, name, value),
+            Kind::Region { layer, index } => self.region_set(layer, index, name, value),
+            Kind::Sprite(owner) => self.sprite_set(owner, name, value),
+            Kind::Keyboard | Kind::Inert(_) => false,
+        }
+    }
+
+    /// A method call on a native; `None` when it has no such method.
+    pub(crate) fn native_call(
+        &mut self,
+        id: NativeId,
+        name: &str,
+        args: &[Value],
+        ctx: Context<'_>,
+    ) -> Option<Return> {
+        let kind = self.native(id)?.kind.clone();
+        if let Some(ret) = self.holder_call(id, name, args, ctx) {
+            return Some(ret);
+        }
+        match kind {
+            Kind::Game => self.game_call(name, args),
+            Kind::Keyboard => match name {
+                "IsKeyDown" => Some(Return::value(false)),
+                _ => None,
+            },
+            Kind::Scene => self.scene_call(name, args),
+            Kind::Layer(index) => self.layer_call(index, name, args),
+            Kind::Entity(r) => self.entity_call(id, r, name, args),
+            Kind::Region { layer, index } => self.region_call(layer, index, name, args),
+            Kind::Sprite(owner) => self.sprite_call(owner, name),
+            Kind::Inert(kind) => match name {
+                "GetWidget" | "GetControl" => {
+                    let widget = self.inert("Widget");
+                    Some(Return::value(Value::Native(widget)))
+                }
+                _ => {
+                    self.stub(&format!("{kind}.{name}"));
+                    Some(Return::null())
+                }
+            },
+        }
+    }
+
+    /// The methods every script holder has (`CBScriptHolder`).
+    fn holder_call(
+        &mut self,
+        id: NativeId,
+        name: &str,
+        args: &[Value],
+        ctx: Context<'_>,
+    ) -> Option<Return> {
+        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        Some(match name {
+            "ApplyEvent" => {
+                let event = arg(0).get_string(self);
+                let handled = ctx.engine.apply_event(self, id, &event, false);
+                Return::value(handled)
+            }
+            "CanHandleEvent" => {
+                let event = arg(0).get_string(self);
+                Return::value(ctx.engine.can_handle_event(id, &event))
+            }
+            "CanHandleMethod" => {
+                let method = arg(0).get_string(self);
+                Return::value(ctx.engine.can_handle_method(id, &method))
+            }
+            "AttachScript" => {
+                let path = arg(0).get_string(self);
+                let ok = self.attach(ctx.engine, id, &path);
+                Return::value(ok)
+            }
+            "DetachScript" => {
+                let path = arg(0).get_string(self);
+                let kill_threads = arg(1).get_bool(self);
+                let found = ctx.engine.scripts_of(id).into_iter().find(|s| {
+                    ctx.engine
+                        .script(*s)
+                        .is_some_and(|s| s.filename().eq_ignore_ascii_case(&path))
+                });
+                match found {
+                    Some(script) => {
+                        ctx.engine.finish(script, kill_threads);
+                        Return::value(true)
+                    }
+                    None => Return::value(false),
+                }
+            }
+            "IsScriptRunning" => {
+                let path = arg(0).get_string(self);
+                let running = ctx.engine.scripts_of(id).into_iter().any(|s| {
+                    ctx.engine.script(s).is_some_and(|s| {
+                        s.filename().eq_ignore_ascii_case(&path)
+                            && !matches!(s.state(), State::Finished | State::Error)
+                    })
+                });
+                Return::value(running)
+            }
+            _ => return None,
+        })
+    }
+
+    // ----------------------------------------------------------------
+    // Game
+    // ----------------------------------------------------------------
+
+    fn game_get(&self, name: &str) -> Option<Value> {
+        Some(match name {
+            "Type" => Value::from("game"),
+            "Name" => Value::from(self.name.clone()),
+            "Caption" => Value::from(self.caption.clone()),
+            "CurrentTime" => Value::Int(self.timer() as i32),
+            "WindowsTime" => Value::Int(self.timer() as i32),
+            "MouseX" | "MouseY" => Value::Int(0),
+            "MainObject" => native_or_null(self.main_object),
+            "ActiveObject" => Value::Null,
+            "ScreenWidth" => Value::Int(self.settings().width as i32),
+            "ScreenHeight" => Value::Int(self.settings().height as i32),
+            "Interactive" => Value::Bool(self.interactive),
+            "Keyboard" => Value::Native(self.keyboard_id),
+            "Scene" => Value::Native(self.scene_id),
+            "PrevScene" | "PreviousScene" => Value::from(self.prev_scene_name.clone()),
+            "PrevSceneFilename" | "PreviousSceneFilename" => {
+                Value::from(self.prev_scene_filename.clone())
+            }
+            "ChangingScene" => Value::Bool(self.scheduled_scene.is_some()),
+            "Subtitles" => Value::Bool(self.game_file().subtitles),
+            "SubtitlesSpeed" => Value::Int(self.game_file().subtitles_speed),
+            "VideoSubtitles" => Value::Bool(self.game_file().video_subtitles),
+            "Frozen"
+            | "DebugMode"
+            | "SoundAvailable"
+            | "WindowedMode"
+            | "TextRTL"
+            | "InventoryVisible"
+            | "ResponsesVisible"
+            | "SuspendedRendering"
+            | "SuppressScriptErrors"
+            | "AutorunDisabled"
+            | "AutoSaveOnExit"
+            | "CursorHidden" => Value::Bool(false),
+            "AcceleratedMode" => Value::Bool(true),
+            "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => Value::Int(100),
+            "FPS"
+            | "NumItems"
+            | "TotalNumItems"
+            | "InventoryScrollOffset"
+            | "TextEncoding"
+            | "SoundBufferSize"
+            | "AutoSaveSlot"
+            | "MostRecentSaveSlot" => Value::Int(0),
+            "TalkSkipButton" => Value::Int(0),
+            "SelectedItem" | "LastResponse" | "LastResponseOrig" => Value::Null,
+            "Platform" => Value::from("luma"),
+            "DeviceType" => Value::from("desktop"),
+            _ => return None,
+        })
+    }
+
+    fn game_set(&mut self, name: &str, value: &Value) -> bool {
+        match name {
+            "Name" => self.name = value.get_string(self),
+            "Caption" => self.caption = value.get_string(self),
+            "Interactive" => self.interactive = value.get_bool(self),
+            "MainObject" => self.main_object = value.as_native(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn game_call(&mut self, name: &str, args: &[Value]) -> Option<Return> {
+        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        Some(match name {
+            "ChangeScene" => {
+                let path = arg(0).get_string(self);
+                let fade_in = match arg(2) {
+                    Value::Null => true,
+                    v => v.get_bool(self),
+                };
+                self.schedule_scene(&path, fade_in);
+                Return::null()
+            }
+            "LoadWindow" | "CreateWindow" => {
+                self.stub(&format!("Game.{name}"));
+                let id = self.inert("Window");
+                Return::value(Value::Native(id))
+            }
+            "LoadActor" => {
+                self.stub("Game.LoadActor");
+                let id = self.inert("Actor");
+                Return::value(Value::Native(id))
+            }
+            "UnloadObject" | "UnloadActor" | "UnloadEntity" | "DeleteEntity" => {
+                if let Some(id) = arg(0).as_native() {
+                    if matches!(self.native(id).map(|n| &n.kind), Some(Kind::Inert(_))) {
+                        self.objects.remove(id);
+                    }
+                }
+                Return::null()
+            }
+            "ValidObject" => Return::value(
+                arg(0)
+                    .as_native()
+                    .is_some_and(|id| self.objects.contains(id)),
+            ),
+            "QuitGame" => {
+                self.quit = true;
+                Return::null()
+            }
+            "LoadStringTable" => {
+                let path = arg(0).get_string(self);
+                let clear_old = match arg(1) {
+                    Value::Null => true,
+                    v => v.get_bool(self),
+                };
+                Return::value(self.load_string_table(&path, clear_old))
+            }
+            "ExpandString" => Return::value(self.expand(&arg(0).get_string(self))),
+            "Msg" => {
+                let text = arg(0).get_string(self);
+                self.log(format!("msg: {text}"));
+                Return::null()
+            }
+            "LOG" => {
+                let text = arg(0).get_string(self);
+                self.log(format!("sc: {text}"));
+                Return::null()
+            }
+            "FileExists" => Return::value(self.vfs().exists(&arg(0).get_string(self))),
+            "ClearScriptCache" => Return::null(),
+            "HasItem" | "IsItemTaken" | "IsSaveSlotUsed" | "HasActiveCursor" | "QueryItem" => {
+                self.stub(&format!("Game.{name}"));
+                Return::value(false)
+            }
+            "GetSaveSlotDescription" | "RegReadString" => {
+                self.stub(&format!("Game.{name}"));
+                Return::value("")
+            }
+            "RegReadNumber" | "GetNumResponses" => {
+                self.stub(&format!("Game.{name}"));
+                Return::value(0)
+            }
+            "GetGlobalSFXVolume"
+            | "GetGlobalSpeechVolume"
+            | "GetGlobalMusicVolume"
+            | "GetGlobalMasterVolume" => Return::value(100),
+            "GetFadeColor" => Return::value(0),
+            "GetItem"
+            | "GetResponse"
+            | "GetCurrentDlgBranch"
+            | "GetActiveCursor"
+            | "GetActiveCursorObject"
+            | "GetWaitCursor"
+            | "GetWaitCursorObject"
+            | "GetInventoryWindow"
+            | "GetResponsesWindow" => {
+                self.stub(&format!("Game.{name}"));
+                Return::null()
+            }
+            _ if GAME_STUBS.contains(&name) => {
+                self.stub(&format!("Game.{name}"));
+                Return::null()
+            }
+            _ => return None,
+        })
+    }
+
+    // ----------------------------------------------------------------
+    // Scene
+    // ----------------------------------------------------------------
+
+    fn scene_get(&self, name: &str) -> Option<Value> {
+        let view = self.scene();
+        Some(match name {
+            "Type" => Value::from("scene"),
+            "Name" => Value::from(view.map(|v| v.scene.name.clone()).unwrap_or_default()),
+            "Filename" => Value::from(view.map(|v| v.path.clone()).unwrap_or_default()),
+            "NumLayers" => Value::Int(view.map_or(0, |v| v.scene.layers.len() as i32)),
+            "NumWaypointGroups" => {
+                Value::Int(view.map_or(0, |v| v.scene.waypoint_groups.len() as i32))
+            }
+            "NumFreeNodes" => Value::Int(view.map_or(0, |v| v.scene.free_entities.len() as i32)),
+            "MainLayer" => native_or_null(
+                view.and_then(|v| v.scene.layers.iter().rposition(|l| l.main))
+                    .and_then(|i| self.layer_id(i)),
+            ),
+            "MouseX" => Value::Int(self.offset_x),
+            "MouseY" => Value::Int(self.offset_y),
+            "OffsetX" => Value::Int(self.offset_x),
+            "OffsetY" => Value::Int(self.offset_y),
+            "Width" => Value::Int(view.map_or(0, |v| v.scene.width())),
+            "Height" => Value::Int(view.map_or(0, |v| v.scene.height())),
+            "AutoScroll" => Value::Bool(true),
+            "PersistentState" => Value::Bool(view.is_some_and(|v| v.scene.persistent_state)),
+            "PersistentStateSprites" => {
+                Value::Bool(view.is_none_or(|v| v.scene.persistent_state_sprites))
+            }
+            "ScrollPixelsX" | "ScrollPixelsY" => Value::Int(1),
+            "ScrollSpeedX" | "ScrollSpeedY" => Value::Int(10),
+            _ => return None,
+        })
+    }
+
+    fn scene_set(&mut self, name: &str, value: &Value) -> bool {
+        match name {
+            "Name" => {
+                let name = value.get_string(self);
+                if let Some(view) = self.scene_mut() {
+                    view.scene.name = name;
+                }
+            }
+            "OffsetX" => self.offset_x = value.get_int(self),
+            "OffsetY" => self.offset_y = value.get_int(self),
+            "PersistentState" => {
+                let v = value.get_bool(self);
+                if let Some(view) = self.scene_mut() {
+                    view.scene.persistent_state = v;
+                }
+            }
+            "PersistentStateSprites" => {
+                let v = value.get_bool(self);
+                if let Some(view) = self.scene_mut() {
+                    view.scene.persistent_state_sprites = v;
+                }
+            }
+            "AutoScroll" | "ScrollPixelsX" | "ScrollPixelsY" | "ScrollSpeedX" | "ScrollSpeedY" => {}
+            _ => return false,
+        }
+        true
+    }
+
+    fn scene_call(&mut self, name: &str, args: &[Value]) -> Option<Return> {
+        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        Some(match name {
+            "GetNode" => {
+                let node_name = arg(0).get_string(self);
+                Return::value(native_or_null(self.find_node(&node_name)))
+            }
+            "GetLayer" => {
+                let id = match arg(0) {
+                    Value::Int(i) => usize::try_from(i).ok().and_then(|i| self.layer_id(i)),
+                    other => {
+                        let layer_name = other.get_string(self);
+                        self.scene()
+                            .and_then(|v| {
+                                v.scene
+                                    .layers
+                                    .iter()
+                                    .position(|l| l.name.eq_ignore_ascii_case(&layer_name))
+                            })
+                            .and_then(|i| self.layer_id(i))
+                    }
+                };
+                Return::value(native_or_null(id))
+            }
+            "GetFreeNode" => {
+                let id = match arg(0) {
+                    Value::Int(i) => usize::try_from(i)
+                        .ok()
+                        .filter(|&i| {
+                            self.scene()
+                                .is_some_and(|v| i < v.scene.free_entities.len())
+                        })
+                        .and_then(|i| self.node_id(EntityRef::Free(i))),
+                    other => {
+                        let node_name = other.get_string(self);
+                        self.scene()
+                            .and_then(|v| v.find_free(&node_name))
+                            .and_then(|i| self.node_id(EntityRef::Free(i)))
+                    }
+                };
+                Return::value(native_or_null(id))
+            }
+            "GetRegionAt" => {
+                let x = arg(0).get_int(self);
+                let y = arg(1).get_int(self);
+                let include_decorations = match arg(2) {
+                    Value::Null => false,
+                    v => v.get_bool(self),
+                };
+                let found = self.scene().and_then(|view| {
+                    let main = view.scene.layers.iter().rposition(|l| l.main)?;
+                    let layer = &view.scene.layers[main];
+                    layer
+                        .nodes
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find_map(|(i, node)| match node {
+                            luma_formats::SceneNode::Region(r)
+                                if r.active
+                                    && r.contains(x, y)
+                                    && (include_decorations || !r.decoration) =>
+                            {
+                                Some((main, i))
+                            }
+                            _ => None,
+                        })
+                });
+                Return::value(native_or_null(
+                    found.and_then(|(layer, index)| self.region_id(layer, index)),
+                ))
+            }
+            "IsBlockedAt" => {
+                let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
+                Return::value(self.scene().is_none_or(|v| v.scene.is_blocked_at(x, y)))
+            }
+            "IsWalkableAt" => {
+                let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
+                Return::value(self.scene().is_some_and(|v| !v.scene.is_blocked_at(x, y)))
+            }
+            "GetScaleAt" => {
+                let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
+                Return::value(f64::from(
+                    self.scene().map_or(100.0, |v| v.scene.zoom_at(x, y)),
+                ))
+            }
+            "GetRotationAt" => {
+                let x = arg(0).get_int(self);
+                Return::value(f64::from(
+                    self.scene().map_or(0.0, |v| v.scene.rotation_at(x)),
+                ))
+            }
+            "SkipTo" | "ScrollTo" | "ScrollToAsync" => {
+                let (x, y) = match arg(0).as_native() {
+                    Some(id) => self.position_of(id).unwrap_or((0, 0)),
+                    None => (arg(0).get_int(self), arg(1).get_int(self)),
+                };
+                self.skip_to(x, y);
+                Return::null()
+            }
+            "IsScrolling" => Return::value(false),
+            "IsPointInViewport" => {
+                let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
+                let (w, h) = (self.settings().width as i32, self.settings().height as i32);
+                Return::value(x >= 0 && y >= 0 && x < w && y < h)
+            }
+            "GetWaypointGroup" | "LoadActor" | "LoadEntity" | "CreateEntity" | "AddLayer"
+            | "InsertLayer" => {
+                self.stub(&format!("Scene.{name}"));
+                Return::null()
+            }
+            "UnloadObject" | "DeleteLayer" | "SetViewport" | "FadeOut" | "FadeOutAsync"
+            | "FadeIn" | "FadeInAsync" => {
+                self.stub(&format!("Scene.{name}"));
+                Return::null()
+            }
+            "GetFadeColor" => Return::value(0),
+            _ => return None,
+        })
+    }
+
+    /// The position of an entity or region, for `SkipTo(object)`.
+    fn position_of(&self, id: NativeId) -> Option<(i32, i32)> {
+        match &self.native(id)?.kind {
+            Kind::Entity(r) => {
+                let e = self.scene()?.entity(*r)?;
+                Some((e.x, e.y - self.entity_height(*r) / 2))
+            }
+            Kind::Region { layer, index } => {
+                let r = self.scene()?.region(*layer, *index)?;
+                let b = r.bounds()?;
+                Some((b.left, b.top))
+            }
+            _ => None,
+        }
+    }
+
+    /// The height of an entity's current frame, when its sub-frame has a
+    /// rectangle; 0 otherwise (`GetHeight`).
+    fn entity_height(&self, r: EntityRef) -> i32 {
+        let Some(view) = self.scene() else { return 0 };
+        let Some(entity) = view.entity(r) else {
+            return 0;
+        };
+        let Some(loaded) = entity.sprite.as_deref().and_then(|p| view.sprite(p)) else {
+            return 0;
+        };
+        let frame = view
+            .frame_of(r)
+            .min(loaded.sprite.frames.len().saturating_sub(1));
+        loaded
+            .sprite
+            .frames
+            .get(frame)
+            .and_then(|f| f.subframes.first())
+            .and_then(|s| s.rect)
+            .map_or(0, |rect| rect.height() as i32)
+    }
+
+    // ----------------------------------------------------------------
+    // Layers
+    // ----------------------------------------------------------------
+
+    fn layer_get(&self, index: usize, name: &str) -> Option<Value> {
+        let layer = self.scene()?.scene.layers.get(index)?;
+        Some(match name {
+            "Type" => Value::from("layer"),
+            "Name" => Value::from(layer.name.clone()),
+            "Caption" => Value::from(layer.caption.clone()),
+            "NumNodes" => Value::Int(layer.nodes.len() as i32),
+            "Width" => Value::Int(layer.width),
+            "Height" => Value::Int(layer.height),
+            "Main" => Value::Bool(layer.main),
+            "CloseUp" => Value::Bool(layer.close_up),
+            "Active" => Value::Bool(layer.active),
+            _ => return None,
+        })
+    }
+
+    fn layer_set(&mut self, index: usize, name: &str, value: &Value) -> bool {
+        let (text, int, flag) = (
+            value.get_string(self),
+            value.get_int(self),
+            value.get_bool(self),
+        );
+        let Some(layer) = self.scene_mut().and_then(|v| v.scene.layers.get_mut(index)) else {
+            return false;
+        };
+        match name {
+            "Name" => layer.name = text,
+            "Caption" => layer.caption = text,
+            "CloseUp" => layer.close_up = flag,
+            "Width" => layer.width = int,
+            "Height" => layer.height = int,
+            "Active" => layer.active = flag,
+            _ => return false,
+        }
+        true
+    }
+
+    fn layer_call(&mut self, index: usize, name: &str, args: &[Value]) -> Option<Return> {
+        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        Some(match name {
+            "GetNode" => {
+                let node = match arg(0) {
+                    Value::Int(i) => usize::try_from(i).ok(),
+                    other => {
+                        let node_name = other.get_string(self);
+                        self.scene().and_then(|v| {
+                            v.scene
+                                .layers
+                                .get(index)?
+                                .nodes
+                                .iter()
+                                .position(|n| match n {
+                                    luma_formats::SceneNode::Entity(e) => {
+                                        e.name.eq_ignore_ascii_case(&node_name)
+                                    }
+                                    luma_formats::SceneNode::Region(r) => {
+                                        r.name.eq_ignore_ascii_case(&node_name)
+                                    }
+                                })
+                        })
+                    }
+                };
+                let id = node.and_then(|ni| match self.scene()?.node(index, ni)? {
+                    luma_formats::SceneNode::Entity(_) => self.node_id(EntityRef::Node {
+                        layer: index,
+                        index: ni,
+                    }),
+                    luma_formats::SceneNode::Region(_) => self.region_id(index, ni),
+                });
+                Return::value(native_or_null(id))
+            }
+            "AddRegion" | "AddEntity" | "InsertRegion" | "InsertEntity" | "DeleteNode" => {
+                self.stub(&format!("Layer.{name}"));
+                Return::null()
+            }
+            _ => return None,
+        })
+    }
+
+    // ----------------------------------------------------------------
+    // Entities
+    // ----------------------------------------------------------------
+
+    fn entity_get(&self, r: EntityRef, name: &str) -> Option<Value> {
+        let view = self.scene()?;
+        let e = view.entity(r)?;
+        Some(match name {
+            "Type" => Value::from("entity"),
+            "Name" => Value::from(e.name.clone()),
+            "Caption" => Value::from(e.caption.clone()),
+            "Filename" => Value::Null,
+            "X" => Value::Int(e.x),
+            "Y" => Value::Int(e.y),
+            "Height" => Value::Int(self.entity_height(r)),
+            "Ready" => Value::Bool(true),
+            "Movable" => Value::Bool(true),
+            "Registrable" | "Interactive" => Value::Bool(e.interactive),
+            "Zoomable" | "Scalable" => Value::Bool(e.scalable),
+            "Rotatable" => Value::Bool(e.rotatable),
+            "AlphaColor" => Value::Int(e.tint.map_or(0, color_int)),
+            "BlendMode" => Value::Int(0),
+            "Scale" => e.scale.map_or(Value::Null, |s| Value::Float(f64::from(s))),
+            "ScaleX" | "ScaleY" => Value::Null,
+            "RelativeScale" => Value::Float(f64::from(e.relative_scale)),
+            "Rotate" => Value::Null,
+            "RelativeRotate" => Value::Float(0.0),
+            "Colorable" => Value::Bool(e.colorable),
+            "SoundPanning" => Value::Bool(e.sound_panning),
+            "SaveState" => Value::Bool(e.save_state),
+            "NonIntMouseEvents" => Value::Bool(false),
+            "AccCaption" => Value::Null,
+            "Active" => Value::Bool(e.active),
+            "IgnoreItems" => Value::Bool(e.ignore_items),
+            "SceneIndependent" => Value::Bool(false),
+            "SubtitlesWidth" | "SubtitlesPosX" | "SubtitlesPosY" => Value::Int(0),
+            "SubtitlesPosRelative" | "SubtitlesPosXCenter" => Value::Bool(true),
+            "NumItems" | "NumAttachments" => Value::Int(0),
+            "ParticleEmitter" => Value::Null,
+            "Item" => e.item.clone().map_or(Value::Null, Value::from),
+            "Subtype" => Value::from(match e.kind {
+                luma_formats::EntityKind::Sound => "sound",
+                luma_formats::EntityKind::Normal => "normal",
+            }),
+            "WalkToX" => Value::Int(e.walk_to_x),
+            "WalkToY" => Value::Int(e.walk_to_y),
+            "WalkToDirection" => Value::Int(e.walk_to_dir.map_or(8, |d| i32::from(d.code()))),
+            "Region" => Value::Null,
+            _ => return None,
+        })
+    }
+
+    fn entity_set(&mut self, r: EntityRef, name: &str, value: &Value) -> bool {
+        let (text, int, flag, float) = (
+            value.get_string(self),
+            value.get_int(self),
+            value.get_bool(self),
+            value.get_float(self),
+        );
+        let is_null = value.is_null();
+        let Some(e) = self.scene_mut().and_then(|v| v.entity_mut(r)) else {
+            return false;
+        };
+        match name {
+            "Name" => e.name = text,
+            "Caption" => e.caption = text,
+            "X" => e.x = int,
+            "Y" => e.y = int,
+            "Registrable" | "Interactive" => e.interactive = flag,
+            "Zoomable" | "Scalable" => e.scalable = flag,
+            "Rotatable" => e.rotatable = flag,
+            "AlphaColor" => e.tint = Some(color_of(int)),
+            "Scale" => e.scale = if is_null { None } else { Some(float as f32) },
+            "RelativeScale" => e.relative_scale = float as f32,
+            "Colorable" => e.colorable = flag,
+            "SoundPanning" => e.sound_panning = flag,
+            "SaveState" => e.save_state = flag,
+            "Active" => e.active = flag,
+            "IgnoreItems" => e.ignore_items = flag,
+            "Item" => e.item = if is_null { None } else { Some(text) },
+            "WalkToX" => e.walk_to_x = int,
+            "WalkToY" => e.walk_to_y = int,
+            "WalkToDirection" => e.walk_to_dir = Direction::from_code(i64::from(int)),
+            "Movable"
+            | "BlendMode"
+            | "ScaleX"
+            | "ScaleY"
+            | "Rotate"
+            | "RelativeRotate"
+            | "NonIntMouseEvents"
+            | "AccCaption"
+            | "SceneIndependent"
+            | "SubtitlesWidth"
+            | "SubtitlesPosRelative"
+            | "SubtitlesPosX"
+            | "SubtitlesPosY"
+            | "SubtitlesPosXCenter" => {}
+            _ => return false,
+        }
+        true
+    }
+
+    fn entity_call(
+        &mut self,
+        id: NativeId,
+        r: EntityRef,
+        name: &str,
+        args: &[Value],
+    ) -> Option<Return> {
+        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        Some(match name {
+            "SkipTo" => {
+                let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
+                if let Some(e) = self.scene_mut().and_then(|v| v.entity_mut(r)) {
+                    e.x = x;
+                    e.y = y;
+                }
+                Return::null()
+            }
+            "Caption" => {
+                let caption = self
+                    .scene()
+                    .and_then(|v| v.entity(r))
+                    .map(|e| e.caption.clone())
+                    .unwrap_or_default();
+                Return::value(caption)
+            }
+            "SetSprite" => {
+                let path = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let ok = match (&path, self.scene.as_mut()) {
+                    (Some(path), Some(view)) => view.add_sprite(&self.vfs, path),
+                    _ => true,
+                };
+                if ok {
+                    if let Some(e) = self.scene_mut().and_then(|v| v.entity_mut(r)) {
+                        e.sprite = path;
+                    }
+                    if let Some(view) = self.scene_mut() {
+                        view.reset_anim(r);
+                    }
+                } else {
+                    let path = path.unwrap_or_default();
+                    self.log(format!("SetSprite method failed for file '{path}'"));
+                }
+                Return::value(ok)
+            }
+            "GetSprite" => {
+                let sprite = self
+                    .scene()
+                    .and_then(|v| v.entity(r))
+                    .and_then(|e| e.sprite.clone());
+                Return::value(sprite.map_or(Value::Null, Value::from))
+            }
+            "GetSpriteObject" => Return::value(native_or_null(self.sprite_object(id))),
+            "Reset" => {
+                if let Some(view) = self.scene_mut() {
+                    view.reset_anim(r);
+                }
+                Return::null()
+            }
+            "IsTalking" | "HasItem" | "HasCursor" => Return::value(false),
+            "GetFont" | "GetCursor" | "GetCursorObject" | "GetItem" | "GetAttachment" => {
+                Return::null()
+            }
+            "IsSoundPlaying" => {
+                self.stub(&format!("Entity.{name}"));
+                Return::value(false)
+            }
+            "GetSoundPosition" | "GetSoundVolume" => {
+                self.stub(&format!("Entity.{name}"));
+                Return::value(0)
+            }
+            _ if OBJECT_STUBS.contains(&name) => {
+                self.stub(&format!("Entity.{name}"));
+                Return::null()
+            }
+            _ => return None,
+        })
+    }
+
+    // ----------------------------------------------------------------
+    // Regions
+    // ----------------------------------------------------------------
+
+    fn region_get(&self, layer: usize, index: usize, name: &str) -> Option<Value> {
+        let region = self.scene()?.region(layer, index)?;
+        Some(match name {
+            "Type" => Value::from("ad region"),
+            "Name" => Value::from(region.name.clone()),
+            "Caption" => Value::from(region.caption.clone()),
+            "Active" => Value::Bool(region.active),
+            "Blocked" => Value::Bool(region.blocked),
+            "Decoration" => Value::Bool(region.decoration),
+            "Scale" => Value::Float(f64::from(region.zoom.unwrap_or(0.0))),
+            "AlphaColor" => Value::Int(color_int(region.tint)),
+            "NumPoints" => Value::Int(region.points.len() as i32),
+            "X" => Value::Int(region.bounds().map_or(0, |b| b.left)),
+            "Y" => Value::Int(region.bounds().map_or(0, |b| b.top)),
+            "Ready" => Value::Bool(true),
+            _ => return None,
+        })
+    }
+
+    fn region_set(&mut self, layer: usize, index: usize, name: &str, value: &Value) -> bool {
+        let (text, int, flag, float) = (
+            value.get_string(self),
+            value.get_int(self),
+            value.get_bool(self),
+            value.get_float(self),
+        );
+        let Some(region) = self.scene_mut().and_then(|v| v.region_mut(layer, index)) else {
+            return false;
+        };
+        match name {
+            "Name" => region.name = text,
+            "Caption" => region.caption = text,
+            "Active" => region.active = flag,
+            "Blocked" => region.blocked = flag,
+            "Decoration" => region.decoration = flag,
+            "Scale" => {
+                region.zoom = if float == 0.0 {
+                    None
+                } else {
+                    Some(float as f32)
+                }
+            }
+            "AlphaColor" => region.tint = color_of(int),
+            _ => return false,
+        }
+        true
+    }
+
+    fn region_call(
+        &mut self,
+        layer: usize,
+        index: usize,
+        name: &str,
+        args: &[Value],
+    ) -> Option<Return> {
+        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        Some(match name {
+            "GetPoint" => {
+                let i = usize::try_from(arg(0).get_int(self)).ok();
+                let point = self
+                    .scene()
+                    .and_then(|v| v.region(layer, index))
+                    .and_then(|r| i.and_then(|i| r.points.get(i)))
+                    .copied();
+                match point {
+                    Some(p) => {
+                        let mut object = Value::object();
+                        object.set_property("X", Value::Int(p.x), self);
+                        object.set_property("Y", Value::Int(p.y), self);
+                        Return::value(object)
+                    }
+                    None => Return::null(),
+                }
+            }
+            "SkipTo" => {
+                let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
+                if let Some(region) = self.scene_mut().and_then(|v| v.region_mut(layer, index)) {
+                    if let Some(b) = region.bounds() {
+                        let (dx, dy) = (x - b.left, y - b.top);
+                        for p in &mut region.points {
+                            p.x += dx;
+                            p.y += dy;
+                        }
+                    }
+                }
+                Return::null()
+            }
+            "AddPoint" | "InsertPoint" | "SetPoint" | "RemovePoint" => {
+                self.stub(&format!("Region.{name}"));
+                Return::value(false)
+            }
+            _ if OBJECT_STUBS.contains(&name) => {
+                self.stub(&format!("Region.{name}"));
+                Return::null()
+            }
+            _ => return None,
+        })
+    }
+
+    // ----------------------------------------------------------------
+    // Sprites
+    // ----------------------------------------------------------------
+
+    fn sprite_get(&self, owner: NativeId, name: &str) -> Option<Value> {
+        let Kind::Entity(r) = self.native(owner)?.kind else {
+            return None;
+        };
+        let view = self.scene()?;
+        let entity = view.entity(r)?;
+        let loaded = entity.sprite.as_deref().and_then(|p| view.sprite(p));
+        let frames = loaded.map_or(0, |l| l.sprite.frames.len());
+        let anim = view.anim(r);
+        Some(match name {
+            "Type" => Value::from("sprite"),
+            "Filename" => entity.sprite.clone().map_or(Value::Null, Value::from),
+            "NumFrames" => Value::Int(frames as i32),
+            "CurrentFrame" => Value::Int(if frames == 0 {
+                -1
+            } else {
+                anim.map_or(0, |a| a.current_frame.min(frames - 1) as i32)
+            }),
+            "PixelPerfect" => Value::Bool(loaded.is_some_and(|l| l.sprite.precise)),
+            "Looping" => Value::Bool(
+                anim.and_then(|a| a.looping)
+                    .unwrap_or_else(|| loaded.is_some_and(|l| l.sprite.looping)),
+            ),
+            "Owner" => Value::Native(owner),
+            "Finished" => Value::Bool(anim.is_some_and(|a| a.finished)),
+            "Paused" => Value::Bool(anim.is_some_and(|a| a.paused)),
+            _ => return None,
+        })
+    }
+
+    fn sprite_set(&mut self, owner: NativeId, name: &str, value: &Value) -> bool {
+        let Some(Kind::Entity(r)) = self.native(owner).map(|n| n.kind.clone()) else {
+            return false;
+        };
+        let (int, flag) = (value.get_int(self), value.get_bool(self));
+        let Some(anim) = self.scene_mut().and_then(|v| v.anim_mut(r)) else {
+            return false;
+        };
+        match name {
+            "CurrentFrame" => {
+                anim.current_frame = int.max(0) as usize;
+                anim.last_frame_time = 0;
+                anim.finished = false;
+            }
+            "Looping" => anim.looping = Some(flag),
+            "PixelPerfect" => {}
+            _ => return false,
+        }
+        true
+    }
+
+    fn sprite_call(&mut self, owner: NativeId, name: &str) -> Option<Return> {
+        let Some(Kind::Entity(r)) = self.native(owner).map(|n| n.kind.clone()) else {
+            return None;
+        };
+        Some(match name {
+            "Reset" => {
+                if let Some(view) = self.scene_mut() {
+                    view.reset_anim(r);
+                }
+                Return::null()
+            }
+            "Pause" | "Play" => {
+                let paused = name == "Pause";
+                if let Some(anim) = self.scene_mut().and_then(|v| v.anim_mut(r)) {
+                    anim.paused = paused;
+                }
+                Return::null()
+            }
+            "GetFrame" | "DeleteFrame" | "AddFrame" | "InsertFrame" => {
+                self.stub(&format!("Sprite.{name}"));
+                Return::null()
+            }
+            _ => return None,
+        })
+    }
+}

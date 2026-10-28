@@ -1,12 +1,13 @@
 //! Desktop player for games running on Luma Engine.
 //!
-//! Milestone 2: shows one scene of a game, without scripts.
+//! Milestone 3, in progress: shows one scene of a game in a window, or
+//! runs the game's scripts without a window.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use luma_adventure::{Camera, GameSettings, SceneView};
+use luma_adventure::{Camera, GameSettings, Runtime, SceneView};
 use luma_archive::Vfs;
 use luma_formats::Rgba;
 use luma_render::winit::event::{ElementState, KeyEvent, WindowEvent};
@@ -18,12 +19,17 @@ luma-player - desktop player for Luma Engine
 
 USAGE:
     luma-player <game> --scene <file> [OPTIONS]
+    luma-player <game> --headless [--scene <file>] [OPTIONS]
 
 OPTIONS:
-    --scene <file>        Scene to show (a path inside the game, e.g. scenes/room/room.scene)
+    --scene <file>        Scene to show (a path inside the game, e.g. scenes/room/room.scene);
+                          in headless mode, the scene to jump to after the game script ran
     --scroll <x>,<y>      Initial scroll offset in scene pixels (default 0,0)
     --screenshot <png>    Render one frame to a PNG file and exit, without a window
     --animate             Play sprite animations (the default shows every first frame)
+    --headless            Run the game's scripts without a window and print the log
+    --ticks <n>           Frames to run in headless mode (default 60)
+    --dt <ms>             Milliseconds per frame in headless mode (default 16)
     --help                Show this message
 
 <game> is a game directory (its *.dcp packages and loose files are read
@@ -41,10 +47,13 @@ const BLACK: Rgba = Rgba {
 
 struct Options {
     game: PathBuf,
-    scene: String,
+    scene: Option<String>,
     scroll: (f32, f32),
     screenshot: Option<PathBuf>,
     animate: bool,
+    headless: bool,
+    ticks: u64,
+    dt: u64,
 }
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -53,6 +62,9 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut scroll = (0.0, 0.0);
     let mut screenshot = None;
     let mut animate = false;
+    let mut headless = false;
+    let mut ticks = 60;
+    let mut dt = 16;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -72,18 +84,37 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--screenshot" => screenshot = Some(PathBuf::from(value(&mut i)?)),
             "--animate" => animate = true,
+            "--headless" => headless = true,
+            "--ticks" => {
+                let v = value(&mut i)?;
+                ticks = v
+                    .parse()
+                    .map_err(|_| format!("--ticks expects a number, got `{v}`"))?;
+            }
+            "--dt" => {
+                let v = value(&mut i)?;
+                dt = v
+                    .parse()
+                    .map_err(|_| format!("--dt expects a number, got `{v}`"))?;
+            }
             other if other.starts_with('-') => return Err(format!("unknown option `{other}`")),
             _ if game.is_none() => game = Some(PathBuf::from(arg)),
             other => return Err(format!("unexpected argument `{other}`")),
         }
         i += 1;
     }
+    if scene.is_none() && !headless {
+        return Err("missing --scene <file> or --headless".to_string());
+    }
     Ok(Options {
         game: game.ok_or("missing <game>")?,
-        scene: scene.ok_or("missing --scene <file>")?,
+        scene,
         scroll,
         screenshot,
         animate,
+        headless,
+        ticks,
+        dt,
     })
 }
 
@@ -119,7 +150,8 @@ fn open(game: &Path) -> Result<(Vfs, GameSettings), String> {
 }
 
 fn load(vfs: &Vfs, renderer: &Renderer, scene: &str) -> Result<SceneView, String> {
-    let view = SceneView::load(vfs, renderer, scene).map_err(|e| e.to_string())?;
+    let mut view = SceneView::load(vfs, scene).map_err(|e| e.to_string())?;
+    view.upload(vfs, renderer);
     eprintln!(
         "scene {:?}: {}x{}, {} layer(s), {} entities, {} texture(s)",
         view.scene.name,
@@ -135,8 +167,60 @@ fn load(vfs: &Vfs, renderer: &Renderer, scene: &str) -> Result<SceneView, String
     Ok(view)
 }
 
+/// Runs the game's scripts without a window, printing the log.
+fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
+    let mut runtime = Runtime::new(vfs).map_err(|e| e.to_string())?;
+    let game = runtime.world.game_file();
+    println!(
+        "game {:?}: {} script(s), {} strings",
+        game.name,
+        game.scripts.len(),
+        runtime.world.strings().len()
+    );
+    runtime.start();
+    for tick in 1..=options.ticks {
+        for line in runtime.tick(options.dt) {
+            println!("[{tick}] {line}");
+        }
+        if tick == 1 {
+            if let Some(scene) = &options.scene {
+                runtime
+                    .change_scene(scene)
+                    .map_err(|e| format!("{scene}: {e}"))?;
+                for line in runtime.world.take_log() {
+                    println!("[{tick}] {line}");
+                }
+            }
+        }
+        if runtime.world.quit_requested() {
+            println!("[{tick}] quit requested");
+            break;
+        }
+    }
+    let counts = runtime.engine.counts();
+    println!(
+        "after {} ms: scene {:?}, {} script(s) ({} running, {} waiting, {} persistent), {} native object(s)",
+        runtime.world.timer(),
+        runtime
+            .world
+            .scene()
+            .map(|s| s.scene.name.as_str())
+            .unwrap_or("none"),
+        counts.total,
+        counts.running,
+        counts.waiting,
+        counts.persistent,
+        runtime.world.objects().len()
+    );
+    Ok(())
+}
+
 fn run(options: Options) -> Result<(), String> {
     let (vfs, settings) = open(&options.game)?;
+    if options.headless {
+        return headless(vfs, &options);
+    }
+    let scene = options.scene.clone().unwrap_or_default();
     let mut camera = Camera::new(settings.width as f32, settings.height as f32);
     camera.offset_x = options.scroll.0;
     camera.offset_y = options.scroll.1;
@@ -145,11 +229,11 @@ fn run(options: Options) -> Result<(), String> {
         let gpu = Gpu::headless().map_err(|e| e.to_string())?;
         eprintln!("adapter: {}", gpu.describe());
         let renderer = Renderer::new(gpu);
-        let view = load(&vfs, &renderer, &options.scene)?;
+        let view = load(&vfs, &renderer, &scene)?;
         camera.clamp_to(&view.scene);
         let target = Offscreen::new(renderer.gpu(), settings.width, settings.height);
         let mut list = DrawList::new(camera.width, camera.height);
-        view.draw(&mut list, &camera, 0);
+        view.draw(&mut list, &camera);
         renderer
             .render(target.target(), BLACK, &list)
             .map_err(|e| e.to_string())?;
@@ -172,7 +256,7 @@ fn run(options: Options) -> Result<(), String> {
     let player = Player {
         frame_limit,
         vfs,
-        scene: options.scene.clone(),
+        scene,
         animate: options.animate,
         camera,
         view: None,
@@ -181,7 +265,7 @@ fn run(options: Options) -> Result<(), String> {
     };
     luma_render::window::run(
         WindowConfig {
-            title: format!("Luma Engine - {}", options.scene),
+            title: format!("Luma Engine - {}", options.scene.unwrap_or_default()),
             width: settings.width,
             height: settings.height,
             ..WindowConfig::default()
@@ -243,7 +327,7 @@ impl App for Player {
     }
 
     fn draw<'a>(&'a mut self, frame: &Frame<'a>, list: &mut DrawList<'a>) -> Flow {
-        let Some(view) = &self.view else {
+        let Some(view) = &mut self.view else {
             return Flow::Exit;
         };
         let step = 400.0 * frame.dt.as_secs_f32();
@@ -263,12 +347,11 @@ impl App for Player {
         list.width = self.camera.width;
         list.height = self.camera.height;
         list.letterbox = true;
-        let elapsed = if self.animate {
-            self.started.elapsed().as_millis() as u64
-        } else {
-            0
-        };
-        view.draw(list, &self.camera, elapsed);
+        if self.animate {
+            // The engine's timer never reads 0 on a shown frame.
+            view.advance(self.started.elapsed().as_millis() as u64 + 1);
+        }
+        view.draw(list, &self.camera);
         match self.frame_limit {
             Some(limit) if frame.frame_index + 1 >= limit => Flow::Exit,
             _ => Flow::Continue,
