@@ -6,7 +6,7 @@
 //! Copyright (c) 2011 Jan Nedoma). See `NOTICE` at the root of the
 //! repository.
 
-use image::{ColorType, ImageFormat, ImageReader};
+use image::{ColorType, ImageEncoder, ImageFormat, ImageReader};
 use std::io::Cursor;
 
 use crate::error::{Error, Result};
@@ -67,6 +67,22 @@ pub struct Image {
 }
 
 impl Image {
+    /// Encodes the image as a PNG file (for screenshots and tools).
+    pub fn to_png(&self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(
+                &self.pixels,
+                self.width,
+                self.height,
+                image::ExtendedColorType::Rgba8,
+            )
+            .map_err(|err| Error::Image {
+                reason: err.to_string(),
+            })?;
+        Ok(out)
+    }
+
     /// The pixel at `(x, y)`, or `None` outside the image.
     pub fn pixel(&self, x: u32, y: u32) -> Option<Rgba> {
         if x >= self.width || y >= self.height {
@@ -219,6 +235,15 @@ mod tests {
         assert!(keeps_alpha(ColorType::Rgba8, Some(ImageFormat::Png)));
         assert!(!keeps_alpha(ColorType::Rgba8, Some(ImageFormat::Bmp)));
         assert!(!keeps_alpha(ColorType::Rgb8, Some(ImageFormat::Png)));
+    }
+
+    #[test]
+    fn encodes_png_round_trip() {
+        let img = decode(&png_rgba(), DEFAULT_COLOR_KEY).unwrap();
+        let png = img.to_png().unwrap();
+        assert_eq!(&png[1..4], b"PNG");
+        let back = decode(&png, DEFAULT_COLOR_KEY).unwrap();
+        assert_eq!(back, img);
     }
 
     #[test]
