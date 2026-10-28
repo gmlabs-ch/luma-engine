@@ -9,5 +9,12 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[dependencies]
+luma-formats.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+pollster.workspace = true
+bytemuck.workspace = true
+
 [lints]
 workspace = true

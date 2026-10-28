@@ -85,7 +85,13 @@ luma scene path/to/game scenes/room/room.scene
 ```
 
 `list` and `unpack` also accept a single `.dcp` file, and `dump` a file on
-disk. The formats are documented in [docs/formats](docs/formats/README.md).
+disk. The formats are documented in [docs/formats](docs/formats/README.md),
+and the renderer in [docs/rendering.md](docs/rendering.md). To see the
+renderer draw something, run its demo:
+
+```sh
+cargo run -p luma-render --example quads
+```
 
 ## Games
 
