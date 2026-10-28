@@ -13,15 +13,10 @@ use crate::world::World;
 
 /// Methods of later milestones that actors accept and log once.
 const ACTOR_STUBS: &[&str] = &[
-    "Talk",
-    "TalkAsync",
-    "StopTalk",
-    "StopTalking",
     "ForceTalkAnim",
     "AddTalkSprite",
     "RemoveTalkSprite",
     "SetTalkSprite",
-    "SetFont",
     "SetCursor",
     "RemoveCursor",
     "PlaySound",
@@ -104,8 +99,11 @@ impl World {
             "AccCaption" => Value::Null,
             "IgnoreItems" => Value::Bool(actor.def.ignore_items),
             "SceneIndependent" => Value::Bool(false),
-            "SubtitlesWidth" | "SubtitlesPosX" | "SubtitlesPosY" => Value::Int(0),
-            "SubtitlesPosRelative" | "SubtitlesPosXCenter" => Value::Bool(true),
+            "SubtitlesWidth" => Value::Int(actor.subtitles.width),
+            "SubtitlesPosX" => Value::Int(actor.subtitles.x),
+            "SubtitlesPosY" => Value::Int(actor.subtitles.y),
+            "SubtitlesPosRelative" => Value::Bool(actor.subtitles.relative),
+            "SubtitlesPosXCenter" => Value::Bool(actor.subtitles.x_center),
             "NumItems" | "NumAttachments" => Value::Int(0),
             "ParticleEmitter" | "Item" => Value::Null,
             _ => return None,
@@ -155,21 +153,13 @@ impl World {
             "Colorable" => actor.def.colorable = flag,
             "SoundPanning" => actor.def.sound_panning = flag,
             "IgnoreItems" => actor.def.ignore_items = flag,
-            "Movable"
-            | "BlendMode"
-            | "ScaleX"
-            | "ScaleY"
-            | "Rotate"
-            | "RelativeRotate"
-            | "SaveState"
-            | "NonIntMouseEvents"
-            | "AccCaption"
-            | "SceneIndependent"
-            | "SubtitlesWidth"
-            | "SubtitlesPosRelative"
-            | "SubtitlesPosX"
-            | "SubtitlesPosY"
-            | "SubtitlesPosXCenter" => {}
+            "SubtitlesWidth" => actor.subtitles.width = int,
+            "SubtitlesPosX" => actor.subtitles.x = int,
+            "SubtitlesPosY" => actor.subtitles.y = int,
+            "SubtitlesPosRelative" => actor.subtitles.relative = flag,
+            "SubtitlesPosXCenter" => actor.subtitles.x_center = flag,
+            "Movable" | "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate"
+            | "SaveState" | "NonIntMouseEvents" | "AccCaption" | "SceneIndependent" => {}
             _ => return false,
         }
         true
@@ -337,10 +327,24 @@ impl World {
                 Return::null()
             }
             "GetStopOnBlocked" => Return::value(self.actor(id).is_some_and(|a| a.stop_on_blocked)),
-            "IsTalking" | "HasItem" | "HasCursor" => Return::value(false),
-            "GetFont" | "GetCursor" | "GetCursorObject" | "GetItem" | "GetAttachment" => {
+            "Talk" | "TalkAsync" => self.talk_call(id, name == "Talk", args),
+            "StopTalk" | "StopTalking" => Return::value(self.stop_talk(id)),
+            "IsTalking" => Return::value(self.is_talking(id)),
+            "SetFont" => {
+                let path = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                self.set_font(id, path.as_deref());
                 Return::null()
             }
+            "GetFont" => Return::value(
+                self.actor(id)
+                    .and_then(|a| a.def.font.clone())
+                    .map_or(Value::Null, Value::from),
+            ),
+            "HasItem" | "HasCursor" => Return::value(false),
+            "GetCursor" | "GetCursorObject" | "GetItem" | "GetAttachment" => Return::null(),
             "IsSoundPlaying" => {
                 self.stub(&format!("Actor.{name}"));
                 Return::value(false)

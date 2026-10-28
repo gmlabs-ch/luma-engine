@@ -14,6 +14,7 @@ use luma_formats::{Rgb, Rgba, Scene, Sprite, SubFrame};
 use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
 
 use crate::error::{Error, Result};
+use crate::talk::{Sentence, SubtitleMods};
 
 /// A sprite definition loaded from the game.
 #[derive(Debug)]
@@ -319,6 +320,17 @@ pub struct Drawable<'a> {
     pub tint: Rgba,
 }
 
+/// An entity saying a sentence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityTalk {
+    /// The sentence.
+    pub sentence: Sentence,
+    /// The talk sprite being played.
+    pub sprite: Option<String>,
+    /// Whether the sentence is shown this frame.
+    pub show: bool,
+}
+
 /// A scene and everything needed to run and draw it.
 #[derive(Debug)]
 pub struct SceneView {
@@ -329,6 +341,9 @@ pub struct SceneView {
     /// The sprites of the scene's entities.
     pub bank: SpriteBank,
     anims: HashMap<EntityRef, AnimState>,
+    talks: HashMap<EntityRef, EntityTalk>,
+    /// The subtitle placement of entities scripts changed it on.
+    pub subtitles: HashMap<EntityRef, SubtitleMods>,
 }
 
 impl SceneView {
@@ -347,6 +362,8 @@ impl SceneView {
             path: path.to_string(),
             bank: SpriteBank::new(),
             anims: HashMap::new(),
+            talks: HashMap::new(),
+            subtitles: HashMap::new(),
         };
         let paths: Vec<String> = view
             .scene
@@ -489,9 +506,119 @@ impl SceneView {
         self.anims.get(&r)
     }
 
+    /// The sprite an entity shows: its talk sprite while talking, else
+    /// its own.
+    pub fn shown_sprite(&self, r: EntityRef) -> Option<String> {
+        if let Some(talk) = self.talks.get(&r) {
+            if let Some(sprite) = &talk.sprite {
+                return Some(sprite.clone());
+            }
+        }
+        self.entity(r)?.sprite.clone()
+    }
+
+    /// Starts a sentence on an entity (`CAdObject::Talk`).
+    pub fn talk(&mut self, r: EntityRef, sentence: Sentence) {
+        self.talks.insert(
+            r,
+            EntityTalk {
+                sentence,
+                sprite: None,
+                show: false,
+            },
+        );
+    }
+
+    /// Ends an entity's sentence (`StopTalk`); whether one was playing.
+    pub fn stop_talk(&mut self, r: EntityRef) -> bool {
+        self.talks.remove(&r).is_some()
+    }
+
+    /// Whether an entity is saying a sentence.
+    pub fn is_talking(&self, r: EntityRef) -> bool {
+        self.talks.contains_key(&r)
+    }
+
+    /// The sentences shown this frame, with their entities.
+    pub fn sentences(&self) -> impl Iterator<Item = (EntityRef, &Sentence)> {
+        self.talks
+            .iter()
+            .filter(|(_, t)| t.show)
+            .map(|(r, t)| (*r, &t.sentence))
+    }
+
+    /// Ends every sentence older than 300 ms (`FinishSentences`).
+    pub fn skip_sentences(&mut self, timer: u64) {
+        for talk in self.talks.values_mut() {
+            if talk.sentence.can_skip(timer) {
+                talk.sentence.finish();
+            }
+        }
+    }
+
+    /// The talk sprite of an entity for a stance
+    /// (`CAdTalkHolder::GetTalkStance`): the special or generic sprite of
+    /// that name, else a random generic one, else the entity's sprite.
+    fn talk_stance(&self, r: EntityRef, stance: Option<&str>, random: u32) -> Option<String> {
+        let entity = self.entity(r)?;
+        if let Some(name) = stance {
+            let found = entity
+                .talk_special_sprites
+                .iter()
+                .chain(&entity.talk_sprites)
+                .find(|s| sprite_name(s).eq_ignore_ascii_case(name));
+            if let Some(path) = found {
+                return Some(path.clone());
+            }
+        }
+        if entity.talk_sprites.is_empty() {
+            entity.sprite.clone()
+        } else {
+            Some(entity.talk_sprites[random as usize % entity.talk_sprites.len()].clone())
+        }
+    }
+
+    /// One frame of each talking entity (`CAdEntity::Update`,
+    /// `STATE_TALKING`).
+    fn talk_step(&mut self, timer: u64, random: u32) {
+        let talking: Vec<EntityRef> = self.talks.keys().copied().collect();
+        for r in talking {
+            let (time_is_up, sprite_done) = {
+                let talk = &self.talks[&r];
+                let done = talk.sprite.as_deref().is_none_or(|p| {
+                    self.anims
+                        .get(&r)
+                        .is_some_and(|a| a.sprite == key(p) && a.finished)
+                });
+                (talk.sentence.time_is_up(timer), done)
+            };
+            if time_is_up {
+                self.talks.remove(&r);
+                continue;
+            }
+            if sprite_done {
+                let stance = self
+                    .talks
+                    .get_mut(&r)
+                    .and_then(|t| t.sentence.next_stance());
+                let sprite = self.talk_stance(r, stance.as_deref(), random);
+                if let Some(talk) = self.talks.get_mut(&r) {
+                    talk.sprite = sprite.clone();
+                    talk.show = true;
+                }
+                if let Some(path) = sprite {
+                    let state = self.anims.entry(r).or_insert_with(|| AnimState::new(&path));
+                    *state = AnimState::new(&path);
+                }
+            } else if let Some(talk) = self.talks.get_mut(&r) {
+                talk.show = true;
+            }
+        }
+    }
+
     /// The animation state of an entity, created for its current sprite.
     pub fn anim_mut(&mut self, r: EntityRef) -> Option<&mut AnimState> {
-        let sprite = key(self.entity(r)?.sprite.as_deref()?);
+        let sprite = key(&self.shown_sprite(r)?);
         let state = self
             .anims
             .entry(r)
@@ -513,6 +640,13 @@ impl SceneView {
     /// game timer, in milliseconds), applying the `MOVE` of each frame
     /// that becomes current to its entity.
     pub fn advance(&mut self, timer: u64) {
+        self.advance_with(timer, 0);
+    }
+
+    /// Like [`SceneView::advance`], with a random number for the talk
+    /// sprites of talking entities.
+    pub fn advance_with(&mut self, timer: u64, random: u32) {
+        self.talk_step(timer, random);
         for r in self.entity_refs() {
             let Some(entity) = self.entity(r) else {
                 continue;
@@ -632,7 +766,7 @@ impl SceneView {
         if !entity.active || entity.kind != EntityKind::Normal {
             return None;
         }
-        let loaded = entity.sprite.as_deref().and_then(|p| self.sprite(p))?;
+        let loaded = self.shown_sprite(r).and_then(|p| self.sprite(&p))?;
         if loaded.sprite.frames.is_empty() {
             return None;
         }
@@ -646,6 +780,13 @@ impl SceneView {
             tint: self.scene.entity_tint(entity),
         })
     }
+}
+
+/// The name of a sprite file, for talk stances: its file name without
+/// directory and extension.
+fn sprite_name(path: &str) -> &str {
+    let file = path.rsplit(['\\', '/']).next().unwrap_or(path);
+    file.rsplit_once('.').map_or(file, |(name, _)| name)
 }
 
 /// The regions of a scene's main layer containing a point, as

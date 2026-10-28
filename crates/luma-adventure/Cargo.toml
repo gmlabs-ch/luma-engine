@@ -14,6 +14,7 @@ luma-archive.workspace = true
 luma-formats.workspace = true
 luma-render.workspace = true
 luma-script.workspace = true
+fontdue.workspace = true
 
 [lints]
 workspace = true

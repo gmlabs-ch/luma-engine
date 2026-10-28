@@ -25,6 +25,7 @@ image = { version = "0.25", default-features = false, features = ["png", "bmp", 
 wgpu = { version = "30", default-features = false, features = ["std", "metal", "vulkan", "dx12", "gles", "wgsl"] }
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
 pollster = "1"
+fontdue = { version = "0.9", default-features = false, features = ["std", "hashbrown"] }
 bytemuck = { version = "1", features = ["derive"] }
 
 [workspace.lints.rust]

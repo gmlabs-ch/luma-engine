@@ -14,6 +14,7 @@ use luma_formats::{Rgba, Scene};
 use crate::error::{Error, Result};
 use crate::path::Floor;
 use crate::scene_view::{AnimState, Drawable, SpriteBank, frame_height, key};
+use crate::talk::{Sentence, SubtitleMods};
 
 /// What an actor is doing (`TObjectState`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +35,8 @@ pub enum ActorState {
     TurningLeft,
     /// Turning clockwise.
     TurningRight,
+    /// Saying a sentence (`Talk`).
+    Talking,
 }
 
 /// An event an update raises, applied by the host after the update.
@@ -60,6 +63,8 @@ pub struct WalkContext<'a> {
     pub floor: Floor<'a>,
     /// The game timer, in milliseconds.
     pub timer: u64,
+    /// A random number for this frame, for picking talk sprites.
+    pub random: u32,
 }
 
 /// A loaded actor and its state.
@@ -99,6 +104,12 @@ pub struct Actor {
     pub turn_right_anim: String,
     /// Whether no walk, turn or animation is in progress (`Ready`).
     pub ready: bool,
+    /// The sentence being said, or the last one.
+    pub sentence: Option<Sentence>,
+    /// Where the actor's speech goes.
+    pub subtitles: SubtitleMods,
+    /// Whether the sentence is shown this frame.
+    pub show_sentence: bool,
     anims: HashMap<String, AnimState>,
     /// The sprite set by `SetSprite`, shown instead of `STAND`.
     sprite_override: Option<String>,
@@ -185,6 +196,9 @@ impl Actor {
             turn_left_anim: "turnleft".to_string(),
             turn_right_anim: "turnright".to_string(),
             ready: true,
+            sentence: None,
+            subtitles: SubtitleMods::default(),
+            show_sentence: false,
             anims: HashMap::new(),
             sprite_override: None,
             anim_sprite: None,
@@ -331,6 +345,7 @@ impl Actor {
         self.path_ready = false;
         self.target = floor.correct_target(self.position(), Point { x, y });
         self.state = ActorState::SearchingPath;
+        self.ready = false;
     }
 
     /// Walks to an entity (`GoToObject`): to its `WALK_TO` point and
@@ -371,6 +386,7 @@ impl Actor {
             ActorState::TurningRight
         };
         self.temp_sprite2 = None;
+        self.ready = false;
     }
 
     /// Turns towards a point (`TurnTo(object)`).
@@ -398,9 +414,121 @@ impl Actor {
     pub fn reset(&mut self) {
         if self.state == ActorState::PlayingAnim {
             self.anim_sprite = None;
+        } else if self.state == ActorState::Talking {
+            if let Some(sentence) = &mut self.sentence {
+                sentence.finish();
+            }
         }
         self.state = ActorState::Ready;
         self.next_state = ActorState::Ready;
+    }
+
+    /// Starts saying a sentence (`CAdObject::Talk`), already placed by
+    /// the world.
+    pub fn talk(&mut self, sentence: Sentence) {
+        self.sentence = Some(sentence);
+        self.temp_sprite2 = None;
+        self.state = ActorState::Talking;
+        self.ready = false;
+    }
+
+    /// Ends the sentence (`StopTalk`); returns whether one was playing.
+    pub fn stop_talk(&mut self) -> bool {
+        if let Some(sentence) = &mut self.sentence {
+            sentence.finish();
+        }
+        if self.state == ActorState::Talking {
+            self.state = self.next_state;
+            self.next_state = ActorState::Ready;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Whether the actor is saying a sentence.
+    pub fn is_talking(&self) -> bool {
+        self.state == ActorState::Talking
+    }
+
+    /// The talk sprite for a stance (`CAdActor::GetTalkStance`): with
+    /// `TALK` sets, the special or generic set of that name, else a
+    /// random generic set; with animations, the one of that name, else
+    /// a random animation named like `TalkAnimName`; else the standing
+    /// sprite.
+    fn talk_stance(&self, stance: Option<&str>, random: u32) -> Option<String> {
+        if !self.def.talk.is_empty() || !self.def.talk_special.is_empty() {
+            if let Some(name) = stance {
+                let found = self
+                    .def
+                    .talk_special
+                    .iter()
+                    .chain(&self.def.talk)
+                    .find(|s| s.name.eq_ignore_ascii_case(name));
+                if let Some(set) = found {
+                    return Self::set_sprite_of(Some(set), self.dir);
+                }
+            }
+            return if self.def.talk.is_empty() {
+                Self::set_sprite_of(self.def.stand.as_ref(), self.dir)
+            } else {
+                let i = random as usize % self.def.talk.len();
+                Self::set_sprite_of(Some(&self.def.talk[i]), self.dir)
+            };
+        }
+        if let Some(path) =
+            stance.and_then(|name| Self::set_sprite_of(self.def.animation(name), self.dir))
+        {
+            return Some(path);
+        }
+        let talks: Vec<&luma_formats::SpriteSet> = self
+            .def
+            .animations
+            .iter()
+            .filter(|a| a.name.eq_ignore_ascii_case(&self.talk_anim))
+            .collect();
+        if talks.is_empty() {
+            match &self.def.stand {
+                Some(set) => Self::set_sprite_of(Some(set), self.dir),
+                None => Self::set_sprite_of(self.def.animation(&self.idle_anim), self.dir),
+            }
+        } else {
+            Self::set_sprite_of(Some(talks[random as usize % talks.len()]), self.dir)
+        }
+    }
+
+    /// One frame of talking (`CAdActor::Update`, `STATE_TALKING`).
+    fn talk_step(&mut self, timer: u64, random: u32) {
+        self.show_sentence = false;
+        let Some(time_is_up) = self.sentence.as_ref().map(|s| s.time_is_up(timer)) else {
+            self.state = ActorState::Ready;
+            return;
+        };
+        let temp_done = self
+            .temp_sprite2
+            .as_deref()
+            .is_none_or(|p| self.is_finished(p));
+        if temp_done || time_is_up {
+            if time_is_up {
+                if let Some(sentence) = &mut self.sentence {
+                    sentence.finish();
+                }
+                self.temp_sprite2 = None;
+                self.state = self.next_state;
+                self.next_state = ActorState::Ready;
+            } else {
+                let stance = self.sentence.as_mut().and_then(|s| s.next_stance());
+                self.temp_sprite2 = self.talk_stance(stance.as_deref(), random);
+                if let Some(path) = self.temp_sprite2.clone() {
+                    self.anim(&path).reset();
+                    self.current_sprite = Some(path);
+                    self.show_sentence = true;
+                }
+            }
+        } else {
+            self.current_sprite = self.temp_sprite2.clone();
+            self.show_sentence = true;
+        }
     }
 
     /// Plays an animation (`PlayAnim`): the named set in the current
@@ -411,6 +539,7 @@ impl Actor {
             self.anim(&path).reset();
             self.anim_sprite2 = Some(path);
             self.state = ActorState::PlayingAnimSet;
+            self.ready = false;
             return true;
         }
         if !self.bank.add_sprite(vfs, name) {
@@ -419,6 +548,7 @@ impl Actor {
         self.anims.insert(key(name), AnimState::new(name));
         self.anim_sprite = Some(name.to_string());
         self.state = ActorState::PlayingAnim;
+        self.ready = false;
         true
     }
 
@@ -533,11 +663,18 @@ impl Actor {
             self.next_state = ActorState::Ready;
             self.current_sprite = self.anim_sprite2.clone();
         }
+        if self.state != ActorState::Talking {
+            self.show_sentence = false;
+            if let Some(sentence) = &mut self.sentence {
+                sentence.finish();
+            }
+        }
         if self.current_sprite.is_none() {
             self.current_sprite = self.stand_sprite();
         }
         let mut already_moved = false;
         match self.state {
+            ActorState::Talking => self.talk_step(ctx.timer, ctx.random),
             ActorState::PlayingAnim => self.current_sprite = self.anim_sprite.clone(),
             ActorState::PlayingAnimSet => self.current_sprite = self.anim_sprite2.clone(),
             ActorState::TurningLeft => self.turn_step(true),
@@ -917,6 +1054,7 @@ mod tests {
                     waypoints: &[],
                 },
                 timer,
+                random: 0,
             };
             timer += 20;
             actor.update(&ctx, events);

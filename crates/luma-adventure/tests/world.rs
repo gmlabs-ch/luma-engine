@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use luma_adventure::{Kind, Runtime};
 use luma_archive::{PackageBuilder, Vfs};
+use luma_formats::Image;
 use luma_script::asm::Assembler;
 use luma_script::{Instruction, Natives, State, Value};
 
@@ -18,6 +19,17 @@ fn temp_dir() -> std::path::PathBuf {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+fn png(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
+    Image {
+        width,
+        height,
+        pixels: color.repeat((width * height) as usize),
+        has_alpha_channel: true,
+    }
+    .to_png()
+    .unwrap()
 }
 
 /// An argument of a call in the assembled scripts.
@@ -334,6 +346,79 @@ fn walk_script() -> Vec<u8> {
     a.build()
 }
 
+/// Loads an actor, makes it and an entity talk, checks the waits, the
+/// states, fonts and subtitle settings.
+fn talk_script() -> Vec<u8> {
+    let mut a = Assembler::new("talk.script");
+    a.def_glob_var("result");
+    a.def_glob_var("Scene");
+    a.def_glob_var("actor");
+    get(&mut a, "Game", "Scene");
+    a.pop_var("Scene");
+    call(
+        &mut a,
+        "Game",
+        "LoadActor",
+        &[Arg::Str("actors\\bob.actor")],
+    );
+    a.pop_var("actor");
+    call(&mut a, "actor", "SkipTo", &[Arg::Int(100), Arg::Int(24)]);
+    a.emit(Instruction::PopEmpty);
+    a.push_int(10);
+    set(&mut a, "Game", "SubtitlesSpeed");
+    get(&mut a, "Game", "SubtitlesSpeed");
+    store(&mut a, "speed");
+    get(&mut a, "Game", "CurrentTime");
+    store(&mut a, "t0");
+    // actor.Talk("/GREET/x") waits for the sentence: 1000 ms at least.
+    call(&mut a, "actor", "Talk", &[Arg::Str("/GREET/x")]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "Game", "CurrentTime");
+    store(&mut a, "t1");
+    call(&mut a, "actor", "IsTalking", &[]);
+    store(&mut a, "talkingAfter");
+    call(&mut a, "actor", "TalkAsync", &[Arg::Str("Hi there")]);
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "actor", "IsTalking", &[]);
+    store(&mut a, "talkingAsync");
+    get(&mut a, "actor", "Ready");
+    store(&mut a, "readyWhileTalking");
+    a.def_var("lamp");
+    call(&mut a, "Scene", "GetNode", &[Arg::Str("lamp")]);
+    a.pop_var("lamp");
+    call(
+        &mut a,
+        "lamp",
+        "TalkAsync",
+        &[Arg::Str("Lamp says"), Arg::Str(""), Arg::Int(500)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "lamp", "IsTalking", &[]);
+    store(&mut a, "lampTalking");
+    get(&mut a, "lamp", "Ready");
+    store(&mut a, "lampReady");
+    call(&mut a, "actor", "StopTalk", &[]);
+    store(&mut a, "stopped");
+    call(&mut a, "actor", "StopTalk", &[]);
+    store(&mut a, "stoppedAgain");
+    call(&mut a, "actor", "GetFont", &[]);
+    store(&mut a, "font0");
+    call(&mut a, "actor", "SetFont", &[Arg::Str("fonts\\test.font")]);
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "actor", "GetFont", &[]);
+    store(&mut a, "font1");
+    a.push_int(20);
+    set(&mut a, "actor", "SubtitlesWidth");
+    get(&mut a, "actor", "SubtitlesWidth");
+    store(&mut a, "subWidth");
+    call(&mut a, "actor", "TalkAsync", &[Arg::Str("Wide")]);
+    a.emit(Instruction::PopEmpty);
+    a.push_bool(true);
+    store(&mut a, "done");
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
 fn game() -> std::path::PathBuf {
     let dir = temp_dir();
     let mut pkg = PackageBuilder::new("data");
@@ -343,9 +428,21 @@ fn game() -> std::path::PathBuf {
     );
     pkg.add_file(
         "default.game",
-        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" } AD_GAME { }"
+        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" } AD_GAME { }"
             .to_vec(),
     );
+    pkg.add_file("art\\font.png", png(128, 128, [255, 255, 255, 255]));
+    pkg.add_file(
+        "fonts\\sys.font",
+        b"FONT { IMAGE=\"art\\font.png\" COLUMNS=16 TILE_WIDTH=8 TILE_HEIGHT=8 DEFAULT_WIDTH=6 }"
+            .to_vec(),
+    );
+    pkg.add_file(
+        "fonts\\test.font",
+        b"FONT { IMAGE=\"art\\font.png\" COLUMNS=16 TILE_WIDTH=8 TILE_HEIGHT=10 DEFAULT_WIDTH=4 }"
+            .to_vec(),
+    );
+    pkg.add_file("talk.script", talk_script());
     pkg.add_file("string.tab", b"GREET\tHello\r\n".to_vec());
     pkg.add_file("game.script", game_script());
     pkg.add_file("scenes\\room\\scene_init.script", scene_init_script());
@@ -656,6 +753,96 @@ fn actors_walk_turn_and_scroll_the_view() {
     assert!(runtime.world.unload_object(&mut runtime.engine, actor));
     assert!(!runtime.world.objects().contains(actor));
     assert!(runtime.world.actor(actor).is_none());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn objects_talk_with_fonts_and_subtitles() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::new(vfs).unwrap();
+    assert_eq!(runtime.world.system_font(), Some("fonts\\sys.font"));
+    assert!(runtime.world.fonts().get("FONTS/SYS.FONT").is_some());
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "talk.script")
+    );
+    let mut log = Vec::new();
+    let mut ticks = 0;
+    while result(&runtime, "done") != Value::Bool(true) && ticks < 400 {
+        log.extend(runtime.tick(16));
+        ticks += 1;
+    }
+    assert_eq!(result(&runtime, "done"), Value::Bool(true), "{log:?}");
+    assert_eq!(result(&runtime, "speed"), Value::Int(10));
+    let (Value::Int(t0), Value::Int(t1)) = (result(&runtime, "t0"), result(&runtime, "t1")) else {
+        panic!("times");
+    };
+    assert!(
+        t1 - t0 >= 1000 && t1 - t0 < 1100,
+        "Talk waited {} ms",
+        t1 - t0
+    );
+    assert_eq!(result(&runtime, "talkingAfter"), Value::Bool(false));
+    assert_eq!(result(&runtime, "talkingAsync"), Value::Bool(true));
+    assert_eq!(result(&runtime, "readyWhileTalking"), Value::Bool(false));
+    assert_eq!(result(&runtime, "lampTalking"), Value::Bool(true));
+    assert_eq!(result(&runtime, "lampReady"), Value::Bool(false));
+    assert_eq!(result(&runtime, "stopped"), Value::Bool(true));
+    assert_eq!(result(&runtime, "stoppedAgain"), Value::Bool(false));
+    assert_eq!(result(&runtime, "font0"), Value::Null);
+    assert_eq!(result(&runtime, "font1"), Value::from("fonts\\test.font"));
+    assert_eq!(result(&runtime, "subWidth"), Value::Int(20));
+    assert!(
+        log.iter().all(|l| !l.starts_with("Runtime error")),
+        "{log:?}"
+    );
+
+    // The actor is saying "Wide" with the test font, 20 px wide, above
+    // its head: the actor at (100, 24) is 8 high, the text 10, and the
+    // box is clamped to the 32 px screen (the view is not scrolled: the
+    // scene script's `Scene` global is unset without the game script).
+    runtime.tick(16);
+    let actor = runtime.engine.global("actor").unwrap().as_native().unwrap();
+    assert!(runtime.world.is_talking(actor));
+    let sentences = runtime.world.sentences();
+    assert_eq!(sentences.len(), 2, "{sentences:?}");
+    let wide = sentences
+        .iter()
+        .find(|s| s.text == "Wide")
+        .expect("the actor's sentence");
+    assert_eq!(wide.font, "fonts\\test.font");
+    assert_eq!((wide.x, wide.y, wide.width), (12, 1, 20));
+    let lamp = sentences
+        .iter()
+        .find(|s| s.text == "Lamp says")
+        .expect("the lamp's sentence");
+    assert_eq!(lamp.font, "fonts\\sys.font");
+    assert_eq!(
+        lamp.width, 16,
+        "half the screen for an object in the middle"
+    );
+    assert_eq!(lamp.y, 0, "a tall wrapped text is clamped to the top");
+    // A click while the game is not interactive skips the sentences.
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(false));
+    for _ in 0..25 {
+        runtime.tick(16);
+    }
+    runtime.world.click_while_busy(false);
+    runtime.tick(16);
+    assert!(!runtime.world.is_talking(actor));
+    assert!(runtime.world.sentences().is_empty());
+    // Subtitles off: the actor still talks, nothing is drawn.
+    runtime
+        .world
+        .set_property(game, "Subtitles", &Value::Bool(false));
+    assert!(!runtime.world.subtitles_enabled());
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

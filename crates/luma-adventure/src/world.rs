@@ -19,6 +19,9 @@ use crate::objects::{Kind, Native, Objects};
 use crate::path::Floor;
 use crate::scene_view::{Camera, Drawable, SceneView};
 use crate::settings::GameSettings;
+use crate::talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
+use crate::text::FontBank;
+use luma_formats::font::TextAlign;
 
 /// The game as scripts see it. Implements the script engine's [`Host`].
 pub struct World {
@@ -47,6 +50,12 @@ pub struct World {
     last_scroll_y: u64,
     pub(crate) actors: Vec<(NativeId, Actor)>,
     pending_events: Vec<(NativeId, &'static str)>,
+    pub(crate) fonts: FontBank,
+    pub(crate) system_font: Option<String>,
+    pub(crate) subtitles: bool,
+    pub(crate) subtitles_speed: i32,
+    pub(crate) talk_skip_button: TalkSkipButton,
+    sentences: Vec<SentenceDraw>,
     pub(crate) interactive: bool,
     pub(crate) main_object: Option<NativeId>,
     pub(crate) quit: bool,
@@ -101,6 +110,12 @@ impl World {
             last_scroll_y: 0,
             actors: Vec::new(),
             pending_events: Vec::new(),
+            fonts: FontBank::new(),
+            system_font: None,
+            subtitles: true,
+            subtitles_speed: 70,
+            talk_skip_button: TalkSkipButton::Left,
+            sentences: Vec::new(),
             interactive: true,
             main_object: None,
             quit: false,
@@ -112,6 +127,18 @@ impl World {
         };
         if let Some(path) = world.game_file.string_table.clone() {
             world.load_string_table(&path, true);
+        }
+        world.subtitles = world.game_file.subtitles;
+        world.subtitles_speed = world.game_file.subtitles_speed;
+        world.talk_skip_button = world
+            .game_file
+            .talk_skip_button
+            .as_deref()
+            .map_or(TalkSkipButton::Left, TalkSkipButton::parse);
+        if let Some(path) = world.game_file.system_font.clone() {
+            if world.load_font(&path) {
+                world.system_font = Some(path);
+            }
         }
         Ok(world)
     }
@@ -455,6 +482,7 @@ impl World {
                 continue;
             }
             let mut events = Vec::new();
+            let random = self.next_random();
             self.with_floor(id, |actor, floor| {
                 let ctx = WalkContext {
                     floor: Floor {
@@ -463,6 +491,7 @@ impl World {
                         waypoints: floor.waypoints,
                     },
                     timer,
+                    random,
                 };
                 actor.update(&ctx, &mut events);
             });
@@ -474,6 +503,16 @@ impl World {
                     self.scroll_to(x, y);
                 }
             }
+        }
+        self.collect_sentences();
+    }
+
+    /// One frame of the scene's entities: animations and sentences.
+    pub fn update_scene(&mut self) {
+        let timer = self.timer;
+        let random = self.next_random();
+        if let Some(view) = self.scene.as_mut() {
+            view.advance_with(timer, random);
         }
     }
 
@@ -550,14 +589,22 @@ impl World {
             .collect()
     }
 
-    /// Fills a draw list with the scene and the actors.
+    /// Fills a draw list with the scene, the actors and the sentences
+    /// (when subtitles are on).
     pub fn draw<'a>(&'a self, list: &mut luma_render::DrawList<'a>, camera: &Camera) {
         if let Some(view) = &self.scene {
             view.draw_with(list, camera, &self.drawables());
         }
+        if self.subtitles {
+            for draw in &self.sentences {
+                if let Some(font) = self.fonts.get(&draw.font) {
+                    font.draw(list, &draw.text, draw.x, draw.y, draw.width, draw.align, -1);
+                }
+            }
+        }
     }
 
-    /// Uploads the textures of the scene and of the actors.
+    /// Uploads the textures of the scene, of the actors and of the fonts.
     pub fn upload(&mut self, renderer: &luma_render::Renderer) {
         if let Some(view) = self.scene.as_mut() {
             view.upload(&self.vfs, renderer);
@@ -565,6 +612,7 @@ impl World {
         for (_, actor) in &mut self.actors {
             actor.bank.upload(&self.vfs, renderer);
         }
+        self.fonts.upload(renderer);
     }
 
     /// Loads a scene, replacing the current one (`CAdGame::ChangeScene`):
@@ -699,6 +747,336 @@ impl World {
             }
         }
         Ok(())
+    }
+
+    /// The fonts loaded.
+    pub fn fonts(&self) -> &FontBank {
+        &self.fonts
+    }
+
+    /// The fonts loaded, mutable.
+    pub fn fonts_mut(&mut self) -> &mut FontBank {
+        &mut self.fonts
+    }
+
+    /// Loads a font (`CBFontStorage::AddFont`), logging a failure once.
+    pub fn load_font(&mut self, path: &str) -> bool {
+        let ok = self.fonts.load(&self.vfs, path);
+        for (file, reason) in self.fonts.take_missing() {
+            self.log(format!("Error loading font '{file}': {reason}"));
+        }
+        ok
+    }
+
+    /// The game's `SYSTEM_FONT`, when it loaded.
+    pub fn system_font(&self) -> Option<&str> {
+        self.system_font.as_deref()
+    }
+
+    /// Whether speech is subtitled (`Game.Subtitles`).
+    pub fn subtitles_enabled(&self) -> bool {
+        self.subtitles
+    }
+
+    /// The sentences shown this frame, in screen coordinates.
+    pub fn sentences(&self) -> &[SentenceDraw] {
+        &self.sentences
+    }
+
+    /// A random number, from the same generator as the scripts'.
+    pub(crate) fn next_random(&mut self) -> u32 {
+        self.rng ^= self.rng >> 12;
+        self.rng ^= self.rng << 25;
+        self.rng ^= self.rng >> 27;
+        (self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as u32
+    }
+
+    /// The font an object talks with: its own, else the system font.
+    pub fn font_of(&self, id: NativeId) -> Option<String> {
+        let own = match self.objects.get(id).map(|n| &n.kind) {
+            Some(Kind::Actor) => self.actor(id).and_then(|a| a.def.font.clone()),
+            Some(Kind::Entity(r)) => self
+                .scene()
+                .and_then(|v| v.entity(*r))
+                .and_then(|e| e.font.clone()),
+            _ => None,
+        };
+        own.filter(|f| self.fonts.get(f).is_some())
+            .or_else(|| self.system_font.clone())
+    }
+
+    /// Sets an object's font (`SetFont`); `None` restores the system
+    /// font. Returns whether the font loaded.
+    pub fn set_font(&mut self, id: NativeId, path: Option<&str>) -> bool {
+        let loaded = match path {
+            Some(path) => self.load_font(path),
+            None => true,
+        };
+        let value = if loaded {
+            path.map(str::to_string)
+        } else {
+            None
+        };
+        match self.objects.get(id).map(|n| n.kind.clone()) {
+            Some(Kind::Actor) => {
+                if let Some(actor) = self.actor_mut(id) {
+                    actor.def.font = value;
+                }
+            }
+            Some(Kind::Entity(r)) => {
+                if let Some(entity) = self.scene_mut().and_then(|v| v.entity_mut(r)) {
+                    entity.font = value;
+                }
+            }
+            _ => return false,
+        }
+        loaded
+    }
+
+    /// The subtitle placement of an object.
+    pub fn subtitle_mods(&self, id: NativeId) -> SubtitleMods {
+        match self.objects.get(id).map(|n| &n.kind) {
+            Some(Kind::Actor) => self.actor(id).map(|a| a.subtitles).unwrap_or_default(),
+            Some(Kind::Entity(r)) => self
+                .scene()
+                .and_then(|v| v.subtitles.get(r).copied())
+                .unwrap_or_default(),
+            _ => SubtitleMods::default(),
+        }
+    }
+
+    /// Changes the subtitle placement of an object.
+    pub fn set_subtitle_mods(&mut self, id: NativeId, mods: SubtitleMods) {
+        match self.objects.get(id).map(|n| n.kind.clone()) {
+            Some(Kind::Actor) => {
+                if let Some(actor) = self.actor_mut(id) {
+                    actor.subtitles = mods;
+                }
+            }
+            Some(Kind::Entity(r)) => {
+                if let Some(view) = self.scene_mut() {
+                    view.subtitles.insert(r, mods);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The height of an object (`GetHeight`).
+    fn object_height(&self, id: NativeId) -> i32 {
+        match self.objects.get(id).map(|n| &n.kind) {
+            Some(Kind::Actor) => match (self.actor(id), &self.scene) {
+                (Some(actor), Some(view)) => actor.height(&view.scene),
+                _ => 0,
+            },
+            Some(Kind::Entity(r)) => self.entity_height(*r),
+            _ => 0,
+        }
+    }
+
+    /// Makes an object say a sentence (`CAdObject::Talk`): the text is
+    /// expanded, the duration comes from the text when none is given,
+    /// and the text box is placed above the object. Returns whether the
+    /// object can talk.
+    pub fn talk(
+        &mut self,
+        id: NativeId,
+        text: &str,
+        duration: i32,
+        stances: Option<String>,
+        align: TextAlign,
+    ) -> bool {
+        let kind = match self.objects.get(id).map(|n| n.kind.clone()) {
+            Some(kind @ (Kind::Actor | Kind::Entity(_))) => kind,
+            _ => return false,
+        };
+        let text = self.expand(text);
+        let font = self.font_of(id);
+        let mut duration = u64::try_from(duration).unwrap_or(0);
+        if duration == 0 {
+            let length = text.chars().count() as u64;
+            duration = (self.subtitles_speed.max(0) as u64 * length).max(1000);
+        }
+        let mods = self.subtitle_mods(id);
+        let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
+        let (mut x, mut y) = match &kind {
+            Kind::Actor => self.actor(id).map_or((0, 0), |a| (a.x, a.y)),
+            Kind::Entity(r) => self
+                .scene()
+                .and_then(|v| v.entity(*r))
+                .map_or((0, 0), |e| (e.x, e.y)),
+            _ => (0, 0),
+        };
+        if mods.relative {
+            x -= self.offset_x;
+            y -= self.offset_y;
+        }
+        let width = if mods.width > 0 {
+            mods.width
+        } else if x < sw / 4 || f64::from(x) > f64::from(sw) * 0.75 {
+            (sw / 4).max((x * 2).min((sw - x) * 2))
+        } else {
+            sw / 2
+        };
+        let height = match font.as_deref().and_then(|f| self.fonts.get_mut(f)) {
+            Some(font) => font.text_height(&text, width),
+            None => 0,
+        };
+        y = y - height - self.object_height(id) - 5;
+        if mods.relative {
+            x += mods.x;
+            y += mods.y;
+        } else {
+            x = mods.x;
+            y = mods.y;
+        }
+        if mods.x_center {
+            x -= width / 2;
+        }
+        x = x.max(0).min(sw - width);
+        y = y.max(0).min(sh - height);
+        if mods.relative {
+            x += self.offset_x;
+            y += self.offset_y;
+        }
+        let sentence = Sentence {
+            text,
+            stances,
+            current_stance: -1,
+            duration,
+            start_time: self.timer,
+            font,
+            x,
+            y,
+            width,
+            align,
+            fixed_pos: !mods.relative,
+        };
+        match kind {
+            Kind::Actor => {
+                if let Some(actor) = self.actor_mut(id) {
+                    actor.talk(sentence);
+                }
+            }
+            Kind::Entity(r) => {
+                let sprites: Vec<String> = self
+                    .scene()
+                    .and_then(|v| v.entity(r))
+                    .map(|e| {
+                        e.talk_sprites
+                            .iter()
+                            .chain(&e.talk_special_sprites)
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if let Some(view) = self.scene.as_mut() {
+                    for sprite in sprites {
+                        view.add_sprite(&self.vfs, &sprite);
+                    }
+                    view.talk(r, sentence);
+                }
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Ends an object's sentence (`StopTalk`); whether one was playing.
+    pub fn stop_talk(&mut self, id: NativeId) -> bool {
+        match self.objects.get(id).map(|n| n.kind.clone()) {
+            Some(Kind::Actor) => self.actor_mut(id).is_some_and(|a| a.stop_talk()),
+            Some(Kind::Entity(r)) => self.scene_mut().is_some_and(|v| v.stop_talk(r)),
+            _ => false,
+        }
+    }
+
+    /// Whether an object is saying a sentence.
+    pub fn is_talking(&self, id: NativeId) -> bool {
+        match self.objects.get(id).map(|n| &n.kind) {
+            Some(Kind::Actor) => self.actor(id).is_some_and(|a| a.is_talking()),
+            Some(Kind::Entity(r)) => self.scene().is_some_and(|v| v.is_talking(*r)),
+            _ => false,
+        }
+    }
+
+    /// Ends every sentence older than 300 ms, as a click does while the
+    /// game is not interactive (`CAdGame::FinishSentences`).
+    pub fn skip_sentences(&mut self) {
+        let timer = self.timer;
+        for (_, actor) in &mut self.actors {
+            if let Some(sentence) = &mut actor.sentence {
+                if sentence.can_skip(timer) {
+                    sentence.finish();
+                }
+            }
+        }
+        if let Some(view) = self.scene.as_mut() {
+            view.skip_sentences(timer);
+        }
+    }
+
+    /// A left or right click while the game is not interactive skips
+    /// the sentences, per `TALK_SKIP_BUTTON`.
+    pub fn click_while_busy(&mut self, right: bool) {
+        let skips = if right {
+            self.talk_skip_button.skips_on_right()
+        } else {
+            self.talk_skip_button.skips_on_left()
+        };
+        if skips && !self.interactive {
+            self.skip_sentences();
+        }
+    }
+
+    /// Gathers the sentences shown this frame and lays their text out.
+    fn collect_sentences(&mut self) {
+        let (ox, oy, sw) = (self.offset_x, self.offset_y, self.settings.width as i32);
+        let mut draws = Vec::new();
+        for (_, actor) in &self.actors {
+            if actor.show_sentence {
+                if let Some(draw) = actor
+                    .sentence
+                    .as_ref()
+                    .and_then(|s| SentenceDraw::of(s, ox, oy, sw))
+                {
+                    draws.push(draw);
+                }
+            }
+        }
+        if let Some(view) = &self.scene {
+            for (_, sentence) in view.sentences() {
+                if let Some(draw) = SentenceDraw::of(sentence, ox, oy, sw) {
+                    draws.push(draw);
+                }
+            }
+        }
+        for draw in &draws {
+            if let Some(font) = self.fonts.get_mut(&draw.font) {
+                font.prepare(&draw.text, draw.width, draw.align, -1);
+            }
+        }
+        self.sentences = draws;
+    }
+
+    /// The object the view follows (`Game.MainObject`).
+    pub fn main_object(&self) -> Option<NativeId> {
+        self.main_object.filter(|id| self.objects.contains(*id))
+    }
+
+    /// Moves an actor to a point (`SkipTo`), raising the region events.
+    pub fn place_actor(&mut self, id: NativeId, x: i32, y: i32) {
+        let mut events = Vec::new();
+        let scene = self.scene().map(|v| v.scene.clone());
+        match (scene, self.actor_mut(id)) {
+            (Some(scene), Some(actor)) => actor.skip_to(x, y, &scene, &mut events),
+            (None, Some(actor)) => {
+                actor.x = x;
+                actor.y = y;
+            }
+            _ => {}
+        }
+        self.queue_events(id, events);
     }
 
     /// The handle of a scene node or free entity.
@@ -868,6 +1246,7 @@ impl Host for World {
     fn is_ready(&self, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).is_none_or(|a| a.ready),
+            Some(Kind::Entity(r)) => self.scene().is_none_or(|v| !v.is_talking(*r)),
             Some(Kind::Scene) => self.is_scrolled(),
             _ => true,
         }
@@ -960,10 +1339,7 @@ impl Runtime {
             }
         }
         self.engine.tick(&mut self.world);
-        let timer = self.world.timer;
-        if let Some(scene) = self.world.scene.as_mut() {
-            scene.advance(timer);
-        }
+        self.world.update_scene();
         self.world.update_actors();
         self.world.scroll_step();
         self.world.apply_pending_events(&mut self.engine);

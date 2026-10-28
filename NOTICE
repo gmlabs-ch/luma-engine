@@ -40,6 +40,8 @@ no code copied):
   crates/luma-formats/src/game.rs
   docs/formats/actor.md
   crates/luma-formats/src/actor.rs
+  docs/formats/font.md
+  crates/luma-formats/src/font.rs
   docs/formats/script.md
   crates/luma-script/src/program.rs
   crates/luma-script/src/instruction.rs
@@ -53,6 +55,8 @@ no code copied):
   crates/luma-adventure/src/scene_view.rs
   crates/luma-adventure/src/actor.rs
   crates/luma-adventure/src/path.rs
+  crates/luma-adventure/src/text.rs
+  crates/luma-adventure/src/talk.rs
 
 Luma Engine is an independent project. It is not affiliated with, endorsed
 by, or sponsored by Jan Nedoma, Dead:Code Software, or the authors of any

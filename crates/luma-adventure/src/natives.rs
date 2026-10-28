@@ -1,8 +1,8 @@
 //! The properties and methods of the native objects, as scripts call
 //! them: `Game`, `Scene`, layers, entities, regions, sprites and the
 //! keyboard; actors are in `natives_actor.rs`. Methods of later
-//! milestones (sound, talking, inventory, windows, saving) are accepted
-//! and logged once.
+//! milestones (sound, inventory, windows, saving) are accepted and
+//! logged once.
 //!
 //! Written with reference to the `ScGetProperty`, `ScSetProperty` and
 //! `ScCallMethod` methods of `BGame.cpp`, `AdGame.cpp`, `AdScene.cpp`,
@@ -17,7 +17,9 @@ use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 
 use crate::objects::Kind;
 use crate::scene_view::{EntityRef, frame_height};
+use crate::talk::TalkSkipButton;
 use crate::world::World;
+use luma_formats::font::TextAlign;
 
 /// `AlphaColor`: the engine's `0xAARRGGBB` integer.
 fn color_int(c: Rgba) -> i32 {
@@ -153,12 +155,8 @@ const OBJECT_STUBS: &[&str] = &[
     "RemoveCursor",
     "PlayAnim",
     "PlayAnimAsync",
-    "Talk",
-    "TalkAsync",
-    "StopTalk",
     "ForceTalkAnim",
     "StickToRegion",
-    "SetFont",
     "TakeItem",
     "DropItem",
     "CreateParticleEmitter",
@@ -339,8 +337,8 @@ impl World {
                 Value::from(self.prev_scene_filename.clone())
             }
             "ChangingScene" => Value::Bool(self.scheduled_scene.is_some()),
-            "Subtitles" => Value::Bool(self.game_file().subtitles),
-            "SubtitlesSpeed" => Value::Int(self.game_file().subtitles_speed),
+            "Subtitles" => Value::Bool(self.subtitles),
+            "SubtitlesSpeed" => Value::Int(self.subtitles_speed),
             "VideoSubtitles" => Value::Bool(self.game_file().video_subtitles),
             "Frozen"
             | "DebugMode"
@@ -364,7 +362,7 @@ impl World {
             | "SoundBufferSize"
             | "AutoSaveSlot"
             | "MostRecentSaveSlot" => Value::Int(0),
-            "TalkSkipButton" => Value::Int(0),
+            "TalkSkipButton" => Value::Int(self.talk_skip_button.code()),
             "SelectedItem" | "LastResponse" | "LastResponseOrig" => Value::Null,
             "Platform" => Value::from("luma"),
             "DeviceType" => Value::from("desktop"),
@@ -378,6 +376,11 @@ impl World {
             "Caption" => self.caption = value.get_string(self),
             "Interactive" => self.interactive = value.get_bool(self),
             "MainObject" => self.main_object = value.as_native(),
+            "Subtitles" => self.subtitles = value.get_bool(self),
+            "SubtitlesSpeed" => self.subtitles_speed = value.get_int(self),
+            "TalkSkipButton" => {
+                self.talk_skip_button = TalkSkipButton::from_code(value.get_int(self));
+            }
             _ => return false,
         }
         true
@@ -811,7 +814,7 @@ impl World {
             "X" => Value::Int(e.x),
             "Y" => Value::Int(e.y),
             "Height" => Value::Int(self.entity_height(r)),
-            "Ready" => Value::Bool(true),
+            "Ready" => Value::Bool(!view.is_talking(r)),
             "Movable" => Value::Bool(true),
             "Registrable" | "Interactive" => Value::Bool(e.interactive),
             "Zoomable" | "Scalable" => Value::Bool(e.scalable),
@@ -831,8 +834,13 @@ impl World {
             "Active" => Value::Bool(e.active),
             "IgnoreItems" => Value::Bool(e.ignore_items),
             "SceneIndependent" => Value::Bool(false),
-            "SubtitlesWidth" | "SubtitlesPosX" | "SubtitlesPosY" => Value::Int(0),
-            "SubtitlesPosRelative" | "SubtitlesPosXCenter" => Value::Bool(true),
+            "SubtitlesWidth" => Value::Int(view.subtitles.get(&r).map_or(0, |m| m.width)),
+            "SubtitlesPosX" => Value::Int(view.subtitles.get(&r).map_or(0, |m| m.x)),
+            "SubtitlesPosY" => Value::Int(view.subtitles.get(&r).map_or(0, |m| m.y)),
+            "SubtitlesPosRelative" => {
+                Value::Bool(view.subtitles.get(&r).is_none_or(|m| m.relative))
+            }
+            "SubtitlesPosXCenter" => Value::Bool(view.subtitles.get(&r).is_none_or(|m| m.x_center)),
             "NumItems" | "NumAttachments" => Value::Int(0),
             "ParticleEmitter" => Value::Null,
             "Item" => e.item.clone().map_or(Value::Null, Value::from),
@@ -856,6 +864,21 @@ impl World {
             value.get_float(self),
         );
         let is_null = value.is_null();
+        if name.starts_with("Subtitles") {
+            let Some(view) = self.scene_mut() else {
+                return false;
+            };
+            let mods = view.subtitles.entry(r).or_default();
+            match name {
+                "SubtitlesWidth" => mods.width = int,
+                "SubtitlesPosX" => mods.x = int,
+                "SubtitlesPosY" => mods.y = int,
+                "SubtitlesPosRelative" => mods.relative = flag,
+                "SubtitlesPosXCenter" => mods.x_center = flag,
+                _ => return false,
+            }
+            return true;
+        }
         let Some(e) = self.scene_mut().and_then(|v| v.entity_mut(r)) else {
             return false;
         };
@@ -879,20 +902,8 @@ impl World {
             "WalkToX" => e.walk_to_x = int,
             "WalkToY" => e.walk_to_y = int,
             "WalkToDirection" => e.walk_to_dir = Direction::from_code(i64::from(int)),
-            "Movable"
-            | "BlendMode"
-            | "ScaleX"
-            | "ScaleY"
-            | "Rotate"
-            | "RelativeRotate"
-            | "NonIntMouseEvents"
-            | "AccCaption"
-            | "SceneIndependent"
-            | "SubtitlesWidth"
-            | "SubtitlesPosRelative"
-            | "SubtitlesPosX"
-            | "SubtitlesPosY"
-            | "SubtitlesPosXCenter" => {}
+            "Movable" | "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate"
+            | "NonIntMouseEvents" | "AccCaption" | "SceneIndependent" => {}
             _ => return false,
         }
         true
@@ -959,10 +970,25 @@ impl World {
                 }
                 Return::null()
             }
-            "IsTalking" | "HasItem" | "HasCursor" => Return::value(false),
-            "GetFont" | "GetCursor" | "GetCursorObject" | "GetItem" | "GetAttachment" => {
+            "Talk" | "TalkAsync" => self.talk_call(id, name == "Talk", args),
+            "StopTalk" | "StopTalking" => Return::value(self.stop_talk(id)),
+            "IsTalking" => Return::value(self.is_talking(id)),
+            "SetFont" => {
+                let path = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                self.set_font(id, path.as_deref());
                 Return::null()
             }
+            "GetFont" => Return::value(
+                self.scene()
+                    .and_then(|v| v.entity(r))
+                    .and_then(|e| e.font.clone())
+                    .map_or(Value::Null, Value::from),
+            ),
+            "HasItem" | "HasCursor" => Return::value(false),
+            "GetCursor" | "GetCursorObject" | "GetItem" | "GetAttachment" => Return::null(),
             "IsSoundPlaying" => {
                 self.stub(&format!("Entity.{name}"));
                 Return::value(false)
@@ -977,6 +1003,31 @@ impl World {
             }
             _ => return None,
         })
+    }
+
+    /// `Talk(text, sound, duration, stances, align)` on an actor or an
+    /// entity; the synchronous form makes the script wait for the
+    /// object.
+    pub(crate) fn talk_call(&mut self, id: NativeId, sync: bool, args: &[Value]) -> Return {
+        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        let text = arg(0).get_string(self);
+        if !arg(1).is_null() {
+            self.stub("Talk with a sound file");
+        }
+        let duration = arg(2).get_int(self);
+        let stances = match arg(3) {
+            Value::Null => None,
+            v => Some(v.get_string(self)),
+        };
+        let align = match arg(4) {
+            Value::Null => TextAlign::Center,
+            v => TextAlign::from_code(v.get_int(self)),
+        };
+        if self.talk(id, &text, duration, stances, align) && sync {
+            Return::effect(Effect::WaitForExclusive(id))
+        } else {
+            Return::null()
+        }
     }
 
     // ----------------------------------------------------------------
