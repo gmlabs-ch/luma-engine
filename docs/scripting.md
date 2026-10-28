@@ -138,10 +138,11 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 
 | Object | Properties | Methods |
 |--------|------------|---------|
-| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
-| `Scene` | `Name`, `Width`, `Height`, `NumLayers`, `MainLayer`, `OffsetX`, `OffsetY`, `MouseX`, `MouseY`, `NumFreeNodes` | `GetNode`, `GetLayer`, `GetFreeNode`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `SkipTo`, `ScrollTo`, `IsPointInViewport` |
+| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadActor`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
+| `Scene` | `Name`, `Width`, `Height`, `NumLayers`, `MainLayer`, `OffsetX`, `OffsetY`, `MouseX`, `MouseY`, `NumFreeNodes`, `AutoScroll`, `ScrollPixelsX`, `ScrollSpeedX`... | `GetNode`, `GetLayer`, `GetFreeNode`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `SkipTo`, `ScrollTo`, `ScrollToAsync`, `IsScrolling`, `IsPointInViewport`, `LoadActor`, `UnloadObject` |
 | Layers | `Name`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active` | `GetNode` |
 | Entities | `Name`, `Caption`, `X`, `Y`, `Height`, `Active`, `Interactive`, `Scalable`, `Scale`, `RelativeScale`, `AlphaColor`, `Colorable`, `Item`, `Subtype`, `WalkToX`, `WalkToY`, `WalkToDirection`, `SaveState`, `IgnoreItems`... | `SkipTo`, `SetSprite`, `GetSprite`, `GetSpriteObject`, `Reset`, `Caption` |
+| Actors (`Game.LoadActor`, `Scene.LoadActor`) | The entities' properties, plus `Direction`, `Ready`, `ActorIsBlocked`, `TalkAnimName`, `IdleAnimName`, `WalkAnimName`, `TurnLeftAnimName`, `TurnRightAnimName` | `GoTo`, `GoToAsync`, `GoToObject`, `GoToObjectAsync`, `TurnTo`, `TurnToAsync`, `IsWalking`, `SkipTo`, `Reset`, `PlayAnim`, `PlayAnimAsync`, `SetSprite`, `GetSprite`, `HasAnim`, `MergeAnims`, `UnloadAnim`, `SetStopOnBlocked`, `GetStopOnBlocked` |
 | Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
 | Sprite objects | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner` | `Reset`, `Pause`, `Play` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
@@ -153,16 +154,28 @@ of its objects, loads the new scene and attaches its scripts in file
 order: the scene's first, then each layer's and its nodes'. The change
 itself happens at the start of the next frame, as in the engine.
 
+Actors (see [docs/formats/actor.md](formats/actor.md)) are updated once
+per frame after the scripts ran: walks, turns and animations progress,
+the view follows `Game.MainObject` when the scene's `AutoScroll` is on,
+and the events the updates raise (`ActorIsBlocked` on the actor,
+`ActorEntry` and `ActorLeave` on the regions of the main layer) reach
+their scripts on the next frame. A script that called `GoTo`, `TurnTo`
+or `PlayAnim` waits until the actor is `Ready`; `ScrollTo` waits until
+the view reached its target. A scene change removes the actors the scene
+loaded and resets the game's.
+
 What later milestones implement is accepted and logged once as "not
-implemented": sound and music, `Talk` and `PlayAnim`, inventory,
-windows (`LoadWindow` returns an inert object that keeps the properties
-scripts set, so that game scripts run through), actors (`LoadActor`
-likewise), saving, videos and transitions.
+implemented": sound and music, `Talk`, inventory, windows (`LoadWindow`
+returns an inert object that keeps the properties scripts set, so that
+game scripts run through), saving, videos and transitions.
 
 ## Not yet
 
 - The `String`, `Array`, `Date`, `File` and `MemBuffer` classes: `new`
   returns an inert object.
 - Persistent scene state (`PERSISTENT_STATE`) across scene changes.
+- `Scene.GetWaypointGroup` and `WaypointGroup.Active`: every waypoint
+  group of a scene is used.
+- `GetSpriteObject` on actors, and `PlayAnim` on entities.
 - Saving and restoring running scripts.
 - The debugger protocol (`DBG_LINE` is read but only used for messages).

@@ -30,7 +30,11 @@ OPTIONS:
     --headless            Run the game's scripts without a window and print the log
     --ticks <n>           Frames to run in headless mode (default 60)
     --dt <ms>             Milliseconds per frame in headless mode (default 16)
+    --click <node>        In headless mode, raise LeftClick on a scene node once the scene is up
     --help                Show this message
+
+With --headless and --screenshot, the scene and the actors are rendered
+once after the last frame.
 
 <game> is a game directory (its *.dcp packages and loose files are read
 the way the engine does).
@@ -54,6 +58,7 @@ struct Options {
     headless: bool,
     ticks: u64,
     dt: u64,
+    click: Option<String>,
 }
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -65,6 +70,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut headless = false;
     let mut ticks = 60;
     let mut dt = 16;
+    let mut click = None;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -85,6 +91,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--screenshot" => screenshot = Some(PathBuf::from(value(&mut i)?)),
             "--animate" => animate = true,
             "--headless" => headless = true,
+            "--click" => click = Some(value(&mut i)?.clone()),
             "--ticks" => {
                 let v = value(&mut i)?;
                 ticks = v
@@ -115,6 +122,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         headless,
         ticks,
         dt,
+        click,
     })
 }
 
@@ -161,7 +169,7 @@ fn load(vfs: &Vfs, renderer: &Renderer, scene: &str) -> Result<SceneView, String
         view.scene.entities().count(),
         view.texture_count()
     );
-    for (path, reason) in &view.missing {
+    for (path, reason) in view.missing() {
         eprintln!("  missing: {path}: {reason}");
     }
     Ok(view)
@@ -178,6 +186,7 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         runtime.world.strings().len()
     );
     runtime.start();
+    let mut clicked = false;
     for tick in 1..=options.ticks {
         for line in runtime.tick(options.dt) {
             println!("[{tick}] {line}");
@@ -192,6 +201,24 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 }
             }
         }
+        if !clicked && runtime.world.scene().is_some() {
+            if let Some(node) = &options.click {
+                clicked = true;
+                match runtime.world.find_node(node) {
+                    Some(id) => {
+                        let handled =
+                            runtime
+                                .engine
+                                .apply_event(&mut runtime.world, id, "LeftClick", false);
+                        println!(
+                            "[{tick}] LeftClick on {node:?}: {}",
+                            if handled { "handled" } else { "no handler" }
+                        );
+                    }
+                    None => println!("[{tick}] LeftClick on {node:?}: no such node"),
+                }
+            }
+        }
         if runtime.world.quit_requested() {
             println!("[{tick}] quit requested");
             break;
@@ -199,19 +226,55 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
     }
     let counts = runtime.engine.counts();
     println!(
-        "after {} ms: scene {:?}, {} script(s) ({} running, {} waiting, {} persistent), {} native object(s)",
+        "after {} ms: scene {:?}, offset {:?}, {} script(s) ({} running, {} waiting, {} persistent), {} native object(s)",
         runtime.world.timer(),
         runtime
             .world
             .scene()
             .map(|s| s.scene.name.as_str())
             .unwrap_or("none"),
+        runtime.world.offset(),
         counts.total,
         counts.running,
         counts.waiting,
         counts.persistent,
         runtime.world.objects().len()
     );
+    for id in runtime.world.actor_ids() {
+        if let Some(actor) = runtime.world.actor(id) {
+            println!(
+                "actor {:?}: at ({}, {}), facing {:?}, {:?}{}, sprite {:?}",
+                actor.def.name,
+                actor.x,
+                actor.y,
+                actor.dir,
+                actor.state,
+                if actor.def.active { "" } else { ", inactive" },
+                actor.current_sprite().unwrap_or("none")
+            );
+        }
+    }
+    if let Some(output) = &options.screenshot {
+        let gpu = Gpu::headless().map_err(|e| e.to_string())?;
+        let renderer = Renderer::new(gpu);
+        runtime.world.upload(&renderer);
+        let settings = runtime.world.settings();
+        let target = Offscreen::new(renderer.gpu(), settings.width, settings.height);
+        let mut list = DrawList::new(settings.width as f32, settings.height as f32);
+        runtime.draw(&mut list);
+        renderer
+            .render(target.target(), BLACK, &list)
+            .map_err(|e| e.to_string())?;
+        let image = target.read(renderer.gpu()).map_err(|e| e.to_string())?;
+        let png = image.to_png().map_err(|e| e.to_string())?;
+        std::fs::write(output, png).map_err(|e| format!("{}: {e}", output.display()))?;
+        println!(
+            "wrote {} ({}x{})",
+            output.display(),
+            image.width,
+            image.height
+        );
+    }
     Ok(())
 }
 

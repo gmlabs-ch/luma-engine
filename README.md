@@ -112,6 +112,9 @@ luma-player path/to/game --headless
 
 # The same, jumping to a scene after the game script ran
 luma-player path/to/game --headless --scene scenes/room/room.scene --ticks 200
+
+# Click a scene node (its LeftClick handler walks the actor), then render the result
+luma-player path/to/game --headless --scene scenes/room/room.scene --click Door --ticks 60 --screenshot walk.png
 ```
 
 ## Games
