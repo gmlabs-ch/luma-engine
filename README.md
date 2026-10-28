@@ -59,6 +59,8 @@ module, and the front-ends depend on the modules they use.
 ## Building
 
 You need a recent stable Rust toolchain ([rustup](https://rustup.rs)).
+On Linux, sound output builds against ALSA: install `libasound2-dev` and
+`pkg-config` (Debian and Ubuntu names) first.
 
 ```sh
 cargo build --release
