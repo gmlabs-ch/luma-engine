@@ -138,11 +138,12 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 
 | Object | Properties | Methods |
 |--------|------------|---------|
-| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadActor`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
+| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`, `SubtitlesSpeed`, `TalkSkipButton`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadActor`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
 | `Scene` | `Name`, `Width`, `Height`, `NumLayers`, `MainLayer`, `OffsetX`, `OffsetY`, `MouseX`, `MouseY`, `NumFreeNodes`, `AutoScroll`, `ScrollPixelsX`, `ScrollSpeedX`... | `GetNode`, `GetLayer`, `GetFreeNode`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `SkipTo`, `ScrollTo`, `ScrollToAsync`, `IsScrolling`, `IsPointInViewport`, `LoadActor`, `UnloadObject` |
 | Layers | `Name`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active` | `GetNode` |
 | Entities | `Name`, `Caption`, `X`, `Y`, `Height`, `Active`, `Interactive`, `Scalable`, `Scale`, `RelativeScale`, `AlphaColor`, `Colorable`, `Item`, `Subtype`, `WalkToX`, `WalkToY`, `WalkToDirection`, `SaveState`, `IgnoreItems`... | `SkipTo`, `SetSprite`, `GetSprite`, `GetSpriteObject`, `Reset`, `Caption` |
 | Actors (`Game.LoadActor`, `Scene.LoadActor`) | The entities' properties, plus `Direction`, `Ready`, `ActorIsBlocked`, `TalkAnimName`, `IdleAnimName`, `WalkAnimName`, `TurnLeftAnimName`, `TurnRightAnimName` | `GoTo`, `GoToAsync`, `GoToObject`, `GoToObjectAsync`, `TurnTo`, `TurnToAsync`, `IsWalking`, `SkipTo`, `Reset`, `PlayAnim`, `PlayAnimAsync`, `SetSprite`, `GetSprite`, `HasAnim`, `MergeAnims`, `UnloadAnim`, `SetStopOnBlocked`, `GetStopOnBlocked` |
+| Actors and entities, speech | `SubtitlesWidth`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosRelative`, `SubtitlesPosXCenter` | `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`, `SetFont`, `GetFont` |
 | Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
 | Sprite objects | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner` | `Reset`, `Pause`, `Play` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
@@ -164,8 +165,17 @@ or `PlayAnim` waits until the actor is `Ready`; `ScrollTo` waits until
 the view reached its target. A scene change removes the actors the scene
 loaded and resets the game's.
 
+Speech (`Talk`, see [docs/formats/font.md](formats/font.md)) is a state
+of the actor or entity: the sentence lasts its duration, the talk
+sprites play stance after stance, and the text is drawn above the
+object with its font (or the game's `SYSTEM_FONT`) while
+`Game.Subtitles` is on. The scripts waiting for the object resume when
+the sentence ends, or when a click skips it while the game is not
+interactive.
+
 What later milestones implement is accepted and logged once as "not
-implemented": sound and music, `Talk`, inventory, windows (`LoadWindow`
+implemented": sound and music (a `Talk` with a sound file logs it and
+times the sentence from the text), inventory, windows (`LoadWindow`
 returns an inert object that keeps the properties scripts set, so that
 game scripts run through), saving, videos and transitions.
 
@@ -177,5 +187,7 @@ game scripts run through), saving, videos and transitions.
 - `Scene.GetWaypointGroup` and `WaypointGroup.Active`: every waypoint
   group of a scene is used.
 - `GetSpriteObject` on actors, and `PlayAnim` on entities.
+- `.talk` files timing talk sprites to a sound, `ForceTalkAnim`, and
+  `AddTalkSprite`; text in UTF-8 string tables is drawn as Latin-1.
 - Saving and restoring running scripts.
 - The debugger protocol (`DBG_LINE` is read but only used for messages).

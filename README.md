@@ -113,8 +113,12 @@ luma-player path/to/game --headless
 # The same, jumping to a scene after the game script ran
 luma-player path/to/game --headless --scene scenes/room/room.scene --ticks 200
 
-# Click a scene node (its LeftClick handler walks the actor), then render the result
-luma-player path/to/game --headless --scene scenes/room/room.scene --click Door --ticks 60 --screenshot walk.png
+# Place the actor, raise an event on a node (here the look-at handler, which walks
+# the actor there and makes it talk), then render the result
+luma-player path/to/game --headless --scene scenes/room/room.scene --at 120,420 --click Scanner:LookAt --ticks 300 --screenshot talk.png
+
+# Make the main actor say something with a given font
+luma-player path/to/game --headless --scene scenes/room/room.scene --say "Hello" --font fonts/big.font --ticks 10 --screenshot hello.png
 ```
 
 ## Games

@@ -10,6 +10,7 @@ use std::time::Instant;
 use luma_adventure::{Camera, GameSettings, Runtime, SceneView};
 use luma_archive::Vfs;
 use luma_formats::Rgba;
+use luma_formats::font::TextAlign;
 use luma_render::winit::event::{ElementState, KeyEvent, WindowEvent};
 use luma_render::winit::keyboard::{Key, NamedKey};
 use luma_render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig};
@@ -30,7 +31,11 @@ OPTIONS:
     --headless            Run the game's scripts without a window and print the log
     --ticks <n>           Frames to run in headless mode (default 60)
     --dt <ms>             Milliseconds per frame in headless mode (default 16)
-    --click <node>        In headless mode, raise LeftClick on a scene node once the scene is up
+    --at <x>,<y>          In headless mode, place the main actor there once the scene is up
+    --say <text>          In headless mode, make the main actor say a sentence once the scene is up
+    --font <file>         With --say, the font the actor talks with
+    --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
+                          node once the scene is up, e.g. --click Door or --click Freezer:LookAt
     --help                Show this message
 
 With --headless and --screenshot, the scene and the actors are rendered
@@ -59,6 +64,9 @@ struct Options {
     ticks: u64,
     dt: u64,
     click: Option<String>,
+    at: Option<(i32, i32)>,
+    say: Option<String>,
+    font: Option<String>,
 }
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -71,6 +79,9 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut ticks = 60;
     let mut dt = 16;
     let mut click = None;
+    let mut at = None;
+    let mut say = None;
+    let mut font = None;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -92,6 +103,16 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--animate" => animate = true,
             "--headless" => headless = true,
             "--click" => click = Some(value(&mut i)?.clone()),
+            "--say" => say = Some(value(&mut i)?.clone()),
+            "--font" => font = Some(value(&mut i)?.clone()),
+            "--at" => {
+                let v = value(&mut i)?;
+                let (x, y) = v
+                    .split_once(',')
+                    .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
+                    .ok_or_else(|| format!("--at expects <x>,<y>, got `{v}`"))?;
+                at = Some((x, y));
+            }
             "--ticks" => {
                 let v = value(&mut i)?;
                 ticks = v
@@ -123,6 +144,9 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         ticks,
         dt,
         click,
+        at,
+        say,
+        font,
     })
 }
 
@@ -202,20 +226,46 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
             }
         }
         if !clicked && runtime.world.scene().is_some() {
-            if let Some(node) = &options.click {
-                clicked = true;
+            clicked = true;
+            if let Some((x, y)) = options.at {
+                if let Some(main) = runtime.world.main_object() {
+                    runtime.world.place_actor(main, x, y);
+                    println!("[{tick}] main actor placed at ({x}, {y})");
+                }
+            }
+            if let Some(text) = &options.say {
+                match runtime.world.main_object() {
+                    Some(main) => {
+                        if let Some(font) = &options.font {
+                            let ok = runtime.world.set_font(main, Some(font));
+                            println!(
+                                "[{tick}] font {font:?}: {}",
+                                if ok { "loaded" } else { "failed" }
+                            );
+                        }
+                        let ok = runtime.world.talk(main, text, 0, None, TextAlign::Center);
+                        println!(
+                            "[{tick}] main actor says {text:?}: {}",
+                            if ok { "started" } else { "no main actor" }
+                        );
+                    }
+                    None => println!("[{tick}] --say: no main actor"),
+                }
+            }
+            if let Some(click) = &options.click {
+                let (node, event) = click.split_once(':').unwrap_or((click, "LeftClick"));
                 match runtime.world.find_node(node) {
                     Some(id) => {
                         let handled =
                             runtime
                                 .engine
-                                .apply_event(&mut runtime.world, id, "LeftClick", false);
+                                .apply_event(&mut runtime.world, id, event, false);
                         println!(
-                            "[{tick}] LeftClick on {node:?}: {}",
+                            "[{tick}] {event} on {node:?}: {}",
                             if handled { "handled" } else { "no handler" }
                         );
                     }
-                    None => println!("[{tick}] LeftClick on {node:?}: no such node"),
+                    None => println!("[{tick}] {event} on {node:?}: no such node"),
                 }
             }
         }
@@ -253,6 +303,12 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 actor.current_sprite().unwrap_or("none")
             );
         }
+    }
+    for sentence in runtime.world.sentences() {
+        println!(
+            "sentence {:?} with {} at ({}, {}), width {}",
+            sentence.text, sentence.font, sentence.x, sentence.y, sentence.width
+        );
     }
     if let Some(output) = &options.screenshot {
         let gpu = Gpu::headless().map_err(|e| e.to_string())?;
