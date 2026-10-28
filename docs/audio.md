@@ -19,12 +19,17 @@ not do yet.
 
 ## Output
 
-`luma_audio::Audio` opens the default output device and mixes the
-playing sounds into it, resampling each to the device rate. Without a
-device (continuous integration, a headless run, `luma-player --mute`)
-the sounds still play, silently, and advance with the game clock: a
-sentence timed by its speech file lasts as long, `IsSoundPlaying` turns
-false at the same frame. Tests use this backend.
+`luma_audio::Audio` mixes the playing sounds with
+[Kira](https://crates.io/crates/kira) (resampling, click-free volume and
+pan changes, loop regions) and decodes them with
+[Symphonia](https://crates.io/crates/symphonia), both pure Rust. With the
+crate's `device` feature, the output goes to the default device through
+`cpal` (on Linux that builds against ALSA). Without the feature, or
+without a device (continuous integration, a headless run, `luma-player
+--mute`), the sounds still play on Kira's mock backend, silently, and
+advance with the game clock: a sentence timed by its speech file lasts
+as long, `IsSoundPlaying` turns false at the same frame. Tests use this
+backend.
 
 ## Volumes
 
@@ -38,9 +43,10 @@ also has its own volume (`SetSoundVolume` on its object,
 The gain of a sound is the engine's: the global volume of its kind is
 weighted by the sound's own volume (`global / 100 * own`, in percent);
 the remaining fraction is cubed and turned into an attenuation of up to
-100 dB; that attenuation becomes the factor applied to the samples. At
-50 % a sound plays at about 24 % of its amplitude, at 75 % about 67 %.
-The master volume then multiplies the result linearly.
+100 dB; that attenuation becomes the factor applied to the samples
+(floored at Kira's silence of -60 dB). At 50 % a sound plays at about
+24 % of its amplitude, at 75 % about 67 %. The master volume then
+multiplies the result linearly, on the main mixer track.
 
 ## Panning
 
@@ -98,6 +104,7 @@ the sound does; skipping the sentence stops the sound. See
 
 ## Not yet
 
-- Streaming of long files; the echo and reverb effects; the `.talk`
-  files timing talk sprites to a sound.
+- Streaming of long files (Kira can stream; the engine decodes in full
+  for now); the echo and reverb effects; the `.talk` files timing talk
+  sprites to a sound.
 - Pausing every sound while a system window is open (no windows yet).

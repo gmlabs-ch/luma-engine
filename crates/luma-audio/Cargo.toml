@@ -10,8 +10,12 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
-cpal.workspace = true
-lewton.workspace = true
+kira.workspace = true
+
+[features]
+default = []
+# Sound output on the default device through cpal (needs ALSA on Linux).
+device = ["kira/cpal"]
 
 [lints]
 workspace = true

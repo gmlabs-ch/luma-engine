@@ -63,6 +63,20 @@ no code copied):
   crates/luma-audio/src/audio.rs
   crates/luma-audio/src/mixer.rs
 
+-------------------------------------------------------------------------------
+Dependencies under the Mozilla Public License 2.0
+-------------------------------------------------------------------------------
+
+Luma Engine links, unmodified, to these crates, used through the `kira`
+crate for decoding sound files:
+
+  symphonia (and its symphonia-* components)   https://github.com/pdeljanov/Symphonia
+  Copyright (c) Philip Deljanov and contributors
+  Licensed under the Mozilla Public License 2.0
+
+The MPL 2.0 applies to those crates' own source files only; their source
+is available at the address above.
+
 Luma Engine is an independent project. It is not affiliated with, endorsed
 by, or sponsored by Jan Nedoma, Dead:Code Software, or the authors of any
 game it can run. "Wintermute Engine" is used only to describe compatibility.

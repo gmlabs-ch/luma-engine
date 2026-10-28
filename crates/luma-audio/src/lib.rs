@@ -4,12 +4,13 @@
 //!
 //! # Overview
 //!
-//! - [`decode`]: WAV and Ogg Vorbis files decoded to 16-bit PCM
-//!   [`Clip`]s.
+//! - [`Clip`] and [`decode`]: WAV and Ogg Vorbis files decoded by
+//!   Symphonia.
 //! - [`Audio`]: the sounds loaded, with the engine's rules for volumes
 //!   (per type, per sound, master), panning, looping with a loop start,
-//!   pausing and positions. Output goes to the default device through
-//!   `cpal`; without a device, the sounds advance by game time, so that
+//!   pausing and positions, mixed by Kira. With the `device` feature the
+//!   output goes to the default device through `cpal`; otherwise, or
+//!   when no device is there, the sounds advance by game time, so that
 //!   durations and `IsPlaying` behave the same in headless runs and on
 //!   continuous integration.
 //!
@@ -20,11 +21,9 @@
 #![forbid(unsafe_code)]
 
 mod audio;
-pub mod decode;
+mod clip;
 mod error;
-mod mixer;
 
-pub use audio::Audio;
-pub use decode::{Clip, decode, encode_wav};
+pub use audio::{Audio, SoundId, SoundType, gain};
+pub use clip::{Clip, decode, silent_wav};
 pub use error::{Error, Result};
-pub use mixer::{SoundId, SoundType, gain};

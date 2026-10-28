@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 luma-adventure.workspace = true
+luma-audio = { workspace = true, features = ["device"] }
 luma-archive.workspace = true
 luma-formats.workspace = true
 luma-render.workspace = true

@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use luma_adventure::{Audio, Kind, Runtime};
 use luma_archive::{PackageBuilder, Vfs};
-use luma_audio::Clip;
 use luma_formats::Image;
 use luma_script::asm::Assembler;
 use luma_script::{Instruction, Natives, State, Value};
@@ -538,14 +537,8 @@ fn game() -> std::path::PathBuf {
     );
     pkg.add_file("talk.script", talk_script());
     pkg.add_file("sound.script", sound_script());
-    pkg.add_file(
-        "audio\\beep.wav",
-        luma_audio::encode_wav(&Clip::silence(8000, 1, 300)),
-    );
-    pkg.add_file(
-        "voices\\GREET.wav",
-        luma_audio::encode_wav(&Clip::silence(8000, 2, 250)),
-    );
+    pkg.add_file("audio\\beep.wav", luma_audio::silent_wav(8000, 1, 300));
+    pkg.add_file("voices\\GREET.wav", luma_audio::silent_wav(8000, 2, 250));
     pkg.add_file("string.tab", b"GREET\tHello\r\n".to_vec());
     pkg.add_file("game.script", game_script());
     pkg.add_file("scenes\\room\\scene_init.script", scene_init_script());
