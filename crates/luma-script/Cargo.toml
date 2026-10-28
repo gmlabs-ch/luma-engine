@@ -1,6 +1,6 @@
 [package]
 name = "luma-script"
-description = "Virtual machine executing compiled game scripts."
+description = "Compiled game scripts: loader, disassembler and virtual machine."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +8,8 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 publish.workspace = true
+
+[dependencies]
 
 [lints]
 workspace = true
