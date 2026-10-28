@@ -11,21 +11,31 @@
 //! conversion, comparison and property rules; native objects of the
 //! engine are reached through the [`Natives`] trait.
 //!
-//! **Status:** loading, disassembly and values. The virtual machine that
-//! executes programs is the next step.
+//! The [`Engine`] runs scripts: it executes their instructions, spawns
+//! threads for events and methods, and resolves sleeps and waits once per
+//! frame through the [`Host`] trait, which the embedding program
+//! implements. The rules are summarised in `docs/scripting.md`.
 //!
 //! Written with reference to the MIT-licensed WME Lite sources; see
 //! `NOTICE`.
 
 pub mod asm;
+mod engine;
 mod error;
+mod host;
 mod instruction;
 mod program;
+mod script;
+mod stack;
 mod value;
 
+pub use engine::{Counts, Engine, Global, Removed, rgba};
 pub use error::{Error, Result};
+pub use host::{Context, Effect, Host, Return};
 pub use instruction::{Instruction, Opcode, OperandKind};
 pub use program::{
     CallType, Entry, External, ExternalType, HEADER_SIZE, Header, MAGIC, Program, VERSION,
 };
+pub use script::{Script, ScriptId, State};
+pub use stack::{Globals, Slot, Stack, VarRef};
 pub use value::{DivisionByZero, NativeId, Natives, Properties, Value, atof, atoi, format_float};
