@@ -39,6 +39,7 @@ no code copied):
   docs/formats/script.md
   crates/luma-script/src/program.rs
   crates/luma-script/src/instruction.rs
+  crates/luma-script/src/value.rs
 
 Luma Engine is an independent project. It is not affiliated with, endorsed
 by, or sponsored by Jan Nedoma, Dead:Code Software, or the authors of any
