@@ -2,6 +2,9 @@
 //! entities, composed into a draw list the way the engine draws it (see
 //! `docs/formats/scene.md`, section "Drawing"). Textures are uploaded
 //! separately, so that a scene can be loaded and run without a GPU.
+//!
+//! Written with reference to `BSprite.cpp` and `AdScene.cpp` of WME Lite
+//! (MIT License, Copyright (c) 2011 Jan Nedoma); see `NOTICE`.
 
 use std::collections::HashMap;
 
@@ -86,10 +89,10 @@ pub enum EntityRef {
     Free(usize),
 }
 
-/// The animation state of an entity's sprite, advanced like the engine's
-/// `CBSprite::GetCurrentFrame`: a frame lasts its delay from the moment
-/// the previous one was shown; a non-looping sprite stops on its last
-/// frame and is then `finished`.
+/// The animation state of a sprite shown by an object, advanced like the
+/// engine's `CBSprite::GetCurrentFrame`: a frame lasts its delay from the
+/// moment the previous one was shown; a non-looping sprite stops on its
+/// last frame and is then `finished`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnimState {
     /// The sprite path this state belongs to (normalised).
@@ -105,17 +108,28 @@ pub struct AnimState {
     pub paused: bool,
     /// A `Looping` set by a script, overriding the sprite's.
     pub looping: Option<bool>,
+    /// Whether the last [`AnimState::step`] showed a new frame.
+    pub changed: bool,
+    /// The `MOVE` offset of the frame that became current at the last
+    /// change.
+    pub move_x: i32,
+    /// See `move_x`.
+    pub move_y: i32,
 }
 
 impl AnimState {
-    fn new(sprite: String) -> AnimState {
+    /// A state at the first frame of a sprite path.
+    pub fn new(sprite: &str) -> AnimState {
         AnimState {
-            sprite,
+            sprite: key(sprite),
             current_frame: 0,
             last_frame_time: 0,
             finished: false,
             paused: false,
             looping: None,
+            changed: false,
+            move_x: 0,
+            move_y: 0,
         }
     }
 
@@ -124,22 +138,58 @@ impl AnimState {
         self.current_frame = 0;
         self.last_frame_time = 0;
         self.finished = false;
+        self.move_x = 0;
+        self.move_y = 0;
+    }
+
+    /// Advances the state to `timer` (the game timer, in milliseconds)
+    /// for the sprite it belongs to, and returns whether a new frame
+    /// became current, in which case `move_x` and `move_y` hold that
+    /// frame's `MOVE` (`CBSprite::GetCurrentFrame`).
+    pub fn step(&mut self, sprite: &Sprite, timer: u64) -> bool {
+        let frames = sprite.frames.len();
+        if frames == 0 {
+            self.changed = false;
+            return false;
+        }
+        let looping = self.looping.unwrap_or(sprite.looping);
+        self.current_frame = self.current_frame.min(frames - 1);
+        let last = self.current_frame;
+        let delay = u64::from(sprite.frames[self.current_frame].delay_ms);
+        if !self.paused
+            && !self.finished
+            && self.last_frame_time != 0
+            && timer >= self.last_frame_time + delay
+        {
+            if self.current_frame < frames - 1 {
+                self.current_frame += 1;
+            } else if looping {
+                self.current_frame = 0;
+            } else {
+                self.finished = true;
+            }
+            self.last_frame_time = timer;
+        }
+        self.changed = last != self.current_frame || (looping && frames == 1);
+        if self.last_frame_time == 0 {
+            self.last_frame_time = timer;
+            self.changed = true;
+        }
+        if self.changed {
+            self.move_x = sprite.frames[self.current_frame].move_x;
+            self.move_y = sprite.frames[self.current_frame].move_y;
+        }
+        self.changed
     }
 }
 
-/// A scene and everything needed to run and draw it.
-#[derive(Debug)]
-pub struct SceneView {
-    /// The scene definition, which scripts modify.
-    pub scene: Scene,
-    /// Path the scene was loaded from.
-    pub path: String,
+/// Sprites loaded from the game and the textures of their images, keyed
+/// by path without regard to case or separator.
+#[derive(Debug, Default)]
+pub struct SpriteBank {
     sprites: HashMap<String, LoadedSprite>,
     textures: HashMap<String, Texture>,
-    /// Files referenced by the scene that could not be loaded, with the
-    /// reason; the scene is still shown without them.
-    pub missing: Vec<(String, String)>,
-    anims: HashMap<EntityRef, AnimState>,
+    missing: Vec<(String, String)>,
 }
 
 /// Case-insensitive key of a game path.
@@ -157,43 +207,22 @@ fn texture_key(path: &str, color_key: Rgb) -> String {
     )
 }
 
-impl SceneView {
-    /// Loads a scene file from the game and the sprites of its entities.
-    /// A missing or broken sprite is recorded in `missing`, not an error.
-    /// Images are decoded and uploaded later by [`SceneView::upload`].
-    pub fn load(vfs: &Vfs, path: &str) -> Result<SceneView> {
-        let bytes = vfs.read(path)?;
-        let scene = Scene::parse(&bytes).map_err(|source| Error::Format {
-            path: path.to_string(),
-            source,
-        })?;
-        let mut view = SceneView {
-            scene,
-            path: path.to_string(),
-            sprites: HashMap::new(),
-            textures: HashMap::new(),
-            missing: Vec::new(),
-            anims: HashMap::new(),
-        };
-        let paths: Vec<String> = view
-            .scene
-            .entities()
-            .filter(|e| e.kind == EntityKind::Normal)
-            .filter_map(|e| e.sprite.clone())
-            .collect();
-        for sprite_path in paths {
-            view.add_sprite(vfs, &sprite_path);
-        }
-        Ok(view)
+impl SpriteBank {
+    /// An empty bank.
+    pub fn new() -> SpriteBank {
+        SpriteBank::default()
     }
 
-    /// Loads a sprite definition if it is not loaded yet, for an entity
-    /// whose sprite a script changed. Returns whether the sprite is
-    /// available.
+    /// Loads a sprite definition if it is not loaded yet. A missing or
+    /// broken sprite is recorded in [`SpriteBank::missing`], not an
+    /// error. Returns whether the sprite is available.
     pub fn add_sprite(&mut self, vfs: &Vfs, path: &str) -> bool {
         let k = key(path);
         if self.sprites.contains_key(&k) {
             return true;
+        }
+        if self.missing.iter().any(|(p, _)| key(p) == k) {
+            return false;
         }
         let sprite = if Sprite::is_image_path(path) {
             Sprite::from_image(path)
@@ -244,6 +273,12 @@ impl SceneView {
         }
     }
 
+    /// Adds an already parsed sprite under a path, replacing any loaded
+    /// one.
+    pub fn insert(&mut self, path: &str, sprite: Sprite) {
+        self.sprites.insert(key(path), LoadedSprite { sprite });
+    }
+
     /// The loaded sprite of a path, if it loaded.
     pub fn sprite(&self, path: &str) -> Option<&LoadedSprite> {
         self.sprites.get(&key(path))
@@ -257,6 +292,106 @@ impl SceneView {
     /// Number of textures uploaded.
     pub fn texture_count(&self) -> usize {
         self.textures.len()
+    }
+
+    /// Files that could not be loaded, with the reason.
+    pub fn missing(&self) -> &[(String, String)] {
+        &self.missing
+    }
+}
+
+/// An object drawn among the free objects of a scene: an actor, or an
+/// entity of another bank.
+pub struct Drawable<'a> {
+    /// Position of the hotspot.
+    pub x: i32,
+    /// See `x`.
+    pub y: i32,
+    /// The sprite shown, from `bank`.
+    pub sprite: Option<&'a LoadedSprite>,
+    /// Where the sprite's textures are.
+    pub bank: &'a SpriteBank,
+    /// The frame shown.
+    pub frame: usize,
+    /// Scale in percent.
+    pub scale: f32,
+    /// Tint and opacity.
+    pub tint: Rgba,
+}
+
+/// A scene and everything needed to run and draw it.
+#[derive(Debug)]
+pub struct SceneView {
+    /// The scene definition, which scripts modify.
+    pub scene: Scene,
+    /// Path the scene was loaded from.
+    pub path: String,
+    /// The sprites of the scene's entities.
+    pub bank: SpriteBank,
+    anims: HashMap<EntityRef, AnimState>,
+}
+
+impl SceneView {
+    /// Loads a scene file from the game and the sprites of its entities.
+    /// A missing or broken sprite is recorded in [`SceneView::missing`],
+    /// not an error. Images are decoded and uploaded later by
+    /// [`SceneView::upload`].
+    pub fn load(vfs: &Vfs, path: &str) -> Result<SceneView> {
+        let bytes = vfs.read(path)?;
+        let scene = Scene::parse(&bytes).map_err(|source| Error::Format {
+            path: path.to_string(),
+            source,
+        })?;
+        let mut view = SceneView {
+            scene,
+            path: path.to_string(),
+            bank: SpriteBank::new(),
+            anims: HashMap::new(),
+        };
+        let paths: Vec<String> = view
+            .scene
+            .entities()
+            .filter(|e| e.kind == EntityKind::Normal)
+            .filter_map(|e| e.sprite.clone())
+            .collect();
+        for sprite_path in paths {
+            view.bank.add_sprite(vfs, &sprite_path);
+        }
+        Ok(view)
+    }
+
+    /// Loads a sprite definition if it is not loaded yet, for an entity
+    /// whose sprite a script changed. Returns whether the sprite is
+    /// available.
+    pub fn add_sprite(&mut self, vfs: &Vfs, path: &str) -> bool {
+        self.bank.add_sprite(vfs, path)
+    }
+
+    /// Decodes and uploads the images of every loaded sprite that has no
+    /// texture yet. Safe to call every frame.
+    pub fn upload(&mut self, vfs: &Vfs, renderer: &Renderer) {
+        self.bank.upload(vfs, renderer);
+    }
+
+    /// The loaded sprite of a path, if it loaded.
+    pub fn sprite(&self, path: &str) -> Option<&LoadedSprite> {
+        self.bank.sprite(path)
+    }
+
+    /// The texture of an image, if it was uploaded.
+    pub fn texture(&self, path: &str, color_key: Rgb) -> Option<&Texture> {
+        self.bank.texture(path, color_key)
+    }
+
+    /// Number of textures uploaded.
+    pub fn texture_count(&self) -> usize {
+        self.bank.texture_count()
+    }
+
+    /// Files referenced by the scene that could not be loaded, with the
+    /// reason; the scene is still shown without them.
+    pub fn missing(&self) -> &[(String, String)] {
+        self.bank.missing()
     }
 
     /// Every entity of the scene: layer nodes in order, then free ones.
@@ -343,6 +478,12 @@ impl SceneView {
             .position(|e| e.name.eq_ignore_ascii_case(name))
     }
 
+    /// The regions of the main layer containing a point, last node
+    /// first, up to the engine's limit of nine (`GetRegionsAt`).
+    pub fn regions_at(&self, x: i32, y: i32) -> Vec<(usize, usize)> {
+        regions_at(&self.scene, x, y)
+    }
+
     /// The animation state of an entity, if it has been shown.
     pub fn anim(&self, r: EntityRef) -> Option<&AnimState> {
         self.anims.get(&r)
@@ -354,9 +495,9 @@ impl SceneView {
         let state = self
             .anims
             .entry(r)
-            .or_insert_with(|| AnimState::new(sprite.clone()));
+            .or_insert_with(|| AnimState::new(&sprite));
         if state.sprite != sprite {
-            *state = AnimState::new(sprite);
+            *state = AnimState::new(&sprite);
         }
         Some(state)
     }
@@ -369,7 +510,8 @@ impl SceneView {
     }
 
     /// Advances the animations of the active entities to `timer` (the
-    /// game timer, in milliseconds).
+    /// game timer, in milliseconds), applying the `MOVE` of each frame
+    /// that becomes current to its entity.
     pub fn advance(&mut self, timer: u64) {
         for r in self.entity_refs() {
             let Some(entity) = self.entity(r) else {
@@ -378,46 +520,24 @@ impl SceneView {
             if !entity.active || entity.kind != EntityKind::Normal {
                 continue;
             }
-            let Some(path) = entity.sprite.clone() else {
+            let Some(sprite_key) = self.anim_mut(r).map(|s| s.sprite.clone()) else {
                 continue;
             };
-            let (frames, looping, delay_of): (usize, bool, Vec<u64>) = match self.sprite(&path) {
-                Some(loaded) => (
-                    loaded.sprite.frames.len(),
-                    loaded.sprite.looping,
-                    loaded
-                        .sprite
-                        .frames
-                        .iter()
-                        .map(|f| u64::from(f.delay_ms))
-                        .collect(),
-                ),
-                None => continue,
+            let (changed, move_x, move_y) = {
+                let Some(loaded) = self.bank.sprites.get(&sprite_key) else {
+                    continue;
+                };
+                let Some(state) = self.anims.get_mut(&r) else {
+                    continue;
+                };
+                let changed = state.step(&loaded.sprite, timer);
+                (changed, state.move_x, state.move_y)
             };
-            if frames == 0 {
-                continue;
-            }
-            let Some(state) = self.anim_mut(r) else {
-                continue;
-            };
-            let looping = state.looping.unwrap_or(looping);
-            state.current_frame = state.current_frame.min(frames - 1);
-            if !state.paused
-                && !state.finished
-                && state.last_frame_time != 0
-                && timer >= state.last_frame_time + delay_of[state.current_frame]
-            {
-                if state.current_frame < frames - 1 {
-                    state.current_frame += 1;
-                } else if looping {
-                    state.current_frame = 0;
-                } else {
-                    state.finished = true;
+            if changed && (move_x != 0 || move_y != 0) {
+                if let Some(entity) = self.entity_mut(r) {
+                    entity.x += move_x;
+                    entity.y += move_y;
                 }
-                state.last_frame_time = timer;
-            }
-            if state.last_frame_time == 0 {
-                state.last_frame_time = timer;
             }
         }
     }
@@ -430,8 +550,52 @@ impl SceneView {
     /// Fills a draw list with the scene as seen by `camera`, showing the
     /// frames the animations are at (see [`SceneView::advance`]).
     pub fn draw<'a>(&'a self, list: &mut DrawList<'a>, camera: &Camera) {
+        self.draw_with(list, camera, &[]);
+    }
+
+    /// Like [`SceneView::draw`], with other objects (actors) drawn among
+    /// the free entities: an object standing in a walkable region of the
+    /// main layer is drawn right after that region, in `y` order with
+    /// the others; the rest follow the main layer's nodes.
+    pub fn draw_with<'a>(
+        &'a self,
+        list: &mut DrawList<'a>,
+        camera: &Camera,
+        others: &[Drawable<'a>],
+    ) {
         let scene = &self.scene;
-        let mut drawn = vec![false; scene.free_entities.len()];
+        // Free objects: the others first, then the scene's free entities,
+        // as the engine lists them.
+        let mut objects: Vec<Drawable<'a>> = others
+            .iter()
+            .map(|d| Drawable {
+                x: d.x,
+                y: d.y,
+                sprite: d.sprite,
+                bank: d.bank,
+                frame: d.frame,
+                scale: d.scale,
+                tint: d.tint,
+            })
+            .collect();
+        for (i, e) in scene.free_entities.iter().enumerate() {
+            if let Some(d) = self.drawable(EntityRef::Free(i), e) {
+                objects.push(d);
+            }
+        }
+        let mut drawn = vec![false; objects.len()];
+        let mut draw_in = |list: &mut DrawList<'a>, region: Option<&Region>| {
+            let mut inside: Vec<usize> = (0..objects.len())
+                .filter(|&i| {
+                    !drawn[i] && region.is_none_or(|r| r.contains(objects[i].x, objects[i].y))
+                })
+                .collect();
+            inside.sort_by_key(|&i| objects[i].y);
+            for i in inside {
+                drawn[i] = true;
+                draw_object(list, &objects[i]);
+            }
+        };
         for (li, layer) in scene.layers.iter().enumerate() {
             if !layer.active {
                 continue;
@@ -440,67 +604,100 @@ impl SceneView {
             list.set_offset(-ox, -oy);
             for (ni, node) in layer.nodes.iter().enumerate() {
                 match node {
-                    SceneNode::Entity(entity) => self.draw_entity(
-                        list,
-                        EntityRef::Node {
+                    SceneNode::Entity(entity) => {
+                        let r = EntityRef::Node {
                             layer: li,
                             index: ni,
-                        },
-                        entity,
-                    ),
+                        };
+                        if let Some(d) = self.drawable(r, entity) {
+                            draw_object(list, &d);
+                        }
+                    }
                     SceneNode::Region(region) => {
                         if region.blocked || region.decoration || !region.active {
                             continue;
                         }
-                        let mut inside: Vec<usize> = (0..drawn.len())
-                            .filter(|&i| {
-                                let e = &scene.free_entities[i];
-                                !drawn[i] && e.active && region.contains(e.x, e.y)
-                            })
-                            .collect();
-                        inside.sort_by_key(|&i| scene.free_entities[i].y);
-                        for i in inside {
-                            drawn[i] = true;
-                            self.draw_entity(list, EntityRef::Free(i), &scene.free_entities[i]);
-                        }
+                        draw_in(list, Some(region));
                     }
                 }
             }
             if layer.main {
-                let mut rest: Vec<usize> = (0..drawn.len())
-                    .filter(|&i| !drawn[i] && scene.free_entities[i].active)
-                    .collect();
-                rest.sort_by_key(|&i| scene.free_entities[i].y);
-                for i in rest {
-                    drawn[i] = true;
-                    self.draw_entity(list, EntityRef::Free(i), &scene.free_entities[i]);
-                }
+                draw_in(list, None);
             }
         }
         list.set_offset(0.0, 0.0);
     }
 
-    fn draw_entity<'a>(&'a self, list: &mut DrawList<'a>, r: EntityRef, entity: &Entity) {
+    fn drawable<'a>(&'a self, r: EntityRef, entity: &'a Entity) -> Option<Drawable<'a>> {
         if !entity.active || entity.kind != EntityKind::Normal {
-            return;
+            return None;
         }
-        let Some(loaded) = entity.sprite.as_deref().and_then(|p| self.sprite(p)) else {
-            return;
-        };
+        let loaded = entity.sprite.as_deref().and_then(|p| self.sprite(p))?;
         if loaded.sprite.frames.is_empty() {
-            return;
+            return None;
         }
-        let frame = self.frame_of(r).min(loaded.sprite.frames.len() - 1);
-        let scale = self.scene.entity_scale(entity) / 100.0;
-        let tint = self.scene.entity_tint(entity);
-        for sub in &loaded.sprite.frames[frame].subframes {
-            let Some(image) = &sub.image else { continue };
-            let Some(texture) = self.texture(image, sub.color_key) else {
-                continue;
-            };
-            list.push(place(sub, texture, entity.x, entity.y, scale, tint));
-        }
+        Some(Drawable {
+            x: entity.x,
+            y: entity.y,
+            sprite: Some(loaded),
+            bank: &self.bank,
+            frame: self.frame_of(r),
+            scale: self.scene.entity_scale(entity),
+            tint: self.scene.entity_tint(entity),
+        })
     }
+}
+
+/// The regions of a scene's main layer containing a point, as
+/// `(layer, node)` pairs, last node first, up to the engine's limit of
+/// nine (`CAdScene::GetRegionsAt`).
+pub fn regions_at(scene: &Scene, x: i32, y: i32) -> Vec<(usize, usize)> {
+    let Some(main) = scene.layers.iter().rposition(|l| l.main) else {
+        return Vec::new();
+    };
+    scene.layers[main]
+        .nodes
+        .iter()
+        .enumerate()
+        .rev()
+        .filter_map(|(i, node)| match node {
+            SceneNode::Region(r) if r.active && r.contains(x, y) => Some((main, i)),
+            _ => None,
+        })
+        .take(9)
+        .collect()
+}
+
+/// Draws an object's current frame.
+pub fn draw_object<'a>(list: &mut DrawList<'a>, d: &Drawable<'a>) {
+    let Some(loaded) = d.sprite else { return };
+    if loaded.sprite.frames.is_empty() {
+        return;
+    }
+    let frame = d.frame.min(loaded.sprite.frames.len() - 1);
+    for sub in &loaded.sprite.frames[frame].subframes {
+        let Some(image) = &sub.image else { continue };
+        let Some(texture) = d.bank.texture(image, sub.color_key) else {
+            continue;
+        };
+        list.push(place(sub, texture, d.x, d.y, d.scale / 100.0, d.tint));
+    }
+}
+
+/// The height of a sprite's frame as the engine measures it
+/// (`CAdObject::GetHeight`): the largest hotspot `y` of its sub-frames,
+/// scaled by `zoom` percent.
+pub fn frame_height(sprite: &Sprite, frame: usize, zoom: f32) -> i32 {
+    let Some(frame) = sprite.frames.get(frame) else {
+        return 0;
+    };
+    let height = frame
+        .subframes
+        .iter()
+        .map(|s| s.hotspot_y)
+        .max()
+        .unwrap_or(0);
+    (height as f32 * zoom / 100.0) as i32
 }
 
 /// Where and how a sub-frame is drawn for an owner at `(x, y)` with a

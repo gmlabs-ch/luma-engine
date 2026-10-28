@@ -1,7 +1,8 @@
 //! The properties and methods of the native objects, as scripts call
 //! them: `Game`, `Scene`, layers, entities, regions, sprites and the
-//! keyboard. Methods of later milestones (sound, walking, talking,
-//! inventory, windows, saving) are accepted and logged once.
+//! keyboard; actors are in `natives_actor.rs`. Methods of later
+//! milestones (sound, talking, inventory, windows, saving) are accepted
+//! and logged once.
 //!
 //! Written with reference to the `ScGetProperty`, `ScSetProperty` and
 //! `ScCallMethod` methods of `BGame.cpp`, `AdGame.cpp`, `AdScene.cpp`,
@@ -12,10 +13,10 @@
 
 use luma_formats::Rgba;
 use luma_formats::scene::Direction;
-use luma_script::{Context, NativeId, Return, State, Value, rgba};
+use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 
 use crate::objects::Kind;
-use crate::scene_view::EntityRef;
+use crate::scene_view::{EntityRef, frame_height};
 use crate::world::World;
 
 /// `AlphaColor`: the engine's `0xAARRGGBB` integer.
@@ -190,6 +191,7 @@ impl World {
             Kind::Entity(r) => self.entity_get(r, name),
             Kind::Region { layer, index } => self.region_get(layer, index, name),
             Kind::Sprite(owner) => self.sprite_get(owner, name),
+            Kind::Actor => self.actor_get(id, name),
             Kind::Inert(kind) => match name {
                 "Type" => Some(Value::from(kind.to_ascii_lowercase())),
                 "Name" => Some(Value::from(kind)),
@@ -212,6 +214,7 @@ impl World {
             Kind::Entity(r) => self.entity_set(r, name, value),
             Kind::Region { layer, index } => self.region_set(layer, index, name, value),
             Kind::Sprite(owner) => self.sprite_set(owner, name, value),
+            Kind::Actor => self.actor_set(id, name, value),
             Kind::Keyboard | Kind::Inert(_) => false,
         }
     }
@@ -225,20 +228,22 @@ impl World {
         ctx: Context<'_>,
     ) -> Option<Return> {
         let kind = self.native(id)?.kind.clone();
-        if let Some(ret) = self.holder_call(id, name, args, ctx) {
+        let mut ctx = ctx;
+        if let Some(ret) = self.holder_call(id, name, args, &mut ctx) {
             return Some(ret);
         }
         match kind {
-            Kind::Game => self.game_call(name, args),
+            Kind::Game => self.game_call(name, args, ctx),
             Kind::Keyboard => match name {
                 "IsKeyDown" => Some(Return::value(false)),
                 _ => None,
             },
-            Kind::Scene => self.scene_call(name, args),
+            Kind::Scene => self.scene_call(name, args, ctx),
             Kind::Layer(index) => self.layer_call(index, name, args),
             Kind::Entity(r) => self.entity_call(id, r, name, args),
             Kind::Region { layer, index } => self.region_call(layer, index, name, args),
             Kind::Sprite(owner) => self.sprite_call(owner, name),
+            Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
                     let widget = self.inert("Widget");
@@ -258,7 +263,7 @@ impl World {
         id: NativeId,
         name: &str,
         args: &[Value],
-        ctx: Context<'_>,
+        ctx: &mut Context<'_>,
     ) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         Some(match name {
@@ -378,7 +383,7 @@ impl World {
         true
     }
 
-    fn game_call(&mut self, name: &str, args: &[Value]) -> Option<Return> {
+    fn game_call(&mut self, name: &str, args: &[Value], ctx: Context<'_>) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         Some(match name {
             "ChangeScene" => {
@@ -396,15 +401,12 @@ impl World {
                 Return::value(Value::Native(id))
             }
             "LoadActor" => {
-                self.stub("Game.LoadActor");
-                let id = self.inert("Actor");
-                Return::value(Value::Native(id))
+                let path = arg(0).get_string(self);
+                Return::value(native_or_null(self.load_actor(ctx.engine, &path, false)))
             }
             "UnloadObject" | "UnloadActor" | "UnloadEntity" | "DeleteEntity" => {
                 if let Some(id) = arg(0).as_native() {
-                    if matches!(self.native(id).map(|n| &n.kind), Some(Kind::Inert(_))) {
-                        self.objects.remove(id);
-                    }
+                    self.unload_object(ctx.engine, id);
                 }
                 Return::null()
             }
@@ -500,13 +502,15 @@ impl World {
             "OffsetY" => Value::Int(self.offset_y),
             "Width" => Value::Int(view.map_or(0, |v| v.scene.width())),
             "Height" => Value::Int(view.map_or(0, |v| v.scene.height())),
-            "AutoScroll" => Value::Bool(true),
+            "AutoScroll" => Value::Bool(self.auto_scroll),
             "PersistentState" => Value::Bool(view.is_some_and(|v| v.scene.persistent_state)),
             "PersistentStateSprites" => {
                 Value::Bool(view.is_none_or(|v| v.scene.persistent_state_sprites))
             }
-            "ScrollPixelsX" | "ScrollPixelsY" => Value::Int(1),
-            "ScrollSpeedX" | "ScrollSpeedY" => Value::Int(10),
+            "ScrollPixelsX" => Value::Int(self.scroll_pixels_x),
+            "ScrollPixelsY" => Value::Int(self.scroll_pixels_y),
+            "ScrollSpeedX" => Value::Int(self.scroll_time_x as i32),
+            "ScrollSpeedY" => Value::Int(self.scroll_time_y as i32),
             _ => return None,
         })
     }
@@ -519,8 +523,19 @@ impl World {
                     view.scene.name = name;
                 }
             }
-            "OffsetX" => self.offset_x = value.get_int(self),
-            "OffsetY" => self.offset_y = value.get_int(self),
+            "OffsetX" => {
+                self.offset_x = value.get_int(self);
+                self.target_offset_x = self.offset_x;
+            }
+            "OffsetY" => {
+                self.offset_y = value.get_int(self);
+                self.target_offset_y = self.offset_y;
+            }
+            "AutoScroll" => self.auto_scroll = value.get_bool(self),
+            "ScrollPixelsX" => self.scroll_pixels_x = value.get_int(self),
+            "ScrollPixelsY" => self.scroll_pixels_y = value.get_int(self),
+            "ScrollSpeedX" => self.scroll_time_x = value.get_int(self).max(0) as u64,
+            "ScrollSpeedY" => self.scroll_time_y = value.get_int(self).max(0) as u64,
             "PersistentState" => {
                 let v = value.get_bool(self);
                 if let Some(view) = self.scene_mut() {
@@ -533,15 +548,24 @@ impl World {
                     view.scene.persistent_state_sprites = v;
                 }
             }
-            "AutoScroll" | "ScrollPixelsX" | "ScrollPixelsY" | "ScrollSpeedX" | "ScrollSpeedY" => {}
             _ => return false,
         }
         true
     }
 
-    fn scene_call(&mut self, name: &str, args: &[Value]) -> Option<Return> {
+    fn scene_call(&mut self, name: &str, args: &[Value], ctx: Context<'_>) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         Some(match name {
+            "LoadActor" => {
+                let path = arg(0).get_string(self);
+                Return::value(native_or_null(self.load_actor(ctx.engine, &path, true)))
+            }
+            "UnloadObject" | "UnloadActor" | "UnloadEntity" | "UnloadActor3D" | "DeleteEntity" => {
+                if let Some(id) = arg(0).as_native() {
+                    self.unload_object(ctx.engine, id);
+                }
+                Return::null()
+            }
             "GetNode" => {
                 let node_name = arg(0).get_string(self);
                 Return::value(native_or_null(self.find_node(&node_name)))
@@ -636,22 +660,33 @@ impl World {
                     Some(id) => self.position_of(id).unwrap_or((0, 0)),
                     None => (arg(0).get_int(self), arg(1).get_int(self)),
                 };
-                self.skip_to(x, y);
-                Return::null()
+                match name {
+                    "SkipTo" => {
+                        self.skip_to(x, y);
+                        Return::null()
+                    }
+                    "ScrollTo" => {
+                        self.scroll_to(x, y);
+                        Return::effect(Effect::WaitFor(self.scene_id))
+                    }
+                    _ => {
+                        self.scroll_to(x, y);
+                        Return::null()
+                    }
+                }
             }
-            "IsScrolling" => Return::value(false),
+            "IsScrolling" => Return::value(!self.is_scrolled()),
             "IsPointInViewport" => {
                 let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
                 let (w, h) = (self.settings().width as i32, self.settings().height as i32);
                 Return::value(x >= 0 && y >= 0 && x < w && y < h)
             }
-            "GetWaypointGroup" | "LoadActor" | "LoadEntity" | "CreateEntity" | "AddLayer"
-            | "InsertLayer" => {
+            "GetWaypointGroup" | "LoadEntity" | "CreateEntity" | "AddLayer" | "InsertLayer" => {
                 self.stub(&format!("Scene.{name}"));
                 Return::null()
             }
-            "UnloadObject" | "DeleteLayer" | "SetViewport" | "FadeOut" | "FadeOutAsync"
-            | "FadeIn" | "FadeInAsync" => {
+            "DeleteLayer" | "SetViewport" | "FadeOut" | "FadeOutAsync" | "FadeIn"
+            | "FadeInAsync" => {
                 self.stub(&format!("Scene.{name}"));
                 Return::null()
             }
@@ -660,25 +695,9 @@ impl World {
         })
     }
 
-    /// The position of an entity or region, for `SkipTo(object)`.
-    fn position_of(&self, id: NativeId) -> Option<(i32, i32)> {
-        match &self.native(id)?.kind {
-            Kind::Entity(r) => {
-                let e = self.scene()?.entity(*r)?;
-                Some((e.x, e.y - self.entity_height(*r) / 2))
-            }
-            Kind::Region { layer, index } => {
-                let r = self.scene()?.region(*layer, *index)?;
-                let b = r.bounds()?;
-                Some((b.left, b.top))
-            }
-            _ => None,
-        }
-    }
-
-    /// The height of an entity's current frame, when its sub-frame has a
-    /// rectangle; 0 otherwise (`GetHeight`).
-    fn entity_height(&self, r: EntityRef) -> i32 {
+    /// The height of an entity's current frame (`CAdObject::GetHeight`):
+    /// the largest hotspot `y` of its sub-frames, scaled with the entity.
+    pub(crate) fn entity_height(&self, r: EntityRef) -> i32 {
         let Some(view) = self.scene() else { return 0 };
         let Some(entity) = view.entity(r) else {
             return 0;
@@ -686,16 +705,12 @@ impl World {
         let Some(loaded) = entity.sprite.as_deref().and_then(|p| view.sprite(p)) else {
             return 0;
         };
-        let frame = view
-            .frame_of(r)
-            .min(loaded.sprite.frames.len().saturating_sub(1));
-        loaded
-            .sprite
-            .frames
-            .get(frame)
-            .and_then(|f| f.subframes.first())
-            .and_then(|s| s.rect)
-            .map_or(0, |rect| rect.height() as i32)
+        let zoom = if entity.scalable {
+            view.scene.zoom_at(entity.x, entity.y)
+        } else {
+            100.0
+        };
+        frame_height(&loaded.sprite, view.frame_of(r), zoom)
     }
 
     // ----------------------------------------------------------------

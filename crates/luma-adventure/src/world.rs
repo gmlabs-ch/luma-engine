@@ -10,12 +10,14 @@
 use std::collections::HashSet;
 
 use luma_archive::Vfs;
-use luma_formats::{GameFile, StringTable};
+use luma_formats::{GameFile, Scene, StringTable};
 use luma_script::{Context, Engine, Host, NativeId, Natives, Return, State, Value};
 
+use crate::actor::{Actor, ActorEvent, WalkContext, scene_obstacles};
 use crate::error::{Error, Result};
 use crate::objects::{Kind, Native, Objects};
-use crate::scene_view::{Camera, SceneView};
+use crate::path::Floor;
+use crate::scene_view::{Camera, Drawable, SceneView};
 use crate::settings::GameSettings;
 
 /// The game as scripts see it. Implements the script engine's [`Host`].
@@ -34,6 +36,17 @@ pub struct World {
     pub(crate) scheduled_scene: Option<(String, bool)>,
     pub(crate) offset_x: i32,
     pub(crate) offset_y: i32,
+    pub(crate) target_offset_x: i32,
+    pub(crate) target_offset_y: i32,
+    pub(crate) auto_scroll: bool,
+    pub(crate) scroll_pixels_x: i32,
+    pub(crate) scroll_pixels_y: i32,
+    pub(crate) scroll_time_x: u64,
+    pub(crate) scroll_time_y: u64,
+    last_scroll_x: u64,
+    last_scroll_y: u64,
+    pub(crate) actors: Vec<(NativeId, Actor)>,
+    pending_events: Vec<(NativeId, &'static str)>,
     pub(crate) interactive: bool,
     pub(crate) main_object: Option<NativeId>,
     pub(crate) quit: bool,
@@ -77,6 +90,17 @@ impl World {
             scheduled_scene: None,
             offset_x: 0,
             offset_y: 0,
+            target_offset_x: 0,
+            target_offset_y: 0,
+            auto_scroll: true,
+            scroll_pixels_x: 1,
+            scroll_pixels_y: 1,
+            scroll_time_x: 10,
+            scroll_time_y: 10,
+            last_scroll_x: 0,
+            last_scroll_y: 0,
+            actors: Vec::new(),
+            pending_events: Vec::new(),
             interactive: true,
             main_object: None,
             quit: false,
@@ -266,8 +290,280 @@ impl World {
                 .unwrap_or_default(),
             Some(Kind::Keyboard) => "keyboard".to_string(),
             Some(Kind::Sprite(_)) => "sprite".to_string(),
+            Some(Kind::Actor) => self
+                .actor(id)
+                .map(|a| a.def.name.clone())
+                .unwrap_or_default(),
             Some(Kind::Inert(kind)) => kind.clone(),
             None => "invalid".to_string(),
+        }
+    }
+
+    /// An actor by handle.
+    pub fn actor(&self, id: NativeId) -> Option<&Actor> {
+        self.actors.iter().find(|(i, _)| *i == id).map(|(_, a)| a)
+    }
+
+    /// An actor by handle, mutable.
+    pub fn actor_mut(&mut self, id: NativeId) -> Option<&mut Actor> {
+        self.actors
+            .iter_mut()
+            .find(|(i, _)| *i == id)
+            .map(|(_, a)| a)
+    }
+
+    /// An actor, mutable, with the game's files, for loading sprites.
+    pub(crate) fn actor_and_vfs(&mut self, id: NativeId) -> Option<(&Vfs, &mut Actor)> {
+        let vfs = &self.vfs;
+        let actor = self
+            .actors
+            .iter_mut()
+            .find(|(i, _)| *i == id)
+            .map(|(_, a)| a)?;
+        Some((vfs, actor))
+    }
+
+    /// The handles of the actors, the game's then the scene's, in load
+    /// order.
+    pub fn actor_ids(&self) -> Vec<NativeId> {
+        self.actors.iter().map(|(id, _)| *id).collect()
+    }
+
+    /// Loads an actor (`Game.LoadActor`, `Scene.LoadActor`) and attaches
+    /// its scripts; `None` when the file cannot be loaded.
+    pub fn load_actor(
+        &mut self,
+        engine: &mut Engine,
+        path: &str,
+        scene_bound: bool,
+    ) -> Option<NativeId> {
+        let actor = match Actor::load(&self.vfs, path, scene_bound) {
+            Ok(actor) => actor,
+            Err(err) => {
+                self.log(format!("Error loading ACTOR file '{path}': {err}"));
+                return None;
+            }
+        };
+        for (file, reason) in actor.bank.missing() {
+            self.log(format!("  missing: {file}: {reason}"));
+        }
+        let id = self.objects.insert(Kind::Actor);
+        if let Some(native) = self.objects.get_mut(id) {
+            for property in &actor.def.properties {
+                native
+                    .props
+                    .insert(property.name.clone(), Value::from(property.value.clone()));
+            }
+        }
+        let scripts = actor.def.scripts.clone();
+        self.actors.push((id, actor));
+        for script in scripts {
+            self.attach(engine, id, &script);
+        }
+        Some(id)
+    }
+
+    /// Removes an object scripts created (`Game.UnloadObject`): an actor
+    /// or an inert object, with its scripts. Returns whether the handle
+    /// named one.
+    pub fn unload_object(&mut self, engine: &mut Engine, id: NativeId) -> bool {
+        match self.objects.get(id).map(|n| &n.kind) {
+            Some(Kind::Actor | Kind::Inert(_)) => {}
+            _ => return false,
+        }
+        for script in engine.scripts_of(id) {
+            engine.finish(script, true);
+        }
+        self.actors.retain(|(i, _)| *i != id);
+        if self.main_object == Some(id) {
+            self.main_object = None;
+        }
+        self.objects.remove(id);
+        true
+    }
+
+    /// The floor an actor walks on: the scene, the polygons of the other
+    /// active objects, and every waypoint but its own.
+    fn obstacles_for(
+        &self,
+        id: NativeId,
+    ) -> (Vec<Vec<luma_formats::Point>>, Vec<luma_formats::Point>) {
+        let Some(view) = &self.scene else {
+            return (Vec::new(), Vec::new());
+        };
+        let (mut blockers, mut waypoints) = scene_obstacles(&view.scene);
+        for (other, actor) in &self.actors {
+            if *other == id || !actor.def.active {
+                continue;
+            }
+            if let Some(polygon) = actor.block_polygon(&view.scene) {
+                blockers.push(polygon);
+            }
+            waypoints.extend(actor.waypoints(&view.scene));
+        }
+        (blockers, waypoints)
+    }
+
+    /// Runs a closure with the floor seen by an actor.
+    pub(crate) fn with_floor<T>(
+        &mut self,
+        id: NativeId,
+        f: impl FnOnce(&mut Actor, &Floor<'_>) -> T,
+    ) -> Option<T> {
+        let (blockers, waypoints) = self.obstacles_for(id);
+        let empty = Scene::default();
+        let scene = self.scene.as_ref().map_or(&empty, |v| &v.scene);
+        let floor = Floor {
+            scene,
+            blockers: &blockers,
+            waypoints: &waypoints,
+        };
+        let actor = self
+            .actors
+            .iter_mut()
+            .find(|(i, _)| *i == id)
+            .map(|(_, a)| a)?;
+        Some(f(actor, &floor))
+    }
+
+    /// Queues an event an update raised, applied by
+    /// [`World::apply_pending_events`].
+    pub(crate) fn queue_events(&mut self, owner: NativeId, events: Vec<ActorEvent>) {
+        for event in events {
+            match event {
+                ActorEvent::OnActor(name) => self.pending_events.push((owner, name)),
+                ActorEvent::OnRegion {
+                    layer,
+                    index,
+                    event,
+                } => {
+                    if let Some(region) = self.region_id(layer, index) {
+                        self.pending_events.push((region, event));
+                    }
+                }
+            }
+        }
+    }
+
+    /// One frame of every active actor (`CAdScene::UpdateFreeObjects`):
+    /// walks, turns and animations progress, then the view follows the
+    /// main object. The events raised are queued.
+    pub fn update_actors(&mut self) {
+        let timer = self.timer;
+        for id in self.actor_ids() {
+            if !self.actor(id).is_some_and(|a| a.def.active) {
+                continue;
+            }
+            let mut events = Vec::new();
+            self.with_floor(id, |actor, floor| {
+                let ctx = WalkContext {
+                    floor: Floor {
+                        scene: floor.scene,
+                        blockers: floor.blockers,
+                        waypoints: floor.waypoints,
+                    },
+                    timer,
+                };
+                actor.update(&ctx, &mut events);
+            });
+            self.queue_events(id, events);
+        }
+        if self.auto_scroll {
+            if let Some(main) = self.main_object.filter(|id| self.objects.contains(*id)) {
+                if let Some((x, y)) = self.position_of(main) {
+                    self.scroll_to(x, y);
+                }
+            }
+        }
+    }
+
+    /// Raises the queued events on their objects.
+    pub fn apply_pending_events(&mut self, engine: &mut Engine) {
+        for (owner, event) in std::mem::take(&mut self.pending_events) {
+            if self.objects.contains(owner) {
+                engine.apply_event(self, owner, event, false);
+            }
+        }
+    }
+
+    /// Moves the view towards its target (`CAdScene::TraverseNodes`):
+    /// `scroll_pixels` every `scroll_time` milliseconds, each axis on its
+    /// own clock.
+    pub fn scroll_step(&mut self) {
+        if !self.auto_scroll {
+            return;
+        }
+        if self.timer.saturating_sub(self.last_scroll_x) >= self.scroll_time_x {
+            self.last_scroll_x = self.timer;
+            if self.offset_x < self.target_offset_x {
+                self.offset_x = (self.offset_x + self.scroll_pixels_x).min(self.target_offset_x);
+            } else if self.offset_x > self.target_offset_x {
+                self.offset_x = (self.offset_x - self.scroll_pixels_x).max(self.target_offset_x);
+            }
+        }
+        if self.timer.saturating_sub(self.last_scroll_y) >= self.scroll_time_y {
+            self.last_scroll_y = self.timer;
+            if self.offset_y < self.target_offset_y {
+                self.offset_y = (self.offset_y + self.scroll_pixels_y).min(self.target_offset_y);
+            } else if self.offset_y > self.target_offset_y {
+                self.offset_y = (self.offset_y - self.scroll_pixels_y).max(self.target_offset_y);
+            }
+        }
+    }
+
+    /// Whether the view has reached its scroll target.
+    pub fn is_scrolled(&self) -> bool {
+        !self.auto_scroll
+            || (self.offset_x == self.target_offset_x && self.offset_y == self.target_offset_y)
+    }
+
+    /// The position of an object, raised by half its height for actors
+    /// and entities, as the view centres on it (`ScrollToObject`).
+    pub(crate) fn position_of(&self, id: NativeId) -> Option<(i32, i32)> {
+        match &self.native(id)?.kind {
+            Kind::Actor => {
+                let actor = self.actor(id)?;
+                let height = self.scene.as_ref().map_or(0, |v| actor.height(&v.scene));
+                Some((actor.x, actor.y - height / 2))
+            }
+            Kind::Entity(r) => {
+                let e = self.scene()?.entity(*r)?;
+                Some((e.x, e.y - self.entity_height(*r) / 2))
+            }
+            Kind::Region { layer, index } => {
+                let r = self.scene()?.region(*layer, *index)?;
+                let b = r.bounds()?;
+                Some((b.left, b.top))
+            }
+            _ => None,
+        }
+    }
+
+    /// The actors as drawn this frame, the game's then the scene's.
+    pub fn drawables(&self) -> Vec<Drawable<'_>> {
+        let Some(view) = &self.scene else {
+            return Vec::new();
+        };
+        self.actors
+            .iter()
+            .filter_map(|(_, a)| a.drawable(&view.scene))
+            .collect()
+    }
+
+    /// Fills a draw list with the scene and the actors.
+    pub fn draw<'a>(&'a self, list: &mut luma_render::DrawList<'a>, camera: &Camera) {
+        if let Some(view) = &self.scene {
+            view.draw_with(list, camera, &self.drawables());
+        }
+    }
+
+    /// Uploads the textures of the scene and of the actors.
+    pub fn upload(&mut self, renderer: &luma_render::Renderer) {
+        if let Some(view) = self.scene.as_mut() {
+            view.upload(&self.vfs, renderer);
+        }
+        for (_, actor) in &mut self.actors {
+            actor.bank.upload(&self.vfs, renderer);
         }
     }
 
@@ -283,17 +579,36 @@ impl World {
             self.prev_scene_filename = filename;
         }
         // Objects of the old scene, and the scripts attached to them.
+        let scene_actors: Vec<NativeId> = self
+            .actors
+            .iter()
+            .filter(|(_, a)| a.scene_bound)
+            .map(|(id, _)| *id)
+            .collect();
         let gone: Vec<NativeId> = self
             .objects
             .iter()
-            .filter(|(_, n)| {
+            .filter(|(id, n)| {
                 matches!(
                     n.kind,
                     Kind::Layer(_) | Kind::Entity(_) | Kind::Region { .. } | Kind::Sprite(_)
-                )
+                ) || scene_actors.contains(id)
             })
             .map(|(id, _)| id)
             .collect();
+        self.actors.retain(|(id, _)| !scene_actors.contains(id));
+        if self
+            .main_object
+            .is_some_and(|id| scene_actors.contains(&id))
+        {
+            self.main_object = None;
+        }
+        // The game's actors are reset before the new scene loads.
+        for (id, actor) in &mut self.actors {
+            actor.reset();
+            engine.reset_object(*id);
+        }
+        self.pending_events.clear();
         for id in gone.iter().copied().chain([self.scene_id]) {
             for script in engine.scripts_of(id) {
                 engine.finish(script, true);
@@ -314,12 +629,17 @@ impl World {
             view.scene.layers.len(),
             view.scene.entities().count()
         ));
-        for (file, reason) in &view.missing {
+        for (file, reason) in view.missing() {
             self.log(format!("  missing: {file}: {reason}"));
         }
         self.offset_x = 0;
         self.offset_y = 0;
+        self.target_offset_x = 0;
+        self.target_offset_y = 0;
         self.scene = Some(view);
+        for (_, actor) in &mut self.actors {
+            actor.invalidate_regions();
+        }
 
         // Attach scripts in file order: the scene's, then each layer's and
         // its nodes', then the free entities'.
@@ -440,15 +760,34 @@ impl World {
         self.objects.get(id)
     }
 
-    /// Centres the view on a point (`Scene.SkipTo`), clamped to the scene.
-    pub fn skip_to(&mut self, x: i32, y: i32) {
+    /// The offset centring the view on a point, clamped to the scene.
+    fn centred_offset(&self, x: i32, y: i32) -> (i32, i32) {
         let (w, h) = (self.settings.width as i32, self.settings.height as i32);
         let (sw, sh) = match &self.scene {
             Some(view) => (view.scene.width(), view.scene.height()),
             None => (w, h),
         };
-        self.offset_x = (x - w / 2).max(0).min(sw - w);
-        self.offset_y = (y - h / 2).max(0).min(sh - h);
+        (
+            (x - w / 2).max(0).min(sw - w),
+            (y - h / 2).max(0).min(sh - h),
+        )
+    }
+
+    /// Centres the view on a point at once (`Scene.SkipTo`).
+    pub fn skip_to(&mut self, x: i32, y: i32) {
+        let (ox, oy) = self.centred_offset(x, y);
+        self.offset_x = ox;
+        self.offset_y = oy;
+        self.target_offset_x = ox;
+        self.target_offset_y = oy;
+    }
+
+    /// Scrolls the view towards a point (`Scene.ScrollTo`): the target
+    /// the auto-scroll moves to.
+    pub fn scroll_to(&mut self, x: i32, y: i32) {
+        let (ox, oy) = self.centred_offset(x, y);
+        self.target_offset_x = ox;
+        self.target_offset_y = oy;
     }
 }
 
@@ -462,6 +801,7 @@ impl Natives for World {
             Some(Kind::Entity(_)) => "entity".to_string(),
             Some(Kind::Region { .. }) => "region".to_string(),
             Some(Kind::Sprite(_)) => "sprite".to_string(),
+            Some(Kind::Actor) => "actor".to_string(),
             Some(Kind::Inert(kind)) => kind.to_ascii_lowercase(),
             None => String::new(),
         }
@@ -473,6 +813,7 @@ impl Natives for World {
             Some(Kind::Entity(_) | Kind::Region { .. } | Kind::Layer(_) | Kind::Scene) => {
                 format!("[{}]", self.describe(id))
             }
+            Some(Kind::Actor) => "[actor object]".to_string(),
             Some(_) => "[native object]".to_string(),
             None => "[invalid object]".to_string(),
         }
@@ -524,9 +865,12 @@ impl Host for World {
         self.objects.contains(id)
     }
 
-    fn is_ready(&self, _id: NativeId) -> bool {
-        // Nothing walks or talks yet.
-        true
+    fn is_ready(&self, id: NativeId) -> bool {
+        match self.objects.get(id).map(|n| &n.kind) {
+            Some(Kind::Actor) => self.actor(id).is_none_or(|a| a.ready),
+            Some(Kind::Scene) => self.is_scrolled(),
+            _ => true,
+        }
     }
 
     fn random(&mut self, from: i32, to: i32) -> i32 {
@@ -603,8 +947,10 @@ impl Runtime {
     }
 
     /// One frame: the clocks advance by `dt` milliseconds, a scheduled
-    /// scene change happens, the scripts run, the scene's animations
-    /// advance. Returns the log lines of the frame.
+    /// scene change happens, the scripts run, the scene's animations and
+    /// the actors advance, the view follows the main object, and the
+    /// events the actors raised reach their scripts. Returns the log
+    /// lines of the frame.
     pub fn tick(&mut self, dt: u64) -> Vec<String> {
         self.world.advance_time(dt);
         if let Some((path, _fade_in)) = self.world.scheduled_scene.take() {
@@ -618,6 +964,15 @@ impl Runtime {
         if let Some(scene) = self.world.scene.as_mut() {
             scene.advance(timer);
         }
+        self.world.update_actors();
+        self.world.scroll_step();
+        self.world.apply_pending_events(&mut self.engine);
         self.world.take_log()
+    }
+
+    /// Fills a draw list with the scene and the actors as they are now.
+    pub fn draw<'a>(&'a self, list: &mut luma_render::DrawList<'a>) {
+        let camera = self.world.camera();
+        self.world.draw(list, &camera);
     }
 }

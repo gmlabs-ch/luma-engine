@@ -155,11 +155,11 @@ fn loads_and_draws_a_scene_from_a_package() {
     assert_eq!(view.texture_count(), 0, "nothing uploaded yet");
     view.upload(&vfs, &renderer);
     assert_eq!(view.texture_count(), 3, "bg, red, green");
-    assert_eq!(view.missing.len(), 1);
+    assert_eq!(view.missing().len(), 1);
     assert!(
-        view.missing[0].0.ends_with("missing.sprite"),
+        view.missing()[0].0.ends_with("missing.sprite"),
         "{:?}",
-        view.missing
+        view.missing()
     );
     assert!(
         view.sprite("ART/PROP.SPRITE").is_some(),

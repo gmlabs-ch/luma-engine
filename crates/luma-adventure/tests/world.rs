@@ -24,12 +24,14 @@ fn temp_dir() -> std::path::PathBuf {
 enum Arg {
     Int(i32),
     Str(&'static str),
+    Var(&'static str),
 }
 
 fn push_arg(a: &mut Assembler, arg: &Arg) {
     match arg {
         Arg::Int(i) => a.push_int(*i),
         Arg::Str(s) => a.push_string(s),
+        Arg::Var(v) => a.push_var(v),
     }
 }
 
@@ -244,6 +246,94 @@ fn lamp_script() -> Vec<u8> {
     a.build()
 }
 
+fn floor_script() -> Vec<u8> {
+    let mut a = Assembler::new("scenes\\room\\floor.script");
+    let end = a.label();
+    a.jmp(end);
+    a.event("ActorEntry");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    get(&mut a, "this", "Name");
+    store(&mut a, "entered");
+    a.emit(Instruction::RetEvent);
+    a.bind(end);
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
+/// Loads an actor, walks, turns, plays an animation and scrolls, every
+/// synchronous call waiting for the actor.
+fn walk_script() -> Vec<u8> {
+    let mut a = Assembler::new("walk.script");
+    a.def_glob_var("result");
+    a.def_glob_var("Scene");
+    a.def_glob_var("actor");
+    get(&mut a, "Game", "Scene");
+    a.pop_var("Scene");
+    call(
+        &mut a,
+        "Game",
+        "LoadActor",
+        &[Arg::Str("actors\\bob.actor")],
+    );
+    a.pop_var("actor");
+    a.push_var("actor");
+    set(&mut a, "Game", "MainObject");
+    get(&mut a, "actor", "Type");
+    store(&mut a, "actorType");
+    get(&mut a, "actor", "Name");
+    store(&mut a, "actorName");
+    get(&mut a, "actor", "Direction");
+    store(&mut a, "dir0");
+    get(&mut a, "actor", "Mood");
+    store(&mut a, "mood");
+    call(&mut a, "actor", "GoTo", &[Arg::Int(50), Arg::Int(24)]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "actor", "X");
+    store(&mut a, "afterX");
+    get(&mut a, "actor", "Y");
+    store(&mut a, "afterY");
+    get(&mut a, "actor", "Direction");
+    store(&mut a, "dir1");
+    get(&mut a, "actor", "Height");
+    store(&mut a, "height");
+    call(&mut a, "actor", "TurnTo", &[Arg::Int(0)]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "actor", "Direction");
+    store(&mut a, "dir2");
+    a.def_var("lamp");
+    call(&mut a, "Scene", "GetNode", &[Arg::Str("lamp")]);
+    a.pop_var("lamp");
+    call(&mut a, "actor", "GoToObject", &[Arg::Var("lamp")]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "actor", "X");
+    store(&mut a, "objX");
+    get(&mut a, "actor", "Y");
+    store(&mut a, "objY");
+    get(&mut a, "actor", "Direction");
+    store(&mut a, "dir3");
+    call(&mut a, "actor", "IsWalking", &[]);
+    store(&mut a, "walking");
+    call(&mut a, "actor", "SkipTo", &[Arg::Int(5), Arg::Int(30)]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "actor", "X");
+    store(&mut a, "skipX");
+    call(&mut a, "actor", "PlayAnim", &[Arg::Str("art\\prop.sprite")]);
+    store(&mut a, "animStarted");
+    get(&mut a, "actor", "Ready");
+    store(&mut a, "animDone");
+    call(&mut a, "Scene", "ScrollTo", &[Arg::Var("actor")]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "Scene", "OffsetX");
+    store(&mut a, "scrolled");
+    call(&mut a, "actor", "GoToObject", &[Arg::Int(3)]);
+    store(&mut a, "badGoTo");
+    a.push_bool(true);
+    store(&mut a, "done");
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
 fn game() -> std::path::PathBuf {
     let dir = temp_dir();
     let mut pkg = PackageBuilder::new("data");
@@ -261,9 +351,30 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("scenes\\room\\scene_init.script", scene_init_script());
     pkg.add_file("scenes\\room\\scene_events.script", scene_events_script());
     pkg.add_file("scenes\\room\\lamp.script", lamp_script());
+    pkg.add_file("scenes\\room\\floor.script", floor_script());
+    pkg.add_file("walk.script", walk_script());
     pkg.add_file(
         "art\\prop.sprite",
         b"SPRITE { LOOPING=FALSE FRAME { DELAY=100 IMAGE=\"art\\red.png\" } FRAME { DELAY=100 IMAGE=\"art\\green.png\" } }".to_vec(),
+    );
+    pkg.add_file(
+        "art\\walk.sprite",
+        b"SPRITE { LOOPING=TRUE FRAME { DELAY=10 IMAGE=\"art\\red.png\" HOTSPOT {0,8} } }".to_vec(),
+    );
+    pkg.add_file(
+        "art\\stand.sprite",
+        b"SPRITE { LOOPING=TRUE FRAME { DELAY=100 IMAGE=\"art\\green.png\" HOTSPOT {0,8} } }"
+            .to_vec(),
+    );
+    pkg.add_file(
+        "actors\\bob.actor",
+        b"ACTOR {
+  NAME=\"bob\" X=10 Y=24 SCALABLE=FALSE
+  PROPERTY { NAME=\"Mood\" VALUE=\"calm\" }
+  WALK { SPRITESET { LEFT=\"art\\walk.sprite\" RIGHT=\"art\\walk.sprite\" } }
+  STAND { SPRITESET { LEFT=\"art\\stand.sprite\" } }
+}"
+        .to_vec(),
     );
     pkg.add_file(
         "scenes\\room.scene",
@@ -274,8 +385,8 @@ fn game() -> std::path::PathBuf {
   LAYER {
     NAME=\"main\" MAIN=TRUE WIDTH=200 HEIGHT=32
     ENTITY { NAME=\"prop\" X=8 Y=12 SPRITE=\"art\\prop.sprite\" }
-    REGION { NAME=\"floor\" POINT {0,16} POINT {200,16} POINT {200,32} POINT {0,32} }
-    ENTITY { NAME=\"lamp\" X=20 Y=20 SCRIPT=\"scenes\\room\\lamp.script\" }
+    REGION { NAME=\"floor\" SCRIPT=\"scenes\\room\\floor.script\" POINT {0,16} POINT {200,16} POINT {200,32} POINT {0,32} }
+    ENTITY { NAME=\"lamp\" X=20 Y=20 WALK_TO_X=30 WALK_TO_Y=20 WALK_TO_DIR=4 SCRIPT=\"scenes\\room\\lamp.script\" }
   }
 }"
         .to_vec(),
@@ -387,7 +498,7 @@ fn scripts_drive_the_game_and_its_scene() {
         .iter()
         .filter(|s| s.state() == State::Persistent)
         .count();
-    assert_eq!(persistent, 2, "scene_events and lamp");
+    assert_eq!(persistent, 3, "scene_events, lamp and floor");
     let lamp = runtime.world.find_node("LAMP").unwrap();
     assert!(matches!(
         runtime.world.objects().get(lamp).unwrap().kind,
@@ -458,6 +569,93 @@ fn sprite_objects_follow_the_animation() {
         runtime.world.get_property(sprite, "Owner"),
         Some(Value::Native(prop))
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn actors_walk_turn_and_scroll_the_view() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::new(vfs).unwrap();
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "walk.script")
+    );
+    let mut log = Vec::new();
+    let mut ticks = 0;
+    while result(&runtime, "done") != Value::Bool(true) && ticks < 400 {
+        log.extend(runtime.tick(16));
+        ticks += 1;
+    }
+    assert_eq!(result(&runtime, "done"), Value::Bool(true), "{log:?}");
+    assert_eq!(result(&runtime, "actorType"), Value::from("actor"));
+    assert_eq!(result(&runtime, "actorName"), Value::from("bob"));
+    assert_eq!(result(&runtime, "mood"), Value::from("calm"));
+    assert_eq!(
+        result(&runtime, "dir0"),
+        Value::Int(6),
+        "actors start facing left"
+    );
+    // GoTo waited for the walk: the actor is on the target, facing it.
+    assert_eq!(result(&runtime, "afterX"), Value::Int(50));
+    assert_eq!(result(&runtime, "afterY"), Value::Int(24));
+    assert_eq!(result(&runtime, "dir1"), Value::Int(2));
+    assert_eq!(result(&runtime, "height"), Value::Int(8));
+    assert_eq!(
+        result(&runtime, "dir2"),
+        Value::Int(0),
+        "TurnTo waited for the turn"
+    );
+    // GoToObject went to the lamp's walk-to point and direction.
+    assert_eq!(result(&runtime, "objX"), Value::Int(30));
+    assert_eq!(result(&runtime, "objY"), Value::Int(20));
+    assert_eq!(result(&runtime, "dir3"), Value::Int(4));
+    assert_eq!(result(&runtime, "walking"), Value::Bool(false));
+    assert_eq!(result(&runtime, "skipX"), Value::Int(5));
+    assert_eq!(result(&runtime, "animStarted"), Value::Bool(true));
+    assert_eq!(result(&runtime, "animDone"), Value::Bool(true));
+    // The view followed the main object to the left edge; ScrollTo
+    // waited for it.
+    assert_eq!(result(&runtime, "scrolled"), Value::Int(0));
+    assert_eq!(runtime.world.offset(), (0, 0));
+    assert_eq!(result(&runtime, "badGoTo"), Value::Null);
+    assert!(
+        log.iter()
+            .any(|l| l.contains("accepts an entity refrence only")),
+        "{log:?}"
+    );
+    assert_eq!(result(&runtime, "entered"), Value::from("floor"));
+    assert!(
+        ticks > 40,
+        "walking, turning, playing and scrolling took {ticks} ticks"
+    );
+    let errors = log
+        .iter()
+        .filter(|l| l.starts_with("Runtime error"))
+        .count();
+    assert_eq!(errors, 1, "{log:?}");
+
+    // The actor is a native the world knows, drawn with the scene.
+    let actor = runtime.engine.global("actor").unwrap().as_native().unwrap();
+    assert!(matches!(
+        runtime.world.objects().get(actor).unwrap().kind,
+        Kind::Actor
+    ));
+    assert_eq!(runtime.world.actor(actor).unwrap().def.name, "bob");
+    assert_eq!(runtime.world.drawables().len(), 1);
+
+    // A scene change keeps the game's actor; UnloadObject removes it.
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    assert!(runtime.world.objects().contains(actor));
+    assert_eq!(runtime.world.actor(actor).unwrap().x, 5);
+    assert!(runtime.world.unload_object(&mut runtime.engine, actor));
+    assert!(!runtime.world.objects().contains(actor));
+    assert!(runtime.world.actor(actor).is_none());
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

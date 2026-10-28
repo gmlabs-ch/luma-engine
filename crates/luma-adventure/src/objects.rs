@@ -30,6 +30,9 @@ pub enum Kind {
     },
     /// The sprite object of an entity (`GetSpriteObject`).
     Sprite(NativeId),
+    /// An actor (`Game.LoadActor`, `Scene.LoadActor`); its state lives in
+    /// the world's actor list.
+    Actor,
     /// A stand-in that keeps the properties scripts set and answers every
     /// method with `null`: windows, actors and other objects of later
     /// milestones.
