@@ -71,6 +71,52 @@ impl Direction {
     pub fn code(self) -> u8 {
         self as u8
     }
+
+    /// Every direction, in code order.
+    pub const ALL: [Direction; 8] = [
+        Direction::Up,
+        Direction::UpRight,
+        Direction::Right,
+        Direction::DownRight,
+        Direction::Down,
+        Direction::DownLeft,
+        Direction::Left,
+        Direction::UpLeft,
+    ];
+
+    /// The direction of a code from 0 to 7, as scripts set `Direction`;
+    /// `None` for any other value.
+    pub fn from_index(code: i64) -> Option<Direction> {
+        usize::try_from(code)
+            .ok()
+            .and_then(|i| Direction::ALL.get(i).copied())
+    }
+
+    /// The direction of an angle in degrees, `atan2` style with `y`
+    /// down and `0` pointing right (`CAdActor::AngleToDirection`).
+    pub fn from_angle(angle: i32) -> Direction {
+        match angle {
+            -111..=-67 => Direction::Up,
+            -66..=-22 => Direction::UpRight,
+            -21..=22 => Direction::Right,
+            23..=67 => Direction::DownRight,
+            68..=112 => Direction::Down,
+            113..=157 => Direction::DownLeft,
+            158..=180 | -180..=-157 => Direction::Left,
+            -156..=-112 => Direction::UpLeft,
+            _ => Direction::Down,
+        }
+    }
+
+    /// The next direction counter-clockwise (one step left).
+    pub fn left(self) -> Direction {
+        Direction::ALL[(usize::from(self.code()) + 7) % 8]
+    }
+
+    /// The next direction clockwise (one step right).
+    pub fn right(self) -> Direction {
+        Direction::ALL[(usize::from(self.code()) + 1) % 8]
+    }
 }
 
 /// A scene: layers, waypoints, scale and rotation levels, free entities.
@@ -750,7 +796,7 @@ impl Region {
     /// Parses a region block. Scene regions (`scene == true`) read the
     /// blocking, decoration, scale and tint keys; the hotspot of an entity
     /// reads only the base keys, like the engine.
-    fn from_node(node: &Node, scene: bool) -> Result<Region> {
+    pub(crate) fn from_node(node: &Node, scene: bool) -> Result<Region> {
         let mut region = Region::default();
         let (mut r, mut g, mut b, mut alpha) = (255i64, 255i64, 255i64, 255i64);
         for child in node.nodes() {
@@ -795,7 +841,7 @@ impl Region {
 }
 
 impl WaypointGroup {
-    fn from_node(node: &Node) -> Result<WaypointGroup> {
+    pub(crate) fn from_node(node: &Node) -> Result<WaypointGroup> {
         let mut group = WaypointGroup::default();
         for child in node.nodes() {
             match child.key.to_ascii_uppercase().as_str() {
@@ -1162,6 +1208,30 @@ SCENE {
                 "scenes\\blackchamber\\sprites\\coffin.sprite",
             ]
         );
+    }
+
+    #[test]
+    fn directions_turn_and_come_from_angles() {
+        assert_eq!(Direction::from_index(6), Some(Direction::Left));
+        assert_eq!(Direction::from_index(8), None);
+        assert_eq!(Direction::from_index(-1), None);
+        assert_eq!(Direction::Up.left(), Direction::UpLeft);
+        assert_eq!(Direction::UpLeft.right(), Direction::Up);
+        assert_eq!(Direction::Right.right(), Direction::DownRight);
+        assert_eq!(Direction::from_angle(0), Direction::Right);
+        assert_eq!(Direction::from_angle(-90), Direction::Up);
+        assert_eq!(Direction::from_angle(90), Direction::Down);
+        assert_eq!(Direction::from_angle(180), Direction::Left);
+        assert_eq!(Direction::from_angle(-180), Direction::Left);
+        assert_eq!(Direction::from_angle(-45), Direction::UpRight);
+        assert_eq!(Direction::from_angle(45), Direction::DownRight);
+        assert_eq!(Direction::from_angle(135), Direction::DownLeft);
+        assert_eq!(Direction::from_angle(-135), Direction::UpLeft);
+        assert_eq!(Direction::from_angle(22), Direction::Right);
+        assert_eq!(Direction::from_angle(23), Direction::DownRight);
+        assert_eq!(Direction::from_angle(-112), Direction::UpLeft);
+        assert_eq!(Direction::from_angle(-111), Direction::Up);
+        assert_eq!(Direction::from_angle(500), Direction::Down);
     }
 
     #[test]

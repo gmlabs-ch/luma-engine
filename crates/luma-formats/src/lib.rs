@@ -12,6 +12,10 @@
 //!   `docs/formats/sprite.md`.
 //! - [`scene`]: rooms made of layers, entities and regions (`.scene`,
 //!   `.entity`), documented in `docs/formats/scene.md`.
+//! - [`actor`]: walking characters with a sprite per direction
+//!   (`.actor`), documented in `docs/formats/actor.md`.
+//! - [`game`] and [`strings`]: the game definition and its string tables,
+//!   documented in `docs/formats/game.md`.
 //! - [`image`]: decoding of PNG, BMP, JPEG and TGA files to RGBA with the
 //!   engine's colour key rules.
 //!
@@ -20,6 +24,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod actor;
 pub mod def;
 mod error;
 pub mod game;
@@ -28,6 +33,7 @@ pub mod scene;
 pub mod sprite;
 pub mod strings;
 
+pub use actor::{Actor, SpriteSet};
 pub use def::{Document, Node, Nodes, ParseError, Scalar, Value};
 pub use error::{Error, Result};
 pub use game::GameFile;
