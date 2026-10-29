@@ -1729,7 +1729,8 @@ fn videos_freeze_the_game_and_can_be_skipped() {
         list.quads().is_empty(),
         "no texture uploaded without a renderer"
     );
-    let mut ticks = 0;
+    // 21 ticks so far since the start.
+    let mut ticks = 21;
     while runtime.world.is_video_playing() && ticks < 200 {
         runtime.tick(16);
         ticks += 1;

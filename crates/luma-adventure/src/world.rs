@@ -1569,6 +1569,7 @@ impl Runtime {
             }
         }
         self.world.sounds.audio.tick(dt);
+        self.world.drop_finished_video();
         if self.world.is_video_playing() {
             // A video takes the frame: no scripts, no scene, no windows
             // (`CAdGame::DisplayContent`).

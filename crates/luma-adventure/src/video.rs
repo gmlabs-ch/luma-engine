@@ -250,6 +250,14 @@ impl World {
         self.video.as_ref()
     }
 
+    /// Drops a video that ended, the frame after (the engine deletes the
+    /// player once `IsFinished`).
+    pub(crate) fn drop_finished_video(&mut self) {
+        if self.video.as_ref().is_some_and(|v| !v.is_playing()) {
+            self.video = None;
+        }
+    }
+
     /// Whether a video plays (`IsVideoPlaying`).
     pub fn is_video_playing(&self) -> bool {
         self.video.as_ref().is_some_and(VideoPlayer::is_playing)
