@@ -54,6 +54,10 @@ OPTIONS:
                           In headless mode, move the mouse there and right-click once the scene is up
     --key <code>          In headless mode, press a key (a Windows virtual key code, e.g. 27 for
                           Escape) once the scene is up, after the clicks
+    --then-scene <file>   In headless mode, change to that scene --after frames after the clicks;
+                          repeatable, to leave a scene and come back to it
+    --entities            In headless mode, list the last scene's entities and the states
+                          remembered of the scenes left
     --help                Show this message
 
 With --headless and --screenshot, the scene and the actors are rendered
@@ -92,6 +96,8 @@ struct Options {
     hover_at: Option<(i32, i32)>,
     key: Option<i32>,
     after: u64,
+    then_scenes: Vec<String>,
+    entities: bool,
 }
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -113,6 +119,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut hover_at = None;
     let mut key = None;
     let mut after = 3;
+    let mut then_scenes = Vec::new();
+    let mut entities = false;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -132,6 +140,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--screenshot" => screenshot = Some(PathBuf::from(value(&mut i)?)),
             "--animate" => animate = true,
+            "--then-scene" => then_scenes.push(value(&mut i)?.clone()),
+            "--entities" => entities = true,
             "--headless" => headless = true,
             "--click" => click = Some(value(&mut i)?.clone()),
             "--say" => say = Some(value(&mut i)?.clone()),
@@ -222,6 +232,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         hover_at,
         key,
         after,
+        then_scenes,
+        entities,
     })
 }
 
@@ -404,6 +416,20 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 }
                 runtime.mouse_left_up();
             }
+            for scene in &options.then_scenes {
+                // Frames for the scene's scripts to run before leaving it.
+                for _ in 0..options.after {
+                    for line in runtime.tick(options.dt) {
+                        println!("[{tick}] {line}");
+                    }
+                }
+                runtime
+                    .change_scene(scene)
+                    .map_err(|e| format!("{scene}: {e}"))?;
+                for line in runtime.world.take_log() {
+                    println!("[{tick}] {line}");
+                }
+            }
         }
         if runtime.world.quit_requested() {
             println!("[{tick}] quit requested");
@@ -426,6 +452,34 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         counts.persistent,
         runtime.world.objects().len()
     );
+    if options.entities {
+        if let Some(view) = runtime.world.scene() {
+            for r in view.entity_refs() {
+                if let Some(e) = view.entity(r) {
+                    println!(
+                        "entity {:?}: {}, sprite {:?}, caption {:?}, alpha {:?}",
+                        e.name,
+                        if e.active { "active" } else { "inactive" },
+                        e.sprite.as_deref().unwrap_or("none"),
+                        e.caption,
+                        e.tint
+                    );
+                }
+            }
+        }
+        for (file, state) in runtime.world.scene_states() {
+            println!("scene state {file:?}: {} node(s)", state.nodes.len());
+            for (name, node) in &state.nodes {
+                println!(
+                    "  {name}: {}, sprite {:?}, caption {:?}, alpha {:?}",
+                    if node.active { "active" } else { "inactive" },
+                    node.sprite.as_deref().unwrap_or("none"),
+                    node.caption.as_deref().unwrap_or(""),
+                    node.alpha
+                );
+            }
+        }
+    }
     for id in runtime.world.actor_ids() {
         if let Some(actor) = runtime.world.actor(id) {
             println!(

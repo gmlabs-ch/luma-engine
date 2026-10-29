@@ -141,6 +141,7 @@ luma-player path/to/game --headless --scene scenes/room/room.scene --right-click
 
 # Move the mouse and click on the floor: the main actor walks there
 luma-player path/to/game --headless --scene scenes/room/room.scene --click-at 500,520 --ticks 300 --screenshot walk.png
+luma-player path/to/game --headless --scene scenes/room/room.scene --click Cupboard:Take --after 250 --then-scene scenes/hall/hall.scene --then-scene scenes/room/room.scene --entities
 ```
 
 ## Games
