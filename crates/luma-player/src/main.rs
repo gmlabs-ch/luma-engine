@@ -48,7 +48,10 @@ OPTIONS:
     --after <n>           In headless mode, frames to run before --click-at (default 3), e.g. to
                           let a script finish first
     --click-at <x>,<y>    In headless mode, move the mouse there and click once the scene is up
-                          (after --right-click-at and --key, so that a menu can be clicked)
+                          (after --right-click-at and --key, so that a menu can be clicked);
+                          repeatable, each step --after frames after the previous one
+    --type <text>         In headless mode, type the text, a key per character, in the order
+                          given with --click-at (into the focused editor)
     --hover-at <x>,<y>    In headless mode, move the mouse there once the scene is up
     --right-click-at <x>,<y>
                           In headless mode, move the mouse there and right-click once the scene is up
@@ -58,6 +61,11 @@ OPTIONS:
                           repeatable, to leave a scene and come back to it
     --entities            In headless mode, list the last scene's entities and the states
                           remembered of the scenes left
+    --save <slot>         In headless mode, save the game to that slot after the clicks and
+                          the scene changes (as Game.SaveGame does)
+    --load <slot>         In headless mode, load that slot before the first frame (as
+                          Game.LoadGame does); the game's own scripts are replaced by the
+                          saved ones
     --help                Show this message
 
 With --headless and --screenshot, the scene and the actors are rendered
@@ -77,6 +85,12 @@ const BLACK: Rgba = Rgba {
     a: 255,
 };
 
+/// A step of the headless run, in command-line order.
+enum Step {
+    ClickAt(i32, i32),
+    Type(String),
+}
+
 struct Options {
     game: PathBuf,
     scene: Option<String>,
@@ -91,13 +105,15 @@ struct Options {
     say: Option<String>,
     font: Option<String>,
     mute: bool,
-    click_at: Option<(i32, i32)>,
+    steps: Vec<Step>,
     right_click_at: Option<(i32, i32)>,
     hover_at: Option<(i32, i32)>,
     key: Option<i32>,
     after: u64,
     then_scenes: Vec<String>,
     entities: bool,
+    save: Option<i32>,
+    load: Option<i32>,
 }
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -114,13 +130,15 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut say = None;
     let mut font = None;
     let mut mute = false;
-    let mut click_at = None;
+    let mut steps = Vec::new();
     let mut right_click_at = None;
     let mut hover_at = None;
     let mut key = None;
     let mut after = 3;
     let mut then_scenes = Vec::new();
     let mut entities = false;
+    let mut save = None;
+    let mut load = None;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -142,6 +160,17 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--animate" => animate = true,
             "--then-scene" => then_scenes.push(value(&mut i)?.clone()),
             "--entities" => entities = true,
+            "--save" | "--load" => {
+                let v = value(&mut i)?;
+                let slot = v
+                    .parse()
+                    .map_err(|_| format!("{arg} expects a slot number, got `{v}`"))?;
+                if arg == "--save" {
+                    save = Some(slot);
+                } else {
+                    load = Some(slot);
+                }
+            }
             "--headless" => headless = true,
             "--click" => click = Some(value(&mut i)?.clone()),
             "--say" => say = Some(value(&mut i)?.clone()),
@@ -153,8 +182,9 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .split_once(',')
                     .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
                     .ok_or_else(|| format!("--click-at expects <x>,<y>, got `{v}`"))?;
-                click_at = Some((x, y));
+                steps.push(Step::ClickAt(x, y));
             }
+            "--type" => steps.push(Step::Type(value(&mut i)?.clone())),
             "--hover-at" => {
                 let v = value(&mut i)?;
                 let (x, y) = v
@@ -227,13 +257,15 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         say,
         font,
         mute,
-        click_at,
+        steps,
         right_click_at,
         hover_at,
         key,
         after,
         then_scenes,
         entities,
+        save,
+        load,
     })
 }
 
@@ -303,6 +335,10 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         runtime.world.audio().device().unwrap_or("off")
     );
     runtime.start();
+    if let Some(slot) = options.load {
+        runtime.world.schedule_load(slot);
+        println!("load scheduled from slot {slot}");
+    }
     let mut clicked = false;
     for tick in 1..=options.ticks {
         for line in runtime.tick(options.dt) {
@@ -389,7 +425,7 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                     None => println!("[{tick}] {event} on {node:?}: no such node"),
                 }
             }
-            if let Some((x, y)) = options.click_at {
+            for step in &options.steps {
                 // A few frames so that a menu opened by the right click or
                 // the key is in place, or that a script ran.
                 for _ in 0..options.after {
@@ -397,6 +433,18 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                         println!("[{tick}] {line}");
                     }
                 }
+                let (x, y) = match step {
+                    Step::ClickAt(x, y) => (*x, *y),
+                    Step::Type(text) => {
+                        println!("[{tick}] typing {text:?}");
+                        for ch in text.chars() {
+                            let code = i32::from(ch.to_ascii_uppercase() as u8);
+                            runtime.key_down(code, Some(ch), false, false, false);
+                            runtime.key_up(code);
+                        }
+                        continue;
+                    }
+                };
                 runtime.mouse_move(x, y);
                 // A frame so that the object under the mouse is known.
                 for line in runtime.tick(options.dt) {
@@ -426,6 +474,20 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 runtime
                     .change_scene(scene)
                     .map_err(|e| format!("{scene}: {e}"))?;
+                for line in runtime.world.take_log() {
+                    println!("[{tick}] {line}");
+                }
+            }
+            if let Some(slot) = options.save {
+                for _ in 0..options.after {
+                    for line in runtime.tick(options.dt) {
+                        println!("[{tick}] {line}");
+                    }
+                }
+                match runtime.save_game(slot, "luma-player", false) {
+                    Ok(path) => println!("[{tick}] saved to {}", path.display()),
+                    Err(err) => println!("[{tick}] save to slot {slot} failed: {err}"),
+                }
                 for line in runtime.world.take_log() {
                     println!("[{tick}] {line}");
                 }
