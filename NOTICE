@@ -72,6 +72,7 @@ no code copied):
   docs/video.md
   crates/luma-video/src/lib.rs
   crates/luma-adventure/src/video.rs
+  crates/luma-adventure/src/scene_state.rs
   crates/luma-audio/src/audio.rs
 
 -------------------------------------------------------------------------------

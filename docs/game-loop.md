@@ -13,8 +13,10 @@ game's scripts and schedules its `STARTUP_SCENE`. Every frame then runs,
 in this order (`Runtime::tick`):
 
 1. the timer advances by the frame's duration, at most a second;
-2. a scene change asked last frame happens (`SceneShutdown`, the new
-   scene's scripts), with a fade from black of 200 ms when asked;
+2. a scene change asked last frame happens (`SceneShutdown`, the old
+   scene's state noted, the new scene loaded and its remembered state
+   put back, its scripts attached), with a fade from black of 200 ms
+   when asked;
 3. speech sounds that ended end their sentences; the fader advances;
 4. the scripts run (`Engine::tick`);
 5. the scene's entities animate and talk; the actors walk, turn, talk;
@@ -133,6 +135,30 @@ not wait and the `System` forms run on the wall clock, so that a frozen
 game still fades. `GetFadeColor` reads the colour laid over the frame.
 A scene change fades in from black over 200 ms unless `ChangeScene` is
 told not to.
+
+## Scene state between visits
+
+A scene marked `PERSISTENT_STATE` (see
+[formats/scene.md](formats/scene.md)) is remembered when the player
+leaves it (`CAdScene::SaveState`, right after `SceneShutdown`) and put
+back when it loads again (`CAdScene::LoadState`, before its scripts
+run). The states are kept by scene file name, without case; a scene the
+player never left has none. Per named node marked `SAVE_STATE` (the
+default) the engine keeps:
+
+- for an entity: `Active`, the caption, `AlphaColor`, the cursor, and
+  the sprite it was switched to, unless the entity is a hotspot (a
+  `REGION` without sprite) or the scene says
+  `PERSISTENT_STATE_SPRITES=FALSE`;
+- for a region: `Active`.
+
+Nothing else comes back: positions, script variables and the scripts
+themselves start over from the file, and a scene's init script runs on
+every visit, so it may override what was restored. A remembered sprite
+that cannot be loaded is logged and the entity keeps the file's. The
+state survives scene changes only, until saved games keep it. The
+original engine also remembers whether each waypoint group is active;
+Luma uses every group, so this is not kept yet.
 
 ## Not yet
 

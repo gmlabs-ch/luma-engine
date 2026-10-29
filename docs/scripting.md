@@ -222,7 +222,6 @@ implemented": saving and transitions.
 
 - The `String`, `Array`, `Date`, `File` and `MemBuffer` classes: `new`
   returns an inert object.
-- Persistent scene state (`PERSISTENT_STATE`) across scene changes.
 - `Scene.GetWaypointGroup` and `WaypointGroup.Active`: every waypoint
   group of a scene is used.
 - `GetSpriteObject` on actors, and `PlayAnim` on entities.

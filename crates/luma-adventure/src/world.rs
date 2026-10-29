@@ -7,7 +7,7 @@
 //! `BScriptHolder.cpp` of WME Lite (MIT License, Copyright (c) 2011 Jan
 //! Nedoma); see `NOTICE`.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use luma_archive::Vfs;
 use luma_formats::{GameFile, Scene, StringTable};
@@ -20,6 +20,7 @@ use crate::input::{Cursors, HitArea, Keyboard, Mouse};
 use crate::inventory::Inventory;
 use crate::objects::{Kind, Native, Objects};
 use crate::path::Floor;
+use crate::scene_state::SceneState;
 use crate::scene_view::{Camera, Drawable, SceneView};
 use crate::settings::GameSettings;
 use crate::sound::Sounds;
@@ -44,6 +45,7 @@ pub struct World {
     pub(crate) prev_scene_name: String,
     pub(crate) prev_scene_filename: String,
     pub(crate) scheduled_scene: Option<(String, bool)>,
+    pub(crate) scene_states: BTreeMap<String, SceneState>,
     pub(crate) offset_x: i32,
     pub(crate) offset_y: i32,
     pub(crate) target_offset_x: i32,
@@ -129,6 +131,7 @@ impl World {
             prev_scene_name: String::new(),
             prev_scene_filename: String::new(),
             scheduled_scene: None,
+            scene_states: BTreeMap::new(),
             offset_x: 0,
             offset_y: 0,
             target_offset_x: 0,
@@ -733,6 +736,7 @@ impl World {
             engine.apply_event(self, scene_id, "SceneShutdown", true);
             self.prev_scene_name = name;
             self.prev_scene_filename = filename;
+            self.save_scene_state();
         }
         // Objects of the old scene, and the scripts attached to them.
         let scene_actors: Vec<NativeId> = self
@@ -814,6 +818,7 @@ impl World {
         self.active_object = None;
         self.hits.clear();
         self.scene = Some(view);
+        self.restore_scene_state();
         self.hide_taken_item_entities();
         for (_, actor) in &mut self.actors {
             actor.invalidate_regions();

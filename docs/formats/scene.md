@@ -121,7 +121,7 @@ is absent.
 | `TEMPLATE` | string | | Another scene file loaded first; this file then overrides it. Not written by the editor. |
 | `SCRIPT` | string, repeatable | | Scripts attached to the scene, run in order. |
 | `PROPERTY` | block, repeatable | | A script property set on the scene, see [`PROPERTY`](#property). |
-| `PERSISTENT_STATE` | bool | false | Keep the state of the scene's objects (position, active, script variables) when the player leaves and comes back. |
+| `PERSISTENT_STATE` | bool | false | Remember the state of the scene's named nodes (active, caption, sprite, cursor, alpha colour) when the player leaves, and put it back when they come back; see [game-loop.md](../game-loop.md#scene-state-between-visits). Positions and script variables are not kept. |
 | `PERSISTENT_STATE_SPRITES` | bool | true | With `PERSISTENT_STATE`, also keep the sprites objects were switched to. |
 | `CURSOR` | string | | Sprite used as the mouse cursor over the scene instead of the game's cursor. |
 | `VIEWPORT` | `left,top,right,bottom` | the whole window | Part of the window the scene is drawn in. Not written by the editor. |

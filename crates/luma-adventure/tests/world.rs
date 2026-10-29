@@ -664,6 +664,50 @@ fn fade_script() -> Vec<u8> {
     a.build()
 }
 
+fn hall_init_script() -> Vec<u8> {
+    // Records the state the hall's nodes arrive in, then changes it.
+    let mut a = Assembler::new("scenes\\hall\\hall_init.script");
+    a.def_glob_var("result");
+    a.def_glob_var("Scene");
+    get(&mut a, "Scene", "PersistentState");
+    store(&mut a, "hallPersistent");
+    a.def_var("d");
+    call(&mut a, "Scene", "GetNode", &[Arg::Str("door")]);
+    a.pop_var("d");
+    call(&mut a, "d", "GetSprite", &[]);
+    store(&mut a, "doorSprite");
+    get(&mut a, "d", "Active");
+    store(&mut a, "doorActive");
+    get(&mut a, "d", "Caption");
+    store(&mut a, "doorCaption");
+    get(&mut a, "d", "AlphaColor");
+    store(&mut a, "doorAlpha");
+    a.def_var("x");
+    call(&mut a, "Scene", "GetNode", &[Arg::Str("exit")]);
+    a.pop_var("x");
+    get(&mut a, "x", "Active");
+    store(&mut a, "exitActive");
+    a.def_var("f");
+    call(&mut a, "Scene", "GetNode", &[Arg::Str("fixed")]);
+    a.pop_var("f");
+    get(&mut a, "f", "Active");
+    store(&mut a, "fixedActive");
+    call(&mut a, "d", "SetSprite", &[Arg::Str("art\\walk.sprite")]);
+    a.emit(Instruction::PopEmpty);
+    a.push_bool(false);
+    set(&mut a, "d", "Active");
+    a.push_string("opened");
+    set(&mut a, "d", "Caption");
+    a.push_int(0x1122_3344);
+    set(&mut a, "d", "AlphaColor");
+    a.push_bool(false);
+    set(&mut a, "x", "Active");
+    a.push_bool(false);
+    set(&mut a, "f", "Active");
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
 fn game() -> std::path::PathBuf {
     let dir = temp_dir();
     let mut pkg = PackageBuilder::new("data");
@@ -740,6 +784,21 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     pkg.add_file("scenes\\room\\floor.script", floor_script());
     pkg.add_file("scenes\\room\\prop.script", prop_script());
     pkg.add_file("fade.script", fade_script());
+    pkg.add_file("scenes\\hall\\hall_init.script", hall_init_script());
+    pkg.add_file(
+        "scenes\\hall.scene",
+        b"SCENE {
+  NAME=\"Hall\" PERSISTENT_STATE=TRUE
+  SCRIPT=\"scenes\\hall\\hall_init.script\"
+  LAYER {
+    NAME=\"main\" MAIN=TRUE WIDTH=32 HEIGHT=32
+    ENTITY { NAME=\"door\" X=4 Y=4 SPRITE=\"art\\prop.sprite\" }
+    REGION { NAME=\"exit\" POINT {0,0} POINT {8,0} POINT {8,8} POINT {0,8} }
+    ENTITY { NAME=\"fixed\" X=10 Y=10 SPRITE=\"art\\prop.sprite\" SAVE_STATE=FALSE }
+  }
+}"
+        .to_vec(),
+    );
     pkg.add_file("art\\red.png", png(4, 4, [255, 0, 0, 255]));
     pkg.add_file("art\\green.png", png(4, 4, [0, 255, 0, 255]));
     pkg.add_file(
@@ -1845,4 +1904,74 @@ fn runs_the_local_game() {
     }
     let counts = runtime.engine.counts();
     eprintln!("{counts:?}");
+}
+
+#[test]
+fn persistent_scenes_remember_their_nodes_between_visits() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+
+    // First visit: the nodes are as the file says; the script changes them.
+    runtime.change_scene("scenes/hall.scene").unwrap();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "hallPersistent"), Value::Bool(true));
+    assert_eq!(
+        result(&runtime, "doorSprite"),
+        Value::from("art\\prop.sprite")
+    );
+    assert_eq!(result(&runtime, "doorActive"), Value::Bool(true));
+    assert_eq!(result(&runtime, "doorCaption"), Value::from(""));
+    assert_eq!(result(&runtime, "doorAlpha"), Value::Int(0));
+    assert_eq!(result(&runtime, "exitActive"), Value::Bool(true));
+    assert_eq!(result(&runtime, "fixedActive"), Value::Bool(true));
+    assert!(runtime.world.scene_states().is_empty());
+
+    // Leaving notes the state; the room is not persistent.
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    let states = runtime.world.scene_states();
+    assert_eq!(states.len(), 1, "{states:?}");
+    let hall = &states["scenes\\hall.scene"];
+    assert_eq!(
+        hall.nodes.len(),
+        2,
+        "the fixed entity is not kept: {hall:?}"
+    );
+    assert_eq!(
+        hall.nodes["door"].sprite.as_deref(),
+        Some("art\\walk.sprite")
+    );
+    assert!(!hall.nodes["door"].active);
+    assert!(!hall.nodes["exit"].active);
+
+    // Coming back: the door is open and inactive, the exit inactive, the
+    // fixed entity back as in the file, and the room's state not kept.
+    runtime.change_scene("scenes\\Hall.scene").unwrap();
+    let view = runtime.world.scene().unwrap();
+    let door = view
+        .entity_refs()
+        .into_iter()
+        .find_map(|r| view.entity(r).filter(|e| e.name == "door"))
+        .unwrap();
+    assert_eq!(door.sprite.as_deref(), Some("art\\walk.sprite"));
+    assert!(
+        view.bank.sprite("art\\walk.sprite").is_some(),
+        "the sprite is loaded"
+    );
+    runtime.tick(16);
+    assert_eq!(
+        result(&runtime, "doorSprite"),
+        Value::from("art\\walk.sprite")
+    );
+    assert_eq!(result(&runtime, "doorActive"), Value::Bool(false));
+    assert_eq!(result(&runtime, "doorCaption"), Value::from("opened"));
+    assert_eq!(result(&runtime, "doorAlpha"), Value::Int(0x1122_3344));
+    assert_eq!(result(&runtime, "exitActive"), Value::Bool(false));
+    assert_eq!(result(&runtime, "fixedActive"), Value::Bool(true));
+    assert_eq!(runtime.world.scene_states().len(), 1);
 }

@@ -27,6 +27,8 @@
 //!   shows them and the cursor of the item in use.
 //! - [`VideoPlayer`]: a video played by `Game.PlayTheora` over the frozen
 //!   game, with its sound and subtitles.
+//! - [`SceneState`]: what a persistent scene remembers of its nodes
+//!   between visits.
 //! - [`World`]: the game as scripts see it (`Game`, `Scene`, layers,
 //!   entities, regions, sprites, actors), the script engine's host.
 //! - [`Runtime`]: a script engine and a world, driven once per frame.
@@ -47,6 +49,7 @@ mod natives_sound;
 mod natives_ui;
 pub mod objects;
 pub mod path;
+pub mod scene_state;
 pub mod scene_view;
 pub mod settings;
 pub mod sound;
@@ -64,6 +67,7 @@ pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;
 pub use objects::{Kind, Native, Objects};
 pub use path::Floor;
+pub use scene_state::{NodeState, SceneState, state_key};
 pub use scene_view::{
     AnimState, Camera, DrawItem, Drawable, EntityRef, EntityTalk, LoadedSprite, Mask, SceneView,
     SpriteBank, draw_object, frame_height, place,
