@@ -57,6 +57,8 @@ OPTIONS:
                           In headless mode, move the mouse there and right-click once the scene is up
     --key <code>          In headless mode, press a key (a Windows virtual key code, e.g. 27 for
                           Escape) once the scene is up, after the clicks
+    --hold-key <code>     In headless mode, hold a key down from the time the scene is up to the
+                          end, for scripts that poll Keyboard.IsKeyDown
     --then-scene <file>   In headless mode, change to that scene --after frames after the clicks;
                           repeatable, to leave a scene and come back to it
     --entities            In headless mode, list the last scene's entities and the states
@@ -112,6 +114,7 @@ struct Options {
     right_click_at: Option<(i32, i32)>,
     hover_at: Option<(i32, i32)>,
     key: Option<i32>,
+    hold_key: Option<i32>,
     after: u64,
     then_scenes: Vec<String>,
     entities: bool,
@@ -137,6 +140,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut right_click_at = None;
     let mut hover_at = None;
     let mut key = None;
+    let mut hold_key = None;
     let mut after = 3;
     let mut then_scenes = Vec::new();
     let mut entities = false;
@@ -217,6 +221,13 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                         .map_err(|_| format!("--key expects a key code, got `{v}`"))?,
                 );
             }
+            "--hold-key" => {
+                let v = value(&mut i)?;
+                hold_key = Some(
+                    v.parse()
+                        .map_err(|_| format!("--hold-key expects a key code, got `{v}`"))?,
+                );
+            }
             "--at" => {
                 let v = value(&mut i)?;
                 let (x, y) = v
@@ -264,6 +275,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         right_click_at,
         hover_at,
         key,
+        hold_key,
         after,
         then_scenes,
         entities,
@@ -417,6 +429,10 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 println!("[{tick}] key {code} pressed");
                 runtime.key_down(code, None, false, false, false);
                 runtime.key_up(code);
+            }
+            if let Some(code) = options.hold_key {
+                println!("[{tick}] key {code} held down");
+                runtime.key_down(code, None, false, false, false);
             }
             if let Some(click) = &options.click {
                 let (node, event) = click.split_once(':').unwrap_or((click, "LeftClick"));
