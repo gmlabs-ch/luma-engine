@@ -138,13 +138,14 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 
 | Object | Properties | Methods |
 |--------|------------|---------|
-| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`, `SubtitlesSpeed`, `TalkSkipButton`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadActor`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
+| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `ActiveObject`, `MouseX`, `MouseY`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`, `SubtitlesSpeed`, `TalkSkipButton`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadActor`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
 | `Scene` | `Name`, `Width`, `Height`, `NumLayers`, `MainLayer`, `OffsetX`, `OffsetY`, `MouseX`, `MouseY`, `NumFreeNodes`, `AutoScroll`, `ScrollPixelsX`, `ScrollSpeedX`... | `GetNode`, `GetLayer`, `GetFreeNode`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `SkipTo`, `ScrollTo`, `ScrollToAsync`, `IsScrolling`, `IsPointInViewport`, `LoadActor`, `UnloadObject` |
 | Layers | `Name`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active` | `GetNode` |
 | Entities | `Name`, `Caption`, `X`, `Y`, `Height`, `Active`, `Interactive`, `Scalable`, `Scale`, `RelativeScale`, `AlphaColor`, `Colorable`, `Item`, `Subtype`, `WalkToX`, `WalkToY`, `WalkToDirection`, `SaveState`, `IgnoreItems`... | `SkipTo`, `SetSprite`, `GetSprite`, `GetSpriteObject`, `Reset`, `Caption` |
 | Actors (`Game.LoadActor`, `Scene.LoadActor`) | The entities' properties, plus `Direction`, `Ready`, `ActorIsBlocked`, `TalkAnimName`, `IdleAnimName`, `WalkAnimName`, `TurnLeftAnimName`, `TurnRightAnimName` | `GoTo`, `GoToAsync`, `GoToObject`, `GoToObjectAsync`, `TurnTo`, `TurnToAsync`, `IsWalking`, `SkipTo`, `Reset`, `PlayAnim`, `PlayAnimAsync`, `SetSprite`, `GetSprite`, `HasAnim`, `MergeAnims`, `UnloadAnim`, `SetStopOnBlocked`, `GetStopOnBlocked` |
 | Actors and entities, speech | `SubtitlesWidth`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosRelative`, `SubtitlesPosXCenter` | `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`, `SetFont`, `GetFont` |
 | `Game`, actors and entities, sound | `SoundPanning` | `LoadSound`, `PlaySound`, `PlaySoundEvent`, `StopSound`, `PauseSound`, `ResumeSound`, `IsSoundPlaying`, `SetSoundPosition`, `GetSoundPosition`, `SetSoundVolume`, `GetSoundVolume` |
+| `Game`, input and fades | `Keyboard.KeyCode`, `Key`, `Printable`, `IsShift`, `IsAlt`, `IsControl` | `Keyboard.IsKeyDown`, `SetMousePos`, `FadeOut`, `FadeIn` (and their `Async` and `System` forms), `GetFadeColor`, `SetActiveCursor`, `RemoveActiveCursor`, `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`, `GetActiveCursor`, `GetWaitCursor`, `HideCursor`, `ShowCursor` |
 | `Game`, music and volumes | | `PlayMusic`, `PlayMusicChannel`, `StopMusic`, `StopMusicChannel`, `PauseMusic`, `ResumeMusic`, `GetMusic`, `SetMusicPosition`, `GetMusicPosition`, `IsMusicPlaying`, `SetMusicVolume`, `GetMusicVolume` (and their `...Channel` forms), `MusicCrossfade`, `GetSoundLength`, `SetGlobalSFXVolume`, `SetGlobalSpeechVolume`, `SetGlobalMusicVolume`, `SetGlobalMasterVolume` and their getters, `AddSpeechDir`, `RemoveSpeechDir` |
 | Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
 | Sprite objects | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner` | `Reset`, `Pause`, `Play` |
@@ -174,6 +175,13 @@ object with its font (or the game's `SYSTEM_FONT`) while
 `Game.Subtitles` is on. The scripts waiting for the object resume when
 the sentence ends, or when a click skips it while the game is not
 interactive.
+
+Input (see [docs/game-loop.md](game-loop.md)): the mouse raises
+`LeftClick`, `LeftRelease`, `RightClick`, `RightRelease` and
+`LeftDoubleClick` on the game first, then on the object under the
+mouse or on the scene; the object under the mouse gets `MouseEntry`
+and `MouseLeave`; a key raises `Keypress` on the game. `Game.FadeOut`
+and `FadeIn` make the script wait for the fade.
 
 Sound (see [docs/audio.md](audio.md)) is owned by the objects: each has
 one sound effect, the game has five music channels, and a sentence plays

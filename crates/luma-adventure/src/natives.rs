@@ -46,25 +46,12 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 
 /// Methods the engine has that later milestones implement.
 const GAME_STUBS: &[&str] = &[
-    "SetMousePos",
     "LockMouseRect",
     "RegWriteNumber",
     "RegWriteString",
     "SaveGame",
     "LoadGame",
     "EmptySaveSlot",
-    "SetActiveCursor",
-    "RemoveActiveCursor",
-    "SetWaitCursor",
-    "RemoveWaitCursor",
-    "FadeOut",
-    "FadeOutAsync",
-    "FadeIn",
-    "FadeInAsync",
-    "SystemFadeOut",
-    "SystemFadeOutAsync",
-    "SystemFadeIn",
-    "SystemFadeInAsync",
     "Screenshot",
     "ScreenshotEx",
     "DeleteWindow",
@@ -134,9 +121,17 @@ impl World {
             Kind::Game => self.game_get(name),
             Kind::Keyboard => match name {
                 "Type" => Some(Value::from("keyboard")),
-                "Key" => Some(Value::from("")),
-                "Printable" | "IsShift" | "IsAlt" | "IsControl" => Some(Value::Bool(false)),
-                "KeyCode" => Some(Value::Int(0)),
+                "Key" => Some(Value::from(self.keyboard.key.clone())),
+                "Printable" => Some(Value::Bool(self.keyboard.printable)),
+                "IsShift" => Some(Value::Bool(self.keyboard.shift)),
+                "IsAlt" => Some(Value::Bool(self.keyboard.alt)),
+                "IsControl" => Some(Value::Bool(self.keyboard.control)),
+                "KeyCode" => Some(Value::Int(self.keyboard.key_code)),
+                _ => None,
+            },
+            Kind::Fader => match name {
+                "Type" => Some(Value::from("fader")),
+                "Ready" => Some(Value::Bool(self.fader.ready)),
                 _ => None,
             },
             Kind::Scene => self.scene_get(name),
@@ -168,7 +163,7 @@ impl World {
             Kind::Region { layer, index } => self.region_set(layer, index, name, value),
             Kind::Sprite(owner) => self.sprite_set(owner, name, value),
             Kind::Actor => self.actor_set(id, name, value),
-            Kind::Keyboard | Kind::Inert(_) => false,
+            Kind::Keyboard | Kind::Fader | Kind::Inert(_) => false,
         }
     }
 
@@ -188,9 +183,19 @@ impl World {
         match kind {
             Kind::Game => self.game_call(name, args, ctx),
             Kind::Keyboard => match name {
-                "IsKeyDown" => Some(Return::value(false)),
+                "IsKeyDown" => {
+                    let code = match args.first() {
+                        Some(Value::String(s)) if !s.is_empty() => {
+                            i32::from(s.as_bytes()[0].to_ascii_lowercase())
+                        }
+                        Some(v) => v.get_int(self),
+                        None => 0,
+                    };
+                    Some(Return::value(self.keyboard.is_key_down(code)))
+                }
                 _ => None,
             },
+            Kind::Fader => None,
             Kind::Scene => self.scene_call(name, args, ctx),
             Kind::Layer(index) => self.layer_call(index, name, args),
             Kind::Entity(r) => self.entity_call(id, r, name, args),
@@ -279,9 +284,11 @@ impl World {
             "Caption" => Value::from(self.caption.clone()),
             "CurrentTime" => Value::Int(self.timer() as i32),
             "WindowsTime" => Value::Int(self.timer() as i32),
-            "MouseX" | "MouseY" => Value::Int(0),
             "MainObject" => native_or_null(self.main_object),
-            "ActiveObject" => Value::Null,
+            "MouseX" => Value::Int(self.mouse.x),
+            "MouseY" => Value::Int(self.mouse.y),
+            "ActiveObject" => native_or_null(self.active_object()),
+            "SelectedItem" => native_or_null(self.selected_item),
             "ScreenWidth" => Value::Int(self.settings().width as i32),
             "ScreenHeight" => Value::Int(self.settings().height as i32),
             "Interactive" => Value::Bool(self.interactive),
@@ -318,7 +325,7 @@ impl World {
             | "AutoSaveSlot"
             | "MostRecentSaveSlot" => Value::Int(0),
             "TalkSkipButton" => Value::Int(self.talk_skip_button.code()),
-            "SelectedItem" | "LastResponse" | "LastResponseOrig" => Value::Null,
+            "LastResponse" | "LastResponseOrig" => Value::Null,
             "Platform" => Value::from("luma"),
             "DeviceType" => Value::from("desktop"),
             _ => return None,
@@ -333,6 +340,9 @@ impl World {
             "MainObject" => self.main_object = value.as_native(),
             "Subtitles" => self.subtitles = value.get_bool(self),
             "SubtitlesSpeed" => self.subtitles_speed = value.get_int(self),
+            "MouseX" => self.mouse.x = value.get_int(self),
+            "MouseY" => self.mouse.y = value.get_int(self),
+            "SelectedItem" => self.selected_item = value.as_native(),
             "TalkSkipButton" => {
                 self.talk_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }
@@ -375,6 +385,76 @@ impl World {
                 }
                 Return::null()
             }
+            "SetMousePos" => {
+                let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
+                self.set_mouse(x, y);
+                Return::null()
+            }
+            "FadeOut" | "FadeOutAsync" | "SystemFadeOut" | "SystemFadeOutAsync" | "FadeIn"
+            | "FadeInAsync" | "SystemFadeIn" | "SystemFadeInAsync" => {
+                let duration = match arg(0) {
+                    Value::Null => 500,
+                    v => u64::try_from(v.get_int(self)).unwrap_or(0),
+                };
+                let channel = |n: usize, default: i32| match arg(n) {
+                    Value::Null => default,
+                    v => v.get_int(self),
+                };
+                let color = Rgba {
+                    r: channel(1, 0).clamp(0, 255) as u8,
+                    g: channel(2, 0).clamp(0, 255) as u8,
+                    b: channel(3, 0).clamp(0, 255) as u8,
+                    a: channel(4, 255).clamp(0, 255) as u8,
+                };
+                let system = name.starts_with("System");
+                let (timer, clock) = (self.timer(), self.clock);
+                if name.contains("Out") {
+                    self.fader.fade_out(color, duration, system, timer, clock);
+                } else {
+                    self.fader.fade_in(color, duration, system, timer, clock);
+                }
+                if name.ends_with("Async") {
+                    Return::null()
+                } else {
+                    Return::effect(Effect::WaitFor(self.fader_id))
+                }
+            }
+            "GetFadeColor" => Return::value(self.fader.color_int()),
+            "SetActiveCursor" | "SetWaitCursor" => {
+                let path = arg(0).get_string(self);
+                let ok = if name == "SetActiveCursor" {
+                    self.set_active_cursor(Some(&path))
+                } else {
+                    self.set_wait_cursor(Some(&path))
+                };
+                Return::value(ok)
+            }
+            "RemoveActiveCursor" => {
+                self.set_active_cursor(None);
+                Return::null()
+            }
+            "RemoveWaitCursor" => {
+                self.set_wait_cursor(None);
+                Return::null()
+            }
+            "HasActiveCursor" => Return::value(self.cursors.active.is_some()),
+            "GetActiveCursor" => {
+                Return::value(self.cursors.active.clone().map_or(Value::Null, Value::from))
+            }
+            "GetWaitCursor" => Return::value(
+                self.cursors
+                    .noninteractive
+                    .clone()
+                    .map_or(Value::Null, Value::from),
+            ),
+            "HideCursor" => {
+                self.cursors.hidden = true;
+                Return::null()
+            }
+            "ShowCursor" => {
+                self.cursors.hidden = false;
+                Return::null()
+            }
             "ValidObject" => Return::value(
                 arg(0)
                     .as_native()
@@ -405,9 +485,13 @@ impl World {
             }
             "FileExists" => Return::value(self.vfs().exists(&arg(0).get_string(self))),
             "ClearScriptCache" => Return::null(),
-            "HasItem" | "IsItemTaken" | "IsSaveSlotUsed" | "HasActiveCursor" | "QueryItem" => {
+            "HasItem" | "IsItemTaken" | "IsSaveSlotUsed" | "QueryItem" => {
                 self.stub(&format!("Game.{name}"));
                 Return::value(false)
+            }
+            "GetActiveCursorObject" | "GetWaitCursorObject" => {
+                self.stub(&format!("Game.{name}"));
+                Return::null()
             }
             "GetSaveSlotDescription" | "RegReadString" => {
                 self.stub(&format!("Game.{name}"));
@@ -417,14 +501,9 @@ impl World {
                 self.stub(&format!("Game.{name}"));
                 Return::value(0)
             }
-            "GetFadeColor" => Return::value(0),
             "GetItem"
             | "GetResponse"
             | "GetCurrentDlgBranch"
-            | "GetActiveCursor"
-            | "GetActiveCursorObject"
-            | "GetWaitCursor"
-            | "GetWaitCursorObject"
             | "GetInventoryWindow"
             | "GetResponsesWindow" => {
                 self.stub(&format!("Game.{name}"));
@@ -457,8 +536,8 @@ impl World {
                 view.and_then(|v| v.scene.layers.iter().rposition(|l| l.main))
                     .and_then(|i| self.layer_id(i)),
             ),
-            "MouseX" => Value::Int(self.offset_x),
-            "MouseY" => Value::Int(self.offset_y),
+            "MouseX" => Value::Int(self.mouse.x + self.offset_x),
+            "MouseY" => Value::Int(self.mouse.y + self.offset_y),
             "OffsetX" => Value::Int(self.offset_x),
             "OffsetY" => Value::Int(self.offset_y),
             "Width" => Value::Int(view.map_or(0, |v| v.scene.width())),
@@ -651,7 +730,6 @@ impl World {
                 self.stub(&format!("Scene.{name}"));
                 Return::null()
             }
-            "GetFadeColor" => Return::value(0),
             _ => return None,
         })
     }

@@ -15,6 +15,8 @@ use luma_script::{Context, Engine, Host, NativeId, Natives, Return, State, Value
 
 use crate::actor::{Actor, ActorEvent, WalkContext, scene_obstacles};
 use crate::error::{Error, Result};
+use crate::fader::{Fader, SCENE_FADE_MS};
+use crate::input::{Cursors, HitArea, Keyboard, Mouse};
 use crate::objects::{Kind, Native, Objects};
 use crate::path::Floor;
 use crate::scene_view::{Camera, Drawable, SceneView};
@@ -59,6 +61,14 @@ pub struct World {
     pub(crate) subtitles_speed: i32,
     pub(crate) talk_skip_button: TalkSkipButton,
     sentences: Vec<SentenceDraw>,
+    pub(crate) mouse: Mouse,
+    pub(crate) keyboard: Keyboard,
+    pub(crate) active_object: Option<NativeId>,
+    pub(crate) selected_item: Option<NativeId>,
+    pub(crate) cursors: Cursors,
+    pub(crate) hits: Vec<HitArea>,
+    pub(crate) fader: Fader,
+    pub(crate) fader_id: NativeId,
     pub(crate) interactive: bool,
     pub(crate) main_object: Option<NativeId>,
     pub(crate) quit: bool,
@@ -92,6 +102,7 @@ impl World {
         let game_id = objects.insert(Kind::Game);
         let keyboard_id = objects.insert(Kind::Keyboard);
         let scene_id = objects.insert(Kind::Scene);
+        let fader_id = objects.insert(Kind::Fader);
         let mut world = World {
             vfs,
             settings,
@@ -127,6 +138,14 @@ impl World {
             subtitles_speed: 70,
             talk_skip_button: TalkSkipButton::Left,
             sentences: Vec::new(),
+            mouse: Mouse::default(),
+            keyboard: Keyboard::default(),
+            active_object: None,
+            selected_item: None,
+            cursors: Cursors::default(),
+            hits: Vec::new(),
+            fader: Fader::default(),
+            fader_id,
             interactive: true,
             main_object: None,
             quit: false,
@@ -151,6 +170,7 @@ impl World {
                 world.system_font = Some(path);
             }
         }
+        world.load_cursors();
         Ok(world)
     }
 
@@ -300,6 +320,11 @@ impl World {
     }
 
     /// A name for an object, for messages.
+    pub fn describe_object(&self, id: NativeId) -> String {
+        format!("{} '{}'", self.class_name(id), self.describe(id))
+    }
+
+    /// A name for an object, for messages.
     pub(crate) fn describe(&self, id: NativeId) -> String {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Game) => self.name.clone(),
@@ -328,6 +353,7 @@ impl World {
                 .unwrap_or_default(),
             Some(Kind::Keyboard) => "keyboard".to_string(),
             Some(Kind::Sprite(_)) => "sprite".to_string(),
+            Some(Kind::Fader) => "fader".to_string(),
             Some(Kind::Actor) => self
                 .actor(id)
                 .map(|a| a.def.name.clone())
@@ -608,9 +634,17 @@ impl World {
             .collect()
     }
 
-    /// Fills a draw list with the scene, the actors and the sentences
-    /// (when subtitles are on).
-    pub fn draw<'a>(&'a self, list: &mut luma_render::DrawList<'a>, camera: &Camera) {
+    /// Fills a draw list with the frame as the engine composes it: the
+    /// scene with the actors, the sentences (when subtitles are on), the
+    /// cursor, and the fader's colour over everything. `white` is the
+    /// renderer's white texture, for the fader; without it no fade is
+    /// drawn.
+    pub fn draw<'a>(
+        &'a self,
+        list: &mut luma_render::DrawList<'a>,
+        camera: &Camera,
+        white: Option<&'a luma_render::Texture>,
+    ) {
         if let Some(view) = &self.scene {
             view.draw_with(list, camera, &self.drawables());
         }
@@ -621,9 +655,14 @@ impl World {
                 }
             }
         }
+        self.draw_cursor(list);
+        if let Some(white) = white {
+            self.draw_fade(list, white);
+        }
     }
 
-    /// Uploads the textures of the scene, of the actors and of the fonts.
+    /// Uploads the textures of the scene, of the actors, of the cursors
+    /// and of the fonts.
     pub fn upload(&mut self, renderer: &luma_render::Renderer) {
         if let Some(view) = self.scene.as_mut() {
             view.upload(&self.vfs, renderer);
@@ -631,6 +670,7 @@ impl World {
         for (_, actor) in &mut self.actors {
             actor.bank.upload(&self.vfs, renderer);
         }
+        self.cursors.bank.upload(&self.vfs, renderer);
         self.fonts.upload(renderer);
     }
 
@@ -704,6 +744,8 @@ impl World {
         self.offset_y = 0;
         self.target_offset_x = 0;
         self.target_offset_y = 0;
+        self.active_object = None;
+        self.hits.clear();
         self.scene = Some(view);
         for (_, actor) in &mut self.actors {
             actor.invalidate_regions();
@@ -789,6 +831,21 @@ impl World {
             self.set_sfx_volume(id, volume);
             self.play_sfx(id, Some(&sound), false, false, None, 0);
         }
+    }
+
+    /// The screen fader.
+    pub fn fader(&self) -> &Fader {
+        &self.fader
+    }
+
+    /// The screen fader, mutable.
+    pub fn fader_mut(&mut self) -> &mut Fader {
+        &mut self.fader
+    }
+
+    /// The fader's handle, for scripts to wait on.
+    pub fn fader_id(&self) -> NativeId {
+        self.fader_id
     }
 
     /// The fonts loaded.
@@ -1247,6 +1304,7 @@ impl Natives for World {
             Some(Kind::Region { .. }) => "region".to_string(),
             Some(Kind::Sprite(_)) => "sprite".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
+            Some(Kind::Fader) => "fader".to_string(),
             Some(Kind::Inert(kind)) => kind.to_ascii_lowercase(),
             None => String::new(),
         }
@@ -1315,6 +1373,7 @@ impl Host for World {
             Some(Kind::Actor) => self.actor(id).is_none_or(|a| a.ready),
             Some(Kind::Entity(r)) => self.scene().is_none_or(|v| !v.is_talking(*r)),
             Some(Kind::Scene) => self.is_scrolled(),
+            Some(Kind::Fader) => self.fader.ready,
             _ => true,
         }
     }
@@ -1405,26 +1464,155 @@ impl Runtime {
     /// of the frame.
     pub fn tick(&mut self, dt: u64) -> Vec<String> {
         self.world.advance_time(dt);
-        if let Some((path, _fade_in)) = self.world.scheduled_scene.take() {
-            if let Err(err) = self.world.load_scene(&mut self.engine, &path) {
-                self.world
-                    .log(format!("cannot change scene to '{path}': {err}"));
+        if let Some((path, fade_in)) = self.world.scheduled_scene.take() {
+            match self.world.load_scene(&mut self.engine, &path) {
+                Ok(()) => {
+                    if fade_in {
+                        let (timer, clock) = (self.world.timer, self.world.clock);
+                        self.world.fader.fade_in(
+                            luma_formats::Rgba {
+                                r: 0,
+                                g: 0,
+                                b: 0,
+                                a: 255,
+                            },
+                            SCENE_FADE_MS,
+                            true,
+                            timer,
+                            clock,
+                        );
+                    }
+                }
+                Err(err) => {
+                    self.world
+                        .log(format!("cannot change scene to '{path}': {err}"));
+                }
             }
         }
         self.world.sounds.audio.tick(dt);
         self.world.update_speech();
+        let (timer, clock) = (self.world.timer, self.world.clock);
+        self.world.fader.update(timer, clock);
         self.engine.tick(&mut self.world);
         self.world.update_scene();
         self.world.update_actors();
         self.world.scroll_step();
         self.world.update_sounds();
+        self.world.collect_hits();
+        self.world.update_active_object();
+        self.world.update_cursor();
         self.world.apply_pending_events(&mut self.engine);
         self.world.take_log()
     }
 
-    /// Fills a draw list with the scene and the actors as they are now.
-    pub fn draw<'a>(&'a self, list: &mut luma_render::DrawList<'a>) {
+    /// Fills a draw list with the frame as it is now; `white` is the
+    /// renderer's white texture, for the fader.
+    pub fn draw<'a>(
+        &'a self,
+        list: &mut luma_render::DrawList<'a>,
+        white: Option<&'a luma_render::Texture>,
+    ) {
         let camera = self.world.camera();
-        self.world.draw(list, &camera);
+        self.world.draw(list, &camera, white);
+    }
+
+    /// Moves the mouse to a point in game pixels.
+    pub fn mouse_move(&mut self, x: i32, y: i32) {
+        self.world.set_mouse(x, y);
+    }
+
+    /// Whether the mouse is over the scene (`PointInViewport`).
+    fn mouse_in_viewport(&self) -> bool {
+        let (x, y) = (self.world.mouse.x, self.world.mouse.y);
+        let (w, h) = (
+            self.world.settings.width as i32,
+            self.world.settings.height as i32,
+        );
+        self.world.scene.is_some() && x >= 0 && y >= 0 && x < w && y < h
+    }
+
+    /// Raises a mouse event (`CAdGame::OnMouseLeftDown` and the like):
+    /// on the game first; when its scripts do not handle it, on the
+    /// active object, else on the scene when the mouse is over it.
+    fn mouse_event(&mut self, event: &str) {
+        let game = self.world.game_id;
+        if self.engine.apply_event(&mut self.world, game, event, false) {
+            return;
+        }
+        if let Some(active) = self.world.active_object() {
+            self.engine
+                .apply_event(&mut self.world, active, event, false);
+        } else if self.mouse_in_viewport() {
+            let scene = self.world.scene_id;
+            self.engine
+                .apply_event(&mut self.world, scene, event, false);
+        }
+    }
+
+    /// The left button goes down: a click, or a double click when it
+    /// follows another within 400 ms and 4 pixels. While the game is not
+    /// interactive, the click only skips the sentences.
+    pub fn mouse_left_down(&mut self) {
+        let (x, y, clock) = (self.world.mouse.x, self.world.mouse.y, self.world.clock);
+        let double = self
+            .world
+            .mouse
+            .last_left_click
+            .is_some_and(|(at, lx, ly)| {
+                clock.saturating_sub(at) < 400 && (lx - x).abs() <= 4 && (ly - y).abs() <= 4
+            });
+        self.world.mouse.last_left_click = if double { None } else { Some((clock, x, y)) };
+        self.world.mouse.left_down = true;
+        if !self.world.interactive {
+            self.world.click_while_busy(false);
+            return;
+        }
+        if double {
+            self.mouse_event("LeftDoubleClick");
+        } else {
+            self.mouse_event("LeftClick");
+        }
+    }
+
+    /// The left button goes up (`LeftRelease`).
+    pub fn mouse_left_up(&mut self) {
+        self.world.mouse.left_down = false;
+        self.mouse_event("LeftRelease");
+    }
+
+    /// The right button goes down (`RightClick`); while the game is not
+    /// interactive, it only skips the sentences.
+    pub fn mouse_right_down(&mut self) {
+        if !self.world.interactive {
+            self.world.click_while_busy(true);
+            return;
+        }
+        self.mouse_event("RightClick");
+    }
+
+    /// The right button goes up (`RightRelease`).
+    pub fn mouse_right_up(&mut self) {
+        self.mouse_event("RightRelease");
+    }
+
+    /// A key goes down: the keyboard state is updated and `Keypress` is
+    /// raised on the game (`CBGame::HandleKeypress`).
+    pub fn key_down(
+        &mut self,
+        code: i32,
+        text: Option<char>,
+        shift: bool,
+        alt: bool,
+        control: bool,
+    ) {
+        self.world.key_down(code, text, shift, alt, control);
+        let game = self.world.game_id;
+        self.engine
+            .apply_event(&mut self.world, game, "Keypress", false);
+    }
+
+    /// A key goes up.
+    pub fn key_up(&mut self, code: i32) {
+        self.world.key_up(code);
     }
 }

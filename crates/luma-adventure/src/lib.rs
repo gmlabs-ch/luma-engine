@@ -18,6 +18,9 @@
 //!   with them; [`Sentence`]: what an object says (`Talk`).
 //! - [`Sounds`]: the objects' sound effects, the music channels and the
 //!   speech of sentences, played through `luma_audio`.
+//! - [`Mouse`], [`Keyboard`], [`Cursors`] and [`Fader`]: the input scripts
+//!   see, the object under the cursor, the cursor drawn, and the screen
+//!   fades; the [`Runtime`] routes the events to the scripts.
 //! - [`World`]: the game as scripts see it (`Game`, `Scene`, layers,
 //!   entities, regions, sprites, actors), the script engine's host.
 //! - [`Runtime`]: a script engine and a world, driven once per frame.
@@ -29,6 +32,8 @@
 
 pub mod actor;
 mod error;
+pub mod fader;
+pub mod input;
 mod natives;
 mod natives_actor;
 mod natives_sound;
@@ -43,12 +48,14 @@ pub mod world;
 
 pub use actor::{Actor, ActorEvent, ActorState, WalkContext};
 pub use error::{Error, Result};
+pub use fader::{Fader, SCENE_FADE_MS};
+pub use input::{Cursors, Keyboard, Mouse};
 pub use luma_audio::Audio;
 pub use objects::{Kind, Native, Objects};
 pub use path::Floor;
 pub use scene_view::{
-    AnimState, Camera, Drawable, EntityRef, EntityTalk, LoadedSprite, SceneView, SpriteBank,
-    draw_object, frame_height, place,
+    AnimState, Camera, DrawItem, Drawable, EntityRef, EntityTalk, LoadedSprite, Mask, SceneView,
+    SpriteBank, draw_object, frame_height, place,
 };
 pub use settings::{GameSettings, SETTINGS_FILE};
 pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, Sounds};

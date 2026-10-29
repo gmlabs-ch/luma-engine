@@ -59,6 +59,9 @@ no code copied):
   crates/luma-adventure/src/talk.rs
   crates/luma-adventure/src/sound.rs
   crates/luma-adventure/src/natives_sound.rs
+  crates/luma-adventure/src/input.rs
+  crates/luma-adventure/src/fader.rs
+  docs/game-loop.md
   docs/audio.md
   crates/luma-audio/src/audio.rs
   crates/luma-audio/src/mixer.rs

@@ -184,12 +184,43 @@ impl AnimState {
     }
 }
 
+/// The opaque pixels of an image, for hit tests (`IsTransparentAt`): a
+/// pixel is opaque when its alpha is above 128.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mask {
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    opaque: Vec<bool>,
+}
+
+impl Mask {
+    /// The mask of a decoded image.
+    pub fn of(image: &luma_formats::Image) -> Mask {
+        Mask {
+            width: image.width,
+            height: image.height,
+            opaque: image.pixels.chunks(4).map(|p| p[3] > 128).collect(),
+        }
+    }
+
+    /// Whether the pixel is opaque; outside the image, it is not.
+    pub fn is_opaque(&self, x: i32, y: i32) -> bool {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+            return false;
+        }
+        self.opaque[(y as u32 * self.width + x as u32) as usize]
+    }
+}
+
 /// Sprites loaded from the game and the textures of their images, keyed
 /// by path without regard to case or separator.
 #[derive(Debug, Default)]
 pub struct SpriteBank {
     sprites: HashMap<String, LoadedSprite>,
     textures: HashMap<String, Texture>,
+    masks: HashMap<String, Mask>,
     missing: Vec<(String, String)>,
 }
 
@@ -285,6 +316,35 @@ impl SpriteBank {
         self.sprites.get(&key(path))
     }
 
+    /// The opaque pixels of an image, decoded on first request (no GPU
+    /// needed); `None` when the image cannot be decoded.
+    pub fn mask(&mut self, vfs: &Vfs, path: &str, color_key: Rgb) -> Option<&Mask> {
+        let k = texture_key(path, color_key);
+        if !self.masks.contains_key(&k) {
+            if self.missing.iter().any(|(p, _)| *p == path) {
+                return None;
+            }
+            let decoded = vfs.read(path).map_err(|e| e.to_string()).and_then(|bytes| {
+                luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
+            });
+            match decoded {
+                Ok(image) => {
+                    self.masks.insert(k.clone(), Mask::of(&image));
+                }
+                Err(reason) => {
+                    self.missing.push((path.to_string(), reason));
+                    return None;
+                }
+            }
+        }
+        self.masks.get(&k)
+    }
+
+    /// The opaque pixels of an image, when already decoded.
+    pub fn mask_if_loaded(&self, path: &str, color_key: Rgb) -> Option<&Mask> {
+        self.masks.get(&texture_key(path, color_key))
+    }
+
     /// The texture of an image, if it was uploaded.
     pub fn texture(&self, path: &str, color_key: Rgb) -> Option<&Texture> {
         self.textures.get(&texture_key(path, color_key))
@@ -329,6 +389,43 @@ pub struct EntityTalk {
     pub sprite: Option<String>,
     /// Whether the sentence is shown this frame.
     pub show: bool,
+}
+
+/// One object in the drawing order of a scene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawItem {
+    /// An entity node of a layer.
+    Node {
+        /// The layer.
+        layer: usize,
+        /// The node in the layer.
+        index: usize,
+    },
+    /// A free entity of the scene, drawn in a layer.
+    Free {
+        /// The free entity.
+        index: usize,
+        /// The layer it is drawn in.
+        layer: usize,
+    },
+    /// One of the other objects given to the drawing (an actor).
+    Other {
+        /// Its index among them.
+        index: usize,
+        /// The layer it is drawn in.
+        layer: usize,
+    },
+}
+
+impl DrawItem {
+    /// The layer the item is drawn in.
+    pub fn layer(self) -> usize {
+        match self {
+            DrawItem::Node { layer, .. }
+            | DrawItem::Free { layer, .. }
+            | DrawItem::Other { layer, .. } => layer,
+        }
+    }
 }
 
 /// A scene and everything needed to run and draw it.
@@ -692,10 +789,69 @@ impl SceneView {
         self.draw_with(list, camera, &[]);
     }
 
+    /// The order the scene's objects are drawn in (`CAdScene::
+    /// TraverseNodes`): layer by layer, each layer's nodes in order; a
+    /// walkable region of a layer is followed by the free objects
+    /// standing in it, sorted by `y`; the main layer ends with the free
+    /// objects not drawn yet, sorted by `y`. The free objects are the
+    /// `others` (actors, at their positions) first, then the scene's free
+    /// entities, as the engine lists them.
+    pub fn draw_order(&self, others: &[(i32, i32)]) -> Vec<DrawItem> {
+        let scene = &self.scene;
+        let mut objects: Vec<(i32, i32, DrawItem)> = Vec::new();
+        for (i, &(x, y)) in others.iter().enumerate() {
+            objects.push((x, y, DrawItem::Other { index: i, layer: 0 }));
+        }
+        for (i, e) in scene.free_entities.iter().enumerate() {
+            if e.active && e.kind == EntityKind::Normal {
+                objects.push((e.x, e.y, DrawItem::Free { index: i, layer: 0 }));
+            }
+        }
+        let mut drawn = vec![false; objects.len()];
+        let mut order = Vec::new();
+        let mut draw_in = |order: &mut Vec<DrawItem>, layer: usize, region: Option<&Region>| {
+            let mut inside: Vec<usize> = (0..objects.len())
+                .filter(|&i| {
+                    !drawn[i] && region.is_none_or(|r| r.contains(objects[i].0, objects[i].1))
+                })
+                .collect();
+            inside.sort_by_key(|&i| objects[i].1);
+            for i in inside {
+                drawn[i] = true;
+                order.push(match objects[i].2 {
+                    DrawItem::Other { index, .. } => DrawItem::Other { index, layer },
+                    DrawItem::Free { index, .. } => DrawItem::Free { index, layer },
+                    DrawItem::Node { layer, index } => DrawItem::Node { layer, index },
+                });
+            }
+        };
+        for (li, layer) in scene.layers.iter().enumerate() {
+            if !layer.active {
+                continue;
+            }
+            for (ni, node) in layer.nodes.iter().enumerate() {
+                match node {
+                    SceneNode::Entity(_) => order.push(DrawItem::Node {
+                        layer: li,
+                        index: ni,
+                    }),
+                    SceneNode::Region(region) => {
+                        if region.blocked || region.decoration || !region.active {
+                            continue;
+                        }
+                        draw_in(&mut order, li, Some(region));
+                    }
+                }
+            }
+            if layer.main {
+                draw_in(&mut order, li, None);
+            }
+        }
+        order
+    }
+
     /// Like [`SceneView::draw`], with other objects (actors) drawn among
-    /// the free entities: an object standing in a walkable region of the
-    /// main layer is drawn right after that region, in `y` order with
-    /// the others; the rest follow the main layer's nodes.
+    /// the free entities, in the order of [`SceneView::draw_order`].
     pub fn draw_with<'a>(
         &'a self,
         list: &mut DrawList<'a>,
@@ -703,65 +859,37 @@ impl SceneView {
         others: &[Drawable<'a>],
     ) {
         let scene = &self.scene;
-        // Free objects: the others first, then the scene's free entities,
-        // as the engine lists them.
-        let mut objects: Vec<Drawable<'a>> = others
-            .iter()
-            .map(|d| Drawable {
-                x: d.x,
-                y: d.y,
-                sprite: d.sprite,
-                bank: d.bank,
-                frame: d.frame,
-                scale: d.scale,
-                tint: d.tint,
-            })
-            .collect();
-        for (i, e) in scene.free_entities.iter().enumerate() {
-            if let Some(d) = self.drawable(EntityRef::Free(i), e) {
-                objects.push(d);
+        let positions: Vec<(i32, i32)> = others.iter().map(|d| (d.x, d.y)).collect();
+        let mut current_layer = usize::MAX;
+        for item in self.draw_order(&positions) {
+            let layer = item.layer();
+            if layer != current_layer {
+                current_layer = layer;
+                let (ox, oy) = camera.layer_offset(scene, &scene.layers[layer]);
+                list.set_offset(-ox, -oy);
             }
-        }
-        let mut drawn = vec![false; objects.len()];
-        let mut draw_in = |list: &mut DrawList<'a>, region: Option<&Region>| {
-            let mut inside: Vec<usize> = (0..objects.len())
-                .filter(|&i| {
-                    !drawn[i] && region.is_none_or(|r| r.contains(objects[i].x, objects[i].y))
-                })
-                .collect();
-            inside.sort_by_key(|&i| objects[i].y);
-            for i in inside {
-                drawn[i] = true;
-                draw_object(list, &objects[i]);
-            }
-        };
-        for (li, layer) in scene.layers.iter().enumerate() {
-            if !layer.active {
-                continue;
-            }
-            let (ox, oy) = camera.layer_offset(scene, layer);
-            list.set_offset(-ox, -oy);
-            for (ni, node) in layer.nodes.iter().enumerate() {
-                match node {
-                    SceneNode::Entity(entity) => {
-                        let r = EntityRef::Node {
-                            layer: li,
-                            index: ni,
-                        };
-                        if let Some(d) = self.drawable(r, entity) {
+            match item {
+                DrawItem::Node { layer, index } => {
+                    if let Some(SceneNode::Entity(entity)) = self.node(layer, index) {
+                        if let Some(d) = self.drawable(EntityRef::Node { layer, index }, entity) {
                             draw_object(list, &d);
                         }
                     }
-                    SceneNode::Region(region) => {
-                        if region.blocked || region.decoration || !region.active {
-                            continue;
-                        }
-                        draw_in(list, Some(region));
+                }
+                DrawItem::Free { index, .. } => {
+                    if let Some(d) = scene
+                        .free_entities
+                        .get(index)
+                        .and_then(|e| self.drawable(EntityRef::Free(index), e))
+                    {
+                        draw_object(list, &d);
                     }
                 }
-            }
-            if layer.main {
-                draw_in(list, None);
+                DrawItem::Other { index, .. } => {
+                    if let Some(d) = others.get(index) {
+                        draw_object(list, d);
+                    }
+                }
             }
         }
         list.set_offset(0.0, 0.0);

@@ -121,6 +121,21 @@ fn game_script() -> Vec<u8> {
     get(&mut a, "Game", "ChangingScene");
     store(&mut a, "changing");
     a.emit(Instruction::Ret);
+    a.event("Keypress");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.def_var("kb");
+    get(&mut a, "Game", "Keyboard");
+    a.pop_var("kb");
+    get(&mut a, "kb", "KeyCode");
+    store(&mut a, "key");
+    get(&mut a, "kb", "Key");
+    store(&mut a, "keyText");
+    get(&mut a, "kb", "IsShift");
+    store(&mut a, "keyShift");
+    call(&mut a, "kb", "IsKeyDown", &[Arg::Str("a")]);
+    store(&mut a, "aDown");
+    a.emit(Instruction::RetEvent);
     a.build()
 }
 
@@ -237,6 +252,15 @@ fn scene_events_script() -> Vec<u8> {
     a.def_glob_var("result");
     a.push_bool(true);
     store(&mut a, "shutdown");
+    a.emit(Instruction::RetEvent);
+    a.event("LeftClick");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.def_glob_var("Scene");
+    get(&mut a, "Scene", "MouseX");
+    store(&mut a, "clickX");
+    get(&mut a, "Scene", "MouseY");
+    store(&mut a, "clickY");
     a.emit(Instruction::RetEvent);
     a.bind(end);
     a.emit(Instruction::Ret);
@@ -512,6 +536,53 @@ fn sound_script() -> Vec<u8> {
     a.build()
 }
 
+/// The prop's script: mouse events and a click.
+fn prop_script() -> Vec<u8> {
+    let mut a = Assembler::new("scenes\\room\\prop.script");
+    let end = a.label();
+    a.jmp(end);
+    for (event, key) in [
+        ("MouseEntry", "entered"),
+        ("MouseLeave", "left"),
+        ("LeftClick", "clicked"),
+        ("RightClick", "rightClicked"),
+        ("LeftDoubleClick", "doubleClicked"),
+    ] {
+        a.event(event);
+        a.emit(Instruction::Scope);
+        a.def_glob_var("result");
+        get(&mut a, "this", "Name");
+        store(&mut a, key);
+        a.emit(Instruction::RetEvent);
+    }
+    a.bind(end);
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
+/// Fades the screen out and reads the colour.
+fn fade_script() -> Vec<u8> {
+    let mut a = Assembler::new("fade.script");
+    a.def_glob_var("result");
+    get(&mut a, "Game", "CurrentTime");
+    store(&mut a, "fadeT0");
+    call(
+        &mut a,
+        "Game",
+        "FadeOut",
+        &[Arg::Int(100), Arg::Int(10), Arg::Int(20), Arg::Int(30)],
+    );
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "Game", "CurrentTime");
+    store(&mut a, "fadeT1");
+    call(&mut a, "Game", "GetFadeColor", &[]);
+    store(&mut a, "fadeColor");
+    a.push_bool(true);
+    store(&mut a, "faded");
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
 fn game() -> std::path::PathBuf {
     let dir = temp_dir();
     let mut pkg = PackageBuilder::new("data");
@@ -521,7 +592,7 @@ fn game() -> std::path::PathBuf {
     );
     pkg.add_file(
         "default.game",
-        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" } AD_GAME { }"
+        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" } AD_GAME { }"
             .to_vec(),
     );
     pkg.add_file("art\\font.png", png(128, 128, [255, 255, 255, 255]));
@@ -545,6 +616,14 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("scenes\\room\\scene_events.script", scene_events_script());
     pkg.add_file("scenes\\room\\lamp.script", lamp_script());
     pkg.add_file("scenes\\room\\floor.script", floor_script());
+    pkg.add_file("scenes\\room\\prop.script", prop_script());
+    pkg.add_file("fade.script", fade_script());
+    pkg.add_file("art\\red.png", png(4, 4, [255, 0, 0, 255]));
+    pkg.add_file("art\\green.png", png(4, 4, [0, 255, 0, 255]));
+    pkg.add_file(
+        "sprites\\cursor.sprite",
+        b"SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" } FRAME { DELAY=50 IMAGE=\"art\\green.png\" } }".to_vec(),
+    );
     pkg.add_file("walk.script", walk_script());
     pkg.add_file(
         "art\\prop.sprite",
@@ -577,7 +656,7 @@ fn game() -> std::path::PathBuf {
   SCRIPT=\"scenes\\room\\scene_events.script\"
   LAYER {
     NAME=\"main\" MAIN=TRUE WIDTH=200 HEIGHT=32
-    ENTITY { NAME=\"prop\" X=8 Y=12 SPRITE=\"art\\prop.sprite\" }
+    ENTITY { NAME=\"prop\" X=8 Y=12 SPRITE=\"art\\prop.sprite\" SCRIPT=\"scenes\\room\\prop.script\" }
     REGION { NAME=\"floor\" SCRIPT=\"scenes\\room\\floor.script\" POINT {0,16} POINT {200,16} POINT {200,32} POINT {0,32} }
     ENTITY { NAME=\"lamp\" X=20 Y=20 WALK_TO_X=30 WALK_TO_Y=20 WALK_TO_DIR=4 SCRIPT=\"scenes\\room\\lamp.script\" }
   }
@@ -695,7 +774,7 @@ fn scripts_drive_the_game_and_its_scene() {
         .iter()
         .filter(|s| s.state() == State::Persistent)
         .count();
-    assert_eq!(persistent, 3, "scene_events, lamp and floor");
+    assert_eq!(persistent, 5, "game, scene_events, prop, lamp and floor");
     let lamp = runtime.world.find_node("LAMP").unwrap();
     assert!(matches!(
         runtime.world.objects().get(lamp).unwrap().kind,
@@ -1027,6 +1106,135 @@ fn sounds_music_and_speech_play_on_the_game_clock() {
         2,
         "the game's sound and the new hum"
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn mouse_keyboard_cursors_and_fades() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    assert_eq!(
+        runtime.world.cursors().normal.as_deref(),
+        Some("sprites\\cursor.sprite")
+    );
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    // The game script turned the game non-interactive; the scene script
+    // deactivated the prop. Undo both.
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    let prop_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    // The scene script moved the prop to (5, 6); its 4x4 sprite covers
+    // (5..9, 6..10). Scroll the view back to the origin first.
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(6, 7);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(prop));
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "entered"), Value::from("prop"));
+    assert_eq!(
+        runtime.world.cursors().shown(),
+        Some("art\\green.png"),
+        "the active cursor over an object"
+    );
+    runtime.mouse_left_down();
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "clicked"), Value::from("prop"));
+    runtime.mouse_right_down();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "rightClicked"), Value::from("prop"));
+    // A second click at once is a double click.
+    runtime.mouse_left_down();
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "doubleClicked"), Value::from("prop"));
+    // Off the prop: the cursor is the default one and animates; a click
+    // reaches the scene with the mouse in scene coordinates.
+    runtime.mouse_move(20, 30);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), None);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "left"), Value::from("prop"));
+    assert_eq!(
+        runtime.world.cursors().shown(),
+        Some("sprites\\cursor.sprite")
+    );
+    let frame0 = runtime.world.cursors().frame();
+    runtime.world.skip_to(100, 0);
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "clickX"), Value::Int(20 + 84));
+    assert_eq!(result(&runtime, "clickY"), Value::Int(30));
+    for _ in 0..5 {
+        runtime.tick(16);
+    }
+    assert_ne!(
+        runtime.world.cursors().frame(),
+        frame0,
+        "the cursor animates"
+    );
+    // Not interactive: the wait cursor, no active object, no click.
+    runtime.world.skip_to(0, 0);
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(false));
+    runtime.mouse_move(6, 7);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), None);
+    assert_eq!(runtime.world.cursors().shown(), Some("art\\red.png"));
+    runtime.engine.set_global("result", Value::object());
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "clicked"), Value::Null);
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    // Keys: the code, the text and the modifiers reach the Keypress
+    // handler; IsKeyDown sees the held key.
+    runtime.key_down(65, Some('A'), true, false, false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "key"), Value::Int(65));
+    assert_eq!(result(&runtime, "keyText"), Value::from("A"));
+    assert_eq!(result(&runtime, "keyShift"), Value::Bool(true));
+    assert_eq!(result(&runtime, "aDown"), Value::Bool(true));
+    runtime.key_up(65);
+    assert!(!runtime.world.keyboard().is_key_down(97));
+    // Fades: FadeOut waits for the fade.
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "fade.script")
+    );
+    let mut ticks = 0;
+    while result(&runtime, "faded") != Value::Bool(true) && ticks < 50 {
+        runtime.tick(16);
+        ticks += 1;
+    }
+    assert_eq!(result(&runtime, "faded"), Value::Bool(true));
+    let (Value::Int(t0), Value::Int(t1)) = (result(&runtime, "fadeT0"), result(&runtime, "fadeT1"))
+    else {
+        panic!("times");
+    };
+    assert!((100..150).contains(&(t1 - t0)), "{} ms", t1 - t0);
+    assert_eq!(
+        result(&runtime, "fadeColor"),
+        Value::Int(luma_script::rgba(10, 20, 30, 255))
+    );
+    assert_eq!(runtime.world.fader().color().unwrap().a, 255);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
