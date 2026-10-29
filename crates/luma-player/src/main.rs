@@ -43,22 +43,22 @@ OPTIONS:
     --font <file>         With --say, the font the actor talks with
     --mute                Play no sound (the sounds still run, silently, on the game clock)
     --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
-                          node once the scene is up, e.g. --click Door or --click Freezer:LookAt
-                          (before --click-at, so that an item taken can be clicked)
-    --after <n>           In headless mode, frames to run before --click-at (default 3), e.g. to
-                          let a script finish first
-    --click-at <x>,<y>    In headless mode, move the mouse there and click once the scene is up
-                          (after --right-click-at and --key, so that a menu can be clicked);
-                          repeatable, each step --after frames after the previous one
-    --type <text>         In headless mode, type the text, a key per character, in the order
-                          given with --click-at (into the focused editor)
-    --hover-at <x>,<y>    In headless mode, move the mouse there once the scene is up
+                          node, e.g. --click Door or --click Freezer:LookAt
+    --click-at <x>,<y>    In headless mode, move the mouse there and click
     --right-click-at <x>,<y>
-                          In headless mode, move the mouse there and right-click once the scene is up
+                          In headless mode, move the mouse there and right-click (a verb menu
+                          centred on the mouse is then clicked with --click-at at the same point)
     --key <code>          In headless mode, press a key (a Windows virtual key code, e.g. 27 for
-                          Escape) once the scene is up, after the clicks
-    --hold-key <code>     In headless mode, hold a key down from the time the scene is up to the
-                          end, for scripts that poll Keyboard.IsKeyDown
+                          Escape)
+    --hold-key <code>[:<frames>]
+                          In headless mode, hold a key down for that many frames (--after by
+                          default), for scripts that poll Keyboard.IsKeyDown
+    --type <text>         In headless mode, type the text, a key per character (into the
+                          focused editor)
+    --wait <n>            In headless mode, run n frames, e.g. for a loaded game's sentence to end
+    --after <n>           In headless mode, frames between two steps (default 3), e.g. to let
+                          a script finish first
+    --hover-at <x>,<y>    In headless mode, move the mouse there once the scene is up
     --then-scene <file>   In headless mode, change to that scene --after frames after the clicks;
                           repeatable, to leave a scene and come back to it
     --entities            In headless mode, list the last scene's entities and the states
@@ -70,8 +70,10 @@ OPTIONS:
                           saved ones
     --help                Show this message
 
-The headless steps run one frame after the scene is up, once its scripts
-have placed the actor, as for a player who acts when the scene shows.
+--click, --click-at, --right-click-at, --key, --hold-key, --type and --wait
+are steps: they run in the order given, --after frames apart, starting one
+frame after the scene is up, once its scripts have placed the actor, as
+for a player who acts when the scene shows.
 
 With --headless and --screenshot, the scene and the actors are rendered
 once after the last frame.
@@ -92,7 +94,16 @@ const BLACK: Rgba = Rgba {
 
 /// A step of the headless run, in command-line order.
 enum Step {
+    /// Raise an event on a scene node by name (`node` or `node:event`).
+    Node(String),
     ClickAt(i32, i32),
+    RightClickAt(i32, i32),
+    /// Press and release a key.
+    Key(i32),
+    /// Hold a key down for that many frames (`--after` when `None`).
+    HoldKey(i32, Option<u64>),
+    /// Run that many frames.
+    Wait(u64),
     Type(String),
 }
 
@@ -105,16 +116,12 @@ struct Options {
     headless: bool,
     ticks: u64,
     dt: u64,
-    click: Option<String>,
     at: Option<(i32, i32)>,
     say: Option<String>,
     font: Option<String>,
     mute: bool,
     steps: Vec<Step>,
-    right_click_at: Option<(i32, i32)>,
     hover_at: Option<(i32, i32)>,
-    key: Option<i32>,
-    hold_key: Option<i32>,
     after: u64,
     then_scenes: Vec<String>,
     entities: bool,
@@ -131,16 +138,12 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut headless = false;
     let mut ticks = 60;
     let mut dt = 16;
-    let mut click = None;
     let mut at = None;
     let mut say = None;
     let mut font = None;
     let mut mute = false;
     let mut steps = Vec::new();
-    let mut right_click_at = None;
     let mut hover_at = None;
-    let mut key = None;
-    let mut hold_key = None;
     let mut after = 3;
     let mut then_scenes = Vec::new();
     let mut entities = false;
@@ -179,7 +182,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                 }
             }
             "--headless" => headless = true,
-            "--click" => click = Some(value(&mut i)?.clone()),
+            "--click" => steps.push(Step::Node(value(&mut i)?.clone())),
             "--say" => say = Some(value(&mut i)?.clone()),
             "--font" => font = Some(value(&mut i)?.clone()),
             "--mute" => mute = true,
@@ -192,6 +195,13 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                 steps.push(Step::ClickAt(x, y));
             }
             "--type" => steps.push(Step::Type(value(&mut i)?.clone())),
+            "--wait" => {
+                let v = value(&mut i)?;
+                let frames = v
+                    .parse()
+                    .map_err(|_| format!("--wait expects a number of frames, got `{v}`"))?;
+                steps.push(Step::Wait(frames));
+            }
             "--hover-at" => {
                 let v = value(&mut i)?;
                 let (x, y) = v
@@ -206,7 +216,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .split_once(',')
                     .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
                     .ok_or_else(|| format!("--right-click-at expects <x>,<y>, got `{v}`"))?;
-                right_click_at = Some((x, y));
+                steps.push(Step::RightClickAt(x, y));
             }
             "--after" => {
                 let v = value(&mut i)?;
@@ -216,17 +226,27 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--key" => {
                 let v = value(&mut i)?;
-                key = Some(
-                    v.parse()
-                        .map_err(|_| format!("--key expects a key code, got `{v}`"))?,
-                );
+                let code = v
+                    .parse()
+                    .map_err(|_| format!("--key expects a key code, got `{v}`"))?;
+                steps.push(Step::Key(code));
             }
             "--hold-key" => {
                 let v = value(&mut i)?;
-                hold_key = Some(
-                    v.parse()
-                        .map_err(|_| format!("--hold-key expects a key code, got `{v}`"))?,
-                );
+                let (code, frames) = match v.split_once(':') {
+                    Some((code, frames)) => (code, Some(frames)),
+                    None => (v.as_str(), None),
+                };
+                let code = code
+                    .parse()
+                    .map_err(|_| format!("--hold-key expects a key code, got `{v}`"))?;
+                let frames = frames
+                    .map(|f| {
+                        f.parse()
+                            .map_err(|_| format!("--hold-key expects <code>[:<frames>], got `{v}`"))
+                    })
+                    .transpose()?;
+                steps.push(Step::HoldKey(code, frames));
             }
             "--at" => {
                 let v = value(&mut i)?;
@@ -266,16 +286,12 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         headless,
         ticks,
         dt,
-        click,
         at,
         say,
         font,
         mute,
         steps,
-        right_click_at,
         hover_at,
-        key,
-        hold_key,
         after,
         then_scenes,
         entities,
@@ -408,58 +424,65 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 runtime.mouse_move(x, y);
                 println!("[{tick}] mouse moved to ({x}, {y})");
             }
-            if let Some((x, y)) = options.right_click_at {
-                runtime.mouse_move(x, y);
-                for line in runtime.tick(options.dt) {
-                    println!("[{tick}] {line}");
-                }
-                let over = runtime
-                    .world
-                    .active_object()
-                    .map(|id| runtime.world.describe_object(id))
-                    .unwrap_or_else(|| "nothing".to_string());
-                println!("[{tick}] mouse at ({x}, {y}) over {over}; right click");
-                runtime.mouse_right_down();
-                for line in runtime.tick(options.dt) {
-                    println!("[{tick}] {line}");
-                }
-                runtime.mouse_right_up();
-            }
-            if let Some(code) = options.key {
-                println!("[{tick}] key {code} pressed");
-                runtime.key_down(code, None, false, false, false);
-                runtime.key_up(code);
-            }
-            if let Some(code) = options.hold_key {
-                println!("[{tick}] key {code} held down");
-                runtime.key_down(code, None, false, false, false);
-            }
-            if let Some(click) = &options.click {
-                let (node, event) = click.split_once(':').unwrap_or((click, "LeftClick"));
-                match runtime.world.find_node(node) {
-                    Some(id) => {
-                        let handled =
-                            runtime
-                                .engine
-                                .apply_event(&mut runtime.world, id, event, false);
-                        println!(
-                            "[{tick}] {event} on {node:?}: {}",
-                            if handled { "handled" } else { "no handler" }
-                        );
-                    }
-                    None => println!("[{tick}] {event} on {node:?}: no such node"),
-                }
-            }
-            for step in &options.steps {
-                // A few frames so that a menu opened by the right click or
-                // the key is in place, or that a script ran.
-                for _ in 0..options.after {
-                    for line in runtime.tick(options.dt) {
-                        println!("[{tick}] {line}");
+            for (index, step) in options.steps.iter().enumerate() {
+                // A few frames between the steps, so that a menu opened by a
+                // click or a key is in place, or that a script ran. The first
+                // step comes at once, as the scene has just come up.
+                if index > 0 {
+                    for _ in 0..options.after {
+                        for line in runtime.tick(options.dt) {
+                            println!("[{tick}] {line}");
+                        }
                     }
                 }
-                let (x, y) = match step {
-                    Step::ClickAt(x, y) => (*x, *y),
+                let (x, y, right) = match step {
+                    Step::ClickAt(x, y) => (*x, *y, false),
+                    Step::RightClickAt(x, y) => (*x, *y, true),
+                    Step::Node(click) => {
+                        let (node, event) = click.split_once(':').unwrap_or((click, "LeftClick"));
+                        match runtime.world.find_node(node) {
+                            Some(id) => {
+                                let handled = runtime.engine.apply_event(
+                                    &mut runtime.world,
+                                    id,
+                                    event,
+                                    false,
+                                );
+                                println!(
+                                    "[{tick}] {event} on {node:?}: {}",
+                                    if handled { "handled" } else { "no handler" }
+                                );
+                            }
+                            None => println!("[{tick}] {event} on {node:?}: no such node"),
+                        }
+                        continue;
+                    }
+                    Step::Key(code) => {
+                        println!("[{tick}] key {code} pressed");
+                        runtime.key_down(*code, None, false, false, false);
+                        runtime.key_up(*code);
+                        continue;
+                    }
+                    Step::HoldKey(code, frames) => {
+                        let frames = frames.unwrap_or(options.after);
+                        println!("[{tick}] key {code} held down for {frames} frames");
+                        runtime.key_down(*code, None, false, false, false);
+                        for _ in 0..frames {
+                            for line in runtime.tick(options.dt) {
+                                println!("[{tick}] {line}");
+                            }
+                        }
+                        runtime.key_up(*code);
+                        continue;
+                    }
+                    Step::Wait(frames) => {
+                        for _ in 0..*frames {
+                            for line in runtime.tick(options.dt) {
+                                println!("[{tick}] {line}");
+                            }
+                        }
+                        continue;
+                    }
                     Step::Type(text) => {
                         println!("[{tick}] typing {text:?}");
                         for ch in text.chars() {
@@ -480,14 +503,23 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                     .active_object()
                     .map(|id| runtime.world.describe_object(id))
                     .unwrap_or_else(|| "nothing".to_string());
-                println!("[{tick}] mouse at ({x}, {y}) over {over}; left click");
-                runtime.mouse_left_down();
+                let button = if right { "right" } else { "left" };
+                println!("[{tick}] mouse at ({x}, {y}) over {over}; {button} click");
+                if right {
+                    runtime.mouse_right_down();
+                } else {
+                    runtime.mouse_left_down();
+                }
                 // A frame between the press and the release, as a player's
                 // click spans frames (a button notes it is held).
                 for line in runtime.tick(options.dt) {
                     println!("[{tick}] {line}");
                 }
-                runtime.mouse_left_up();
+                if right {
+                    runtime.mouse_right_up();
+                } else {
+                    runtime.mouse_left_up();
+                }
             }
             for scene in &options.then_scenes {
                 // Frames for the scene's scripts to run before leaving it.
