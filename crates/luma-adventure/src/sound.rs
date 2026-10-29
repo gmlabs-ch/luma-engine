@@ -63,7 +63,7 @@ pub struct MusicChannel {
 }
 
 /// A crossfade between two music channels (`MusicCrossfade`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Crossfade {
     start: u64,
     channel1: usize,
@@ -82,8 +82,8 @@ pub struct Sounds {
     pub objects: HashMap<NativeId, ObjectSfx>,
     /// The music channels.
     pub music: Vec<Option<MusicChannel>>,
-    music_start_time: Vec<u64>,
-    crossfade: Option<Crossfade>,
+    pub(crate) music_start_time: Vec<u64>,
+    pub(crate) crossfade: Option<Crossfade>,
     /// Directories searched for speech files, with a trailing separator.
     pub speech_dirs: Vec<String>,
 }

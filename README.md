@@ -45,12 +45,12 @@ Luma Engine reads the same game data with a new engine built for today:
 | Crate | Purpose | Depends on |
 |-------|---------|------------|
 | `luma-archive` | Game packages (`.dcp`) and a virtual file system | `flate2` |
-| `luma-formats` | Definition files, sprites, scenes, actors, fonts and images | `image` |
-| `luma-script` | Virtual machine for compiled game scripts | nothing |
+| `luma-formats` | Definition files, sprites, scenes, actors, fonts and images | `image` (`serde` with the `serde` feature) |
+| `luma-script` | Virtual machine for compiled game scripts | nothing (`serde` with the `serde` feature) |
 | `luma-render` | 2D/2.5D renderer on wgpu | `luma-formats`, `wgpu`, `winit` |
 | `luma-audio` | Music, sound effects and voice | `kira` (Symphonia for decoding, `cpal` with the `device` feature) |
 | `luma-video` | Ogg Theora videos decoded to frames | `ogg`, `oxideav-theora`, `oxideav-core` |
-| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six core crates, `fontdue` |
+| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six core crates, `fontdue`, `serde`, `postcard`, `flate2` |
 | `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script` |
 | `luma-player` | The desktop player | `luma-adventure`, `luma-archive`, `luma-formats`, `luma-render` |
 
@@ -96,8 +96,9 @@ luma script path/to/game scenes/room/scr/scene_init.script
 
 `list` and `unpack` also accept a single `.dcp` file, and `dump` a file on
 disk. The formats are documented in [docs/formats](docs/formats/README.md),
-the renderer in [docs/rendering.md](docs/rendering.md) and the script
-engine in [docs/scripting.md](docs/scripting.md).
+the renderer in [docs/rendering.md](docs/rendering.md), the script
+engine in [docs/scripting.md](docs/scripting.md) and saved games in
+[docs/saving.md](docs/saving.md).
 
 The player shows one scene of a game, without running its scripts yet:
 

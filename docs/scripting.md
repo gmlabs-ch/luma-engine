@@ -16,7 +16,7 @@ behave as their authors saw them.
 | `Value` | The dynamic type of the language: `null`, bool, int, float, string, object, native handle. |
 | `Script` | One execution: instruction pointer, value stack, `this` stack, scopes, call stack, state. A thread is a `Script` too. |
 | `Engine` | Loads programs, keeps the scripts and the engine-wide globals, runs a tick. |
-| `Host` | What the embedding program provides: files, time, logging, native objects and their methods, global functions. |
+| `Host` | What the embedding program provides: files, time, logging, native objects and their methods, global functions, and a hook after each native call. |
 
 ## Values and variables
 
@@ -215,8 +215,16 @@ Videos (see [docs/video.md](video.md)) take the frame over: while one
 plays, the game is frozen and no script runs, so the script that called
 `PlayTheora` goes on when the video ends or is skipped.
 
+Saved games (see [docs/saving.md](saving.md)) keep every running
+script: `Game.SaveGame` writes the file once its `true` is on the
+caller's stack, through the host's `after_call` hook, so that the script
+resumes after the call when the game loads; `Game.LoadGame` schedules
+the load for the next frame and replaces every script with the saved
+ones. With the `serde` feature, `Engine::snapshot` and `Engine::restore`
+do this for any host.
+
 What later milestones implement is accepted and logged once as "not
-implemented": saving and transitions.
+implemented": transitions.
 
 ## Not yet
 
@@ -228,5 +236,4 @@ implemented": saving and transitions.
 - `.talk` files timing talk sprites to a sound, `ForceTalkAnim`, and
   `AddTalkSprite`; text in UTF-8 string tables is drawn as Latin-1.
 - The echo and reverb sound effects, and streaming of long sounds.
-- Saving and restoring running scripts.
 - The debugger protocol (`DBG_LINE` is read but only used for messages).

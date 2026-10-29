@@ -77,7 +77,7 @@ impl Camera {
 }
 
 /// Identifies an entity of a scene: a node of a layer, or a free entity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum EntityRef {
     /// The node `index` of layer `layer`.
     Node {
@@ -94,7 +94,7 @@ pub enum EntityRef {
 /// engine's `CBSprite::GetCurrentFrame`: a frame lasts its delay from the
 /// moment the previous one was shown; a non-looping sprite stops on its
 /// last frame and is then `finished`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AnimState {
     /// The sprite path this state belongs to (normalised).
     pub sprite: String,
@@ -381,7 +381,7 @@ pub struct Drawable<'a> {
 }
 
 /// An entity saying a sentence.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EntityTalk {
     /// The sentence.
     pub sentence: Sentence,
@@ -429,13 +429,15 @@ impl DrawItem {
 }
 
 /// A scene and everything needed to run and draw it.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SceneView {
     /// The scene definition, which scripts modify.
     pub scene: Scene,
     /// Path the scene was loaded from.
     pub path: String,
-    /// The sprites of the scene's entities.
+    /// The sprites of the scene's entities; loaded again after a saved
+    /// game.
+    #[serde(skip)]
     pub bank: SpriteBank,
     anims: HashMap<EntityRef, AnimState>,
     talks: HashMap<EntityRef, EntityTalk>,
@@ -479,6 +481,27 @@ impl SceneView {
     /// available.
     pub fn add_sprite(&mut self, vfs: &Vfs, path: &str) -> bool {
         self.bank.add_sprite(vfs, path)
+    }
+
+    /// Loads the sprites the scene's state names, after a saved game:
+    /// the entities' own and the talk sprites of the talking ones.
+    pub(crate) fn reload_sprites(&mut self, vfs: &Vfs) {
+        let mut paths: Vec<String> = self
+            .scene
+            .entities()
+            .filter(|e| e.kind == EntityKind::Normal)
+            .filter_map(|e| e.sprite.clone())
+            .collect();
+        for (r, talk) in &self.talks {
+            paths.extend(talk.sprite.clone());
+            if let Some(e) = self.entity(*r) {
+                paths.extend(e.talk_sprites.iter().cloned());
+                paths.extend(e.talk_special_sprites.iter().cloned());
+            }
+        }
+        for path in paths {
+            self.bank.add_sprite(vfs, &path);
+        }
     }
 
     /// Decodes and uploads the images of every loaded sprite that has no

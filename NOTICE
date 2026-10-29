@@ -51,6 +51,7 @@ no code copied):
   crates/luma-script/src/stack.rs
   crates/luma-script/src/script.rs
   crates/luma-script/src/engine.rs
+  crates/luma-script/src/snapshot.rs
   crates/luma-adventure/src/world.rs
   crates/luma-adventure/src/natives.rs
   crates/luma-adventure/src/natives_actor.rs
@@ -73,6 +74,7 @@ no code copied):
   crates/luma-video/src/lib.rs
   crates/luma-adventure/src/video.rs
   crates/luma-adventure/src/scene_state.rs
+  crates/luma-adventure/src/save.rs
   crates/luma-audio/src/audio.rs
 
 -------------------------------------------------------------------------------

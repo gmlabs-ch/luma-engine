@@ -10,7 +10,7 @@ use luma_formats::Rgba;
 pub const SCENE_FADE_MS: u64 = 200;
 
 /// The fader's state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Fader {
     /// Whether the colour is shown.
     pub active: bool,

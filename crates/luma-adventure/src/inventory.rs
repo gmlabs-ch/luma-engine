@@ -17,7 +17,7 @@ use crate::ui::{ButtonListener, Control};
 use crate::world::World;
 
 /// An item of the game (`CAdItem`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Item {
     /// The definition, which scripts modify.
     pub def: ItemDef,
@@ -32,7 +32,7 @@ pub struct Item {
 }
 
 /// The items and the box (`CAdInventory`, `CAdInventoryBox`).
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Inventory {
     /// Every item of the game, by handle.
     pub items: Vec<(NativeId, Item)>,

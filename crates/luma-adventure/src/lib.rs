@@ -32,8 +32,8 @@
 //! - [`World`]: the game as scripts see it (`Game`, `Scene`, layers,
 //!   entities, regions, sprites, actors), the script engine's host.
 //! - [`Runtime`]: a script engine and a world, driven once per frame.
-//!
-//! Saved games come with a later ticket of the milestone.
+//! - [`save`]: saved games, the whole engine written to a slot and read
+//!   back (`Game.SaveGame`, `Game.LoadGame`).
 
 #![forbid(unsafe_code)]
 
@@ -49,6 +49,7 @@ mod natives_sound;
 mod natives_ui;
 pub mod objects;
 pub mod path;
+pub mod save;
 pub mod scene_state;
 pub mod scene_view;
 pub mod settings;
@@ -67,6 +68,7 @@ pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;
 pub use objects::{Kind, Native, Objects};
 pub use path::Floor;
+pub use save::{SAVE_EXTENSION, SaveHeader, read_save_header};
 pub use scene_state::{NodeState, SceneState, state_key};
 pub use scene_view::{
     AnimState, Camera, DrawItem, Drawable, EntityRef, EntityTalk, LoadedSprite, Mask, SceneView,

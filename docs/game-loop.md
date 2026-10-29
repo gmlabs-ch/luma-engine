@@ -12,7 +12,9 @@ when the window has another shape), loads `default.game`, attaches the
 game's scripts and schedules its `STARTUP_SCENE`. Every frame then runs,
 in this order (`Runtime::tick`):
 
-1. the timer advances by the frame's duration, at most a second;
+1. a game load asked last frame (`Game.LoadGame`) happens, replacing
+   everything below with the saved state (see [saving.md](saving.md));
+   the timer advances by the frame's duration, at most a second;
 2. a scene change asked last frame happens (`SceneShutdown`, the old
    scene's state noted, the new scene loaded and its remembered state
    put back, its scripts attached), with a fade from black of 200 ms
@@ -156,7 +158,7 @@ Nothing else comes back: positions, script variables and the scripts
 themselves start over from the file, and a scene's init script runs on
 every visit, so it may override what was restored. A remembered sprite
 that cannot be loaded is logged and the entity keeps the file's. The
-state survives scene changes only, until saved games keep it. The
+states are part of a saved game (see [saving.md](saving.md)). The
 original engine also remembers whether each waypoint group is active;
 Luma uses every group, so this is not kept yet.
 

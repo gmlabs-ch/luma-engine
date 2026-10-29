@@ -8,7 +8,7 @@
 use luma_formats::font::TextAlign;
 
 /// A sentence being said.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Sentence {
     /// The text, expanded through the string table.
     pub text: String,
@@ -32,7 +32,9 @@ pub struct Sentence {
     pub align: TextAlign,
     /// Whether the box stays put while the scene scrolls.
     pub fixed_pos: bool,
-    /// The speech sound playing with the sentence, if any.
+    /// The speech sound playing with the sentence, if any; not kept by
+    /// a saved game.
+    #[serde(skip)]
     pub sound: Option<luma_audio::SoundId>,
 }
 
@@ -117,7 +119,7 @@ impl SentenceDraw {
 }
 
 /// Which mouse button ends a sentence (`TALK_SKIP_BUTTON`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum TalkSkipButton {
     /// Code 0, the default.
     #[default]
@@ -172,7 +174,7 @@ impl TalkSkipButton {
 
 /// The subtitle placement an object carries (`SubtitlesWidth`,
 /// `SubtitlesPosX`...).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SubtitleMods {
     /// A fixed width; `0` lets the engine choose.
     pub width: i32,

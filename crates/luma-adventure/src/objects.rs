@@ -8,7 +8,7 @@ use luma_script::{NativeId, Properties};
 use crate::scene_view::EntityRef;
 
 /// What a native object is.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Kind {
     /// The `Game` object.
     Game,
@@ -48,7 +48,7 @@ pub enum Kind {
 }
 
 /// A native object: its kind and the properties scripts set on it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Native {
     /// What it is.
     pub kind: Kind,
@@ -57,7 +57,7 @@ pub struct Native {
 }
 
 /// The table of native objects.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Objects {
     slots: Vec<(u32, Option<Native>)>,
     free: Vec<u32>,

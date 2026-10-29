@@ -50,9 +50,6 @@ const GAME_STUBS: &[&str] = &[
     "LockMouseRect",
     "RegWriteNumber",
     "RegWriteString",
-    "SaveGame",
-    "LoadGame",
-    "EmptySaveSlot",
     "Screenshot",
     "ScreenshotEx",
     "OpenDocument",
@@ -375,9 +372,9 @@ impl World {
             | "CursorHidden" => Value::Bool(false),
             "AcceleratedMode" => Value::Bool(true),
             "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => Value::Int(100),
-            "FPS" | "TextEncoding" | "SoundBufferSize" | "AutoSaveSlot" | "MostRecentSaveSlot" => {
-                Value::Int(0)
-            }
+            "FPS" | "TextEncoding" | "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
+            "SaveDirectory" => Value::from(self.save_directory().to_string_lossy().into_owned()),
+            "MostRecentSaveSlot" => Value::Int(self.most_recent_save_slot()),
             "TalkSkipButton" => Value::Int(self.talk_skip_button.code()),
             "LastResponse" | "LastResponseOrig" => Value::Null,
             "Platform" => Value::from("luma"),
@@ -608,9 +605,30 @@ impl World {
             }
             "FileExists" => Return::value(self.vfs().exists(&arg(0).get_string(self))),
             "ClearScriptCache" => Return::null(),
-            "IsSaveSlotUsed" => {
-                self.stub(&format!("Game.{name}"));
-                Return::value(false)
+            "SaveGame" => {
+                // Done once `true` is on the caller's stack (`after_call`).
+                let slot = arg(0).get_int(self);
+                let description = arg(1).get_string(self);
+                let quick = arg(2).get_bool(self);
+                self.pending_save = Some((slot, description, quick));
+                Return::value(true)
+            }
+            "LoadGame" => {
+                // Loaded at the start of the next frame; the script sleeps
+                // until then and is replaced by the saved one.
+                self.schedule_load(arg(0).get_int(self));
+                Return {
+                    value: Value::Bool(false),
+                    effect: Effect::Sleep(0),
+                }
+            }
+            "IsSaveSlotUsed" => Return::value(self.is_save_slot_used(arg(0).get_int(self))),
+            "GetSaveSlotDescription" => {
+                Return::value(self.save_slot_description(arg(0).get_int(self)))
+            }
+            "EmptySaveSlot" => {
+                self.empty_save_slot(arg(0).get_int(self));
+                Return::null()
             }
             "QueryItem" => Return::value(native_or_null(match arg(0) {
                 Value::Int(i) => usize::try_from(i)
@@ -626,7 +644,7 @@ impl World {
                 self.stub(&format!("Game.{name}"));
                 Return::null()
             }
-            "GetSaveSlotDescription" | "RegReadString" => {
+            "RegReadString" => {
                 self.stub(&format!("Game.{name}"));
                 Return::value("")
             }

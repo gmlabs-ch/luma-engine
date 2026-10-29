@@ -17,7 +17,7 @@ use crate::scene_view::{AnimState, Drawable, SpriteBank, frame_height, key};
 use crate::talk::{Sentence, SubtitleMods};
 
 /// What an actor is doing (`TObjectState`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ActorState {
     /// Standing; `Ready` for the scripts waiting for it.
     Ready,
@@ -68,7 +68,7 @@ pub struct WalkContext<'a> {
 }
 
 /// A loaded actor and its state.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Actor {
     /// The definition, which scripts modify (name, caption, flags).
     pub def: luma_formats::Actor,
@@ -86,7 +86,9 @@ pub struct Actor {
     pub state: ActorState,
     /// The state to return to when the current one ends.
     pub next_state: ActorState,
-    /// The actor's sprites and textures.
+    /// The actor's sprites and textures; loaded again after a saved
+    /// game.
+    #[serde(skip)]
     pub bank: SpriteBank,
     /// Whether the last walk stopped on a block (`ActorIsBlocked`).
     pub actor_is_blocked: bool,
@@ -217,6 +219,31 @@ impl Actor {
             pf_step_y: 0.0,
             pf_count: 0,
             current_regions: Vec::new(),
+        }
+    }
+
+    /// Loads the sprites the actor's state names, after a saved game.
+    pub(crate) fn reload_sprites(&mut self, vfs: &Vfs) {
+        let mut paths: Vec<String> = self
+            .def
+            .sprite_paths()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        for path in [
+            &self.sprite_override,
+            &self.anim_sprite,
+            &self.anim_sprite2,
+            &self.temp_sprite2,
+            &self.current_sprite,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            paths.push(path.clone());
+        }
+        for path in paths {
+            self.bank.add_sprite(vfs, &path);
         }
     }
 

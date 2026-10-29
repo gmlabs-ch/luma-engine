@@ -39,7 +39,7 @@ const VK_DELETE: i32 = 46;
 const ONE_TIME_PRESS_MS: u64 = 100;
 
 /// How a window relates to the rest of the game.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum WindowMode {
     /// The game goes on around the window.
     #[default]
@@ -52,7 +52,7 @@ pub enum WindowMode {
 }
 
 /// The state of a window.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WindowState {
     /// The file it was loaded from.
     pub filename: Option<String>,
@@ -132,7 +132,7 @@ impl Default for WindowState {
 }
 
 /// Who a button reports to besides its scripts (`SetListener`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ButtonListener {
     /// The shield of a menu: a press closes the parent window.
     CloseParent,
@@ -141,7 +141,7 @@ pub enum ButtonListener {
 }
 
 /// The state of a button.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ButtonState {
     /// Tiled backgrounds of the states.
     pub back_hover: Option<TiledImage>,
@@ -186,7 +186,7 @@ pub struct ButtonState {
 }
 
 /// The state of a static text.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct StaticState {
     /// Horizontal alignment.
     pub text_align: TextAlign,
@@ -195,7 +195,7 @@ pub struct StaticState {
 }
 
 /// The state of a text editor.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EditState {
     /// The font of the selected part of the text.
     pub font_selected: Option<String>,
@@ -237,7 +237,7 @@ impl Default for EditState {
 }
 
 /// What a control is.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ControlKind {
     /// A window.
     Window(Box<WindowState>),
@@ -251,7 +251,7 @@ pub enum ControlKind {
 
 /// A control: a window, a button, a static text or an editor
 /// (`CUIObject`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Control {
     /// Name used by scripts.
     pub name: String,
@@ -426,7 +426,7 @@ impl Control {
 }
 
 /// The windows of a game and what freezing them holds.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Ui {
     /// Every control by handle.
     pub controls: HashMap<NativeId, Control>,
@@ -434,7 +434,8 @@ pub struct Ui {
     pub windows: Vec<NativeId>,
     /// The window the keys go to.
     pub focused_window: Option<NativeId>,
-    /// The sprites of the controls.
+    /// The sprites of the controls; loaded again after a saved game.
+    #[serde(skip)]
     pub bank: SpriteBank,
     /// The object the left button went down on (`m_CapturedObject`).
     pub captured: Option<NativeId>,

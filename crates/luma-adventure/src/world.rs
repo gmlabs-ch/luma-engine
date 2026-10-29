@@ -35,7 +35,7 @@ use luma_formats::font::TextAlign;
 pub struct World {
     pub(crate) vfs: Vfs,
     pub(crate) settings: GameSettings,
-    game_file: GameFile,
+    pub(crate) game_file: GameFile,
     strings: StringTable,
     pub(crate) objects: Objects,
     pub(crate) game_id: NativeId,
@@ -55,17 +55,17 @@ pub struct World {
     pub(crate) scroll_pixels_y: i32,
     pub(crate) scroll_time_x: u64,
     pub(crate) scroll_time_y: u64,
-    last_scroll_x: u64,
-    last_scroll_y: u64,
+    pub(crate) last_scroll_x: u64,
+    pub(crate) last_scroll_y: u64,
     pub(crate) actors: Vec<(NativeId, Actor)>,
-    pending_events: Vec<(NativeId, String)>,
+    pub(crate) pending_events: Vec<(NativeId, String)>,
     pub(crate) sounds: Sounds,
     pub(crate) fonts: FontBank,
     pub(crate) system_font: Option<String>,
     pub(crate) subtitles: bool,
     pub(crate) subtitles_speed: i32,
     pub(crate) talk_skip_button: TalkSkipButton,
-    sentences: Vec<SentenceDraw>,
+    pub(crate) sentences: Vec<SentenceDraw>,
     pub(crate) mouse: Mouse,
     pub(crate) keyboard: Keyboard,
     pub(crate) active_object: Option<NativeId>,
@@ -87,11 +87,20 @@ pub struct World {
     pub(crate) quit: bool,
     pub(crate) name: String,
     pub(crate) caption: String,
-    timer: u64,
+    pub(crate) timer: u64,
     pub(crate) clock: u64,
     log: Vec<String>,
     stubs: HashSet<String>,
-    rng: u64,
+    pub(crate) rng: u64,
+    /// The slot `Game.LoadGame` asked for, loaded at the next frame.
+    pub(crate) scheduled_load: Option<i32>,
+    /// What `Game.SaveGame` asked for, done once the call returned.
+    pub(crate) pending_save: Option<(i32, String, bool)>,
+    /// Saved games go to the user's own directory (`PERSONAL_SAVEGAMES`,
+    /// or the game's directory is not writable).
+    pub(crate) personal_save: bool,
+    /// Whether the game's save directory was tried.
+    pub(crate) save_dir_checked: bool,
 }
 
 impl World {
@@ -116,6 +125,7 @@ impl World {
         let keyboard_id = objects.insert(Kind::Keyboard);
         let scene_id = objects.insert(Kind::Scene);
         let fader_id = objects.insert(Kind::Fader);
+        let personal_savegames = game_file.personal_savegames;
         let mut world = World {
             vfs,
             settings,
@@ -176,6 +186,10 @@ impl World {
             log: Vec::new(),
             stubs: HashSet::new(),
             rng: 0x2545_F491_4F6C_DD1D,
+            scheduled_load: None,
+            pending_save: None,
+            personal_save: personal_savegames,
+            save_dir_checked: false,
         };
         if let Some(path) = world.game_file.string_table.clone() {
             world.load_string_table(&path, true);
@@ -1494,6 +1508,18 @@ impl Host for World {
     ) -> Option<Return> {
         self.native_call(target, name, args, ctx)
     }
+
+    /// `Game.SaveGame` takes the snapshot once its `true` is on the
+    /// caller's stack, so that the script resumes after the call when the
+    /// game loads; a failure turns the result into `false`.
+    fn after_call(&mut self, engine: &mut Engine, script: luma_script::ScriptId) {
+        if let Some((slot, description, quick)) = self.pending_save.take() {
+            if let Err(err) = crate::save::save_game(self, engine, slot, &description, quick) {
+                self.log(format!("Error saving game to slot {slot}: {err}"));
+                engine.set_result(script, Value::Bool(false));
+            }
+        }
+    }
 }
 
 /// A script engine and the world it runs in, driven once per frame.
@@ -1540,6 +1566,23 @@ impl Runtime {
         self.world.load_scene(&mut self.engine, path)
     }
 
+    /// Saves the game to a slot now (`Game.SaveGame` outside a script):
+    /// `BeforeSave` runs first. Returns the file written.
+    pub fn save_game(
+        &mut self,
+        slot: i32,
+        description: &str,
+        quick: bool,
+    ) -> std::result::Result<std::path::PathBuf, String> {
+        crate::save::save_game(&mut self.world, &mut self.engine, slot, description, quick)
+    }
+
+    /// Loads the game of a slot now (`Game.LoadGame` without the frame
+    /// delay): `AfterLoad` runs on the game once everything is back.
+    pub fn load_game(&mut self, slot: i32) -> std::result::Result<(), String> {
+        crate::save::load_game(&mut self.world, &mut self.engine, slot)
+    }
+
     /// One frame: the clocks advance by `dt` milliseconds (the sounds too
     /// without an audio device), a scheduled scene change happens, the
     /// scripts run, the scene's animations and the actors advance, the
@@ -1547,6 +1590,14 @@ impl Runtime {
     /// and the events raised reach their scripts. Returns the log lines
     /// of the frame.
     pub fn tick(&mut self, dt: u64) -> Vec<String> {
+        if let Some(slot) = self.world.scheduled_load.take() {
+            // A game loads before anything else of the frame, as the
+            // original engine does between two frames.
+            if let Err(err) = crate::save::load_game(&mut self.world, &mut self.engine, slot) {
+                self.world
+                    .log(format!("Error loading game from slot {slot}: {err}"));
+            }
+        }
         self.world.advance_time(dt);
         if let Some((path, fade_in)) = self.world.scheduled_scene.take() {
             match self.world.load_scene(&mut self.engine, &path) {

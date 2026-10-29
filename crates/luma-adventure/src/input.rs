@@ -18,7 +18,7 @@ use crate::scene_view::{AnimState, DrawItem, EntityRef, SpriteBank, key};
 use crate::world::World;
 
 /// The mouse as scripts see it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Mouse {
     /// Position in game pixels (`Game.MouseX`).
     pub x: i32,
@@ -31,7 +31,7 @@ pub struct Mouse {
 }
 
 /// The keyboard as scripts see it (`Game.Keyboard`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Keyboard {
     /// The code of the last key pressed (`KeyCode`): the Windows virtual
     /// key code, or the ASCII code of a printable key.
@@ -115,9 +115,10 @@ impl HitArea {
 }
 
 /// The cursors a game shows.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Cursors {
-    /// The cursor sprites.
+    /// The cursor sprites; loaded again after a saved game.
+    #[serde(skip)]
     pub bank: SpriteBank,
     /// The default cursor (`CURSOR`).
     pub normal: Option<String>,

@@ -664,6 +664,78 @@ fn fade_script() -> Vec<u8> {
     a.build()
 }
 
+/// Loads the actor, takes an item, starts the music and walks; its
+/// events save and load the game.
+fn save_script() -> Vec<u8> {
+    let mut a = Assembler::new("save.script");
+    a.def_glob_var("result");
+    a.def_glob_var("actor");
+    a.push_int(0);
+    store(&mut a, "afterSave");
+    call(
+        &mut a,
+        "Game",
+        "LoadActor",
+        &[Arg::Str("actors\\bob.actor")],
+    );
+    a.pop_var("actor");
+    a.push_var("actor");
+    set(&mut a, "Game", "MainObject");
+    call(&mut a, "Game", "TakeItem", &[Arg::Str("key")]);
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "PlayMusic",
+        &[Arg::Str("audio\\beep.wav"), Arg::Int(1)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "actor", "GoTo", &[Arg::Int(50), Arg::Int(24)]);
+    a.emit(Instruction::PopEmpty);
+    a.push_bool(true);
+    store(&mut a, "arrived");
+    a.emit(Instruction::Ret);
+    // on "SaveIt": result.saved = Game.SaveGame(3, "mid walk");
+    // result.afterSave = result.afterSave + 1;
+    a.event("SaveIt");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(
+        &mut a,
+        "Game",
+        "SaveGame",
+        &[Arg::Int(3), Arg::Str("mid walk")],
+    );
+    store(&mut a, "saved");
+    get(&mut a, "result", "afterSave");
+    a.push_int(1);
+    a.emit(Instruction::Add);
+    store(&mut a, "afterSave");
+    a.emit(Instruction::RetEvent);
+    // on "LoadIt": Game.LoadGame(3); result.afterLoadCall = true;
+    a.event("LoadIt");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(&mut a, "Game", "LoadGame", &[Arg::Int(3)]);
+    store(&mut a, "loadResult");
+    a.push_bool(true);
+    store(&mut a, "afterLoadCall");
+    a.emit(Instruction::RetEvent);
+    a.event("BeforeSave");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.push_bool(true);
+    store(&mut a, "beforeSave");
+    a.emit(Instruction::RetEvent);
+    a.event("AfterLoad");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.push_bool(true);
+    store(&mut a, "loaded");
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
 fn hall_init_script() -> Vec<u8> {
     // Records the state the hall's nodes arrive in, then changes it.
     let mut a = Assembler::new("scenes\\hall\\hall_init.script");
@@ -806,6 +878,7 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
         b"SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" } FRAME { DELAY=50 IMAGE=\"art\\green.png\" } }".to_vec(),
     );
     pkg.add_file("walk.script", walk_script());
+    pkg.add_file("save.script", save_script());
     pkg.add_file(
         "art\\prop.sprite",
         b"SPRITE { LOOPING=FALSE FRAME { DELAY=100 IMAGE=\"art\\red.png\" } FRAME { DELAY=100 IMAGE=\"art\\green.png\" } }".to_vec(),
@@ -1974,4 +2047,160 @@ fn persistent_scenes_remember_their_nodes_between_visits() {
     assert_eq!(result(&runtime, "exitActive"), Value::Bool(false));
     assert_eq!(result(&runtime, "fixedActive"), Value::Bool(true));
     assert_eq!(runtime.world.scene_states().len(), 1);
+}
+
+#[test]
+fn saved_games_resume_the_scripts_the_actors_and_the_sounds() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "save.script")
+    );
+    for _ in 0..12 {
+        runtime.tick(16);
+    }
+    let actor = runtime.engine.global("actor").unwrap().as_native().unwrap();
+    assert!(runtime.world.actor(actor).unwrap().is_walking());
+    let (x_saved, y_saved) = {
+        let a = runtime.world.actor(actor).unwrap();
+        (a.x, a.y)
+    };
+    assert!(runtime.world.is_music_playing(0));
+    assert!(!runtime.world.is_save_slot_used(3));
+    assert_eq!(runtime.world.most_recent_save_slot(), -1);
+
+    // Save in the middle of the walk: the handler goes on after the call.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "SaveIt", false);
+    let log = runtime.tick(16);
+    assert!(log.iter().any(|l| l.starts_with("Saving game")), "{log:?}");
+    assert_eq!(result(&runtime, "saved"), Value::Bool(true));
+    assert_eq!(result(&runtime, "beforeSave"), Value::Bool(true));
+    assert_eq!(result(&runtime, "afterSave"), Value::Int(1));
+    assert!(dir.join("saves").join("save003.dsv").is_file());
+    assert!(runtime.world.is_save_slot_used(3));
+    assert_eq!(runtime.world.save_slot_description(3), "mid walk");
+    assert_eq!(runtime.world.save_slot_description(4), "");
+    assert_eq!(runtime.world.most_recent_save_slot(), 3);
+    let header = luma_adventure::read_save_header(&dir.join("saves").join("save003.dsv")).unwrap();
+    assert_eq!(header.game, "Test");
+    assert!(header.timestamp > 1_700_000_000);
+
+    // The walk ends, the game moves on: another item, another scene.
+    let mut ticks = 0;
+    while result(&runtime, "arrived") != Value::Bool(true) && ticks < 200 {
+        runtime.tick(16);
+        ticks += 1;
+    }
+    assert_eq!(result(&runtime, "arrived"), Value::Bool(true));
+    assert_eq!(runtime.world.actor(actor).unwrap().x, 50);
+    assert!(runtime.world.take_item("coin", None));
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Hall");
+
+    // Load: the frame after the call, everything is as it was saved, and
+    // the saved handler is the one that goes on.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "LoadIt", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "loadResult"), Value::Null, "not yet");
+    assert_eq!(runtime.world.scheduled_load(), Some(3));
+    let log = runtime.tick(16);
+    assert!(log.iter().any(|l| l.starts_with("Loading game")), "{log:?}");
+    assert!(
+        log.iter()
+            .all(|l| !l.contains("Error") && !l.contains("error")),
+        "{log:?}"
+    );
+    assert_eq!(
+        result(&runtime, "loaded"),
+        Value::Bool(true),
+        "AfterLoad ran"
+    );
+    assert_eq!(result(&runtime, "afterLoadCall"), Value::Null);
+    assert_eq!(result(&runtime, "arrived"), Value::Null);
+    assert_eq!(
+        result(&runtime, "afterSave"),
+        Value::Int(1),
+        "resumed after SaveGame"
+    );
+    assert_eq!(result(&runtime, "saved"), Value::Bool(true));
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    assert_eq!(runtime.world.game_id(), game);
+    assert_eq!(
+        runtime.engine.global("Game").unwrap().as_native(),
+        Some(game)
+    );
+    assert_eq!(runtime.world.main_object(), Some(actor));
+    let a = runtime.world.actor(actor).unwrap();
+    assert!(a.is_walking(), "{:?}", a.state);
+    assert!(
+        (a.x - x_saved).abs() <= 2 && a.y == y_saved,
+        "{} {}",
+        a.x,
+        a.y
+    );
+    let taken: Vec<String> = runtime
+        .world
+        .taken_items()
+        .iter()
+        .map(|id| runtime.world.item(*id).unwrap().def.name.clone())
+        .collect();
+    assert_eq!(taken, ["key"]);
+    assert!(runtime.world.is_music_playing(0));
+    assert!(
+        runtime
+            .world
+            .music(0)
+            .unwrap()
+            .filename
+            .ends_with("beep.wav")
+    );
+    assert!(runtime.world.music_position(0) > 100);
+    assert!(
+        runtime
+            .world
+            .scene()
+            .unwrap()
+            .sprite("art\\prop.sprite")
+            .is_some(),
+        "the scene's sprites are loaded again"
+    );
+    assert!(
+        runtime
+            .world
+            .actor(actor)
+            .unwrap()
+            .bank
+            .sprite("art\\walk.sprite")
+            .is_some(),
+        "the actor's sprites are loaded again"
+    );
+    assert_eq!(runtime.world.drawables().len(), 1);
+
+    // The walk goes on to its end.
+    let mut ticks = 0;
+    while result(&runtime, "arrived") != Value::Bool(true) && ticks < 200 {
+        runtime.tick(16);
+        ticks += 1;
+    }
+    assert_eq!(result(&runtime, "arrived"), Value::Bool(true));
+    assert_eq!(runtime.world.actor(actor).unwrap().x, 50);
+
+    // The slot can be emptied.
+    assert!(runtime.world.empty_save_slot(3));
+    assert!(!runtime.world.is_save_slot_used(3));
+    assert!(!runtime.world.empty_save_slot(3));
+    std::fs::remove_dir_all(&dir).unwrap();
 }

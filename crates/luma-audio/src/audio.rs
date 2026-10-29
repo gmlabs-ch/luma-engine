@@ -453,6 +453,30 @@ impl Audio {
         self.voices.get(&id).map_or(0, |v| v.private_volume)
     }
 
+    /// Whether the sound loops, as its last `play` asked.
+    pub fn is_looping(&self, id: SoundId) -> bool {
+        self.voices.get(&id).is_some_and(|v| v.looping)
+    }
+
+    /// Where the sound's loop restarts, in milliseconds.
+    pub fn loop_start_ms(&self, id: SoundId) -> u64 {
+        self.voices.get(&id).map_or(0, |v| v.loop_start_ms)
+    }
+
+    /// Whether the sound is held by [`Audio::pause_all`].
+    pub fn is_freeze_paused(&self, id: SoundId) -> bool {
+        self.voices.get(&id).is_some_and(|v| v.freeze_paused)
+    }
+
+    /// Stops and unloads every sound (a saved game being loaded).
+    pub fn clear(&mut self) {
+        let ids: Vec<SoundId> = self.voices.keys().copied().collect();
+        for id in ids {
+            self.stop(id);
+            self.remove(id);
+        }
+    }
+
     /// Sets the sound's own volume in percent (`SetPrivateVolume`).
     pub fn set_private_volume(&mut self, id: SoundId, percent: i32) -> bool {
         let Some(voice) = self.voices.get_mut(&id) else {

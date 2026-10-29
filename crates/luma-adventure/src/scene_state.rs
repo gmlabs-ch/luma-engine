@@ -16,7 +16,7 @@ use crate::scene_view::EntityRef;
 use crate::world::World;
 
 /// What is remembered of one named node of a scene (`CAdNodeState`).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct NodeState {
     /// `Active`.
     pub active: bool,
@@ -89,7 +89,7 @@ impl NodeState {
 }
 
 /// The remembered states of a scene's nodes (`CAdSceneState`).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SceneState {
     /// The nodes' states, keyed by their lowercased name (the engine
     /// looks nodes up case-insensitively).

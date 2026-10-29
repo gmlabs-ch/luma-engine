@@ -13,10 +13,13 @@ publish.workspace = true
 luma-archive.workspace = true
 luma-audio.workspace = true
 luma-video.workspace = true
-luma-formats.workspace = true
+luma-formats = { workspace = true, features = ["serde"] }
 luma-render.workspace = true
-luma-script.workspace = true
+luma-script = { workspace = true, features = ["serde"] }
 fontdue.workspace = true
+flate2.workspace = true
+postcard.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true
