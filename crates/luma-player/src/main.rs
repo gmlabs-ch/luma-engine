@@ -483,7 +483,33 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         }
     }
     if runtime.world.is_frozen() {
-        println!("game frozen by a system-exclusive window");
+        println!("game frozen by a system-exclusive window or a video");
+    }
+    if let Some(video) = runtime.world.video() {
+        println!(
+            "video {:?}: {}x{} at {}/{} fps, frame {} shown, at ({}, {}) zoom {}%, {}{}",
+            video.filename,
+            video.info.width,
+            video.info.height,
+            video.info.fps_num,
+            video.info.fps_den,
+            video
+                .frame_index()
+                .map_or("none".to_string(), |i| i.to_string()),
+            video.x,
+            video.y,
+            video.zoom,
+            if video.is_playing() {
+                "playing"
+            } else {
+                "finished"
+            },
+            if video.sound.is_some() {
+                ", with sound"
+            } else {
+                ""
+            }
+        );
     }
     let inventory = runtime.world.inventory();
     if !inventory.items.is_empty() {

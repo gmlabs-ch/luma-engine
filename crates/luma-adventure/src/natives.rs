@@ -18,6 +18,7 @@ use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 use crate::objects::Kind;
 use crate::scene_view::{EntityRef, frame_height};
 use crate::talk::TalkSkipButton;
+use crate::video::VideoPlayback;
 use crate::world::World;
 use luma_formats::font::TextAlign;
 
@@ -63,10 +64,6 @@ const GAME_STUBS: &[&str] = &[
     "DeleteSaveThumbnail",
     "ShowStatusLine",
     "HideStatusLine",
-    "PlayTheora",
-    "StopTheora",
-    "PlayVideo",
-    "StopVideo",
     "AddResponse",
     "AddResponseOnce",
     "AddResponseOnceGame",
@@ -362,7 +359,8 @@ impl World {
             "ChangingScene" => Value::Bool(self.scheduled_scene.is_some()),
             "Subtitles" => Value::Bool(self.subtitles),
             "SubtitlesSpeed" => Value::Int(self.subtitles_speed),
-            "VideoSubtitles" => Value::Bool(self.game_file().video_subtitles),
+            "VideoSubtitles" => Value::Bool(self.video_subtitles),
+            "VideoSkipButton" => Value::Int(self.video_skip_button.code()),
             "Frozen" => Value::Bool(self.is_frozen()),
             "FocusedWindow" => native_or_null(self.focused_window()),
             "DebugMode"
@@ -406,6 +404,10 @@ impl World {
             "TalkSkipButton" => {
                 self.talk_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }
+            "VideoSubtitles" => self.video_subtitles = value.get_bool(self),
+            "VideoSkipButton" => {
+                self.video_skip_button = TalkSkipButton::from_code(value.get_int(self));
+            }
             _ => return false,
         }
         true
@@ -430,6 +432,55 @@ impl World {
                 self.schedule_scene(&path, fade_in);
                 Return::null()
             }
+            "PlayTheora" | "PlayVideo" => {
+                let filename = arg(0).get_string(self);
+                let playback = match arg(1) {
+                    Value::Null => VideoPlayback::Stretch,
+                    v => VideoPlayback::from_code(v.get_int(self)),
+                };
+                let (x, y) = (arg(2).get_int(self), arg(3).get_int(self));
+                let freeze_music = match arg(4) {
+                    Value::Null => true,
+                    v => v.get_bool(self),
+                };
+                let drop_frames = match arg(5) {
+                    Value::Null => true,
+                    v => v.get_bool(self),
+                };
+                let subtitle_file = match arg(6) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                if name == "PlayVideo" {
+                    self.log(
+                        "Warning: Game.PlayVideo() is now deprecated. Use Game.PlayTheora() instead."
+                            .to_string(),
+                    );
+                }
+                let started = self.play_theora(
+                    ctx.engine,
+                    &filename,
+                    playback,
+                    x,
+                    y,
+                    freeze_music,
+                    drop_frames,
+                    subtitle_file.as_deref(),
+                );
+                if started {
+                    Return {
+                        value: Value::Bool(true),
+                        effect: Effect::Sleep(0),
+                    }
+                } else {
+                    Return::value(false)
+                }
+            }
+            "StopTheora" | "StopVideo" => {
+                self.stop_video(ctx.engine);
+                Return::null()
+            }
+            "IsVideoPlaying" => Return::value(self.is_video_playing()),
             "LoadWindow" => {
                 let path = arg(0).get_string(self);
                 Return::value(native_or_null(self.load_window(ctx.engine, &path)))

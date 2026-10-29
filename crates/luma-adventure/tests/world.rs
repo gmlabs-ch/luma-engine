@@ -136,6 +136,36 @@ fn game_script() -> Vec<u8> {
     call(&mut a, "kb", "IsKeyDown", &[Arg::Str("a")]);
     store(&mut a, "aDown");
     a.emit(Instruction::RetEvent);
+    // on "PlayIntro": Game.PlayTheora("intro.ogv"); result.afterVideo = true;
+    a.event("PlayIntro");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(&mut a, "Game", "PlayTheora", &[Arg::Str("intro.ogv")]);
+    store(&mut a, "videoStarted");
+    a.push_bool(true);
+    store(&mut a, "afterVideo");
+    a.emit(Instruction::RetEvent);
+    // on "PlayIntroPos": Game.PlayTheora("intro.ogv", 0, 4, 6); result.afterVideo2 = true;
+    a.event("PlayIntroPos");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(
+        &mut a,
+        "Game",
+        "PlayTheora",
+        &[Arg::Str("intro.ogv"), Arg::Int(0), Arg::Int(4), Arg::Int(6)],
+    );
+    a.emit(Instruction::PopEmpty);
+    a.push_bool(true);
+    store(&mut a, "afterVideo2");
+    a.emit(Instruction::RetEvent);
+    // on "PlayMissing": result.missing = Game.PlayTheora("none.ogv");
+    a.event("PlayMissing");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(&mut a, "Game", "PlayTheora", &[Arg::Str("none.ogv")]);
+    store(&mut a, "missing");
+    a.emit(Instruction::RetEvent);
     // on "OpenMenu": var m = Game.LoadWindow("menu.window");
     // m.GoSystemExclusive(); result.menuClosed = true;
     a.event("OpenMenu");
@@ -664,6 +694,8 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("string.tab", b"GREET\tHello\r\n".to_vec());
     pkg.add_file("game.script", game_script());
     pkg.add_file("win.script", window_script());
+    pkg.add_file("intro.ogv", luma_video::synthetic_clip(32, 32, 10, 10));
+    pkg.add_file("intro.sub", b"{2}{5}Hello|intro\n{7}{0}Bye".to_vec());
     pkg.add_file(
         "items.items",
         b"ITEM { NAME=\"key\" CAPTION=\"/GREET/x\" IMAGE=\"art\\green.png\" SPRITE_HOVER=\"art\\red.png\" CURSOR=\"art\\red.png\" CURSOR_HOVER=\"art\\green.png\" PROPERTY { NAME=\"weight\" VALUE=\"3\" } }
@@ -1631,6 +1663,100 @@ fn items_the_inventory_box_and_the_item_cursor() {
         .set_property(game, "SelectedItem", &Value::Null);
     runtime.tick(16);
     assert_eq!(runtime.world.cursors().item_cursor, None);
+}
+
+#[test]
+fn videos_freeze_the_game_and_can_be_skipped() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "VideoSubtitles", &Value::Bool(true));
+    // A missing file: false, and the script goes on.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "PlayMissing", false);
+    let log = runtime.tick(16);
+    assert_eq!(result(&runtime, "missing"), Value::Bool(false));
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Error opening video file 'none.ogv'")),
+        "{log:?}"
+    );
+    assert!(!runtime.world.is_video_playing());
+    // The intro: the game freezes, the scripts stop, the frames follow
+    // the wall clock.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "PlayIntro", false);
+    runtime.tick(16);
+    assert!(runtime.world.is_video_playing());
+    assert!(runtime.world.is_frozen());
+    // The call sleeps and no script runs during the video: even the
+    // call's result is stored after it.
+    assert_eq!(result(&runtime, "videoStarted"), Value::Null);
+    assert_eq!(result(&runtime, "afterVideo"), Value::Null);
+    let player = runtime.world.video().unwrap();
+    assert_eq!((player.info.width, player.info.height), (32, 32));
+    assert_eq!((player.x, player.y, player.zoom), (0, 0, 100.0));
+    assert_eq!(player.frame_index(), Some(0));
+    assert!(player.subtitler.is_some());
+    let frozen_at = runtime.world.timer();
+    for _ in 0..20 {
+        runtime.tick(16);
+    }
+    assert_eq!(runtime.world.timer(), frozen_at, "the game timer stops");
+    assert_eq!(
+        result(&runtime, "afterVideo"),
+        Value::Null,
+        "scripts do not run"
+    );
+    let player = runtime.world.video().unwrap();
+    assert_eq!(player.frame_index(), Some(3), "320 ms at 10 fps");
+    assert_eq!(
+        player.subtitler.as_ref().unwrap().shown(),
+        Some("Hello\nintro")
+    );
+    // Drawing gives the video's quad only.
+    let mut list = luma_render::DrawList::new(32.0, 32.0);
+    runtime.draw(&mut list, None);
+    assert!(
+        list.quads().is_empty(),
+        "no texture uploaded without a renderer"
+    );
+    let mut ticks = 0;
+    while runtime.world.is_video_playing() && ticks < 200 {
+        runtime.tick(16);
+        ticks += 1;
+    }
+    assert!(
+        (55..=70).contains(&ticks),
+        "ten frames at 10 fps: {ticks} ticks"
+    );
+    assert!(!runtime.world.is_frozen());
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "videoStarted"), Value::Bool(true));
+    assert_eq!(result(&runtime, "afterVideo"), Value::Bool(true));
+    assert!(runtime.world.video().is_none());
+    // Placed at a position, and skipped by a click.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "PlayIntroPos", false);
+    runtime.tick(16);
+    let player = runtime.world.video().unwrap();
+    assert_eq!((player.x, player.y), (4, 6));
+    assert_eq!(player.playback, luma_adventure::VideoPlayback::Pos);
+    runtime.mouse_left_down();
+    assert!(!runtime.world.is_video_playing());
+    assert!(!runtime.world.is_frozen());
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "afterVideo2"), Value::Bool(true));
 }
 
 #[test]

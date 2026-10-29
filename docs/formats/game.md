@@ -42,12 +42,14 @@ AD_GAME {
 | | `SCRIPT` | A script attached to the game object when it starts; repeatable. The game's logic starts there: the first script picks the first scene with `Game.ChangeScene`. |
 | | `STRING_TABLE` | A string table loaded at startup (see below). |
 | | `SYSTEM_FONT` | The font of engine messages. |
+| | `VIDEO_FONT` | The font of video subtitles (see [../video.md](../video.md)); the system font without one. |
 | | `CURSOR`, `ACTIVE_CURSOR`, `NONINTERACTIVE_CURSOR` | The mouse cursor sprites: normal, over an interactive object, while the game is not interactive. |
 | | `SUBTITLES`, `SUBTITLES_SPEED`, `VIDEO_SUBTITLES` | Whether speech and videos are subtitled, and how long a subtitle stays per character (default 70 ms). |
 | | `PERSONAL_SAVEGAMES`, `LOCAL_SAVE_DIR` | Where saved games go. |
 | | `PROPERTY { NAME VALUE }` | Script properties of the game object. |
 | `AD_GAME` | `RESPONSE_BOX`, `INVENTORY_BOX`, `ITEMS` | The dialogue, inventory and item definition files. |
 | | `TALK_SKIP_BUTTON` | Which mouse button skips speech: `left`, `right`, `both`, `none`. |
+| | `VIDEO_SKIP_BUTTON` | Which mouse button skips a video: `left` (default), `right`, `both`. |
 | | `STARTUP_SCENE` | The first scene, when no script picks one. |
 
 Other keys (`INDICATOR_*`, `GUID`, `EDITOR_*`, `COMPAT_*`) describe the

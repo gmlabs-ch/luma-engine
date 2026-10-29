@@ -1,0 +1,18 @@
+[package]
+name = "luma-video"
+description = "Video playback: Ogg Theora decoding to RGBA frames."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ogg.workspace = true
+oxideav-theora.workspace = true
+oxideav-core.workspace = true
+
+[lints]
+workspace = true

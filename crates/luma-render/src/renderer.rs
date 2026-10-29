@@ -169,6 +169,17 @@ impl Renderer {
         Texture::from_image(&self.gpu, label, image)
     }
 
+    /// Uploads RGBA pixels as a texture.
+    pub fn texture_from_rgba(&self, label: &str, width: u32, height: u32, rgba: &[u8]) -> Texture {
+        Texture::from_rgba(&self.gpu, label, width, height, rgba)
+    }
+
+    /// Replaces the texels of a texture with RGBA pixels of the same
+    /// size (a video frame).
+    pub fn write_texture(&self, texture: &Texture, rgba: &[u8]) {
+        texture.write(&self.gpu, rgba);
+    }
+
     /// Renders a draw list into a target, clearing it first, and submits
     /// the work. The GPU runs it asynchronously; see [`Gpu::wait`].
     pub fn render(&self, target: Target<'_>, clear: Rgba, list: &DrawList<'_>) -> Result<()> {

@@ -69,6 +69,9 @@ no code copied):
   crates/luma-adventure/src/natives_item.rs
   docs/game-loop.md
   docs/audio.md
+  docs/video.md
+  crates/luma-video/src/lib.rs
+  crates/luma-adventure/src/video.rs
   crates/luma-audio/src/audio.rs
 
 -------------------------------------------------------------------------------

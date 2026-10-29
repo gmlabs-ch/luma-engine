@@ -26,6 +26,7 @@ use crate::sound::Sounds;
 use crate::talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
 use crate::text::FontBank;
 use crate::ui::{Control, Ui};
+use crate::video::VideoPlayer;
 use luma_audio::Audio;
 use luma_formats::font::TextAlign;
 
@@ -73,6 +74,12 @@ pub struct World {
     pub(crate) fader_id: NativeId,
     pub(crate) ui: Ui,
     pub(crate) inventory: Inventory,
+    pub(crate) video: Option<VideoPlayer>,
+    pub(crate) video_texture: Option<luma_render::Texture>,
+    pub(crate) video_uploaded: u64,
+    pub(crate) video_subtitles: bool,
+    pub(crate) video_font: Option<String>,
+    pub(crate) video_skip_button: TalkSkipButton,
     pub(crate) interactive: bool,
     pub(crate) main_object: Option<NativeId>,
     pub(crate) quit: bool,
@@ -152,6 +159,12 @@ impl World {
             fader_id,
             ui: Ui::default(),
             inventory: Inventory::default(),
+            video: None,
+            video_texture: None,
+            video_uploaded: 0,
+            video_subtitles: false,
+            video_font: None,
+            video_skip_button: TalkSkipButton::Left,
             interactive: true,
             main_object: None,
             quit: false,
@@ -176,6 +189,17 @@ impl World {
                 world.system_font = Some(path);
             }
         }
+        if let Some(path) = world.game_file.video_font.clone() {
+            if world.load_font(&path) {
+                world.video_font = Some(path);
+            }
+        }
+        world.video_subtitles = world.game_file.video_subtitles;
+        world.video_skip_button = world
+            .game_file
+            .video_skip_button
+            .as_deref()
+            .map_or(TalkSkipButton::Left, TalkSkipButton::parse);
         world.load_cursors();
         Ok(world)
     }
@@ -660,6 +684,11 @@ impl World {
         camera: &Camera,
         white: Option<&'a luma_render::Texture>,
     ) {
+        if self.is_video_playing() {
+            // Only the video is drawn while it plays (`DisplayContent`).
+            self.draw_video(list);
+            return;
+        }
         if let Some(view) = &self.scene {
             view.draw_with(list, camera, &self.drawables());
         }
@@ -690,6 +719,7 @@ impl World {
         }
         self.cursors.bank.upload(&self.vfs, renderer);
         self.ui.bank.upload(&self.vfs, renderer);
+        self.upload_video(renderer);
         self.fonts.upload(renderer);
     }
 
@@ -1539,6 +1569,12 @@ impl Runtime {
             }
         }
         self.world.sounds.audio.tick(dt);
+        if self.world.is_video_playing() {
+            // A video takes the frame: no scripts, no scene, no windows
+            // (`CAdGame::DisplayContent`).
+            self.world.update_video(&mut self.engine);
+            return self.world.take_log();
+        }
         self.world.update_speech();
         let (timer, clock) = (self.world.timer, self.world.clock);
         self.world.fader.update(timer, clock);
@@ -1618,6 +1654,15 @@ impl Runtime {
             });
         self.world.mouse.last_left_click = if double { None } else { Some((clock, x, y)) };
         self.world.mouse.left_down = true;
+        if self.world.is_video_playing() {
+            if matches!(
+                self.world.video_skip_button,
+                TalkSkipButton::Left | TalkSkipButton::Both
+            ) {
+                self.world.stop_video(&mut self.engine);
+            }
+            return;
+        }
         if !self.world.interactive {
             self.world.click_while_busy(false);
             return;
@@ -1640,6 +1685,15 @@ impl Runtime {
     /// The right button goes down (`RightClick`); while the game is not
     /// interactive, it only skips the sentences.
     pub fn mouse_right_down(&mut self) {
+        if self.world.is_video_playing() {
+            if matches!(
+                self.world.video_skip_button,
+                TalkSkipButton::Right | TalkSkipButton::Both
+            ) {
+                self.world.stop_video(&mut self.engine);
+            }
+            return;
+        }
         if !self.world.interactive {
             self.world.click_while_busy(true);
             return;
@@ -1665,6 +1719,12 @@ impl Runtime {
         control: bool,
     ) {
         self.world.key_down(code, text, shift, alt, control);
+        if self.world.is_video_playing() {
+            if code == 27 {
+                self.world.stop_video(&mut self.engine);
+            }
+            return;
+        }
         let game = self.world.game_id;
         if let Some(window) = self.world.focused_window() {
             if self.world.window_key(window, code, text) {

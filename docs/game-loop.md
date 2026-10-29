@@ -38,6 +38,10 @@ stops, so the scene, the actors and the sentences stand still, the
 freezable scripts and the sounds pause, and only the window's own
 scripts run.
 
+While a video plays (see [video.md](video.md)), the frame is the
+video's alone: the game is frozen, no script runs, and only the video
+and its subtitles are drawn.
+
 Without a window (`--headless`), the same loop runs with a fixed frame
 duration, and the sounds run on the game clock.
 
@@ -136,4 +140,4 @@ told not to.
 - Each object's own inventory (`Game.InventoryObject`): one inventory
   serves every object.
 - The mouse wheel, which the engine gives to the focused window.
-- Transitions other than the fade; videos.
+- Transitions other than the fade.

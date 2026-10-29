@@ -49,11 +49,12 @@ Luma Engine reads the same game data with a new engine built for today:
 | `luma-script` | Virtual machine for compiled game scripts | nothing |
 | `luma-render` | 2D/2.5D renderer on wgpu | `luma-formats`, `wgpu`, `winit` |
 | `luma-audio` | Music, sound effects and voice | `kira` (Symphonia for decoding, `cpal` with the `device` feature) |
-| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the five core crates, `fontdue` |
+| `luma-video` | Ogg Theora videos decoded to frames | `ogg`, `oxideav-theora`, `oxideav-core` |
+| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six core crates, `fontdue` |
 | `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script` |
 | `luma-player` | The desktop player | `luma-adventure`, `luma-archive`, `luma-formats`, `luma-render` |
 
-The first five are the core; `luma-adventure` is the first optional
+The first six are the core; `luma-adventure` is the first optional
 module, and the front-ends depend on the modules they use.
 
 ## Building

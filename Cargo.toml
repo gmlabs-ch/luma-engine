@@ -18,6 +18,7 @@ luma-formats = { path = "crates/luma-formats" }
 luma-script = { path = "crates/luma-script" }
 luma-render = { path = "crates/luma-render" }
 luma-audio = { path = "crates/luma-audio" }
+luma-video = { path = "crates/luma-video" }
 luma-adventure = { path = "crates/luma-adventure" }
 
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
@@ -27,6 +28,9 @@ winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11
 pollster = "1"
 fontdue = { version = "0.9", default-features = false, features = ["std", "hashbrown"] }
 kira = { version = "0.12", default-features = false, features = ["ogg", "vorbis", "wav", "pcm"] }
+ogg = { version = "0.9", default-features = false }
+oxideav-theora = { version = "0.0.12", default-features = false }
+oxideav-core = { version = "0.1", default-features = false }
 bytemuck = { version = "1", features = ["derive"] }
 
 [workspace.lints.rust]

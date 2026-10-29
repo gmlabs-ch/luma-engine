@@ -21,6 +21,8 @@ pub struct GameFile {
     pub string_table: Option<String>,
     /// `SYSTEM_FONT`: the font of system messages.
     pub system_font: Option<String>,
+    /// `VIDEO_FONT`: the font of video subtitles.
+    pub video_font: Option<String>,
     /// `CURSOR`: the mouse cursor sprite.
     pub cursor: Option<String>,
     /// `ACTIVE_CURSOR`: the cursor over an interactive object.
@@ -47,6 +49,8 @@ pub struct GameFile {
     pub items: Option<String>,
     /// `AD_GAME`'s `TALK_SKIP_BUTTON`: `left`, `right`, `both` or `none`.
     pub talk_skip_button: Option<String>,
+    /// `AD_GAME`'s `VIDEO_SKIP_BUTTON`: `left`, `right` or `both`.
+    pub video_skip_button: Option<String>,
     /// `AD_GAME`'s `STARTUP_SCENE`: the first scene, when the script does
     /// not pick one.
     pub startup_scene: Option<String>,
@@ -60,6 +64,7 @@ impl Default for GameFile {
             scripts: Vec::new(),
             string_table: None,
             system_font: None,
+            video_font: None,
             cursor: None,
             active_cursor: None,
             noninteractive_cursor: None,
@@ -73,6 +78,7 @@ impl Default for GameFile {
             inventory_box: None,
             items: None,
             talk_skip_button: None,
+            video_skip_button: None,
             startup_scene: None,
         }
     }
@@ -101,6 +107,7 @@ impl GameFile {
                 "SCRIPT" => game.scripts.extend(text(node)),
                 "STRING_TABLE" => game.string_table = text(node),
                 "SYSTEM_FONT" => game.system_font = text(node),
+                "VIDEO_FONT" => game.video_font = text(node),
                 "CURSOR" => game.cursor = text(node),
                 "ACTIVE_CURSOR" => game.active_cursor = text(node),
                 "NONINTERACTIVE_CURSOR" => game.noninteractive_cursor = text(node),
@@ -124,6 +131,7 @@ impl GameFile {
                     "INVENTORY_BOX" => game.inventory_box = text(node),
                     "ITEMS" => game.items = text(node),
                     "TALK_SKIP_BUTTON" => game.talk_skip_button = text(node),
+                    "VIDEO_SKIP_BUTTON" => game.video_skip_button = text(node),
                     "STARTUP_SCENE" => game.startup_scene = text(node),
                     _ => {}
                 }

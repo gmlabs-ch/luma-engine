@@ -31,6 +31,41 @@ impl Texture {
         Texture::from_rgba(gpu, label, image.width, image.height, &image.pixels)
     }
 
+    /// Replaces the texels with `width * height * 4` bytes of RGBA of the
+    /// same size (a video frame).
+    ///
+    /// # Panics
+    ///
+    /// Panics when the buffer does not match the texture's size.
+    pub fn write(&self, gpu: &Gpu, rgba: &[u8]) {
+        assert_eq!(
+            rgba.len(),
+            (self.width as usize) * (self.height as usize) * 4,
+            "RGBA buffer size does not match {}x{}",
+            self.width,
+            self.height
+        );
+        gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(self.width * 4),
+                rows_per_image: Some(self.height),
+            },
+            wgpu::Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
     /// Uploads `width * height * 4` bytes of RGBA.
     ///
     /// # Panics

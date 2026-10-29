@@ -151,6 +151,7 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | Buttons | The controls' properties, plus `TextAlign`, `Focusable`, `Pressed`, `PixelPerfect` | `Press`, `SetHoverImage`, `SetPressedImage`, `SetDisabledImage`, `SetFocusedImage` and their getters, `SetHoverFont`, `SetPressedFont`, `SetDisabledFont`, `SetFocusedFont` |
 | Static texts and editors | `TextAlign`, `VerticalAlign`; `SelStart`, `SelEnd`, `MaxLength`, `FrameWidth`, `CursorChar`, `CursorBlinkRate` | `SizeToFit`, `HeightToFit`; `SetSelectedFont` |
 | Items (`ITEMS` of `default.game`) | `Name`, `Caption`, `X`, `Y`, `Amount`, `DisplayAmount`, `AmountOffsetX`, `AmountOffsetY`, `AmountAlign`, `AmountString`, `CursorCombined` | `SetSprite`, `GetSprite`, `SetHoverSprite`, `GetHoverSprite`, `SetNormalCursor`, `GetNormalCursor`, `SetHoverCursor`, `GetHoverCursor`, `SetFont`, `GetFont`, `SetCaption` |
+| `Game`, videos | `VideoSubtitles`, `VideoSkipButton` | `PlayTheora`, `PlayVideo`, `StopTheora`, `StopVideo`, `IsVideoPlaying` |
 | `Game`, actors and entities, inventory | `Game.SelectedItem`, `InventoryVisible`, `InventoryScrollOffset`, `NumItems`, `TotalNumItems`, `SmartItemCursor` | `TakeItem`, `DropItem`, `HasItem`, `GetItem`, `Game.IsItemTaken`, `Game.QueryItem`, `Game.GetInventoryWindow` |
 | Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
 | Sprite objects | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner` | `Reset`, `Pause`, `Play` |
@@ -210,8 +211,12 @@ list of taken items shared by the game, the actors and the entities
 `ITEM` names it, dropping it shows them again, and the selected item
 draws its cursor.
 
+Videos (see [docs/video.md](video.md)) take the frame over: while one
+plays, the game is frozen and no script runs, so the script that called
+`PlayTheora` goes on when the video ends or is skipped.
+
 What later milestones implement is accepted and logged once as "not
-implemented": saving, videos and transitions.
+implemented": saving and transitions.
 
 ## Not yet
 

@@ -25,6 +25,8 @@
 //!   drawn over the scene, their focus, modes and freezing of the game.
 //! - [`Item`] and [`Inventory`]: the items, those taken, the box that
 //!   shows them and the cursor of the item in use.
+//! - [`VideoPlayer`]: a video played by `Game.PlayTheora` over the frozen
+//!   game, with its sound and subtitles.
 //! - [`World`]: the game as scripts see it (`Game`, `Scene`, layers,
 //!   entities, regions, sprites, actors), the script engine's host.
 //! - [`Runtime`]: a script engine and a world, driven once per frame.
@@ -51,6 +53,7 @@ pub mod sound;
 pub mod talk;
 pub mod text;
 pub mod ui;
+pub mod video;
 pub mod world;
 
 pub use actor::{Actor, ActorEvent, ActorState, WalkContext};
@@ -73,4 +76,5 @@ pub use ui::{
     ButtonListener, ButtonState, Control, ControlKind, EditState, StaticState, Ui, WindowMode,
     WindowState,
 };
+pub use video::{Subtitle, Subtitler, VideoPlayback, VideoPlayer, parse_subtitles};
 pub use world::{Runtime, World};
