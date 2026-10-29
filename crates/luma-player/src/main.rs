@@ -68,6 +68,9 @@ OPTIONS:
                           saved ones
     --help                Show this message
 
+The headless steps run one frame after the scene is up, once its scripts
+have placed the actor, as for a player who acts when the scene shows.
+
 With --headless and --screenshot, the scene and the actors are rendered
 once after the last frame.
 
@@ -340,6 +343,7 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         println!("load scheduled from slot {slot}");
     }
     let mut clicked = false;
+    let mut scene_up = false;
     for tick in 1..=options.ticks {
         for line in runtime.tick(options.dt) {
             println!("[{tick}] {line}");
@@ -354,7 +358,12 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 }
             }
         }
-        if !clicked && runtime.world.scene().is_some() {
+        // The scene's own scripts get one frame before the steps, so that
+        // its init script has placed the actor, as for a player who acts
+        // once the scene shows.
+        let act = scene_up && !clicked;
+        scene_up = runtime.world.scene().is_some();
+        if act {
             clicked = true;
             if let Some((x, y)) = options.at {
                 if let Some(main) = runtime.world.main_object() {
