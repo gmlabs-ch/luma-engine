@@ -136,6 +136,57 @@ fn game_script() -> Vec<u8> {
     call(&mut a, "kb", "IsKeyDown", &[Arg::Str("a")]);
     store(&mut a, "aDown");
     a.emit(Instruction::RetEvent);
+    // on "OpenMenu": var m = Game.LoadWindow("menu.window");
+    // m.GoSystemExclusive(); result.menuClosed = true;
+    a.event("OpenMenu");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.def_var("m");
+    call(&mut a, "Game", "LoadWindow", &[Arg::Str("menu.window")]);
+    a.pop_var("m");
+    call(&mut a, "m", "GoSystemExclusive", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.push_bool(true);
+    store(&mut a, "menuClosed");
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
+/// The script of the test window: its `ok` button notifies it, and it
+/// reads the keys it is given.
+fn window_script() -> Vec<u8> {
+    let mut a = Assembler::new("win.script");
+    a.emit(Instruction::Ret);
+    a.event("ok");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.push_bool(true);
+    store(&mut a, "okPressed");
+    a.emit(Instruction::RetEvent);
+    a.event("Keypress");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.def_var("kb");
+    get(&mut a, "Game", "Keyboard");
+    a.pop_var("kb");
+    get(&mut a, "kb", "KeyCode");
+    store(&mut a, "winKey");
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
+/// The script of the menu: its `take` button closes it.
+fn menu_script() -> Vec<u8> {
+    let mut a = Assembler::new("menu.script");
+    a.emit(Instruction::Ret);
+    a.event("take");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(&mut a, "self", "Close", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.push_bool(true);
+    store(&mut a, "take");
+    a.emit(Instruction::RetEvent);
     a.build()
 }
 
@@ -612,6 +663,26 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("voices\\GREET.wav", luma_audio::silent_wav(8000, 2, 250));
     pkg.add_file("string.tab", b"GREET\tHello\r\n".to_vec());
     pkg.add_file("game.script", game_script());
+    pkg.add_file("win.script", window_script());
+    pkg.add_file("menu.script", menu_script());
+    pkg.add_file(
+        "w.window",
+        b"WINDOW {
+  NAME=\"w\" X=2 Y=2 WIDTH=20 HEIGHT=16 SCRIPT=\"win.script\"
+  BUTTON { NAME=\"ok\" X=1 Y=1 WIDTH=6 HEIGHT=6 IMAGE_HOVER=\"art\\green.png\" PARENT_NOTIFY=TRUE }
+  STATIC { NAME=\"label\" TEXT=\"one|two\" X=8 Y=1 WIDTH=10 HEIGHT=8 FONT=\"fonts\\sys.font\" }
+  EDIT { NAME=\"name\" X=1 Y=9 WIDTH=18 HEIGHT=6 MAX_LENGTH=3 }
+}"
+        .to_vec(),
+    );
+    pkg.add_file(
+        "menu.window",
+        b"WINDOW {
+  NAME=\"menu\" X=10 Y=10 WIDTH=8 HEIGHT=8 MENU=TRUE IMAGE=\"art\\red.png\" SCRIPT=\"menu.script\"
+  BUTTON { NAME=\"take\" X=0 Y=0 WIDTH=8 HEIGHT=4 PARENT_NOTIFY=TRUE }
+}"
+        .to_vec(),
+    );
     pkg.add_file("scenes\\room\\scene_init.script", scene_init_script());
     pkg.add_file("scenes\\room\\scene_events.script", scene_events_script());
     pkg.add_file("scenes\\room\\lamp.script", lamp_script());
@@ -705,7 +776,7 @@ fn scripts_drive_the_game_and_its_scene() {
         .iter()
         .filter(|l| l.contains("not implemented"))
         .collect();
-    assert_eq!(stubs.len(), 1, "LoadWindow, once: {log:?}");
+    assert!(stubs.is_empty(), "no stub expected: {log:?}");
     assert_eq!(
         log.iter()
             .filter(|l| l.starts_with("Error opening sound file"))
@@ -774,7 +845,10 @@ fn scripts_drive_the_game_and_its_scene() {
         .iter()
         .filter(|s| s.state() == State::Persistent)
         .count();
-    assert_eq!(persistent, 5, "game, scene_events, prop, lamp and floor");
+    assert_eq!(
+        persistent, 6,
+        "game, window, scene_events, prop, lamp and floor"
+    );
     let lamp = runtime.world.find_node("LAMP").unwrap();
     assert!(matches!(
         runtime.world.objects().get(lamp).unwrap().kind,
@@ -1236,6 +1310,153 @@ fn mouse_keyboard_cursors_and_fades() {
     );
     assert_eq!(runtime.world.fader().color().unwrap().a, 255);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn windows_buttons_keys_and_menus() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    // The game script loaded w.window and hid it.
+    assert_eq!(runtime.world.window_ids().len(), 1);
+    let win = runtime.world.window_ids()[0];
+    let w = runtime.world.control(win).unwrap();
+    assert_eq!(w.name, "w");
+    assert!(!w.visible);
+    assert_eq!((w.x, w.y, w.width, w.height), (2, 2, 20, 16));
+    assert_eq!(runtime.world.widgets_of(win).len(), 3);
+    let ok = runtime.world.widget(win, "OK").unwrap();
+    let label = runtime.world.widget(win, "label").unwrap();
+    let edit = runtime.world.widget(win, "name").unwrap();
+    assert_eq!(runtime.world.class_name(ok), "button");
+    assert_eq!(runtime.world.class_name(label), "static");
+    assert_eq!(runtime.world.class_name(edit), "editor");
+    assert_eq!(runtime.world.control(label).unwrap().text, "one\ntwo");
+    assert_eq!(
+        runtime.world.get_property(win, "NumControls"),
+        Some(Value::Int(3))
+    );
+    assert_eq!(
+        runtime.world.get_property(ok, "Parent"),
+        Some(Value::Native(win))
+    );
+    assert_eq!(
+        runtime.world.get_property(ok, "NextSibling"),
+        Some(Value::Native(label))
+    );
+    // Hidden: nothing under the mouse.
+    runtime.mouse_move(5, 5);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), None);
+    // Shown: the button is under the mouse and hovers.
+    runtime
+        .world
+        .set_property(win, "Visible", &Value::Bool(true));
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(ok));
+    assert_eq!(runtime.world.focused_window(), Some(win));
+    runtime.tick(16);
+    assert!(runtime.world.control(ok).unwrap().button().unwrap().hover);
+    // Click: pressed while held, fired on release, the window notified.
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    assert!(runtime.world.control(ok).unwrap().button().unwrap().press);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "okPressed"), Value::Bool(true));
+    assert!(!runtime.world.control(ok).unwrap().button().unwrap().press);
+    // The editor took the focus; keys go to it, Tab finds no other
+    // focusable control and the window's Keypress handler gets it.
+    assert!(runtime.world.is_focused(edit));
+    runtime.key_down(65, Some('a'), false, false, false);
+    runtime.key_down(66, Some('b'), false, false, false);
+    runtime.key_down(8, None, false, false, false);
+    runtime.key_down(67, Some('c'), false, false, false);
+    runtime.key_down(68, Some('d'), false, false, false);
+    runtime.key_down(69, Some('e'), false, false, false);
+    assert_eq!(runtime.world.control(edit).unwrap().text, "acd");
+    runtime.key_down(9, None, false, false, false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "winKey"), Value::Int(9));
+    // A menu opened system-exclusive freezes the game: the timer stops
+    // and the opening script waits.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "OpenMenu", false);
+    runtime.tick(16);
+    let menu = runtime.world.window_ids()[1];
+    assert_eq!(runtime.world.control(menu).unwrap().name, "menu");
+    assert!(runtime.world.is_frozen());
+    assert_eq!(
+        runtime.world.get_property(menu, "SystemExclusive"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(runtime.world.focused_window(), Some(menu));
+    let frozen_at = runtime.world.timer();
+    runtime.tick(16);
+    assert_eq!(runtime.world.timer(), frozen_at);
+    assert_eq!(result(&runtime, "menuClosed"), Value::Null);
+    // Outside a system-exclusive window its shield takes the clicks and
+    // nothing happens; the menu's own button closes it through its
+    // script, which unfreezes the game.
+    runtime.mouse_move(0, 0);
+    runtime.tick(16);
+    let shield = runtime.world.active_object().unwrap();
+    assert_eq!(runtime.world.class_name(shield), "window");
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    assert!(runtime.world.is_frozen());
+    runtime.mouse_move(12, 12);
+    runtime.tick(16);
+    let take = runtime.world.widget(menu, "take").unwrap();
+    assert_eq!(runtime.world.active_object(), Some(take));
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "take"), Value::Bool(true));
+    assert!(!runtime.world.is_frozen());
+    assert!(!runtime.world.control(menu).unwrap().visible);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "menuClosed"), Value::Bool(true));
+    assert!(runtime.world.timer() > frozen_at);
+    // Shown again as a plain menu, a click outside closes it.
+    runtime
+        .world
+        .set_property(menu, "Visible", &Value::Bool(true));
+    runtime.mouse_move(0, 0);
+    runtime.tick(16);
+    let shield = runtime.world.active_object().unwrap();
+    assert_eq!(runtime.world.control(shield).unwrap().name, "close");
+    assert_eq!(runtime.world.class_name(shield), "button");
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    assert!(!runtime.world.control(menu).unwrap().visible);
+    // Unloading removes the window and its controls.
+    assert!(runtime.world.unload_object(&mut runtime.engine, menu));
+    assert_eq!(runtime.world.window_ids(), [win]);
+    assert!(runtime.world.control(take).is_none());
+    assert!(!runtime.world.objects().contains(take));
+    // A missing file gives no window.
+    assert!(
+        runtime
+            .world
+            .load_window(&mut runtime.engine, "no.window")
+            .is_none()
+    );
 }
 
 #[test]

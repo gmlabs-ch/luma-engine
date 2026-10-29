@@ -24,6 +24,7 @@ use crate::settings::GameSettings;
 use crate::sound::Sounds;
 use crate::talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
 use crate::text::FontBank;
+use crate::ui::{Control, Ui};
 use luma_audio::Audio;
 use luma_formats::font::TextAlign;
 
@@ -69,6 +70,7 @@ pub struct World {
     pub(crate) hits: Vec<HitArea>,
     pub(crate) fader: Fader,
     pub(crate) fader_id: NativeId,
+    pub(crate) ui: Ui,
     pub(crate) interactive: bool,
     pub(crate) main_object: Option<NativeId>,
     pub(crate) quit: bool,
@@ -146,6 +148,7 @@ impl World {
             hits: Vec::new(),
             fader: Fader::default(),
             fader_id,
+            ui: Ui::default(),
             interactive: true,
             main_object: None,
             quit: false,
@@ -254,7 +257,9 @@ impl World {
 
     /// Advances the clocks by `dt` milliseconds.
     pub fn advance_time(&mut self, dt: u64) {
-        self.timer += dt;
+        if !self.ui.frozen {
+            self.timer += dt;
+        }
         self.clock += dt;
     }
 
@@ -358,6 +363,7 @@ impl World {
                 .actor(id)
                 .map(|a| a.def.name.clone())
                 .unwrap_or_default(),
+            Some(Kind::Control) => self.control(id).map(|c| c.name.clone()).unwrap_or_default(),
             Some(Kind::Inert(kind)) => kind.clone(),
             None => "invalid".to_string(),
         }
@@ -401,13 +407,14 @@ impl World {
         path: &str,
         scene_bound: bool,
     ) -> Option<NativeId> {
-        let actor = match Actor::load(&self.vfs, path, scene_bound) {
+        let mut actor = match Actor::load(&self.vfs, path, scene_bound) {
             Ok(actor) => actor,
             Err(err) => {
                 self.log(format!("Error loading ACTOR file '{path}': {err}"));
                 return None;
             }
         };
+        actor.def.caption = self.expand(&actor.def.caption);
         for (file, reason) in actor.bank.missing() {
             self.log(format!("  missing: {file}: {reason}"));
         }
@@ -433,6 +440,7 @@ impl World {
     pub fn unload_object(&mut self, engine: &mut Engine, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor | Kind::Inert(_)) => {}
+            Some(Kind::Control) => return self.unload_control(engine, id),
             _ => return false,
         }
         for script in engine.scripts_of(id) {
@@ -648,6 +656,8 @@ impl World {
         if let Some(view) = &self.scene {
             view.draw_with(list, camera, &self.drawables());
         }
+        self.draw_windows(list, true, white);
+        self.draw_windows(list, false, white);
         if self.subtitles {
             for draw in &self.sentences {
                 if let Some(font) = self.fonts.get(&draw.font) {
@@ -671,6 +681,7 @@ impl World {
             actor.bank.upload(&self.vfs, renderer);
         }
         self.cursors.bank.upload(&self.vfs, renderer);
+        self.ui.bank.upload(&self.vfs, renderer);
         self.fonts.upload(renderer);
     }
 
@@ -730,7 +741,25 @@ impl World {
         }
         engine.remove_finished();
 
-        let view = SceneView::load(&self.vfs, path)?;
+        let mut view = SceneView::load(&self.vfs, path)?;
+        // Captions go through the string table when the objects load
+        // (`CBObject::SetCaption`).
+        for layer in &mut view.scene.layers {
+            layer.caption = self.strings.expand(&layer.caption);
+            for node in &mut layer.nodes {
+                match node {
+                    luma_formats::SceneNode::Entity(e) => {
+                        e.caption = self.strings.expand(&e.caption)
+                    }
+                    luma_formats::SceneNode::Region(r) => {
+                        r.caption = self.strings.expand(&r.caption)
+                    }
+                }
+            }
+        }
+        for e in &mut view.scene.free_entities {
+            e.caption = self.strings.expand(&e.caption);
+        }
         self.log(format!(
             "scene '{}' loaded from '{path}': {} layer(s), {} entities",
             view.scene.name,
@@ -1305,6 +1334,10 @@ impl Natives for World {
             Some(Kind::Sprite(_)) => "sprite".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
             Some(Kind::Fader) => "fader".to_string(),
+            Some(Kind::Control) => self
+                .control(id)
+                .map_or("control", Control::type_name)
+                .to_string(),
             Some(Kind::Inert(kind)) => kind.to_ascii_lowercase(),
             None => String::new(),
         }
@@ -1317,6 +1350,7 @@ impl Natives for World {
                 format!("[{}]", self.describe(id))
             }
             Some(Kind::Actor) => "[actor object]".to_string(),
+            Some(Kind::Control) => format!("[{}]", self.describe(id)),
             Some(_) => "[native object]".to_string(),
             None => "[invalid object]".to_string(),
         }
@@ -1374,6 +1408,9 @@ impl Host for World {
             Some(Kind::Entity(r)) => self.scene().is_none_or(|v| !v.is_talking(*r)),
             Some(Kind::Scene) => self.is_scrolled(),
             Some(Kind::Fader) => self.fader.ready,
+            Some(Kind::Control) => self
+                .control(id)
+                .is_none_or(|c| c.window().is_none_or(|w| w.ready)),
             _ => true,
         }
     }
@@ -1500,6 +1537,7 @@ impl Runtime {
         self.world.update_sounds();
         self.world.collect_hits();
         self.world.update_active_object();
+        self.world.update_ui(&mut self.engine);
         self.world.update_cursor();
         self.world.apply_pending_events(&mut self.engine);
         self.world.take_log()
@@ -1533,16 +1571,18 @@ impl Runtime {
 
     /// Raises a mouse event (`CAdGame::OnMouseLeftDown` and the like):
     /// on the game first; when its scripts do not handle it, on the
-    /// active object, else on the scene when the mouse is over it.
+    /// active object, else on the scene when the mouse is over it. While
+    /// the game is frozen, only the active object gets it.
     fn mouse_event(&mut self, event: &str) {
         let game = self.world.game_id;
-        if self.engine.apply_event(&mut self.world, game, event, false) {
+        let running = !self.world.is_frozen();
+        if running && self.engine.apply_event(&mut self.world, game, event, false) {
             return;
         }
         if let Some(active) = self.world.active_object() {
             self.engine
                 .apply_event(&mut self.world, active, event, false);
-        } else if self.mouse_in_viewport() {
+        } else if running && self.mouse_in_viewport() {
             let scene = self.world.scene_id;
             self.engine
                 .apply_event(&mut self.world, scene, event, false);
@@ -1567,6 +1607,7 @@ impl Runtime {
             self.world.click_while_busy(false);
             return;
         }
+        self.world.ui_mouse_down();
         if double {
             self.mouse_event("LeftDoubleClick");
         } else {
@@ -1577,6 +1618,7 @@ impl Runtime {
     /// The left button goes up (`LeftRelease`).
     pub fn mouse_left_up(&mut self) {
         self.world.mouse.left_down = false;
+        self.world.ui_mouse_up();
         self.mouse_event("LeftRelease");
     }
 
@@ -1595,8 +1637,10 @@ impl Runtime {
         self.mouse_event("RightRelease");
     }
 
-    /// A key goes down: the keyboard state is updated and `Keypress` is
-    /// raised on the game (`CBGame::HandleKeypress`).
+    /// A key goes down (`CBGame::HandleKeypress`): the keyboard state is
+    /// updated; the focused window takes the key first (`Tab`, its
+    /// editor), else its `Keypress` handler when it has one, else the
+    /// game's.
     pub fn key_down(
         &mut self,
         code: i32,
@@ -1607,6 +1651,16 @@ impl Runtime {
     ) {
         self.world.key_down(code, text, shift, alt, control);
         let game = self.world.game_id;
+        if let Some(window) = self.world.focused_window() {
+            if self.world.window_key(window, code, text) {
+                return;
+            }
+            if self.engine.can_handle_event(window, "Keypress") {
+                self.engine
+                    .apply_event(&mut self.world, window, "Keypress", false);
+                return;
+            }
+        }
         self.engine
             .apply_event(&mut self.world, game, "Keypress", false);
     }

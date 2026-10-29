@@ -64,9 +64,10 @@ impl Keyboard {
 
 /// Which bank holds the image of a hit area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HitBank {
+pub(crate) enum HitBank {
     Scene,
     Actor(NativeId),
+    Ui,
 }
 
 /// Where an object can be hit, as the engine registers it while drawing
@@ -89,6 +90,8 @@ enum HitShape {
     },
     /// A polygon in scene coordinates.
     Polygon(Vec<Point>),
+    /// A rectangle on screen (a window, a button).
+    Rect(i32, i32, i32, i32),
 }
 
 /// An object's hit area.
@@ -98,6 +101,17 @@ pub struct HitArea {
     /// The scroll offset of the layer the object is drawn in.
     layer_offset: (i32, i32),
     shape: HitShape,
+}
+
+impl HitArea {
+    /// A rectangle on screen.
+    pub(crate) fn rect(owner: NativeId, x: i32, y: i32, w: i32, h: i32) -> HitArea {
+        HitArea {
+            owner,
+            layer_offset: (0, 0),
+            shape: HitShape::Rect(x, y, w, h),
+        }
+    }
 }
 
 /// The cursors a game shows.
@@ -248,6 +262,7 @@ impl World {
                 .scene()
                 .and_then(|v| v.entity(*r))
                 .and_then(|e| e.cursor.clone()),
+            Some(Kind::Control) => self.control(id).and_then(|c| c.cursor.clone()),
             _ => None,
         }
     }
@@ -334,6 +349,14 @@ impl World {
     /// the mouse, by their region or by their sprite's pixels.
     pub(crate) fn collect_hits(&mut self) {
         self.hits.clear();
+        let mut hits = Vec::new();
+        self.scene_hits(&mut hits);
+        self.ui_hits(&mut hits);
+        self.hits = hits;
+    }
+
+    /// The hit areas of the scene's objects, in drawing order.
+    fn scene_hits(&self, hits: &mut Vec<HitArea>) {
         let Some(view) = &self.scene else {
             return;
         };
@@ -351,7 +374,6 @@ impl World {
             .filter(|id| self.actor(*id).is_some_and(|a| a.def.active))
             .collect();
         let scene_offset = (self.offset_x, self.offset_y);
-        let mut hits = Vec::new();
         for item in view.draw_order(&positions) {
             let layer = &view.scene.layers[item.layer()];
             let (ox, oy) = camera.layer_offset(&view.scene, layer);
@@ -360,30 +382,29 @@ impl World {
                 DrawItem::Node { layer, index } => {
                     let r = EntityRef::Node { layer, index };
                     if let Some(id) = self.node_id(r) {
-                        self.entity_hits(id, r, layer_offset, scene_offset, &mut hits);
+                        self.entity_hits(id, r, layer_offset, scene_offset, hits);
                     }
                 }
                 DrawItem::Free { index, .. } => {
                     let r = EntityRef::Free(index);
                     if let Some(id) = self.node_id(r) {
-                        self.entity_hits(id, r, layer_offset, scene_offset, &mut hits);
+                        self.entity_hits(id, r, layer_offset, scene_offset, hits);
                     }
                 }
                 DrawItem::Other { index, .. } => {
                     if let Some(id) = active_actors.get(index) {
-                        self.actor_hits(*id, layer_offset, &mut hits);
+                        self.actor_hits(*id, layer_offset, hits);
                     }
                 }
             }
         }
-        self.hits = hits;
     }
 
     #[allow(
         clippy::too_many_arguments,
         reason = "the registration of a sprite's sub-frames takes what the engine's does"
     )]
-    fn sprite_hits(
+    pub(crate) fn sprite_hits(
         owner: NativeId,
         bank: HitBank,
         sprite: &Sprite,
@@ -523,6 +544,9 @@ impl World {
             let (lx, ly) = (x + hit.layer_offset.0, y + hit.layer_offset.1);
             let inside = match &hit.shape {
                 HitShape::Polygon(points) => crate::path::polygon_contains(points, lx, ly),
+                HitShape::Rect(rx, ry, rw, rh) => {
+                    lx >= *rx && ly >= *ry && lx < rx + rw && ly < ry + rh
+                }
                 HitShape::Pixels {
                     bank,
                     image,
@@ -542,6 +566,7 @@ impl World {
                         HitBank::Actor(actor) => self
                             .actor_and_vfs(*actor)
                             .and_then(|(vfs, a)| a.bank.mask(vfs, image, *color_key).cloned()),
+                        HitBank::Ui => self.ui.bank.mask(&self.vfs, image, *color_key).cloned(),
                     };
                     let Some(mask) = mask else { continue };
                     let (sx, sy, sw, sh) =

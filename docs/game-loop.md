@@ -21,13 +21,22 @@ in this order (`Runtime::tick`):
 6. the view scrolls towards the main object; the objects' sounds follow
    them;
 7. the object under the mouse is found and becomes the **active
-   object**, raising `MouseLeave` and `MouseEntry`; the cursor is chosen
-   and animates;
-8. the events raised during the frame reach their scripts (they run
+   object**, raising `MouseLeave` and `MouseEntry`;
+8. the windows note the mouse: a button held under it is pressed, a
+   press released on it fires, a dragged window moves, the focused
+   window is checked; the cursor is chosen and animates;
+9. the events raised during the frame reach their scripts (they run
    next frame).
 
-The frame is then drawn: the scene with the actors, the sentences, the
-cursor, and the fader's colour over everything.
+The frame is then drawn: the scene with the actors, the windows marked
+`IN_GAME`, the other windows, the sentences, the cursor, and the fader's
+colour over everything.
+
+While a window is **system exclusive** (see
+[formats/window.md](formats/window.md)) the game is frozen: the timer
+stops, so the scene, the actors and the sentences stand still, the
+freezable scripts and the sounds pause, and only the window's own
+scripts run.
 
 Without a window (`--headless`), the same loop runs with a fixed frame
 duration, and the sounds run on the game clock.
@@ -38,11 +47,16 @@ While drawing, the engine notes where each object that reacts to the
 mouse lands (`CBActiveRect`): an entity or actor whose `INTERACTIVE` is
 on (and not ignoring the mouse while an inventory item is selected),
 through its `REGION` when it has one, and through every sub-frame of the
-sprite it shows that is not a `DECORATION`. The object under the mouse
-is the **last one drawn** whose area contains the point: a region by its
-polygon (in scene coordinates), a sprite by its rectangle on screen, and,
-when the sprite is `PRECISE` (the default), only where the pixel's alpha
-is above 128, with the sprite's scale and mirroring applied.
+sprite it shows that is not a `DECORATION`; then the windows, drawn
+after the scene: a window over its rectangle (or its image's pixels)
+unless `TRANSPARENT`, its buttons over their rectangles (or their
+image's pixels when `PIXEL_PERFECT`), its editors, and under an
+exclusive window or a menu a shield covering the whole screen. The
+object under the mouse is the **last one drawn** whose area contains the
+point: a region by its polygon (in scene coordinates), a sprite by its
+rectangle on screen, and, when the sprite is `PRECISE` (the default),
+only where the pixel's alpha is above 128, with the sprite's scale and
+mirroring applied.
 
 While the game is not interactive there is no active object, so a
 click skips the sentences and nothing else (per `TALK_SKIP_BUTTON`).
@@ -57,6 +71,10 @@ mouse is over it. A game script that handles `LeftClick` is therefore in
 charge of forwarding it (The White Chamber's dispatches to the active
 object or the scene itself, and its scenes walk the actor to
 `Scene.MouseX`, `Scene.MouseY`).
+
+While the game is frozen by a system-exclusive window, the game and the
+scene get no mouse event: only the active object does, a control of the
+window or its shield.
 
 `Game.MouseX` and `Game.MouseY` are the mouse in game pixels
 (writable, as is `Game.SetMousePos`); `Scene.MouseX` and `Scene.MouseY`
@@ -76,9 +94,12 @@ cursor is hidden over the window.
 
 ## Keyboard
 
-A key going down updates `Game.Keyboard` and raises `Keypress` on the
-game (windows, which take keys first in the engine, are not implemented
-yet):
+A key going down updates `Game.Keyboard`, then goes to the **focused
+window** when there is one: `Tab` moves its focus between its focusable
+controls, an editor with the focus edits its text; a key the window
+did not use raises `Keypress` on the window when its scripts handle
+that event, else on the game. Without a focused window, `Keypress`
+goes to the game.
 
 | Property | Value |
 |----------|-------|
@@ -102,7 +123,6 @@ told not to.
 
 ## Not yet
 
-- Windows and their controls (menus, captions, the inventory box); the
-  keys and clicks they would take go to the game.
 - `Game.SelectedItem` and the inventory; dialogue responses.
+- The mouse wheel, which the engine gives to the focused window.
 - Transitions other than the fade; videos.

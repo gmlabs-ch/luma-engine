@@ -45,6 +45,12 @@ OPTIONS:
     --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
                           node once the scene is up, e.g. --click Door or --click Freezer:LookAt
     --click-at <x>,<y>    In headless mode, move the mouse there and click once the scene is up
+                          (after --right-click-at and --key, so that a menu can be clicked)
+    --hover-at <x>,<y>    In headless mode, move the mouse there once the scene is up
+    --right-click-at <x>,<y>
+                          In headless mode, move the mouse there and right-click once the scene is up
+    --key <code>          In headless mode, press a key (a Windows virtual key code, e.g. 27 for
+                          Escape) once the scene is up, after the clicks
     --help                Show this message
 
 With --headless and --screenshot, the scene and the actors are rendered
@@ -79,6 +85,9 @@ struct Options {
     font: Option<String>,
     mute: bool,
     click_at: Option<(i32, i32)>,
+    right_click_at: Option<(i32, i32)>,
+    hover_at: Option<(i32, i32)>,
+    key: Option<i32>,
 }
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -96,6 +105,9 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut font = None;
     let mut mute = false;
     let mut click_at = None;
+    let mut right_click_at = None;
+    let mut hover_at = None;
+    let mut key = None;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -127,6 +139,29 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
                     .ok_or_else(|| format!("--click-at expects <x>,<y>, got `{v}`"))?;
                 click_at = Some((x, y));
+            }
+            "--hover-at" => {
+                let v = value(&mut i)?;
+                let (x, y) = v
+                    .split_once(',')
+                    .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
+                    .ok_or_else(|| format!("--hover-at expects <x>,<y>, got `{v}`"))?;
+                hover_at = Some((x, y));
+            }
+            "--right-click-at" => {
+                let v = value(&mut i)?;
+                let (x, y) = v
+                    .split_once(',')
+                    .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
+                    .ok_or_else(|| format!("--right-click-at expects <x>,<y>, got `{v}`"))?;
+                right_click_at = Some((x, y));
+            }
+            "--key" => {
+                let v = value(&mut i)?;
+                key = Some(
+                    v.parse()
+                        .map_err(|_| format!("--key expects a key code, got `{v}`"))?,
+                );
             }
             "--at" => {
                 let v = value(&mut i)?;
@@ -172,6 +207,9 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         font,
         mute,
         click_at,
+        right_click_at,
+        hover_at,
+        key,
     })
 }
 
@@ -285,7 +323,40 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                     None => println!("[{tick}] --say: no main actor"),
                 }
             }
+            if let Some((x, y)) = options.hover_at {
+                runtime.mouse_move(x, y);
+                println!("[{tick}] mouse moved to ({x}, {y})");
+            }
+            if let Some((x, y)) = options.right_click_at {
+                runtime.mouse_move(x, y);
+                for line in runtime.tick(options.dt) {
+                    println!("[{tick}] {line}");
+                }
+                let over = runtime
+                    .world
+                    .active_object()
+                    .map(|id| runtime.world.describe_object(id))
+                    .unwrap_or_else(|| "nothing".to_string());
+                println!("[{tick}] mouse at ({x}, {y}) over {over}; right click");
+                runtime.mouse_right_down();
+                for line in runtime.tick(options.dt) {
+                    println!("[{tick}] {line}");
+                }
+                runtime.mouse_right_up();
+            }
+            if let Some(code) = options.key {
+                println!("[{tick}] key {code} pressed");
+                runtime.key_down(code, None, false, false, false);
+                runtime.key_up(code);
+            }
             if let Some((x, y)) = options.click_at {
+                // A few frames so that a menu opened by the right click or
+                // the key is in place.
+                for _ in 0..3 {
+                    for line in runtime.tick(options.dt) {
+                        println!("[{tick}] {line}");
+                    }
+                }
                 runtime.mouse_move(x, y);
                 // A frame so that the object under the mouse is known.
                 for line in runtime.tick(options.dt) {
@@ -298,6 +369,11 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                     .unwrap_or_else(|| "nothing".to_string());
                 println!("[{tick}] mouse at ({x}, {y}) over {over}; left click");
                 runtime.mouse_left_down();
+                // A frame between the press and the release, as a player's
+                // click spans frames (a button notes it is held).
+                for line in runtime.tick(options.dt) {
+                    println!("[{tick}] {line}");
+                }
                 runtime.mouse_left_up();
             }
             if let Some(click) = &options.click {
@@ -351,6 +427,51 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 actor.current_sprite().unwrap_or("none")
             );
         }
+    }
+    for id in runtime.world.window_ids() {
+        if let Some(control) = runtime.world.control(*id) {
+            let mode = control.window().map(|w| w.mode);
+            println!(
+                "window {:?}: {}{}, at ({}, {}) {}x{}, {} control(s){}",
+                control.name,
+                if control.visible { "visible" } else { "hidden" },
+                match mode {
+                    Some(luma_adventure::WindowMode::Exclusive) => ", exclusive",
+                    Some(luma_adventure::WindowMode::SystemExclusive) => ", system exclusive",
+                    _ => "",
+                },
+                control.x,
+                control.y,
+                control.width,
+                control.height,
+                runtime.world.widgets_of(*id).len(),
+                if runtime.world.focused_window() == Some(*id) {
+                    ", focused"
+                } else {
+                    ""
+                }
+            );
+            if control.visible {
+                for widget in runtime.world.widgets_of(*id) {
+                    if let Some(c) = runtime.world.control(widget) {
+                        println!(
+                            "  {} {:?}: {}, at ({}, {}) {}x{}, text {:?}",
+                            c.type_name(),
+                            c.name,
+                            if c.visible { "visible" } else { "hidden" },
+                            c.x,
+                            c.y,
+                            c.width,
+                            c.height,
+                            c.text
+                        );
+                    }
+                }
+            }
+        }
+    }
+    if runtime.world.is_frozen() {
+        println!("game frozen by a system-exclusive window");
     }
     for channel in 0..luma_adventure::MUSIC_CHANNELS {
         if let Some(music) = runtime.world.music(channel) {

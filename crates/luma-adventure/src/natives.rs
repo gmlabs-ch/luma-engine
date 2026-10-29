@@ -54,7 +54,6 @@ const GAME_STUBS: &[&str] = &[
     "EmptySaveSlot",
     "Screenshot",
     "ScreenshotEx",
-    "DeleteWindow",
     "OpenDocument",
     "SetLoadingScreen",
     "SetSavingScreen",
@@ -140,6 +139,7 @@ impl World {
             Kind::Region { layer, index } => self.region_get(layer, index, name),
             Kind::Sprite(owner) => self.sprite_get(owner, name),
             Kind::Actor => self.actor_get(id, name),
+            Kind::Control => self.control_get(id, name),
             Kind::Inert(kind) => match name {
                 "Type" => Some(Value::from(kind.to_ascii_lowercase())),
                 "Name" => Some(Value::from(kind)),
@@ -163,6 +163,7 @@ impl World {
             Kind::Region { layer, index } => self.region_set(layer, index, name, value),
             Kind::Sprite(owner) => self.sprite_set(owner, name, value),
             Kind::Actor => self.actor_set(id, name, value),
+            Kind::Control => self.control_set(id, name, value),
             Kind::Keyboard | Kind::Fader | Kind::Inert(_) => false,
         }
     }
@@ -202,6 +203,7 @@ impl World {
             Kind::Region { layer, index } => self.region_call(layer, index, name, args),
             Kind::Sprite(owner) => self.sprite_call(owner, name),
             Kind::Actor => self.actor_call(id, name, args, ctx),
+            Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
                     let widget = self.inert("Widget");
@@ -302,8 +304,9 @@ impl World {
             "Subtitles" => Value::Bool(self.subtitles),
             "SubtitlesSpeed" => Value::Int(self.subtitles_speed),
             "VideoSubtitles" => Value::Bool(self.game_file().video_subtitles),
-            "Frozen"
-            | "DebugMode"
+            "Frozen" => Value::Bool(self.is_frozen()),
+            "FocusedWindow" => native_or_null(self.focused_window()),
+            "DebugMode"
             | "SoundAvailable"
             | "WindowedMode"
             | "TextRTL"
@@ -370,10 +373,22 @@ impl World {
                 self.schedule_scene(&path, fade_in);
                 Return::null()
             }
-            "LoadWindow" | "CreateWindow" => {
-                self.stub(&format!("Game.{name}"));
-                let id = self.inert("Window");
-                Return::value(Value::Native(id))
+            "LoadWindow" => {
+                let path = arg(0).get_string(self);
+                Return::value(native_or_null(self.load_window(ctx.engine, &path)))
+            }
+            "CreateWindow" => {
+                let name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                Return::value(Value::Native(self.create_window(name.as_deref())))
+            }
+            "DeleteWindow" => {
+                let deleted = arg(0).as_native().is_some_and(|id| {
+                    self.window_ids().contains(&id) && self.unload_object(ctx.engine, id)
+                });
+                Return::value(deleted)
             }
             "LoadActor" => {
                 let path = arg(0).get_string(self);
@@ -778,12 +793,13 @@ impl World {
             value.get_int(self),
             value.get_bool(self),
         );
+        let caption = self.expand(&text);
         let Some(layer) = self.scene_mut().and_then(|v| v.scene.layers.get_mut(index)) else {
             return false;
         };
         match name {
             "Name" => layer.name = text,
-            "Caption" => layer.caption = text,
+            "Caption" => layer.caption = caption,
             "CloseUp" => layer.close_up = flag,
             "Width" => layer.width = int,
             "Height" => layer.height = int,
@@ -899,6 +915,7 @@ impl World {
             value.get_bool(self),
             value.get_float(self),
         );
+        let caption = self.expand(&text);
         let is_null = value.is_null();
         if name.starts_with("Subtitles") {
             let Some(view) = self.scene_mut() else {
@@ -920,7 +937,7 @@ impl World {
         };
         match name {
             "Name" => e.name = text,
-            "Caption" => e.caption = text,
+            "Caption" => e.caption = caption,
             "X" => e.x = int,
             "Y" => e.y = int,
             "Registrable" | "Interactive" => e.interactive = flag,
@@ -1092,12 +1109,13 @@ impl World {
             value.get_bool(self),
             value.get_float(self),
         );
+        let caption = self.expand(&text);
         let Some(region) = self.scene_mut().and_then(|v| v.region_mut(layer, index)) else {
             return false;
         };
         match name {
             "Name" => region.name = text,
-            "Caption" => region.caption = text,
+            "Caption" => region.caption = caption,
             "Active" => region.active = flag,
             "Blocked" => region.blocked = flag,
             "Decoration" => region.decoration = flag,

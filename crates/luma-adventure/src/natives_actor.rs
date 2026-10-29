@@ -107,6 +107,7 @@ impl World {
             value.get_float(self),
         );
         let is_null = value.is_null();
+        let caption = self.expand(&text);
         let anim_name = |default: &str| {
             if is_null {
                 default.to_string()
@@ -119,7 +120,7 @@ impl World {
         };
         match name {
             "Name" => actor.def.name = text,
-            "Caption" => actor.def.caption = text,
+            "Caption" => actor.def.caption = caption,
             "X" => actor.x = int,
             "Y" => actor.y = int,
             "Direction" => {

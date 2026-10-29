@@ -133,6 +133,11 @@ luma-player path/to/game --headless --scene scenes/room/room.scene --say "Hello"
 # The same without sound (the sounds still run on the game clock)
 luma-player path/to/game --headless --mute
 
+# Open the game's main menu with Escape and render it, or right-click an
+# object and click the verb menu that opens
+luma-player path/to/game --headless --key 27 --screenshot menu.png
+luma-player path/to/game --headless --scene scenes/room/room.scene --right-click-at 300,240 --click-at 300,240
+
 # Move the mouse and click on the floor: the main actor walks there
 luma-player path/to/game --headless --scene scenes/room/room.scene --click-at 500,520 --ticks 300 --screenshot walk.png
 ```

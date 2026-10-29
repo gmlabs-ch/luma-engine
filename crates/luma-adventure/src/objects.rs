@@ -35,6 +35,9 @@ pub enum Kind {
     Actor,
     /// The screen fader scripts wait for (`Game.FadeOut`).
     Fader,
+    /// A window or one of its controls (`Game.LoadWindow`, `GetWidget`);
+    /// its state lives in the world's UI.
+    Control,
     /// A stand-in that keeps the properties scripts set and answers every
     /// method with `null`: windows, actors and other objects of later
     /// milestones.

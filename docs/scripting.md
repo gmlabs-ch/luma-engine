@@ -147,6 +147,9 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | `Game`, actors and entities, sound | `SoundPanning` | `LoadSound`, `PlaySound`, `PlaySoundEvent`, `StopSound`, `PauseSound`, `ResumeSound`, `IsSoundPlaying`, `SetSoundPosition`, `GetSoundPosition`, `SetSoundVolume`, `GetSoundVolume` |
 | `Game`, input and fades | `Keyboard.KeyCode`, `Key`, `Printable`, `IsShift`, `IsAlt`, `IsControl` | `Keyboard.IsKeyDown`, `SetMousePos`, `FadeOut`, `FadeIn` (and their `Async` and `System` forms), `GetFadeColor`, `SetActiveCursor`, `RemoveActiveCursor`, `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`, `GetActiveCursor`, `GetWaitCursor`, `HideCursor`, `ShowCursor` |
 | `Game`, music and volumes | | `PlayMusic`, `PlayMusicChannel`, `StopMusic`, `StopMusicChannel`, `PauseMusic`, `ResumeMusic`, `GetMusic`, `SetMusicPosition`, `GetMusicPosition`, `IsMusicPlaying`, `SetMusicVolume`, `GetMusicVolume` (and their `...Channel` forms), `MusicCrossfade`, `GetSoundLength`, `SetGlobalSFXVolume`, `SetGlobalSpeechVolume`, `SetGlobalMusicVolume`, `SetGlobalMasterVolume` and their getters, `AddSpeechDir`, `RemoveSpeechDir` |
+| Windows (`Game.LoadWindow`, `Game.CreateWindow`) | `Name`, `X`, `Y`, `Width`, `Height`, `Visible`, `Disabled`, `Text`, `Parent`, `ParentNotify`, `NumControls`, `Exclusive`, `SystemExclusive`, `Menu`, `InGame`, `PauseMusic`, `Transparent`, `FadeColor`, `NextSibling`, `PrevSibling` | `GetWidget`, `GetControl`, `Close`, `GoExclusive`, `GoSystemExclusive`, `Center`, `Focus`, `LoadFromFile`, `SetImage`, `GetImage`, `SetFont`, `SetInactiveImage`, `SetInactiveFont`, `CreateButton`, `CreateStatic`, `CreateEditor`, `CreateWindow`, `DeleteControl`, `MoveAfter`, `MoveBefore`, `MoveToTop`, `MoveToBottom` |
+| Buttons | The controls' properties, plus `TextAlign`, `Focusable`, `Pressed`, `PixelPerfect` | `Press`, `SetHoverImage`, `SetPressedImage`, `SetDisabledImage`, `SetFocusedImage` and their getters, `SetHoverFont`, `SetPressedFont`, `SetDisabledFont`, `SetFocusedFont` |
+| Static texts and editors | `TextAlign`, `VerticalAlign`; `SelStart`, `SelEnd`, `MaxLength`, `FrameWidth`, `CursorChar`, `CursorBlinkRate` | `SizeToFit`, `HeightToFit`; `SetSelectedFont` |
 | Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
 | Sprite objects | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner` | `Reset`, `Pause`, `Play` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
@@ -180,8 +183,17 @@ Input (see [docs/game-loop.md](game-loop.md)): the mouse raises
 `LeftClick`, `LeftRelease`, `RightClick`, `RightRelease` and
 `LeftDoubleClick` on the game first, then on the object under the
 mouse or on the scene; the object under the mouse gets `MouseEntry`
-and `MouseLeave`; a key raises `Keypress` on the game. `Game.FadeOut`
-and `FadeIn` make the script wait for the fade.
+and `MouseLeave`; a key raises `Keypress` on the focused window when
+its scripts handle it, else on the game. `Game.FadeOut` and `FadeIn`
+make the script wait for the fade.
+
+Windows (see [docs/formats/window.md](formats/window.md)) and their
+controls are script holders of their own: a window's `SCRIPT` and its
+buttons' run as any other, a button raises `Press` on itself when
+released and, with `PARENT_NOTIFY`, an event named after it on its
+window. `GoExclusive` and `GoSystemExclusive` make the script wait until
+the window closes; the system-exclusive form freezes the game (`Frozen`),
+pausing every script but the window's.
 
 Sound (see [docs/audio.md](audio.md)) is owned by the objects: each has
 one sound effect, the game has five music channels, and a sentence plays
@@ -190,9 +202,7 @@ clock when no audio device is there, so scripts behave the same in
 headless runs.
 
 What later milestones implement is accepted and logged once as "not
-implemented": inventory, windows (`LoadWindow` returns an inert object
-that keeps the properties scripts set, so that game scripts run
-through), saving, videos and transitions.
+implemented": inventory, saving, videos and transitions.
 
 ## Not yet
 
