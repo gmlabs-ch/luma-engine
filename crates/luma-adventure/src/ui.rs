@@ -1882,12 +1882,17 @@ impl World {
         }
     }
 
-    /// A key in a text editor (`CUIEdit::HandleKeypress`).
+    /// A key in a text editor (`CUIEdit::HandleKeypress`); an edit of
+    /// the text raises an event named after the editor on its parent
+    /// when `PARENT_NOTIFY` is on, as `InsertChars` and `DeleteChars`
+    /// do.
     pub fn edit_key(&mut self, id: NativeId, code: i32, text: Option<char>) -> bool {
         let (shift, control_down) = (self.keyboard.shift, self.keyboard.control);
         let Some(control) = self.control_mut(id) else {
             return false;
         };
+        let (parent, parent_notify, name) =
+            (control.parent, control.parent_notify, control.name.clone());
         let len = control.text.len();
         let Some(e) = control.edit_mut() else {
             return false;
@@ -1897,6 +1902,7 @@ impl World {
         let (mut start, mut end) = (e.sel_start, e.sel_end);
         let max_length = e.max_length;
         let mut handled = true;
+        let mut edited = false;
         let mut new_text = control.text.clone();
         let prev_boundary = |s: &str, i: usize| {
             let mut i = i.saturating_sub(1);
@@ -1915,6 +1921,7 @@ impl World {
         match code {
             VK_ESCAPE | VK_TAB | VK_RETURN => return false,
             VK_BACK => {
+                edited = true;
                 if start == end {
                     let from = prev_boundary(&new_text, start);
                     new_text.replace_range(from..start, "");
@@ -1927,6 +1934,7 @@ impl World {
                 end = start;
             }
             VK_DELETE => {
+                edited = true;
                 if start == end {
                     let to = next_boundary(&new_text, start);
                     new_text.replace_range(start..to, "");
@@ -1967,6 +1975,7 @@ impl World {
             }
             _ => match text.filter(|c| !c.is_control()) {
                 Some(ch) => {
+                    edited = true;
                     if start != end {
                         let (a, b) = (start.min(end), start.max(end));
                         new_text.replace_range(a..b, "");
@@ -1986,6 +1995,11 @@ impl World {
         if let Some(e) = control.edit_mut() {
             e.sel_start = start;
             e.sel_end = end;
+        }
+        if edited && parent_notify {
+            if let Some(parent) = parent {
+                self.queue_event(parent, name);
+            }
         }
         handled
     }

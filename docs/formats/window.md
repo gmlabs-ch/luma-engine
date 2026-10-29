@@ -70,7 +70,7 @@ adds its own. Texts (`TEXT`, `TITLE`) go through the string table
 | `CURSOR` | string | | The cursor shown over the control. |
 | `VISIBLE` | bool | `TRUE` | Drawn and clickable. |
 | `DISABLED` | bool | `FALSE` | Drawn in its disabled state, ignored by the mouse and the focus. |
-| `PARENT_NOTIFY` | bool | `FALSE` | A press raises an event named after the control on its parent. |
+| `PARENT_NOTIFY` | bool | `FALSE` | A press (of a button) or an edit of the text (of an editor) raises an event named after the control on its parent. |
 | `SCRIPT` | string | | A script attached to the control; repeatable. |
 | `EDITOR_PROPERTY` | block | | Editor data, ignored. |
 
@@ -189,7 +189,11 @@ drawn later is found first under the mouse. A button is an active
 object over its rectangle unless `PIXEL_PERFECT`. A click on a button
 holds it pressed while the mouse stays on it; releasing it there raises
 `Press` on the button, then the event named after the button on its
-parent when `PARENT_NOTIFY` is on. A `MENU` window registers a button
+parent when `PARENT_NOTIFY` is on; an editor with `PARENT_NOTIFY` raises
+the event named after it on its parent at each key that edits its text
+(a character, Backspace, Delete), as `CUIEdit::InsertChars` and
+`DeleteChars` do, which is how a save window enables its OK button once
+a name is typed. A `MENU` window registers a button
 named `close` under the whole screen (and under the window) whose press
 closes the window.
 
