@@ -13,6 +13,7 @@ use crate::scene::{Direction, Property, Region, WaypointGroup};
 
 /// A sprite for each direction (`SPRITESET`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SpriteSet {
     /// Name of the set, for talk stances and animations.
     pub name: String,
@@ -113,6 +114,7 @@ impl SpriteSet {
 
 /// An actor definition (`ACTOR`).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Actor {
     /// Name used by scripts.
     pub name: String,

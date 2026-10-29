@@ -53,6 +53,7 @@ pub struct Frame {
 
 /// A rectangle with exclusive right and bottom edges.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Rect {
     /// Left edge.
     pub left: i32,

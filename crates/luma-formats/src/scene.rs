@@ -13,6 +13,7 @@ use crate::sprite::Rect;
 
 /// A point in scene coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Point {
     /// Horizontal position.
     pub x: i32,
@@ -22,6 +23,7 @@ pub struct Point {
 
 /// A script property set from the file (`PROPERTY { NAME VALUE }`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Property {
     /// Property name.
     pub name: String,
@@ -31,6 +33,7 @@ pub struct Property {
 
 /// The direction an actor faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Direction {
     /// Code 0.
     Up,
@@ -121,6 +124,7 @@ impl Direction {
 
 /// A scene: layers, waypoints, scale and rotation levels, free entities.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Scene {
     /// Name used by scripts.
     pub name: String,
@@ -156,6 +160,7 @@ pub struct Scene {
 
 /// A layer of a scene: an ordered list of entities and regions.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Layer {
     /// Name used by scripts.
     pub name: String,
@@ -201,6 +206,7 @@ impl Default for Layer {
 
 /// One node of a layer.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SceneNode {
     /// An entity (boxed: entities are much larger than regions).
     Entity(Box<Entity>),
@@ -210,6 +216,7 @@ pub enum SceneNode {
 
 /// The kind of an entity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EntityKind {
     /// A visible entity.
     #[default]
@@ -220,6 +227,7 @@ pub enum EntityKind {
 
 /// An entity: a sprite placed in the scene, or an invisible hotspot.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Entity {
     /// Name used by scripts.
     pub name: String,
@@ -334,6 +342,7 @@ impl Default for Entity {
 
 /// A polygon with a role in the scene.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Region {
     /// Name used by scripts.
     pub name: String,
@@ -431,6 +440,7 @@ impl Region {
 
 /// A group of waypoints for path finding.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WaypointGroup {
     /// Name used by scripts.
     pub name: String,
@@ -444,6 +454,7 @@ pub struct WaypointGroup {
 
 /// A scale level: the scale at a `y`, interpolated between levels.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScaleLevel {
     /// Vertical position.
     pub y: i32,
@@ -453,6 +464,7 @@ pub struct ScaleLevel {
 
 /// A rotation level: the rotation at an `x`, interpolated between levels.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RotationLevel {
     /// Horizontal position.
     pub x: i32,

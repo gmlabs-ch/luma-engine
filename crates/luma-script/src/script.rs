@@ -13,10 +13,12 @@ use crate::value::{NativeId, Value};
 
 /// Identifies a script for the lifetime of the engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ScriptId(pub u64);
 
 /// The state of a script, as the engine's scheduler sees it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum State {
     /// Executing instructions.
     Running,
@@ -44,6 +46,7 @@ pub enum State {
 pub struct Script {
     pub(crate) id: ScriptId,
     pub(crate) program: Rc<Program>,
+    pub(crate) source: String,
     pub(crate) ip: usize,
     pub(crate) line: u32,
     pub(crate) stack: Stack,
@@ -70,11 +73,17 @@ pub struct Script {
 
 impl Script {
     /// A fresh top-level script, ready to run from the code start.
-    pub(crate) fn new(id: ScriptId, program: Rc<Program>, owner: Option<NativeId>) -> Script {
+    pub(crate) fn new(
+        id: ScriptId,
+        program: Rc<Program>,
+        source: &str,
+        owner: Option<NativeId>,
+    ) -> Script {
         let ip = program.code_start();
         Script {
             id,
             program,
+            source: source.to_string(),
             ip,
             line: 0,
             stack: Stack::new(),
@@ -108,7 +117,12 @@ impl Script {
         event: &str,
         method: bool,
     ) -> Script {
-        let mut script = Script::new(id, Rc::clone(&original.program), original.owner);
+        let mut script = Script::new(
+            id,
+            Rc::clone(&original.program),
+            &original.source,
+            original.owner,
+        );
         script.ip = ip;
         script.globals = Rc::clone(&original.globals);
         script.thread = true;
@@ -130,9 +144,15 @@ impl Script {
         &self.program
     }
 
-    /// The script's path in the game.
+    /// The script's path in the game, as recorded by the compiler.
     pub fn filename(&self) -> &str {
         self.program.filename()
+    }
+
+    /// The path the program was loaded from, which a saved game names
+    /// it by.
+    pub fn source(&self) -> &str {
+        &self.source
     }
 
     /// The current state.

@@ -13,6 +13,7 @@ use crate::error::{Error, Result};
 
 /// An opaque colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Rgb {
     /// Red.
     pub r: u8,
@@ -24,6 +25,7 @@ pub struct Rgb {
 
 /// A colour with opacity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Rgba {
     /// Red.
     pub r: u8,

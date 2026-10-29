@@ -16,6 +16,7 @@ use crate::sprite::Rect;
 
 /// Vertical placement of a text in its box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum VerticalAlign {
     /// At the top.
     Top,
@@ -110,6 +111,7 @@ pub fn control_text(text: &str) -> String {
 
 /// An image cut into nine tiles (`TILED_IMAGE`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TiledImage {
     /// A `.tiled` file loaded first (`TEMPLATE`), to be merged by the
     /// caller.
@@ -250,6 +252,7 @@ impl TiledImage {
 
 /// The keys every control has (`UIObject`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ControlDef {
     /// Name used by scripts.
     pub name: String,
@@ -332,6 +335,7 @@ impl ControlDef {
 
 /// A button (`BUTTON`): images, backgrounds and fonts per state.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ButtonDef {
     /// The common keys.
     pub base: ControlDef,
@@ -462,6 +466,7 @@ impl ButtonDef {
 
 /// A static text (`STATIC`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StaticDef {
     /// The common keys.
     pub base: ControlDef,
@@ -519,6 +524,7 @@ impl StaticDef {
 
 /// A text editor (`EDIT`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EditDef {
     /// The common keys.
     pub base: ControlDef,
@@ -586,6 +592,7 @@ impl EditDef {
 
 /// A control of a window, in drawing order.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum WidgetDef {
     /// A button.
     Button(Box<ButtonDef>),
@@ -611,6 +618,7 @@ impl WidgetDef {
 
 /// A window (`WINDOW`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WindowDef {
     /// The common keys.
     pub base: ControlDef,
@@ -767,6 +775,7 @@ impl WindowDef {
 
 /// The inventory box (`INVENTORY_BOX`, a `.def` file).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InventoryBoxDef {
     /// A `.def` file loaded first (`TEMPLATE`).
     pub template: Option<String>,
@@ -876,6 +885,7 @@ impl InventoryBoxDef {
 
 /// An inventory item (`ITEM`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ItemDef {
     /// An item file loaded first (`TEMPLATE`).
     pub template: Option<String>,

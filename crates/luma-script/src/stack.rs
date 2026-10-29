@@ -134,6 +134,17 @@ impl Stack {
         self.len.checked_sub(depth + 1).map(|i| &self.slots[i])
     }
 
+    /// Every slot, live or not, for snapshots.
+    pub(crate) fn slots(&self) -> &[Slot] {
+        &self.slots
+    }
+
+    /// A stack from its slots and the number of live ones.
+    pub(crate) fn from_parts(slots: Vec<Slot>, len: usize) -> Stack {
+        let len = len.min(slots.len());
+        Stack { slots, len }
+    }
+
     /// A slot by index from the bottom, live or not.
     pub fn slot(&self, index: usize) -> Option<&Slot> {
         self.slots.get(index)

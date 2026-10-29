@@ -14,7 +14,9 @@
 //! The [`Engine`] runs scripts: it executes their instructions, spawns
 //! threads for events and methods, and resolves sleeps and waits once per
 //! frame through the [`Host`] trait, which the embedding program
-//! implements. The rules are summarised in `docs/scripting.md`.
+//! implements. The rules are summarised in `docs/scripting.md`. With the
+//! `serde` feature, an [`EngineSnapshot`] captures every script and
+//! global for a saved game, and puts them back.
 //!
 //! Written with reference to the MIT-licensed WME Lite sources; see
 //! `NOTICE`.
@@ -26,6 +28,8 @@ mod host;
 mod instruction;
 mod program;
 mod script;
+#[cfg(feature = "serde")]
+mod snapshot;
 mod stack;
 mod value;
 
@@ -37,5 +41,7 @@ pub use program::{
     CallType, Entry, External, ExternalType, HEADER_SIZE, Header, MAGIC, Program, VERSION,
 };
 pub use script::{Script, ScriptId, State};
+#[cfg(feature = "serde")]
+pub use snapshot::{EngineSnapshot, ScriptSnapshot, SlotSnapshot, VarRefSnapshot};
 pub use stack::{Globals, Slot, Stack, VarRef};
 pub use value::{DivisionByZero, NativeId, Natives, Properties, Value, atof, atoi, format_float};

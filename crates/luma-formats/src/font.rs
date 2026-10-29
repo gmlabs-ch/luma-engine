@@ -12,6 +12,7 @@ use crate::image::{Image, Rgb, Rgba};
 
 /// How text is placed in its box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TextAlign {
     /// Code 0.
     #[default]

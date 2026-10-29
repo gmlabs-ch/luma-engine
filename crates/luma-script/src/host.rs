@@ -112,4 +112,10 @@ pub trait Host: Natives {
         args: &[Value],
         ctx: Context<'_>,
     ) -> Option<Return>;
+
+    /// Called once the value a native call returned is on the calling
+    /// script's stack and its effect is applied: the moment a host can
+    /// take a snapshot of the engine that resumes right after the call
+    /// (`Game.SaveGame`). The default does nothing.
+    fn after_call(&mut self, _engine: &mut Engine, _script: ScriptId) {}
 }

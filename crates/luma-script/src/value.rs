@@ -23,6 +23,7 @@ use std::fmt;
 /// A handle to a native object of the engine, issued by the host. Two
 /// handles are the same object when they are equal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NativeId(pub u64);
 
 /// The properties of a script object, in the order the original engine
@@ -95,6 +96,7 @@ impl Natives for () {
 
 /// A script value.
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Value {
     /// `null`, also the value of an undefined variable.
     #[default]

@@ -11,6 +11,11 @@ publish.workspace = true
 
 [dependencies]
 image.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+## Serialization of the parsed definitions with serde, for saved games.
+serde = ["dep:serde"]
 
 [lints]
 workspace = true

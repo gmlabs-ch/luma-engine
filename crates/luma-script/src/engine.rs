@@ -21,6 +21,7 @@ const MAX_REF_DEPTH: usize = 8;
 
 /// An engine-wide global variable (`global x`, `const x`).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Global {
     /// The value.
     pub value: Value,
@@ -57,11 +58,11 @@ pub struct Removed {
 /// The script engine.
 #[derive(Debug, Default)]
 pub struct Engine {
-    scripts: Vec<Script>,
-    globals: BTreeMap<String, Global>,
-    cache: HashMap<String, Rc<Program>>,
-    next_id: u64,
-    current: Option<ScriptId>,
+    pub(crate) scripts: Vec<Script>,
+    pub(crate) globals: BTreeMap<String, Global>,
+    pub(crate) cache: HashMap<String, Rc<Program>>,
+    pub(crate) next_id: u64,
+    pub(crate) current: Option<ScriptId>,
 }
 
 impl Engine {
@@ -117,7 +118,7 @@ impl Engine {
     ) -> Option<ScriptId> {
         let program = self.program(host, filename)?;
         let id = self.alloc_id();
-        let script = Script::new(id, program, owner);
+        let script = Script::new(id, program, filename, owner);
         let me = owner.map_or(Value::Null, Value::Native);
         {
             let mut globals = script.globals.borrow_mut();
@@ -467,7 +468,11 @@ impl Engine {
     }
 
     /// Runs the unbreakable scripts to completion (`TickUnbreakable`).
+    /// When a native call raised the event, the script being executed
+    /// stays current and the finished scripts are kept until the end of
+    /// the tick, so that the caller's place in the list holds.
     pub fn tick_unbreakable(&mut self, host: &mut dyn Host) -> Vec<Removed> {
+        let caller = self.current;
         let mut i = 0;
         while i < self.scripts.len() {
             if self.scripts[i].unbreakable {
@@ -479,11 +484,28 @@ impl Engine {
                     }
                 }
                 self.scripts[i].finish();
-                self.current = None;
+                self.current = caller;
             }
             i += 1;
         }
-        self.remove_finished()
+        if caller.is_some() {
+            Vec::new()
+        } else {
+            self.remove_finished()
+        }
+    }
+
+    /// Replaces the value a native call just returned to a script, for
+    /// a host that completes the call in [`Host::after_call`] (a save
+    /// that failed after `true` was pushed).
+    pub fn set_result(&mut self, script: ScriptId, value: Value) {
+        if let Some(script) = self.script_mut(script) {
+            if let Some(index) = script.stack.top_index() {
+                if let Some(slot) = script.stack.slot_mut(index) {
+                    *slot = Slot::Value(value);
+                }
+            }
+        }
     }
 
     fn resolve_waiting_script(&mut self, i: usize) {
@@ -919,7 +941,10 @@ impl Engine {
                         return false;
                     };
                     match ret {
-                        Some(ret) => self.apply_return(i, host, ret),
+                        Some(ret) => {
+                            self.apply_return(i, host, ret);
+                            host.after_call(self, id);
+                        }
                         None => {
                             self.runtime_error(
                                 i,
@@ -1185,7 +1210,10 @@ impl Engine {
             return false;
         };
         match result {
-            Some(ret) => self.apply_return(i, host, ret),
+            Some(ret) => {
+                self.apply_return(i, host, ret);
+                host.after_call(self, id);
+            }
             None => {
                 self.runtime_error(
                     i,
