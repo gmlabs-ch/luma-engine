@@ -1,7 +1,8 @@
 //! Desktop player for games running on Luma Engine.
 //!
-//! Milestone 3, in progress: shows one scene of a game in a window, or
-//! runs the game's scripts without a window.
+//! Runs a game in a window: its scripts, scenes, actors, sound, mouse and
+//! keyboard; shows one scene without scripts (`--scene`); or runs the
+//! scripts without a window (`--headless`).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -11,20 +12,26 @@ use luma_adventure::{Audio, Camera, GameSettings, Runtime, SceneView};
 use luma_archive::Vfs;
 use luma_formats::Rgba;
 use luma_formats::font::TextAlign;
-use luma_render::winit::event::{ElementState, KeyEvent, WindowEvent};
-use luma_render::winit::keyboard::{Key, NamedKey};
-use luma_render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig};
+use luma_render::winit::dpi::PhysicalSize;
+use luma_render::winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
+use luma_render::winit::keyboard::{Key, ModifiersState, NamedKey};
+use luma_render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig, letterbox};
 
 const USAGE: &str = "\
 luma-player - desktop player for Luma Engine
 
 USAGE:
+    luma-player <game> [OPTIONS]
     luma-player <game> --scene <file> [OPTIONS]
     luma-player <game> --headless [--scene <file>] [OPTIONS]
 
+Without --scene or --headless, the game runs in a window: its scripts
+pick the scenes, the mouse and the keyboard go to them.
+
 OPTIONS:
-    --scene <file>        Scene to show (a path inside the game, e.g. scenes/room/room.scene);
-                          in headless mode, the scene to jump to after the game script ran
+    --scene <file>        Show one scene without running the game (a path inside the game,
+                          e.g. scenes/room/room.scene); in headless mode, the scene to jump
+                          to after the game script ran
     --scroll <x>,<y>      Initial scroll offset in scene pixels (default 0,0)
     --screenshot <png>    Render one frame to a PNG file and exit, without a window
     --animate             Play sprite animations (the default shows every first frame)
@@ -37,6 +44,7 @@ OPTIONS:
     --mute                Play no sound (the sounds still run, silently, on the game clock)
     --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
                           node once the scene is up, e.g. --click Door or --click Freezer:LookAt
+    --click-at <x>,<y>    In headless mode, move the mouse there and click once the scene is up
     --help                Show this message
 
 With --headless and --screenshot, the scene and the actors are rendered
@@ -45,7 +53,8 @@ once after the last frame.
 <game> is a game directory (its *.dcp packages and loose files are read
 the way the engine does).
 
-In the window: arrow keys scroll the scene, Escape quits.
+With --scene: arrow keys scroll the scene, Escape quits. In the game, the
+keys and the mouse belong to the game; close the window to quit.
 ";
 
 const BLACK: Rgba = Rgba {
@@ -69,6 +78,7 @@ struct Options {
     say: Option<String>,
     font: Option<String>,
     mute: bool,
+    click_at: Option<(i32, i32)>,
 }
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -85,6 +95,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut say = None;
     let mut font = None;
     let mut mute = false;
+    let mut click_at = None;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -109,6 +120,14 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--say" => say = Some(value(&mut i)?.clone()),
             "--font" => font = Some(value(&mut i)?.clone()),
             "--mute" => mute = true,
+            "--click-at" => {
+                let v = value(&mut i)?;
+                let (x, y) = v
+                    .split_once(',')
+                    .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
+                    .ok_or_else(|| format!("--click-at expects <x>,<y>, got `{v}`"))?;
+                click_at = Some((x, y));
+            }
             "--at" => {
                 let v = value(&mut i)?;
                 let (x, y) = v
@@ -135,8 +154,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         }
         i += 1;
     }
-    if scene.is_none() && !headless {
-        return Err("missing --scene <file> or --headless".to_string());
+    if scene.is_none() && !headless && screenshot.is_some() {
+        return Err("--screenshot needs --scene or --headless".to_string());
     }
     Ok(Options {
         game: game.ok_or("missing <game>")?,
@@ -152,6 +171,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         say,
         font,
         mute,
+        click_at,
     })
 }
 
@@ -265,6 +285,21 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                     None => println!("[{tick}] --say: no main actor"),
                 }
             }
+            if let Some((x, y)) = options.click_at {
+                runtime.mouse_move(x, y);
+                // A frame so that the object under the mouse is known.
+                for line in runtime.tick(options.dt) {
+                    println!("[{tick}] {line}");
+                }
+                let over = runtime
+                    .world
+                    .active_object()
+                    .map(|id| runtime.world.describe_object(id))
+                    .unwrap_or_else(|| "nothing".to_string());
+                println!("[{tick}] mouse at ({x}, {y}) over {over}; left click");
+                runtime.mouse_left_down();
+                runtime.mouse_left_up();
+            }
             if let Some(click) = &options.click {
                 let (node, event) = click.split_once(':').unwrap_or((click, "LeftClick"));
                 match runtime.world.find_node(node) {
@@ -331,6 +366,17 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
             );
         }
     }
+    println!(
+        "mouse at ({}, {}) over {}, cursor {:?}",
+        runtime.world.mouse().x,
+        runtime.world.mouse().y,
+        runtime
+            .world
+            .active_object()
+            .map(|id| runtime.world.describe_object(id))
+            .unwrap_or_else(|| "nothing".to_string()),
+        runtime.world.cursors().shown().unwrap_or("none")
+    );
     for sentence in runtime.world.sentences() {
         println!(
             "sentence {:?} with {} at ({}, {}), width {}",
@@ -344,7 +390,7 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         let settings = runtime.world.settings();
         let target = Offscreen::new(renderer.gpu(), settings.width, settings.height);
         let mut list = DrawList::new(settings.width as f32, settings.height as f32);
-        runtime.draw(&mut list);
+        runtime.draw(&mut list, Some(renderer.white()));
         renderer
             .render(target.target(), BLACK, &list)
             .map_err(|e| e.to_string())?;
@@ -366,7 +412,9 @@ fn run(options: Options) -> Result<(), String> {
     if options.headless {
         return headless(vfs, &options);
     }
-    let scene = options.scene.clone().unwrap_or_default();
+    let Some(scene) = options.scene.clone() else {
+        return play(vfs, settings, &options);
+    };
     let mut camera = Camera::new(settings.width as f32, settings.height as f32);
     camera.offset_x = options.scroll.0;
     camera.offset_y = options.scroll.1;
@@ -419,6 +467,209 @@ fn run(options: Options) -> Result<(), String> {
         player,
     )
     .map_err(|e| e.to_string())
+}
+
+/// Runs the game in a window.
+fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), String> {
+    let audio = if options.mute {
+        Audio::null()
+    } else {
+        Audio::new()
+    };
+    let runtime = Runtime::with_audio(vfs, audio).map_err(|e| e.to_string())?;
+    let caption = runtime.world.game_file().caption.clone();
+    let name = runtime.world.game_file().name.clone();
+    eprintln!(
+        "game {:?}: audio {}",
+        name,
+        runtime.world.audio().device().unwrap_or("off")
+    );
+    let frame_limit = std::env::var("LUMA_PLAYER_FRAMES")
+        .ok()
+        .and_then(|v| v.parse().ok());
+    let player = GamePlayer {
+        runtime,
+        frame_limit,
+        size: PhysicalSize::new(settings.width, settings.height),
+        modifiers: ModifiersState::empty(),
+        started: false,
+    };
+    luma_render::window::run(
+        WindowConfig {
+            title: if caption.is_empty() { name } else { caption },
+            width: settings.width,
+            height: settings.height,
+            cursor_visible: false,
+            ..WindowConfig::default()
+        },
+        player,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// The game running in a window.
+struct GamePlayer {
+    runtime: Runtime,
+    frame_limit: Option<u64>,
+    /// The drawable area, for the mouse mapping.
+    size: PhysicalSize<u32>,
+    modifiers: ModifiersState,
+    started: bool,
+}
+
+impl GamePlayer {
+    /// A window position in game pixels, through the letterbox.
+    fn to_game(&self, x: f64, y: f64) -> (i32, i32) {
+        let settings = self.runtime.world.settings();
+        let (w, h) = (settings.width as f64, settings.height as f64);
+        let (vx, vy, vw, vh) = letterbox(w as f32, h as f32, self.size.width, self.size.height);
+        if vw <= 0.0 || vh <= 0.0 {
+            return (0, 0);
+        }
+        (
+            ((x - f64::from(vx)) * w / f64::from(vw)).floor() as i32,
+            ((y - f64::from(vy)) * h / f64::from(vh)).floor() as i32,
+        )
+    }
+
+    /// The Windows virtual key code of a key, as scripts compare
+    /// `Keyboard.KeyCode` (the engine's codes on its home platform):
+    /// letters as upper-case ASCII, digits and punctuation as themselves,
+    /// named keys by their `VK_` value.
+    fn key_code(key: &Key) -> Option<i32> {
+        Some(match key {
+            Key::Character(text) => {
+                let c = text.chars().next()?;
+                if c.is_ascii_alphabetic() {
+                    i32::from(c.to_ascii_uppercase() as u8)
+                } else if c.is_ascii() {
+                    i32::from(c as u8)
+                } else {
+                    return None;
+                }
+            }
+            Key::Named(named) => match named {
+                NamedKey::Backspace => 8,
+                NamedKey::Tab => 9,
+                NamedKey::Enter => 13,
+                NamedKey::Shift => 16,
+                NamedKey::Control => 17,
+                NamedKey::Alt => 18,
+                NamedKey::Pause => 19,
+                NamedKey::CapsLock => 20,
+                NamedKey::Escape => 27,
+                NamedKey::Space => 32,
+                NamedKey::PageUp => 33,
+                NamedKey::PageDown => 34,
+                NamedKey::End => 35,
+                NamedKey::Home => 36,
+                NamedKey::ArrowLeft => 37,
+                NamedKey::ArrowUp => 38,
+                NamedKey::ArrowRight => 39,
+                NamedKey::ArrowDown => 40,
+                NamedKey::Insert => 45,
+                NamedKey::Delete => 46,
+                NamedKey::F1 => 112,
+                NamedKey::F2 => 113,
+                NamedKey::F3 => 114,
+                NamedKey::F4 => 115,
+                NamedKey::F5 => 116,
+                NamedKey::F6 => 117,
+                NamedKey::F7 => 118,
+                NamedKey::F8 => 119,
+                NamedKey::F9 => 120,
+                NamedKey::F10 => 121,
+                NamedKey::F11 => 122,
+                NamedKey::F12 => 123,
+                _ => return None,
+            },
+            _ => return None,
+        })
+    }
+}
+
+impl App for GamePlayer {
+    fn init(&mut self, renderer: &Renderer) -> luma_render::Result<()> {
+        eprintln!("adapter: {}", renderer.gpu().describe());
+        Ok(())
+    }
+
+    fn event(&mut self, event: &WindowEvent) -> Flow {
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                let (x, y) = self.to_game(position.x, position.y);
+                self.runtime.mouse_move(x, y);
+            }
+            WindowEvent::MouseInput { state, button, .. } => match (button, state) {
+                (MouseButton::Left, ElementState::Pressed) => self.runtime.mouse_left_down(),
+                (MouseButton::Left, ElementState::Released) => self.runtime.mouse_left_up(),
+                (MouseButton::Right, ElementState::Pressed) => self.runtime.mouse_right_down(),
+                (MouseButton::Right, ElementState::Released) => self.runtime.mouse_right_up(),
+                _ => {}
+            },
+            WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key,
+                        state,
+                        text,
+                        repeat,
+                        ..
+                    },
+                ..
+            } => {
+                let Some(code) = GamePlayer::key_code(logical_key) else {
+                    return Flow::Continue;
+                };
+                match state {
+                    ElementState::Pressed if !repeat => {
+                        let printable = text
+                            .as_ref()
+                            .and_then(|t| t.chars().next())
+                            .filter(|c| !c.is_control());
+                        self.runtime.key_down(
+                            code,
+                            printable,
+                            self.modifiers.shift_key(),
+                            self.modifiers.alt_key(),
+                            self.modifiers.control_key(),
+                        );
+                    }
+                    ElementState::Released => self.runtime.key_up(code),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+        Flow::Continue
+    }
+
+    fn draw<'a>(&'a mut self, frame: &Frame<'a>, list: &mut DrawList<'a>) -> Flow {
+        self.size = frame.size;
+        if !self.started {
+            self.started = true;
+            self.runtime.start();
+        }
+        // The engine advances its timer by at most a second per frame.
+        let dt = (frame.dt.as_millis() as u64).clamp(1, 1000);
+        for line in self.runtime.tick(dt) {
+            eprintln!("{line}");
+        }
+        if self.runtime.world.quit_requested() {
+            return Flow::Exit;
+        }
+        self.runtime.world.upload(frame.renderer);
+        let settings = self.runtime.world.settings();
+        list.width = settings.width as f32;
+        list.height = settings.height as f32;
+        list.letterbox = true;
+        self.runtime.draw(list, Some(frame.renderer.white()));
+        match self.frame_limit {
+            Some(limit) if frame.frame_index + 1 >= limit => Flow::Exit,
+            _ => Flow::Continue,
+        }
+    }
 }
 
 #[derive(Default)]

@@ -36,7 +36,7 @@ Luma Engine reads the same game data with a new engine built for today:
 | 0 | Workspace, licensing and CI | ✅ Done |
 | 1 | Read and unpack WME game packages (`luma list`, `luma unpack`) | ✅ Done |
 | 2 | Display a static scene (`luma-player <game> --scene ...`) | ✅ Done |
-| 3 | Run compiled game scripts | In progress |
+| 3 | Run compiled game scripts (`luma-player <game>` plays a game) | In progress |
 | 4 | A complete game playable from start to finish on macOS | Planned |
 | 5 | Playable in the browser, then on iOS | Planned |
 
@@ -102,6 +102,10 @@ The player shows one scene of a game, without running its scripts yet:
 
 ```sh
 # Open a window on a scene (arrow keys scroll, Escape quits)
+# Play a game: its scripts pick the scenes, the mouse and the keyboard go to them
+luma-player path/to/game
+
+# Show one scene without running the game
 luma-player path/to/game --scene scenes/room/room.scene
 
 # Render the same scene to a PNG file, without a window
@@ -128,6 +132,9 @@ luma-player path/to/game --headless --scene scenes/room/room.scene --say "Hello"
 
 # The same without sound (the sounds still run on the game clock)
 luma-player path/to/game --headless --mute
+
+# Move the mouse and click on the floor: the main actor walks there
+luma-player path/to/game --headless --scene scenes/room/room.scene --click-at 500,520 --ticks 300 --screenshot walk.png
 ```
 
 ## Games

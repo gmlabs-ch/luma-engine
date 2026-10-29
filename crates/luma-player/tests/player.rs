@@ -29,7 +29,7 @@ fn usage_errors() {
     let out = player(&[]);
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stdout).contains("USAGE"));
-    let out = player(&["game"]);
+    let out = player(&["game", "--screenshot", "x.png"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--scene"));
     let out = player(&["game", "--scene", "x", "--scroll", "abc"]);
