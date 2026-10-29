@@ -437,12 +437,28 @@ fn orthographic(width: f32, height: f32) -> [[f32; 4]; 4] {
 /// The physical rectangle the logical size maps onto: the whole target,
 /// or the largest centred rectangle with the list's aspect ratio.
 pub(crate) fn viewport(list: &DrawList<'_>, width: u32, height: u32) -> (f32, f32, f32, f32) {
+    if !list.letterbox {
+        return (0.0, 0.0, width as f32, height as f32);
+    }
+    letterbox(list.width, list.height, width, height)
+}
+
+/// The largest centred rectangle of a target of `width` by `height`
+/// physical pixels with the aspect ratio of a logical size, as
+/// `(x, y, w, h)`: where a letterboxed draw list lands, and the mapping
+/// to turn a window position into a logical one.
+pub fn letterbox(
+    logical_width: f32,
+    logical_height: f32,
+    width: u32,
+    height: u32,
+) -> (f32, f32, f32, f32) {
     let (tw, th) = (width as f32, height as f32);
-    if !list.letterbox || list.width <= 0.0 || list.height <= 0.0 {
+    if logical_width <= 0.0 || logical_height <= 0.0 {
         return (0.0, 0.0, tw, th);
     }
-    let scale = (tw / list.width).min(th / list.height);
-    let w = (list.width * scale).floor();
-    let h = (list.height * scale).floor();
+    let scale = (tw / logical_width).min(th / logical_height);
+    let w = (logical_width * scale).floor();
+    let h = (logical_height * scale).floor();
     (((tw - w) / 2.0).floor(), ((th - h) / 2.0).floor(), w, h)
 }

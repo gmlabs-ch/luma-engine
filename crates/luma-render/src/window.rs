@@ -29,6 +29,9 @@ pub struct WindowConfig {
     pub resizable: bool,
     /// Colour of the padding and of the cleared frame.
     pub clear: Rgba,
+    /// Whether the system cursor shows over the window (a game draws
+    /// its own).
+    pub cursor_visible: bool,
 }
 
 impl Default for WindowConfig {
@@ -44,6 +47,7 @@ impl Default for WindowConfig {
                 b: 0,
                 a: 255,
             },
+            cursor_visible: true,
         }
     }
 }
@@ -140,6 +144,7 @@ impl<A: App> Runner<A> {
                         reason: err.to_string(),
                     })?,
             );
+        window.set_cursor_visible(self.config.cursor_visible);
         let instance = wgpu::Instance::new(
             wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(window.clone())),
         );

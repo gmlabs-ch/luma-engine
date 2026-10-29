@@ -35,7 +35,7 @@ pub use draw::{DrawList, Quad, Rect};
 pub use error::{Error, Result};
 pub use gpu::Gpu;
 pub use offscreen::Offscreen;
-pub use renderer::{Renderer, Target};
+pub use renderer::{Renderer, Target, letterbox};
 pub use texture::{TEXTURE_FORMAT, Texture};
 pub use window::{App, Flow, Frame, WindowConfig};
 
