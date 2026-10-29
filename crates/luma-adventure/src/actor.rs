@@ -315,9 +315,19 @@ impl Actor {
     /// Steps a sprite's animation to `timer`; `None` when the sprite is
     /// not loaded. Returns whether the frame changed, and the `MOVE` of
     /// the new frame.
+    ///
+    /// A sprite whose file could not be loaded counts as finished at
+    /// once: the original engine shows its `invalid.bmp` placeholder, a
+    /// one-frame sprite, in its place, so a turn or an animation through
+    /// a missing sprite ends instead of waiting for ever.
     fn step(&mut self, path: &str, timer: u64) -> Option<(bool, i32, i32)> {
         let k = key(path);
-        let loaded = self.bank.sprite(&k)?;
+        let Some(loaded) = self.bank.sprite(&k) else {
+            if let Some(state) = self.anims.get_mut(&k) {
+                state.finished = true;
+            }
+            return None;
+        };
         let state = self.anims.entry(k).or_insert_with(|| AnimState::new(path));
         let changed = state.step(&loaded.sprite, timer);
         Some((changed, state.move_x, state.move_y))
@@ -1058,6 +1068,51 @@ mod tests {
         .unwrap();
         bank.insert("w.sprite", sprite);
         Actor::from_definition(def, "a.actor", false, bank)
+    }
+
+    #[test]
+    fn a_missing_turn_sprite_does_not_stall_the_turn() {
+        let scene = room();
+        let def = luma_formats::Actor::parse(
+            b"ACTOR { NAME=\"a\" X=10 Y=50
+  WALK { SPRITESET { LEFT=\"w.sprite\" } }
+  TURN_LEFT { SPRITESET { LEFT=\"missing.sprite\" UP=\"missing.sprite\" RIGHT=\"missing.sprite\" DOWN=\"missing.sprite\" } } }",
+        )
+        .unwrap();
+        let mut bank = SpriteBank::new();
+        let sprite = luma_formats::Sprite::parse(
+            b"SPRITE { LOOPING=TRUE FRAME { DELAY=10 IMAGE=\"w.png\" } }",
+        )
+        .unwrap();
+        bank.insert("w.sprite", sprite);
+        let mut actor = Actor::from_definition(def, "a.actor", false, bank);
+        let floor = Floor {
+            scene: &scene,
+            blockers: &[],
+            waypoints: &[],
+        };
+        actor.go_to(50, 50, None, &floor);
+        let mut events = Vec::new();
+        let mut timer = 1;
+        let mut updates = 0;
+        while actor.state != ActorState::FollowingPath && updates < 40 {
+            let ctx = WalkContext {
+                floor: Floor {
+                    scene: &scene,
+                    blockers: &[],
+                    waypoints: &[],
+                },
+                timer,
+                random: 0,
+            };
+            timer += 20;
+            actor.update(&ctx, &mut events);
+            updates += 1;
+        }
+        // The turn sprites are missing: each step of the turn ends at
+        // once, as the original engine's placeholder sprite does.
+        assert_eq!(actor.state, ActorState::FollowingPath);
+        assert_eq!(actor.dir, Direction::Right);
     }
 
     #[test]

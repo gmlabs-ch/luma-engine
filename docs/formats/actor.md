@@ -161,7 +161,12 @@ turn sprite: the actor shows the `TURN_LEFT` or `TURN_RIGHT` sprite of
 each intermediate direction, played once (looping is switched off), and
 moves to the next direction when it finishes. A difference of one step
 is not a turn: the actor faces the new direction at once. Without turn
-sprites each step takes one frame.
+sprites each step takes one frame. A turn sprite whose file is missing
+(logged when the actor loads) counts as finished at its first frame,
+as the original engine's `invalid.bmp` placeholder does: the turn goes
+on instead of stalling the actor. The same holds for any sprite the
+actor plays (The White Chamber's droid names a turn sprite that is not
+in the game's files).
 
 ## Animation
 
