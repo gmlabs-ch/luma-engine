@@ -14,3 +14,4 @@ files only (see the clean-room rule in [CONTRIBUTING.md](../../CONTRIBUTING.md))
 | Game definition (`default.game`) and string tables (`string.tab`) | [game.md](game.md) | Implemented in `luma-formats` |
 | Actors (`.actor`) | [actor.md](actor.md) | Implemented in `luma-formats`; walking in `luma-adventure` |
 | Fonts (`.font`, bitmap and TrueType) and speech | [font.md](font.md) | Implemented in `luma-formats`; rendering and `Talk` in `luma-adventure` |
+| Windows and controls (`.window`), tiled images, inventory (`.def`, `.items`) | [window.md](window.md) | Implemented in `luma-formats`; display, input and the inventory in `luma-adventure` |

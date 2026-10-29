@@ -42,6 +42,8 @@ no code copied):
   crates/luma-formats/src/actor.rs
   docs/formats/font.md
   crates/luma-formats/src/font.rs
+  docs/formats/window.md
+  crates/luma-formats/src/window.rs
   docs/formats/script.md
   crates/luma-script/src/program.rs
   crates/luma-script/src/instruction.rs

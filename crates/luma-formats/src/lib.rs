@@ -1,5 +1,5 @@
 //! Parsers for game data formats: text definition files, sprites, scenes,
-//! entities, fonts and images.
+//! entities, fonts, windows and images.
 //!
 //! Part of [Luma Engine](https://github.com/gmlabs-ch/luma-engine).
 //!
@@ -16,6 +16,9 @@
 //!   (`.actor`), documented in `docs/formats/actor.md`.
 //! - [`font`]: bitmap and TrueType fonts (`.font`), documented in
 //!   `docs/formats/font.md`.
+//! - [`window`]: windows and their controls (`.window`), tiled images,
+//!   the inventory box and the items, documented in
+//!   `docs/formats/window.md`.
 //! - [`game`] and [`strings`]: the game definition and its string tables,
 //!   documented in `docs/formats/game.md`.
 //! - [`image`]: decoding of PNG, BMP, JPEG and TGA files to RGBA with the
@@ -35,6 +38,7 @@ pub mod image;
 pub mod scene;
 pub mod sprite;
 pub mod strings;
+pub mod window;
 
 pub use actor::{Actor, SpriteSet};
 pub use def::{Document, Node, Nodes, ParseError, Scalar, Value};
@@ -50,3 +54,7 @@ pub use scene::{
 };
 pub use sprite::{Frame, Rect, Sprite, SubFrame};
 pub use strings::StringTable;
+pub use window::{
+    ButtonDef, ControlDef, EditDef, InventoryBoxDef, ItemDef, StaticDef, TiledImage, VerticalAlign,
+    WidgetDef, WindowDef,
+};
