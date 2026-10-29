@@ -131,6 +131,15 @@ impl Default for WindowState {
     }
 }
 
+/// Who a button reports to besides its scripts (`SetListener`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonListener {
+    /// The shield of a menu: a press closes the parent window.
+    CloseParent,
+    /// A button of the inventory box: `prev`, `next` and `close`.
+    Inventory,
+}
+
 /// The state of a button.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ButtonState {
@@ -172,8 +181,8 @@ pub struct ButtonState {
     pub center_image: bool,
     /// Only the opaque pixels of the image catch the mouse.
     pub pixel_perfect: bool,
-    /// A press closes the parent window (the shield of a menu).
-    pub closes_parent: bool,
+    /// Who a press is reported to.
+    pub listener: Option<ButtonListener>,
 }
 
 /// The state of a static text.
@@ -548,6 +557,31 @@ impl World {
         id
     }
 
+    /// A new empty window control, outside the game's window list (the
+    /// inventory box's).
+    pub(crate) fn new_window_control(&mut self, parent: Option<NativeId>) -> NativeId {
+        self.new_control(ControlKind::Window(Box::default()), parent)
+    }
+
+    /// A new named button reporting to a listener, outside its parent's
+    /// control list (a shield).
+    pub(crate) fn new_button_control(
+        &mut self,
+        parent: Option<NativeId>,
+        name: &str,
+        listener: ButtonListener,
+    ) -> NativeId {
+        let state = ButtonState {
+            listener: Some(listener),
+            ..ButtonState::default()
+        };
+        let id = self.new_control(ControlKind::Button(Box::new(state)), parent);
+        if let Some(c) = self.control_mut(id) {
+            c.name = name.to_string();
+        }
+        id
+    }
+
     /// Loads a sprite or image for the controls.
     pub fn load_ui_image(&mut self, path: &str) -> bool {
         let ok = self.ui.bank.add_sprite(&self.vfs, path);
@@ -645,7 +679,7 @@ impl World {
         }
     }
 
-    fn apply_window_def(
+    pub(crate) fn apply_window_def(
         &mut self,
         engine: &mut Engine,
         id: NativeId,
@@ -760,7 +794,7 @@ impl World {
             stay_pressed: def.pressed,
             center_image: def.center_image,
             pixel_perfect: def.pixel_perfect,
-            closes_parent: false,
+            listener: None,
         };
         if let Some(control) = self.control_mut(id) {
             control.text = text;
@@ -1319,15 +1353,7 @@ impl World {
                 };
                 self.new_control(ControlKind::Window(Box::new(state)), Some(id))
             } else {
-                let state = ButtonState {
-                    closes_parent: true,
-                    ..ButtonState::default()
-                };
-                let shield = self.new_control(ControlKind::Button(Box::new(state)), Some(id));
-                if let Some(c) = self.control_mut(shield) {
-                    c.name = "close".to_string();
-                }
-                shield
+                self.new_button_control(Some(id), "close", ButtonListener::CloseParent)
             };
             if let Some(window) = self.control_mut(id).and_then(Control::window_mut) {
                 window.shield = Some(shield);
@@ -1384,7 +1410,7 @@ impl World {
         }
     }
 
-    fn update_window(&mut self, engine: &mut Engine, id: NativeId) {
+    pub(crate) fn update_window(&mut self, engine: &mut Engine, id: NativeId) {
         let Some(control) = self.control(id) else {
             return;
         };
@@ -1522,7 +1548,7 @@ impl World {
 
     /// A button's frame (`CUIButton::Display`): the hover and press
     /// states, and the press fired on release.
-    fn update_button(&mut self, engine: &mut Engine, id: NativeId) {
+    pub(crate) fn update_button(&mut self, engine: &mut Engine, id: NativeId) {
         let clock = self.clock;
         let interactive = self.interactive;
         let active = self.active_object();
@@ -1584,11 +1610,14 @@ impl World {
         };
         let (parent, parent_notify, name) =
             (control.parent, control.parent_notify, control.name.clone());
-        let closes_parent = control.button().is_some_and(|b| b.closes_parent);
-        if closes_parent {
-            if let Some(parent) = parent {
-                self.close_window(engine, parent);
+        match control.button().and_then(|b| b.listener) {
+            Some(ButtonListener::CloseParent) => {
+                if let Some(parent) = parent {
+                    self.close_window(engine, parent);
+                }
             }
+            Some(ButtonListener::Inventory) => self.inventory_listen(&name),
+            None => {}
         }
         if parent_notify {
             if let Some(parent) = parent {
@@ -1698,17 +1727,23 @@ impl World {
     // The mouse
     // ----------------------------------------------------------------
 
-    /// Registers where the windows and their controls catch the mouse,
-    /// in drawing order (the areas registered by `Display`).
-    pub(crate) fn ui_hits(&mut self, hits: &mut Vec<HitArea>) {
-        let mut order = self.windows_in_pass(true);
-        order.extend(self.windows_in_pass(false));
-        for window in order {
+    /// Registers where the `IN_GAME` windows and their controls catch
+    /// the mouse, in drawing order (the areas registered by `Display`).
+    pub(crate) fn ui_hits_in_game(&mut self, hits: &mut Vec<HitArea>) {
+        for window in self.windows_in_pass(true) {
             self.window_hits(window, 0, 0, hits);
         }
     }
 
-    fn window_hits(&mut self, id: NativeId, ox: i32, oy: i32, hits: &mut Vec<HitArea>) {
+    /// Registers where the other windows and their controls catch the
+    /// mouse.
+    pub(crate) fn ui_hits_normal(&mut self, hits: &mut Vec<HitArea>) {
+        for window in self.windows_in_pass(false) {
+            self.window_hits(window, 0, 0, hits);
+        }
+    }
+
+    pub(crate) fn window_hits(&mut self, id: NativeId, ox: i32, oy: i32, hits: &mut Vec<HitArea>) {
         let Some(control) = self.control(id) else {
             return;
         };
@@ -1971,7 +2006,7 @@ impl World {
         }
     }
 
-    fn draw_window<'a>(
+    pub(crate) fn draw_window<'a>(
         &'a self,
         list: &mut DrawList<'a>,
         id: NativeId,
@@ -2018,7 +2053,7 @@ impl World {
         }
         if let Some(image) = image {
             let frame = control.anim.as_ref().map_or(0, |a| a.current_frame);
-            self.draw_image(list, image, frame, x, y, tint);
+            self.draw_ui_image(list, image, frame, x, y, tint);
         }
         if let (Some(rect), false) = (window.title_rect, control.text.is_empty()) {
             if let Some(font) = self.window_font(id).and_then(|f| self.fonts.get(&f)) {
@@ -2093,7 +2128,7 @@ impl World {
             } else {
                 0
             };
-            self.draw_image(list, path, frame, ix + shift, iy + shift, tint);
+            self.draw_ui_image(list, path, frame, ix + shift, iy + shift, tint);
         }
         if !control.text.is_empty() {
             if let Some(font) = self.button_font(id).and_then(|f| self.fonts.get(&f)) {
@@ -2135,7 +2170,7 @@ impl World {
         }
         if let Some(path) = &control.image {
             let frame = control.anim.as_ref().map_or(0, |a| a.current_frame);
-            self.draw_image(list, path, frame, x, y, tint);
+            self.draw_ui_image(list, path, frame, x, y, tint);
         }
         if !control.text.is_empty() {
             let font = self
@@ -2181,7 +2216,7 @@ impl World {
         }
         if let Some(path) = &control.image {
             let frame = control.anim.as_ref().map_or(0, |a| a.current_frame);
-            self.draw_image(list, path, frame, x, y, tint);
+            self.draw_ui_image(list, path, frame, x, y, tint);
         }
         let font = self
             .control_font(control.font.as_deref())
@@ -2216,7 +2251,7 @@ impl World {
 
     /// The bounding size of a loaded sprite's first frame, from what is
     /// already decoded (no reading at draw time).
-    fn sprite_size_loaded(&self, path: &str) -> Option<(i32, i32)> {
+    pub(crate) fn sprite_size_loaded(&self, path: &str) -> Option<(i32, i32)> {
         let frame = self.ui.bank.sprite(path)?.sprite.frames.first()?;
         let (mut left, mut top, mut right, mut bottom) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
         for sub in &frame.subframes {
@@ -2249,7 +2284,7 @@ impl World {
     }
 
     /// Draws a frame of a sprite of the controls at a point.
-    fn draw_image<'a>(
+    pub(crate) fn draw_ui_image<'a>(
         &'a self,
         list: &mut DrawList<'a>,
         path: &str,

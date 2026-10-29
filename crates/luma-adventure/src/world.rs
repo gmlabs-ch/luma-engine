@@ -17,6 +17,7 @@ use crate::actor::{Actor, ActorEvent, WalkContext, scene_obstacles};
 use crate::error::{Error, Result};
 use crate::fader::{Fader, SCENE_FADE_MS};
 use crate::input::{Cursors, HitArea, Keyboard, Mouse};
+use crate::inventory::Inventory;
 use crate::objects::{Kind, Native, Objects};
 use crate::path::Floor;
 use crate::scene_view::{Camera, Drawable, SceneView};
@@ -71,6 +72,7 @@ pub struct World {
     pub(crate) fader: Fader,
     pub(crate) fader_id: NativeId,
     pub(crate) ui: Ui,
+    pub(crate) inventory: Inventory,
     pub(crate) interactive: bool,
     pub(crate) main_object: Option<NativeId>,
     pub(crate) quit: bool,
@@ -149,6 +151,7 @@ impl World {
             fader: Fader::default(),
             fader_id,
             ui: Ui::default(),
+            inventory: Inventory::default(),
             interactive: true,
             main_object: None,
             quit: false,
@@ -364,6 +367,10 @@ impl World {
                 .map(|a| a.def.name.clone())
                 .unwrap_or_default(),
             Some(Kind::Control) => self.control(id).map(|c| c.name.clone()).unwrap_or_default(),
+            Some(Kind::Item) => self
+                .item(id)
+                .map(|i| i.def.name.clone())
+                .unwrap_or_default(),
             Some(Kind::Inert(kind)) => kind.clone(),
             None => "invalid".to_string(),
         }
@@ -657,6 +664,7 @@ impl World {
             view.draw_with(list, camera, &self.drawables());
         }
         self.draw_windows(list, true, white);
+        self.draw_inventory(list, white);
         self.draw_windows(list, false, white);
         if self.subtitles {
             for draw in &self.sentences {
@@ -776,6 +784,7 @@ impl World {
         self.active_object = None;
         self.hits.clear();
         self.scene = Some(view);
+        self.hide_taken_item_entities();
         for (_, actor) in &mut self.actors {
             actor.invalidate_regions();
         }
@@ -1338,6 +1347,7 @@ impl Natives for World {
                 .control(id)
                 .map_or("control", Control::type_name)
                 .to_string(),
+            Some(Kind::Item) => "item".to_string(),
             Some(Kind::Inert(kind)) => kind.to_ascii_lowercase(),
             None => String::new(),
         }
@@ -1350,7 +1360,7 @@ impl Natives for World {
                 format!("[{}]", self.describe(id))
             }
             Some(Kind::Actor) => "[actor object]".to_string(),
-            Some(Kind::Control) => format!("[{}]", self.describe(id)),
+            Some(Kind::Control | Kind::Item) => format!("[{}]", self.describe(id)),
             Some(_) => "[native object]".to_string(),
             None => "[invalid object]".to_string(),
         }
@@ -1481,6 +1491,8 @@ impl Runtime {
         if let Some(scene) = self.world.game_file.startup_scene.clone() {
             self.world.schedule_scene(&scene, true);
         }
+        self.world.load_items(&mut self.engine);
+        self.world.load_inventory_box(&mut self.engine);
         let game = self.world.game_id;
         for script in self.world.game_file.scripts.clone() {
             self.world.attach(&mut self.engine, game, &script);
@@ -1538,7 +1550,10 @@ impl Runtime {
         self.world.collect_hits();
         self.world.update_active_object();
         self.world.update_ui(&mut self.engine);
+        self.world.update_inventory(&mut self.engine);
+        self.world.prepare_inventory_texts();
         self.world.update_cursor();
+        self.world.update_item_cursor(&self.engine);
         self.world.apply_pending_events(&mut self.engine);
         self.world.take_log()
     }

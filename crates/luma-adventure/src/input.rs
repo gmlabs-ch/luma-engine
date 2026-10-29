@@ -128,15 +128,32 @@ pub struct Cursors {
     pub noninteractive: Option<String>,
     /// Whether the cursor is hidden.
     pub hidden: bool,
+    /// The cursor of the selected inventory item, drawn with (or
+    /// instead of) the cursor.
+    pub item_cursor: Option<String>,
     anims: HashMap<String, AnimState>,
     last: Option<String>,
-    shown: Option<String>,
+    pub(crate) shown: Option<String>,
 }
 
 impl Cursors {
     /// The cursor shown this frame.
     pub fn shown(&self) -> Option<&str> {
         self.shown.as_deref()
+    }
+
+    /// Advances the animation of a cursor sprite to `timer`.
+    pub(crate) fn step_anim(&mut self, path: &str, timer: u64) {
+        let k = key(path);
+        if let Some(loaded) = self.bank.sprite(path) {
+            let state = self.anims.entry(k).or_insert_with(|| AnimState::new(path));
+            state.step(&loaded.sprite, timer);
+        }
+    }
+
+    /// The frame of a cursor sprite's animation.
+    pub fn frame_of(&self, path: &str) -> usize {
+        self.anims.get(&key(path)).map_or(0, |a| a.current_frame)
     }
 
     /// The frame the shown cursor is at.
@@ -313,17 +330,23 @@ impl World {
         self.cursors.shown = shown;
     }
 
-    /// Draws the cursor at the mouse.
+    /// Draws the cursor at the mouse, and the selected item's over it.
     pub fn draw_cursor<'a>(&'a self, list: &mut DrawList<'a>) {
-        let Some(path) = self.cursors.shown.as_deref() else {
-            return;
-        };
+        if let Some(path) = self.cursors.shown.as_deref() {
+            self.draw_cursor_sprite(list, path);
+        }
+        if let Some(path) = self.cursors.item_cursor.as_deref() {
+            self.draw_cursor_sprite(list, path);
+        }
+    }
+
+    fn draw_cursor_sprite<'a>(&'a self, list: &mut DrawList<'a>, path: &str) {
         let Some(loaded) = self.cursors.bank.sprite(path) else {
             return;
         };
         let frame = self
             .cursors
-            .frame()
+            .frame_of(path)
             .min(loaded.sprite.frames.len().saturating_sub(1));
         let Some(frame) = loaded.sprite.frames.get(frame) else {
             return;
@@ -351,7 +374,9 @@ impl World {
         self.hits.clear();
         let mut hits = Vec::new();
         self.scene_hits(&mut hits);
-        self.ui_hits(&mut hits);
+        self.ui_hits_in_game(&mut hits);
+        self.inventory_hits(&mut hits);
+        self.ui_hits_normal(&mut hits);
         self.hits = hits;
     }
 

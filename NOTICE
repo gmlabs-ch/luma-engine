@@ -65,6 +65,8 @@ no code copied):
   crates/luma-adventure/src/fader.rs
   crates/luma-adventure/src/ui.rs
   crates/luma-adventure/src/natives_ui.rs
+  crates/luma-adventure/src/inventory.rs
+  crates/luma-adventure/src/natives_item.rs
   docs/game-loop.md
   docs/audio.md
   crates/luma-audio/src/audio.rs

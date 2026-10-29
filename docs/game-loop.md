@@ -79,7 +79,9 @@ window or its shield.
 `Game.MouseX` and `Game.MouseY` are the mouse in game pixels
 (writable, as is `Game.SetMousePos`); `Scene.MouseX` and `Scene.MouseY`
 add the scene's scroll offset. `Game.ActiveObject` is the active object,
-`Game.SelectedItem` the inventory item in use (none yet).
+`Game.SelectedItem` the inventory item in use. The inventory box, when
+`Game.InventoryVisible`, is drawn between the `IN_GAME` windows and the
+others, and its items are active objects through their sprites.
 
 ## Cursors
 
@@ -91,6 +93,13 @@ restarts its animation. `Game.SetActiveCursor`, `RemoveActiveCursor`,
 `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`,
 `GetActiveCursor` and `GetWaitCursor` change and read them. The system
 cursor is hidden over the window.
+
+While an inventory item is selected and the game is interactive, the
+item's `CURSOR` is drawn at the mouse, over the cursor above when the
+item's `CURSOR_COMBINED` is on, instead of it otherwise; over an entity,
+an actor or an item its `CURSOR_HOVER` is drawn instead (only over
+objects that handle the item's event when `Game.SmartItemCursor` is
+on).
 
 ## Keyboard
 
@@ -123,6 +132,8 @@ told not to.
 
 ## Not yet
 
-- `Game.SelectedItem` and the inventory; dialogue responses.
+- Dialogue responses (`AddResponse`, `GetResponse`).
+- Each object's own inventory (`Game.InventoryObject`): one inventory
+  serves every object.
 - The mouse wheel, which the engine gives to the focused window.
 - Transitions other than the fade; videos.

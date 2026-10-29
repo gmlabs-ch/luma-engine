@@ -67,8 +67,6 @@ const GAME_STUBS: &[&str] = &[
     "StopTheora",
     "PlayVideo",
     "StopVideo",
-    "TakeItem",
-    "DropItem",
     "AddResponse",
     "AddResponseOnce",
     "AddResponseOnceGame",
@@ -98,8 +96,6 @@ const OBJECT_STUBS: &[&str] = &[
     "PlayAnimAsync",
     "ForceTalkAnim",
     "StickToRegion",
-    "TakeItem",
-    "DropItem",
     "CreateParticleEmitter",
     "DeleteParticleEmitter",
     "AddAttachment",
@@ -140,6 +136,7 @@ impl World {
             Kind::Sprite(owner) => self.sprite_get(owner, name),
             Kind::Actor => self.actor_get(id, name),
             Kind::Control => self.control_get(id, name),
+            Kind::Item => self.item_get(id, name),
             Kind::Inert(kind) => match name {
                 "Type" => Some(Value::from(kind.to_ascii_lowercase())),
                 "Name" => Some(Value::from(kind)),
@@ -164,6 +161,7 @@ impl World {
             Kind::Sprite(owner) => self.sprite_set(owner, name, value),
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
+            Kind::Item => self.item_set(id, name, value),
             Kind::Keyboard | Kind::Fader | Kind::Inert(_) => false,
         }
     }
@@ -204,6 +202,7 @@ impl World {
             Kind::Sprite(owner) => self.sprite_call(owner, name),
             Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Control => self.control_call(id, name, args, ctx),
+            Kind::Item => self.item_call(id, name, args),
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
                     let widget = self.inert("Widget");
@@ -275,6 +274,60 @@ impl World {
         })
     }
 
+    /// The inventory methods every adventure object shares
+    /// (`CAdObject::ScCallMethod`): one inventory, the game's.
+    pub(crate) fn inventory_call(&mut self, name: &str, args: &[Value]) -> Return {
+        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        match name {
+            "TakeItem" => {
+                match arg(0) {
+                    Value::Null => self.log("TakeItem: item name expected".to_string()),
+                    v => {
+                        let item = v.get_string(self);
+                        let after = match arg(1) {
+                            Value::Null => None,
+                            a => Some(a.get_string(self)),
+                        };
+                        if !self.take_item(&item, after.as_deref()) {
+                            self.log(format!("Cannot add item '{item}' to inventory"));
+                        }
+                    }
+                }
+                Return::null()
+            }
+            "DropItem" => {
+                match arg(0) {
+                    Value::Null => self.log("DropItem: item name expected".to_string()),
+                    v => {
+                        let item = v.get_string(self);
+                        if !self.drop_item(&item) {
+                            self.log(format!("Cannot remove item '{item}' from inventory"));
+                        }
+                    }
+                }
+                Return::null()
+            }
+            "GetItem" => Return::value(native_or_null(match arg(0) {
+                Value::String(name) => self.item_by_name(&name),
+                Value::Null => None,
+                v => {
+                    let index = v.get_int(self);
+                    usize::try_from(index)
+                        .ok()
+                        .and_then(|i| self.inventory.taken.get(i).copied())
+                }
+            })),
+            "HasItem" | "IsItemTaken" => match arg(0) {
+                Value::Null => Return::value(false),
+                v => {
+                    let name = v.get_string(self);
+                    Return::value(self.has_item(&name))
+                }
+            },
+            _ => Return::null(),
+        }
+    }
+
     // ----------------------------------------------------------------
     // Game
     // ----------------------------------------------------------------
@@ -290,7 +343,13 @@ impl World {
             "MouseX" => Value::Int(self.mouse.x),
             "MouseY" => Value::Int(self.mouse.y),
             "ActiveObject" => native_or_null(self.active_object()),
-            "SelectedItem" => native_or_null(self.selected_item),
+            "SelectedItem" => native_or_null(self.selected_item()),
+            "InventoryVisible" => Value::Bool(self.inventory.visible),
+            "NumItems" => Value::Int(self.inventory.taken.len() as i32),
+            "TotalNumItems" => Value::Int(self.inventory.items.len() as i32),
+            "InventoryScrollOffset" => Value::Int(self.inventory.scroll_offset),
+            "SmartItemCursor" => Value::Bool(self.inventory.smart_item_cursor),
+            "InventoryObject" => Value::Native(self.game_id),
             "ScreenWidth" => Value::Int(self.settings().width as i32),
             "ScreenHeight" => Value::Int(self.settings().height as i32),
             "Interactive" => Value::Bool(self.interactive),
@@ -310,7 +369,6 @@ impl World {
             | "SoundAvailable"
             | "WindowedMode"
             | "TextRTL"
-            | "InventoryVisible"
             | "ResponsesVisible"
             | "SuspendedRendering"
             | "SuppressScriptErrors"
@@ -319,14 +377,9 @@ impl World {
             | "CursorHidden" => Value::Bool(false),
             "AcceleratedMode" => Value::Bool(true),
             "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => Value::Int(100),
-            "FPS"
-            | "NumItems"
-            | "TotalNumItems"
-            | "InventoryScrollOffset"
-            | "TextEncoding"
-            | "SoundBufferSize"
-            | "AutoSaveSlot"
-            | "MostRecentSaveSlot" => Value::Int(0),
+            "FPS" | "TextEncoding" | "SoundBufferSize" | "AutoSaveSlot" | "MostRecentSaveSlot" => {
+                Value::Int(0)
+            }
             "TalkSkipButton" => Value::Int(self.talk_skip_button.code()),
             "LastResponse" | "LastResponseOrig" => Value::Null,
             "Platform" => Value::from("luma"),
@@ -345,7 +398,11 @@ impl World {
             "SubtitlesSpeed" => self.subtitles_speed = value.get_int(self),
             "MouseX" => self.mouse.x = value.get_int(self),
             "MouseY" => self.mouse.y = value.get_int(self),
-            "SelectedItem" => self.selected_item = value.as_native(),
+            "SelectedItem" => self.select_item(value),
+            "InventoryVisible" => self.inventory.visible = value.get_bool(self),
+            "InventoryScrollOffset" => self.inventory.scroll_offset = value.get_int(self),
+            "SmartItemCursor" => self.inventory.smart_item_cursor = value.get_bool(self),
+            "InventoryObject" => {}
             "TalkSkipButton" => {
                 self.talk_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }
@@ -500,9 +557,19 @@ impl World {
             }
             "FileExists" => Return::value(self.vfs().exists(&arg(0).get_string(self))),
             "ClearScriptCache" => Return::null(),
-            "HasItem" | "IsItemTaken" | "IsSaveSlotUsed" | "QueryItem" => {
+            "IsSaveSlotUsed" => {
                 self.stub(&format!("Game.{name}"));
                 Return::value(false)
+            }
+            "QueryItem" => Return::value(native_or_null(match arg(0) {
+                Value::Int(i) => usize::try_from(i)
+                    .ok()
+                    .and_then(|i| self.item_ids().get(i).copied()),
+                v => self.item_by_name(&v.get_string(self)),
+            })),
+            "GetInventoryWindow" => Return::value(native_or_null(self.inventory.window)),
+            "TakeItem" | "DropItem" | "GetItem" | "HasItem" | "IsItemTaken" => {
+                return Some(self.inventory_call(name, args));
             }
             "GetActiveCursorObject" | "GetWaitCursorObject" => {
                 self.stub(&format!("Game.{name}"));
@@ -516,11 +583,7 @@ impl World {
                 self.stub(&format!("Game.{name}"));
                 Return::value(0)
             }
-            "GetItem"
-            | "GetResponse"
-            | "GetCurrentDlgBranch"
-            | "GetInventoryWindow"
-            | "GetResponsesWindow" => {
+            "GetResponse" | "GetCurrentDlgBranch" | "GetResponsesWindow" => {
                 self.stub(&format!("Game.{name}"));
                 Return::null()
             }
@@ -893,7 +956,8 @@ impl World {
                 Value::Bool(view.subtitles.get(&r).is_none_or(|m| m.relative))
             }
             "SubtitlesPosXCenter" => Value::Bool(view.subtitles.get(&r).is_none_or(|m| m.x_center)),
-            "NumItems" | "NumAttachments" => Value::Int(0),
+            "NumItems" => Value::Int(self.inventory.taken.len() as i32),
+            "NumAttachments" => Value::Int(0),
             "ParticleEmitter" => Value::Null,
             "Item" => e.item.clone().map_or(Value::Null, Value::from),
             "Subtype" => Value::from(match e.kind {
@@ -1043,8 +1107,11 @@ impl World {
                     .and_then(|e| e.font.clone())
                     .map_or(Value::Null, Value::from),
             ),
-            "HasItem" | "HasCursor" => Return::value(false),
-            "GetCursor" | "GetCursorObject" | "GetItem" | "GetAttachment" => Return::null(),
+            "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
+                return Some(self.inventory_call(name, args));
+            }
+            "HasCursor" => Return::value(false),
+            "GetCursor" | "GetCursorObject" | "GetAttachment" => Return::null(),
             _ if OBJECT_STUBS.contains(&name) => {
                 self.stub(&format!("Entity.{name}"));
                 Return::null()

@@ -643,7 +643,7 @@ fn game() -> std::path::PathBuf {
     );
     pkg.add_file(
         "default.game",
-        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" } AD_GAME { }"
+        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" }"
             .to_vec(),
     );
     pkg.add_file("art\\font.png", png(128, 128, [255, 255, 255, 255]));
@@ -664,6 +664,25 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("string.tab", b"GREET\tHello\r\n".to_vec());
     pkg.add_file("game.script", game_script());
     pkg.add_file("win.script", window_script());
+    pkg.add_file(
+        "items.items",
+        b"ITEM { NAME=\"key\" CAPTION=\"/GREET/x\" IMAGE=\"art\\green.png\" SPRITE_HOVER=\"art\\red.png\" CURSOR=\"art\\red.png\" CURSOR_HOVER=\"art\\green.png\" PROPERTY { NAME=\"weight\" VALUE=\"3\" } }
+ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COMBINED=FALSE }"
+            .to_vec(),
+    );
+    pkg.add_file(
+        "inv.def",
+        b"INVENTORY_BOX {
+  ITEM_WIDTH=8 ITEM_HEIGHT=8 SPACING=0 SCROLL_BY=1 HIDE_SELECTED=TRUE
+  AREA { 4, 0, 12, 8 }
+  WINDOW {
+    X=0 Y=0 WIDTH=16 HEIGHT=8
+    BUTTON { NAME=\"prev\" X=0 Y=0 WIDTH=4 HEIGHT=8 PARENT_NOTIFY=TRUE }
+    BUTTON { NAME=\"next\" X=12 Y=0 WIDTH=4 HEIGHT=8 PARENT_NOTIFY=TRUE }
+  }
+}"
+        .to_vec(),
+    );
     pkg.add_file("menu.script", menu_script());
     pkg.add_file(
         "w.window",
@@ -730,6 +749,7 @@ fn game() -> std::path::PathBuf {
     ENTITY { NAME=\"prop\" X=8 Y=12 SPRITE=\"art\\prop.sprite\" SCRIPT=\"scenes\\room\\prop.script\" }
     REGION { NAME=\"floor\" SCRIPT=\"scenes\\room\\floor.script\" POINT {0,16} POINT {200,16} POINT {200,32} POINT {0,32} }
     ENTITY { NAME=\"lamp\" X=20 Y=20 WALK_TO_X=30 WALK_TO_Y=20 WALK_TO_DIR=4 SCRIPT=\"scenes\\room\\lamp.script\" }
+    ENTITY { NAME=\"keyspot\" X=28 Y=28 ITEM=\"key\" }
   }
   ENTITY { NAME=\"hum\" SUBTYPE=\"sound\" SOUND=\"audio\\beep.wav\" SOUND_VOLUME=50 }
 }"
@@ -811,7 +831,7 @@ fn scripts_drive_the_game_and_its_scene() {
     assert_eq!(result(&runtime, "walkableAbove"), Value::Bool(false));
     assert_eq!(result(&runtime, "region"), Value::from("floor"));
     assert_eq!(result(&runtime, "regionBlocked"), Value::Bool(false));
-    assert_eq!(result(&runtime, "nodes"), Value::Int(3));
+    assert_eq!(result(&runtime, "nodes"), Value::Int(4));
     assert_eq!(result(&runtime, "lampHandles"), Value::Bool(true));
     assert_eq!(result(&runtime, "lampTakes"), Value::Bool(false));
     assert_eq!(result(&runtime, "applied"), Value::Bool(true));
@@ -1457,6 +1477,160 @@ fn windows_buttons_keys_and_menus() {
             .load_window(&mut runtime.engine, "no.window")
             .is_none()
     );
+}
+
+#[test]
+fn items_the_inventory_box_and_the_item_cursor() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    // The items loaded with their captions expanded and their
+    // properties; the box has its window with two buttons.
+    assert_eq!(runtime.world.item_ids().len(), 2);
+    let key = runtime.world.item_by_name("KEY").unwrap();
+    let coin = runtime.world.item_by_name("coin").unwrap();
+    assert_eq!(runtime.world.class_name(key), "item");
+    assert_eq!(
+        runtime.world.get_property(key, "Caption"),
+        Some(Value::from("Hello"))
+    );
+    assert_eq!(
+        runtime.world.get_property(key, "weight"),
+        Some(Value::from("3"))
+    );
+    assert_eq!(
+        runtime.world.get_property(game, "TotalNumItems"),
+        Some(Value::Int(2))
+    );
+    let inv_window = runtime.world.inventory().window.unwrap();
+    assert_eq!(runtime.world.widgets_of(inv_window).len(), 2);
+    assert!(!runtime.world.window_ids().contains(&inv_window));
+    let keyspot = runtime.world.find_node("keyspot").unwrap();
+    let keyspot_ref = luma_adventure::EntityRef::Node { layer: 0, index: 3 };
+    let active = |runtime: &Runtime| {
+        runtime
+            .world
+            .scene()
+            .unwrap()
+            .entity(keyspot_ref)
+            .unwrap()
+            .active
+    };
+    assert_eq!(
+        runtime.world.get_property(keyspot, "Item"),
+        Some(Value::from("key"))
+    );
+    assert!(active(&runtime));
+    // Taking an item hides the entities tied to it; dropping shows them.
+    assert!(runtime.world.take_item("key", None));
+    assert!(!runtime.world.take_item("nothing", None));
+    assert!(runtime.world.has_item("key") && !runtime.world.has_item("coin"));
+    assert_eq!(runtime.world.taken_items(), [key]);
+    assert!(!active(&runtime));
+    assert_eq!(
+        runtime.world.get_property(game, "NumItems"),
+        Some(Value::Int(1))
+    );
+    // The box shown: the key sits in the first cell, under the mouse.
+    runtime
+        .world
+        .set_property(game, "InventoryVisible", &Value::Bool(true));
+    runtime.mouse_move(6, 2);
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(key));
+    assert_eq!(
+        runtime.world.item(key).unwrap().current_sprite.as_deref(),
+        Some("art\\red.png")
+    );
+    let prev = runtime.world.widget(inv_window, "prev").unwrap();
+    let next = runtime.world.widget(inv_window, "next").unwrap();
+    assert!(runtime.world.control(prev).unwrap().disabled);
+    assert!(runtime.world.control(next).unwrap().disabled);
+    // Selecting the key shows its cursor over the normal one, and hides
+    // it from the box.
+    runtime
+        .world
+        .set_property(game, "SelectedItem", &Value::Native(key));
+    runtime.tick(16);
+    assert_eq!(runtime.world.selected_item(), Some(key));
+    assert_eq!(
+        runtime.world.cursors().item_cursor.as_deref(),
+        Some("art\\red.png")
+    );
+    assert!(runtime.world.cursors().shown().is_some());
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(inv_window));
+    // Over a scene entity the hover cursor shows; a coin replaces the
+    // cursor entirely.
+    runtime
+        .world
+        .set_property(game, "InventoryVisible", &Value::Bool(false));
+    // The scene script deactivated the prop; bring it back.
+    let prop_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    // The scene script moved it to (5, 6) and scrolled the view.
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(6, 7);
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.active_object(),
+        runtime.world.find_node("prop")
+    );
+    assert_eq!(
+        runtime.world.cursors().item_cursor.as_deref(),
+        Some("art\\green.png")
+    );
+    runtime.world.take_item("coin", Some("key"));
+    assert_eq!(runtime.world.taken_items(), [key, coin]);
+    runtime
+        .world
+        .set_property(game, "SelectedItem", &Value::from("coin"));
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.cursors().item_cursor.as_deref(),
+        Some("art\\green.png")
+    );
+    assert_eq!(runtime.world.cursors().shown(), None);
+    // The box pages: with two items and one cell, next scrolls.
+    runtime
+        .world
+        .set_property(game, "InventoryVisible", &Value::Bool(true));
+    runtime.tick(16);
+    assert!(!runtime.world.control(next).unwrap().disabled);
+    runtime.world.press_button(&mut runtime.engine, next);
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryScrollOffset"),
+        Some(Value::Int(1))
+    );
+    assert!(!runtime.world.control(prev).unwrap().disabled);
+    // Dropping the selected item deselects it; a null selection clears.
+    assert!(runtime.world.drop_item("coin"));
+    assert_eq!(runtime.world.selected_item(), None);
+    assert!(!runtime.world.drop_item("coin"));
+    assert_eq!(runtime.world.taken_items(), [key]);
+    runtime.world.drop_item("key");
+    assert!(active(&runtime));
+    runtime
+        .world
+        .set_property(game, "SelectedItem", &Value::Null);
+    runtime.tick(16);
+    assert_eq!(runtime.world.cursors().item_cursor, None);
 }
 
 #[test]

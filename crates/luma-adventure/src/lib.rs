@@ -23,12 +23,13 @@
 //!   fades; the [`Runtime`] routes the events to the scripts.
 //! - [`Control`] and [`Ui`]: windows, buttons, static texts and editors
 //!   drawn over the scene, their focus, modes and freezing of the game.
+//! - [`Item`] and [`Inventory`]: the items, those taken, the box that
+//!   shows them and the cursor of the item in use.
 //! - [`World`]: the game as scripts see it (`Game`, `Scene`, layers,
 //!   entities, regions, sprites, actors), the script engine's host.
 //! - [`Runtime`]: a script engine and a world, driven once per frame.
 //!
-//! The inventory and saved games come with the later tickets of the
-//! milestone.
+//! Saved games come with a later ticket of the milestone.
 
 #![forbid(unsafe_code)]
 
@@ -36,8 +37,10 @@ pub mod actor;
 mod error;
 pub mod fader;
 pub mod input;
+pub mod inventory;
 mod natives;
 mod natives_actor;
+mod natives_item;
 mod natives_sound;
 mod natives_ui;
 pub mod objects;
@@ -54,6 +57,7 @@ pub use actor::{Actor, ActorEvent, ActorState, WalkContext};
 pub use error::{Error, Result};
 pub use fader::{Fader, SCENE_FADE_MS};
 pub use input::{Cursors, Keyboard, Mouse};
+pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;
 pub use objects::{Kind, Native, Objects};
 pub use path::Floor;
@@ -66,6 +70,7 @@ pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, Sounds};
 pub use talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
 pub use text::{BitmapFont, Font, FontBank, TrueTypeFont};
 pub use ui::{
-    ButtonState, Control, ControlKind, EditState, StaticState, Ui, WindowMode, WindowState,
+    ButtonListener, ButtonState, Control, ControlKind, EditState, StaticState, Ui, WindowMode,
+    WindowState,
 };
 pub use world::{Runtime, World};

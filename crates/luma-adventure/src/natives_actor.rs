@@ -19,8 +19,6 @@ const ACTOR_STUBS: &[&str] = &[
     "SetTalkSprite",
     "SetCursor",
     "RemoveCursor",
-    "TakeItem",
-    "DropItem",
     "StickToRegion",
     "CreateParticleEmitter",
     "DeleteParticleEmitter",
@@ -93,7 +91,8 @@ impl World {
             "SubtitlesPosY" => Value::Int(actor.subtitles.y),
             "SubtitlesPosRelative" => Value::Bool(actor.subtitles.relative),
             "SubtitlesPosXCenter" => Value::Bool(actor.subtitles.x_center),
-            "NumItems" | "NumAttachments" => Value::Int(0),
+            "NumItems" => Value::Int(self.inventory.taken.len() as i32),
+            "NumAttachments" => Value::Int(0),
             "ParticleEmitter" | "Item" => Value::Null,
             _ => return None,
         })
@@ -336,8 +335,11 @@ impl World {
                     .and_then(|a| a.def.font.clone())
                     .map_or(Value::Null, Value::from),
             ),
-            "HasItem" | "HasCursor" => Return::value(false),
-            "GetCursor" | "GetCursorObject" | "GetItem" | "GetAttachment" => Return::null(),
+            "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
+                return Some(self.inventory_call(name, args));
+            }
+            "HasCursor" => Return::value(false),
+            "GetCursor" | "GetCursorObject" | "GetAttachment" => Return::null(),
             _ if ACTOR_STUBS.contains(&name) => {
                 self.stub(&format!("Actor.{name}"));
                 Return::null()

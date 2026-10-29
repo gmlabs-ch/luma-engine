@@ -44,6 +44,9 @@ OPTIONS:
     --mute                Play no sound (the sounds still run, silently, on the game clock)
     --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
                           node once the scene is up, e.g. --click Door or --click Freezer:LookAt
+                          (before --click-at, so that an item taken can be clicked)
+    --after <n>           In headless mode, frames to run before --click-at (default 3), e.g. to
+                          let a script finish first
     --click-at <x>,<y>    In headless mode, move the mouse there and click once the scene is up
                           (after --right-click-at and --key, so that a menu can be clicked)
     --hover-at <x>,<y>    In headless mode, move the mouse there once the scene is up
@@ -88,6 +91,7 @@ struct Options {
     right_click_at: Option<(i32, i32)>,
     hover_at: Option<(i32, i32)>,
     key: Option<i32>,
+    after: u64,
 }
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -108,6 +112,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut right_click_at = None;
     let mut hover_at = None;
     let mut key = None;
+    let mut after = 3;
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
@@ -155,6 +160,12 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
                     .ok_or_else(|| format!("--right-click-at expects <x>,<y>, got `{v}`"))?;
                 right_click_at = Some((x, y));
+            }
+            "--after" => {
+                let v = value(&mut i)?;
+                after = v
+                    .parse()
+                    .map_err(|_| format!("--after expects a number of frames, got `{v}`"))?;
             }
             "--key" => {
                 let v = value(&mut i)?;
@@ -210,6 +221,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         right_click_at,
         hover_at,
         key,
+        after,
     })
 }
 
@@ -349,10 +361,26 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 runtime.key_down(code, None, false, false, false);
                 runtime.key_up(code);
             }
+            if let Some(click) = &options.click {
+                let (node, event) = click.split_once(':').unwrap_or((click, "LeftClick"));
+                match runtime.world.find_node(node) {
+                    Some(id) => {
+                        let handled =
+                            runtime
+                                .engine
+                                .apply_event(&mut runtime.world, id, event, false);
+                        println!(
+                            "[{tick}] {event} on {node:?}: {}",
+                            if handled { "handled" } else { "no handler" }
+                        );
+                    }
+                    None => println!("[{tick}] {event} on {node:?}: no such node"),
+                }
+            }
             if let Some((x, y)) = options.click_at {
                 // A few frames so that a menu opened by the right click or
-                // the key is in place.
-                for _ in 0..3 {
+                // the key is in place, or that a script ran.
+                for _ in 0..options.after {
                     for line in runtime.tick(options.dt) {
                         println!("[{tick}] {line}");
                     }
@@ -375,22 +403,6 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                     println!("[{tick}] {line}");
                 }
                 runtime.mouse_left_up();
-            }
-            if let Some(click) = &options.click {
-                let (node, event) = click.split_once(':').unwrap_or((click, "LeftClick"));
-                match runtime.world.find_node(node) {
-                    Some(id) => {
-                        let handled =
-                            runtime
-                                .engine
-                                .apply_event(&mut runtime.world, id, event, false);
-                        println!(
-                            "[{tick}] {event} on {node:?}: {}",
-                            if handled { "handled" } else { "no handler" }
-                        );
-                    }
-                    None => println!("[{tick}] {event} on {node:?}: no such node"),
-                }
             }
         }
         if runtime.world.quit_requested() {
@@ -473,6 +485,31 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
     if runtime.world.is_frozen() {
         println!("game frozen by a system-exclusive window");
     }
+    let inventory = runtime.world.inventory();
+    if !inventory.items.is_empty() {
+        let taken: Vec<String> = runtime
+            .world
+            .taken_items()
+            .iter()
+            .filter_map(|id| runtime.world.item(*id).map(|i| i.def.name.clone()))
+            .collect();
+        println!(
+            "inventory: {} item(s), {} taken {:?}, box {}, selected {}",
+            inventory.items.len(),
+            taken.len(),
+            taken,
+            if inventory.visible {
+                "visible"
+            } else {
+                "hidden"
+            },
+            runtime
+                .world
+                .selected_item()
+                .and_then(|id| runtime.world.item(id))
+                .map_or("none".to_string(), |i| format!("{:?}", i.def.name))
+        );
+    }
     for channel in 0..luma_adventure::MUSIC_CHANNELS {
         if let Some(music) = runtime.world.music(channel) {
             println!(
@@ -488,7 +525,7 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         }
     }
     println!(
-        "mouse at ({}, {}) over {}, cursor {:?}",
+        "mouse at ({}, {}) over {}, cursor {:?}{}",
         runtime.world.mouse().x,
         runtime.world.mouse().y,
         runtime
@@ -496,7 +533,14 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
             .active_object()
             .map(|id| runtime.world.describe_object(id))
             .unwrap_or_else(|| "nothing".to_string()),
-        runtime.world.cursors().shown().unwrap_or("none")
+        runtime.world.cursors().shown().unwrap_or("none"),
+        runtime
+            .world
+            .cursors()
+            .item_cursor
+            .as_deref()
+            .map(|c| format!(", item cursor {c:?}"))
+            .unwrap_or_default()
     );
     for sentence in runtime.world.sentences() {
         println!(
