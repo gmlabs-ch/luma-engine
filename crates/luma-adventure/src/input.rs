@@ -400,7 +400,6 @@ impl World {
             .copied()
             .filter(|id| self.actor(*id).is_some_and(|a| a.def.active))
             .collect();
-        let scene_offset = (self.offset_x, self.offset_y);
         for item in view.draw_order(&positions) {
             let layer = &view.scene.layers[item.layer()];
             let (ox, oy) = camera.layer_offset(&view.scene, layer);
@@ -409,13 +408,13 @@ impl World {
                 DrawItem::Node { layer, index } => {
                     let r = EntityRef::Node { layer, index };
                     if let Some(id) = self.node_id(r) {
-                        self.entity_hits(id, r, layer_offset, scene_offset, hits);
+                        self.entity_hits(id, r, layer_offset, hits);
                     }
                 }
                 DrawItem::Free { index, .. } => {
                     let r = EntityRef::Free(index);
                     if let Some(id) = self.node_id(r) {
-                        self.entity_hits(id, r, layer_offset, scene_offset, hits);
+                        self.entity_hits(id, r, layer_offset, hits);
                     }
                 }
                 DrawItem::Other { index, .. } => {
@@ -499,7 +498,6 @@ impl World {
         id: NativeId,
         r: EntityRef,
         layer_offset: (i32, i32),
-        scene_offset: (i32, i32),
         hits: &mut Vec<HitArea>,
     ) {
         let Some(view) = &self.scene else { return };
@@ -510,10 +508,15 @@ impl World {
         if entity.ignore_items && self.selected_item.is_some() {
             return;
         }
+        // The region's points are scene coordinates, registered with the
+        // offset of the layer the entity is drawn in (`CAdEntity::Display`
+        // hands `Game->m_OffsetX/Y` to the active rectangle), so a scene
+        // smaller than its viewport, whose scroll offset is negative, has
+        // its hotspots where its layers are drawn.
         if let Some(region) = &entity.region {
             hits.push(HitArea {
                 owner: id,
-                layer_offset: scene_offset,
+                layer_offset,
                 shape: HitShape::Polygon(region.points.clone()),
             });
         }

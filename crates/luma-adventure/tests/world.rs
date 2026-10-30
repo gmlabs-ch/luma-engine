@@ -956,6 +956,18 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
 }"
         .to_vec(),
     );
+    pkg.add_file(
+        "scenes\\small.scene",
+        b"SCENE {
+  NAME=\"Small\"
+  LAYER {
+    NAME=\"main\" MAIN=TRUE WIDTH=32 HEIGHT=20
+    ENTITY { NAME=\"spot\" X=20 Y=18 REGION { POINT {8,10} POINT {24,10} POINT {24,18} POINT {8,18} } }
+    REGION { NAME=\"floor\" POINT {0,12} POINT {32,12} POINT {32,20} POINT {0,20} }
+  }
+}"
+        .to_vec(),
+    );
     pkg.add_file("art\\red.png", png(4, 4, [255, 0, 0, 255]));
     pkg.add_file("art\\green.png", png(4, 4, [0, 255, 0, 255]));
     pkg.add_file(
@@ -2534,4 +2546,29 @@ fn a_played_animation_survives_a_saved_game() {
     let view = loaded.world.scene().unwrap();
     assert!(!view.is_talking(prop));
     assert_eq!(view.shown_sprite(prop).as_deref(), Some("art\\prop.sprite"));
+}
+
+#[test]
+fn hotspots_of_a_scene_smaller_than_the_screen_are_where_they_are_drawn() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    // A 32x20 scene on a 32x32 screen: the original engine keeps a
+    // negative scroll offset (`min(0, 20 - 32)`), draws the layers at
+    // the top of the screen anyway, and registers a hotspot's region
+    // with the same offset as the layer it is drawn in.
+    runtime.change_scene("scenes\\small.scene").unwrap();
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Small");
+    runtime.world.scroll_to(16, 10);
+    for _ in 0..40 {
+        runtime.tick(16);
+    }
+    assert_eq!(runtime.world.offset(), (0, -12));
+    let spot = runtime.world.find_node("spot").unwrap();
+    assert_eq!(runtime.world.object_at(16, 14), Some(spot));
+    assert_eq!(runtime.world.object_at(16, 5), None);
 }

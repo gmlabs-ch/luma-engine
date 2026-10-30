@@ -207,7 +207,11 @@ scene and the root block of an `.entity` file.
 | `EVENTS` | | | Reserved, ignored. |
 
 An entity with both a `SPRITE` and a `REGION` loads with a warning: the
-region is then the clickable area and the sprite's pixels are not.
+region is then the clickable area and the sprite's pixels are not. Its
+points are scene coordinates, placed on screen with the offset of the
+layer the entity is drawn in, like the sprite; a scene smaller than its
+viewport keeps a negative scroll offset but draws its layers at the
+viewport's origin, and its hotspots are where its layers are drawn.
 
 ## `REGION`
 
