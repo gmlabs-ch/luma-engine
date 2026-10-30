@@ -66,6 +66,8 @@ OPTIONS:
                           repeatable, to leave a scene and come back to it
     --entities            In headless mode, list the last scene's entities and the states
                           remembered of the scenes left
+    --global <name>       In headless mode, print a script global's value at the end
+                          (repeatable)
     --save <slot>         In headless mode, save the game to that slot after the clicks and
                           the scene changes (as Game.SaveGame does)
     --load <slot>         In headless mode, load that slot before the first frame (as
@@ -131,6 +133,8 @@ struct Options {
     after: u64,
     then_scenes: Vec<String>,
     entities: bool,
+    /// Globals of the scripts to print at the end (`--global`).
+    globals: Vec<String>,
     save: Option<i32>,
     load: Option<i32>,
 }
@@ -153,6 +157,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut after = 3;
     let mut then_scenes = Vec::new();
     let mut entities = false;
+    let mut globals = Vec::new();
     let mut save = None;
     let mut load = None;
     let mut i = 0;
@@ -176,6 +181,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--animate" => animate = true,
             "--then-scene" => then_scenes.push(value(&mut i)?.clone()),
             "--entities" => entities = true,
+            "--global" => globals.push(value(&mut i)?.clone()),
             "--save" | "--load" => {
                 let v = value(&mut i)?;
                 let slot = v
@@ -313,6 +319,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         after,
         then_scenes,
         entities,
+        globals,
         save,
         load,
     })
@@ -623,6 +630,15 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         counts.persistent,
         runtime.world.objects().len()
     );
+    for name in &options.globals {
+        println!(
+            "global {name}: {}",
+            runtime
+                .engine
+                .global(name)
+                .map_or("undefined".to_string(), |v| format!("{v:?}"))
+        );
+    }
     if options.entities {
         if let Some(view) = runtime.world.scene() {
             for r in view.entity_refs() {
