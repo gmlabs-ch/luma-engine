@@ -1171,6 +1171,28 @@ impl World {
                 self.reset_entity_anim(r);
                 Return::null()
             }
+            "PlayAnim" | "PlayAnimAsync" => {
+                let path = arg(0).get_string(self);
+                let ok = match (r, self.scene.as_mut()) {
+                    (EntityRef::Ui(_), _) | (_, None) => false,
+                    (r, Some(view)) => view.play_anim(&self.vfs, r, &path),
+                };
+                if !ok {
+                    let who = self.describe(id);
+                    self.log(format!(
+                        "CAdObject::PlayAnim: error loading temp sprite (object:\"{who}\" sprite:\"{path}\")"
+                    ));
+                    return Some(Return::value(false));
+                }
+                Return {
+                    value: Value::Bool(true),
+                    effect: if name == "PlayAnim" {
+                        Effect::WaitFor(id)
+                    } else {
+                        Effect::None
+                    },
+                }
+            }
             "Talk" | "TalkAsync" => self.talk_call(id, name == "Talk", args),
             "StopTalk" | "StopTalking" => Return::value(self.stop_talk(id)),
             "IsTalking" => Return::value(self.is_talking(id)),

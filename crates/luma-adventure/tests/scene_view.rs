@@ -238,3 +238,29 @@ fn loads_and_draws_a_scene_from_a_package() {
     assert_eq!((p.r, p.g, p.b), (0, 255, 0), "free entity at (40 - 32, 20)");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn play_anim_shows_a_sprite_once_then_gives_the_entity_its_own_back() {
+    use luma_adventure::EntityRef;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut view = SceneView::load(&vfs, "scenes/room.scene").unwrap();
+    // "bg" is node 0 of the main layer; prop.sprite has two 100 ms frames.
+    let bg = EntityRef::Node { layer: 0, index: 0 };
+    assert!(!view.is_playing_anim(bg));
+    assert!(!view.play_anim(&vfs, bg, "art\\nothing.sprite"));
+    assert!(view.play_anim(&vfs, bg, "art\\prop.sprite"));
+    assert!(view.is_playing_anim(bg));
+    assert_eq!(view.shown_sprite(bg).as_deref(), Some("art\\prop.sprite"));
+    view.advance(1);
+    view.advance(150);
+    assert!(view.is_playing_anim(bg), "second frame showing");
+    view.advance(300);
+    view.advance(320);
+    assert!(!view.is_playing_anim(bg), "played to its end");
+    assert_eq!(view.shown_sprite(bg).as_deref(), Some("art\\bg.png"));
+    // Reset cuts a playing sprite short.
+    assert!(view.play_anim(&vfs, bg, "art\\prop.sprite"));
+    view.reset_anim(bg);
+    assert!(!view.is_playing_anim(bg));
+}

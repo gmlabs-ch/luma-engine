@@ -453,6 +453,9 @@ pub struct SceneView {
     pub bank: SpriteBank,
     anims: HashMap<EntityRef, AnimState>,
     talks: HashMap<EntityRef, EntityTalk>,
+    /// The sprite an entity plays once (`PlayAnim`), shown instead of
+    /// its own until it finishes (`STATE_PLAYING_ANIM`).
+    playing: HashMap<EntityRef, String>,
     /// The subtitle placement of entities scripts changed it on.
     pub subtitles: HashMap<EntityRef, SubtitleMods>,
 }
@@ -474,6 +477,7 @@ impl SceneView {
             bank: SpriteBank::new(),
             anims: HashMap::new(),
             talks: HashMap::new(),
+            playing: HashMap::new(),
             subtitles: HashMap::new(),
         };
         let paths: Vec<String> = view
@@ -648,7 +652,30 @@ impl SceneView {
                 return Some(sprite.clone());
             }
         }
+        if let Some(sprite) = self.playing.get(&r) {
+            return Some(sprite.clone());
+        }
         self.entity(r)?.sprite.clone()
+    }
+
+    /// Plays a sprite once on an entity (`CAdObject::PlayAnim`): shown in
+    /// place of the entity's sprite until it finishes; `false` when the
+    /// file cannot be loaded.
+    pub fn play_anim(&mut self, vfs: &Vfs, r: EntityRef, path: &str) -> bool {
+        if self.entity(r).is_none() || !self.bank.add_sprite(vfs, path) {
+            return false;
+        }
+        self.playing.insert(r, path.to_string());
+        let mut state = AnimState::new(path);
+        state.looping = Some(false);
+        self.anims.insert(r, state);
+        true
+    }
+
+    /// Whether an entity is playing a `PlayAnim` sprite; scripts waiting
+    /// for the entity go on when it is done.
+    pub fn is_playing_anim(&self, r: EntityRef) -> bool {
+        self.playing.contains_key(&r)
     }
 
     /// Starts a sentence on an entity (`CAdObject::Talk`).
@@ -770,6 +797,8 @@ impl SceneView {
 
     /// Restarts an entity's animation (`Reset`).
     pub fn reset_anim(&mut self, r: EntityRef) {
+        // `Reset` ends a `PlayAnim` too (`STATE_READY`).
+        self.playing.remove(&r);
         if let Some(state) = self.anim_mut(r) {
             state.reset();
         }
@@ -810,6 +839,18 @@ impl SceneView {
                 if let Some(entity) = self.entity_mut(r) {
                     entity.x += move_x;
                     entity.y += move_y;
+                }
+            }
+            // A played sprite that reached its end gives the entity back
+            // its own sprite.
+            if let Some(playing) = self.playing.get(&r) {
+                let done = self
+                    .anims
+                    .get(&r)
+                    .is_some_and(|a| a.sprite == key(playing) && a.finished);
+                if done {
+                    self.playing.remove(&r);
+                    self.anims.remove(&r);
                 }
             }
         }

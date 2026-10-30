@@ -1532,7 +1532,9 @@ impl Host for World {
     fn is_ready(&self, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).is_none_or(|a| a.ready),
-            Some(Kind::Entity(r)) => self.scene().is_none_or(|v| !v.is_talking(*r)),
+            Some(Kind::Entity(r)) => self
+                .scene()
+                .is_none_or(|v| !v.is_talking(*r) && !v.is_playing_anim(*r)),
             Some(Kind::Scene) => self.is_scrolled(),
             Some(Kind::Fader) => self.fader.ready,
             Some(Kind::Control) => self
