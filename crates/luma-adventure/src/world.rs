@@ -42,6 +42,9 @@ pub struct World {
     pub(crate) keyboard_id: NativeId,
     /// The `Math` object scripts see as a global.
     pub(crate) math_id: NativeId,
+    /// `SCENE_VIEWPORT` of the game file or `Game.SetSceneViewport`:
+    /// `(x, y, width, height)` on the screen; `None` is the whole screen.
+    pub(crate) scene_viewport: Option<(i32, i32, i32, i32)>,
     pub(crate) scene_id: NativeId,
     pub(crate) scene: Option<SceneView>,
     pub(crate) prev_scene_name: String,
@@ -129,6 +132,7 @@ impl World {
         let scene_id = objects.insert(Kind::Scene);
         let fader_id = objects.insert(Kind::Fader);
         let personal_savegames = game_file.personal_savegames;
+        let scene_viewport = game_file.scene_viewport.map(|[x, y, w, h]| (x, y, w, h));
         let mut world = World {
             vfs,
             settings,
@@ -140,6 +144,7 @@ impl World {
             game_id,
             keyboard_id,
             math_id,
+            scene_viewport,
             scene_id,
             scene: None,
             prev_scene_name: String::new(),
@@ -267,11 +272,27 @@ impl World {
         (self.offset_x, self.offset_y)
     }
 
-    /// The camera showing the scene at its current offset.
+    /// The part of the screen the scene is shown in (`SCENE_VIEWPORT`,
+    /// `Game.SetSceneViewport`): `(x, y, width, height)`, the whole
+    /// screen by default.
+    pub fn viewport(&self) -> (i32, i32, i32, i32) {
+        self.scene_viewport.unwrap_or((
+            0,
+            0,
+            self.settings.width as i32,
+            self.settings.height as i32,
+        ))
+    }
+
+    /// The camera showing the scene at its current offset, in the
+    /// scene viewport.
     pub fn camera(&self) -> Camera {
-        let mut camera = Camera::new(self.settings.width as f32, self.settings.height as f32);
+        let (vx, vy, vw, vh) = self.viewport();
+        let mut camera = Camera::new(vw as f32, vh as f32);
         camera.offset_x = self.offset_x as f32;
         camera.offset_y = self.offset_y as f32;
+        camera.origin_x = vx as f32;
+        camera.origin_y = vy as f32;
         camera
     }
 
@@ -1361,9 +1382,12 @@ impl World {
         self.objects.get(id)
     }
 
-    /// The offset centring the view on a point, clamped to the scene.
+    /// The offset centring the view on a point, clamped to the scene
+    /// (`CAdScene::ScrollTo`): the viewport's size counts, and a scene
+    /// smaller than the viewport gives a negative offset, as in the
+    /// original engine, so that it is drawn lower or further right.
     fn centred_offset(&self, x: i32, y: i32) -> (i32, i32) {
-        let (w, h) = (self.settings.width as i32, self.settings.height as i32);
+        let (_, _, w, h) = self.viewport();
         let (sw, sh) = match &self.scene {
             Some(view) => (view.scene.width(), view.scene.height()),
             None => (w, h),
@@ -1684,11 +1708,8 @@ impl Runtime {
     /// Whether the mouse is over the scene (`PointInViewport`).
     fn mouse_in_viewport(&self) -> bool {
         let (x, y) = (self.world.mouse.x, self.world.mouse.y);
-        let (w, h) = (
-            self.world.settings.width as i32,
-            self.world.settings.height as i32,
-        );
-        self.world.scene.is_some() && x >= 0 && y >= 0 && x < w && y < h
+        let (vx, vy, vw, vh) = self.world.viewport();
+        self.world.scene.is_some() && x >= vx && y >= vy && x < vx + vw && y < vy + vh
     }
 
     /// Raises a mouse event (`CAdGame::OnMouseLeftDown` and the like):

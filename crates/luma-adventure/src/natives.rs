@@ -71,7 +71,6 @@ const GAME_STUBS: &[&str] = &[
     "LoadResponseBox",
     "LoadInventoryBox",
     "LoadItems",
-    "SetSceneViewport",
     "LoadEntity",
     "CreateEntity",
     "CreateItem",
@@ -636,6 +635,16 @@ impl World {
                 self.empty_save_slot(arg(0).get_int(self));
                 Return::null()
             }
+            "SetSceneViewport" => {
+                let (x, y, w, h) = (
+                    arg(0).get_int(self),
+                    arg(1).get_int(self),
+                    arg(2).get_int(self),
+                    arg(3).get_int(self),
+                );
+                self.scene_viewport = Some((x, y, w.max(0), h.max(0)));
+                Return::value(true)
+            }
             "QueryItem" => Return::value(native_or_null(match arg(0) {
                 Value::Int(i) => usize::try_from(i)
                     .ok()
@@ -689,8 +698,8 @@ impl World {
                 view.and_then(|v| v.scene.layers.iter().rposition(|l| l.main))
                     .and_then(|i| self.layer_id(i)),
             ),
-            "MouseX" => Value::Int(self.mouse.x + self.offset_x),
-            "MouseY" => Value::Int(self.mouse.y + self.offset_y),
+            "MouseX" => Value::Int(self.mouse.x + self.offset_x - self.viewport().0),
+            "MouseY" => Value::Int(self.mouse.y + self.offset_y - self.viewport().1),
             "OffsetX" => Value::Int(self.offset_x),
             "OffsetY" => Value::Int(self.offset_y),
             "Width" => Value::Int(view.map_or(0, |v| v.scene.width())),
@@ -871,8 +880,8 @@ impl World {
             "IsScrolling" => Return::value(!self.is_scrolled()),
             "IsPointInViewport" => {
                 let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
-                let (w, h) = (self.settings().width as i32, self.settings().height as i32);
-                Return::value(x >= 0 && y >= 0 && x < w && y < h)
+                let (vx, vy, vw, vh) = self.viewport();
+                Return::value(x >= vx && y >= vy && x < vx + vw && y < vy + vh)
             }
             "GetWaypointGroup" | "LoadEntity" | "CreateEntity" | "AddLayer" | "InsertLayer" => {
                 self.stub(&format!("Scene.{name}"));

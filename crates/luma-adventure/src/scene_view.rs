@@ -35,6 +35,11 @@ pub struct Camera {
     pub offset_x: f32,
     /// See `offset_x`.
     pub offset_y: f32,
+    /// Where the view's top-left corner lands on the screen: the scene
+    /// viewport's origin (`SCENE_VIEWPORT`), usually 0.
+    pub origin_x: f32,
+    /// See `origin_x`.
+    pub origin_y: f32,
 }
 
 impl Camera {
@@ -45,6 +50,8 @@ impl Camera {
             height,
             offset_x: 0.0,
             offset_y: 0.0,
+            origin_x: 0.0,
+            origin_y: 0.0,
         }
     }
 
@@ -58,6 +65,8 @@ impl Camera {
 
     /// The offset of a layer, scrolled in proportion to its size
     /// (parallax): a layer as wide as the scene scrolls by `offset_x`.
+    /// The view's origin on the screen is taken off, so that the layer
+    /// is drawn at `-offset` inside the viewport.
     pub fn layer_offset(&self, scene: &Scene, layer: &Layer) -> (f32, f32) {
         let ratio = |offset: f32, scene_size: i32, view: f32| {
             let scrollable = scene_size as f32 - view;
@@ -70,8 +79,8 @@ impl Camera {
         let rx = ratio(self.offset_x, scene.width(), self.width);
         let ry = ratio(self.offset_y, scene.height(), self.height);
         (
-            (rx * (layer.width as f32 - self.width)).trunc(),
-            (ry * (layer.height as f32 - self.height)).trunc(),
+            (rx * (layer.width as f32 - self.width)).trunc() - self.origin_x,
+            (ry * (layer.height as f32 - self.height)).trunc() - self.origin_y,
         )
     }
 }

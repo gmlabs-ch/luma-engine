@@ -152,6 +152,7 @@ world_state! {
     game_id: NativeId,
     keyboard_id: NativeId,
     math_id: NativeId,
+    scene_viewport: Option<(i32, i32, i32, i32)>,
     scene_id: NativeId,
     fader_id: NativeId,
     scene: Option<SceneView>,

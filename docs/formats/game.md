@@ -48,6 +48,7 @@ AD_GAME {
 | | `PERSONAL_SAVEGAMES`, `LOCAL_SAVE_DIR` | Where saved games go. |
 | | `PROPERTY { NAME VALUE }` | Script properties of the game object. |
 | `AD_GAME` | `RESPONSE_BOX`, `INVENTORY_BOX`, `ITEMS` | The dialogue, inventory and item definition files. |
+| | `SCENE_VIEWPORT { x, y, width, height }` | The part of the screen the scene is drawn in and scrolled for (`Game.SetSceneViewport` changes it); the whole screen when absent. A scene smaller than the viewport sits lower or further right by the difference, as the original engine's scroll clamp gives a negative offset (OpenQuest's 320x170 title in a 320x189 viewport starts 19 pixels down). |
 | | `TALK_SKIP_BUTTON` | Which mouse button skips speech: `left`, `right`, `both`, `none`. |
 | | `VIDEO_SKIP_BUTTON` | Which mouse button skips a video: `left` (default), `right`, `both`. |
 | | `STARTUP_SCENE` | The first scene, when no script picks one. |

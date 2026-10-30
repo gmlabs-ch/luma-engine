@@ -86,7 +86,13 @@ window or its shield.
 
 `Game.MouseX` and `Game.MouseY` are the mouse in game pixels
 (writable, as is `Game.SetMousePos`); `Scene.MouseX` and `Scene.MouseY`
-add the scene's scroll offset. `Game.ActiveObject` is the active object,
+add the scene's scroll offset and take off the scene viewport's origin
+(`SCENE_VIEWPORT` in the game file, `Game.SetSceneViewport`; see
+[formats/game.md](formats/game.md)). The viewport also sizes the view
+the scroll centres on the main object, and `Scene.IsPointInViewport`
+answers for it. The scene is not clipped to it yet: a scene taller than
+its viewport draws over whatever lies below, which the games seen so far
+cover with a window. `Game.ActiveObject` is the active object,
 `Game.SelectedItem` the inventory item in use. The inventory box, when
 `Game.InventoryVisible`, is drawn between the `IN_GAME` windows and the
 others, and its items are active objects through their sprites.

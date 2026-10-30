@@ -47,6 +47,9 @@ pub struct GameFile {
     pub inventory_box: Option<String>,
     /// `AD_GAME`'s `ITEMS`: the inventory items definition.
     pub items: Option<String>,
+    /// `AD_GAME`'s `SCENE_VIEWPORT { x, y, width, height }`: the part of
+    /// the screen the scene is shown in; the whole screen when absent.
+    pub scene_viewport: Option<[i32; 4]>,
     /// `AD_GAME`'s `TALK_SKIP_BUTTON`: `left`, `right`, `both` or `none`.
     pub talk_skip_button: Option<String>,
     /// `AD_GAME`'s `VIDEO_SKIP_BUTTON`: `left`, `right` or `both`.
@@ -77,6 +80,7 @@ impl Default for GameFile {
             response_box: None,
             inventory_box: None,
             items: None,
+            scene_viewport: None,
             talk_skip_button: None,
             video_skip_button: None,
             startup_scene: None,
@@ -130,6 +134,12 @@ impl GameFile {
                     "RESPONSE_BOX" => game.response_box = text(node),
                     "INVENTORY_BOX" => game.inventory_box = text(node),
                     "ITEMS" => game.items = text(node),
+                    "SCENE_VIEWPORT" => {
+                        game.scene_viewport = node.as_ints().and_then(|v| match v[..] {
+                            [x, y, w, h, ..] => Some([x as i32, y as i32, w as i32, h as i32]),
+                            _ => None,
+                        })
+                    }
                     "TALK_SKIP_BUTTON" => game.talk_skip_button = text(node),
                     "VIDEO_SKIP_BUTTON" => game.video_skip_button = text(node),
                     "STARTUP_SCENE" => game.startup_scene = text(node),
@@ -170,6 +180,7 @@ AD_GAME {
   INVENTORY_BOX="interface\inventory.def"
   ITEMS="items\items.items"
   TALK_SKIP_BUTTON="left"
+  SCENE_VIEWPORT { 0, 0, 320, 189 }
   STARTUP_SCENE="scenes\intro\intro.scene"
 }
 "#,
@@ -200,6 +211,7 @@ AD_GAME {
             Some("interface\\responses.def")
         );
         assert_eq!(game.items.as_deref(), Some("items\\items.items"));
+        assert_eq!(game.scene_viewport, Some([0, 0, 320, 189]));
         assert_eq!(game.talk_skip_button.as_deref(), Some("left"));
         assert_eq!(
             game.startup_scene.as_deref(),
