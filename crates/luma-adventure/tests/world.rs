@@ -205,6 +205,22 @@ fn window_script() -> Vec<u8> {
     a.build()
 }
 
+/// The script of a verb entity in a window's container: a click notes
+/// it and swaps its sprite.
+fn verb_script() -> Vec<u8> {
+    let mut a = Assembler::new("verb.script");
+    a.emit(Instruction::Ret);
+    a.event("LeftClick");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    get(&mut a, "self", "Name");
+    store(&mut a, "verbClicked");
+    call(&mut a, "self", "SetSprite", &[Arg::Str("art\\red.png")]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
 /// The script of the menu: its `take` button closes it.
 fn menu_script() -> Vec<u8> {
     let mut a = Assembler::new("menu.script");
@@ -832,6 +848,21 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
         .to_vec(),
     );
     pkg.add_file("menu.script", menu_script());
+    pkg.add_file("verb.script", verb_script());
+    pkg.add_file(
+        "verb.entity",
+        b"ENTITY { NAME=\"pick\" CAPTION=\"/GREET/x\" ACTIVE=TRUE REGISTRABLE=TRUE SPRITE=\"art\\green.png\" SCRIPT=\"verb.script\" }"
+            .to_vec(),
+    );
+    pkg.add_file(
+        "cont.window",
+        b"WINDOW {
+  NAME=\"bar\" X=2 Y=2 WIDTH=20 HEIGHT=16
+  ENTITY_CONTAINER { NAME=\"verb\" X=1 Y=1 ENTITY=\"verb.entity\" }
+  ENTITY_CONTAINER { NAME=\"empty\" X=10 Y=1 }
+}"
+        .to_vec(),
+    );
     pkg.add_file(
         "w.window",
         b"WINDOW {
@@ -2203,4 +2234,68 @@ fn saved_games_resume_the_scripts_the_actors_and_the_sounds() {
     assert!(!runtime.world.is_save_slot_used(3));
     assert!(!runtime.world.empty_save_slot(3));
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn entity_containers_show_their_entity_and_give_it_the_mouse() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    let bar = runtime
+        .world
+        .load_window(&mut runtime.engine, "cont.window")
+        .unwrap();
+    let verb = runtime.world.widget(bar, "verb").unwrap();
+    let empty = runtime.world.widget(bar, "empty").unwrap();
+    assert_eq!(runtime.world.class_name(verb), "entity container");
+    // The container's entity, as GetEntity gives it; the caption went
+    // through the string table.
+    let entity = runtime.world.container_entity(verb).unwrap();
+    assert_eq!(runtime.world.container_entity(empty), None);
+    assert_eq!(
+        runtime.world.get_property(entity, "Name"),
+        Some(Value::from("pick"))
+    );
+    assert_eq!(
+        runtime.world.get_property(entity, "Caption"),
+        Some(Value::from("Hello"))
+    );
+    // The entity is drawn at the container's position in the window and
+    // is the object under the mouse there.
+    assert_eq!(
+        runtime.world.get_property(entity, "Interactive"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        runtime.world.get_property(entity, "Active"),
+        Some(Value::Bool(true))
+    );
+    runtime.mouse_move(4, 4);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(entity));
+    runtime.mouse_move(15, 4);
+    runtime.tick(16);
+    assert_ne!(runtime.world.active_object(), Some(entity));
+    // A click raises LeftClick on the entity's own script, which swaps
+    // its sprite.
+    runtime.mouse_move(4, 4);
+    runtime.tick(16);
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "verbClicked"), Value::from("pick"));
+    // Hidden with its container; inactive entities take no mouse.
+    runtime
+        .world
+        .set_property(verb, "Visible", &Value::Bool(false));
+    runtime.tick(16);
+    assert_ne!(runtime.world.active_object(), Some(entity));
 }

@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use luma_archive::Vfs;
+use luma_formats::Entity;
 use luma_formats::{GameFile, Scene, StringTable};
 use luma_script::{Context, Engine, Host, NativeId, Natives, Return, State, Value};
 
@@ -80,6 +81,8 @@ pub struct World {
     pub(crate) fader: Fader,
     pub(crate) fader_id: NativeId,
     pub(crate) ui: Ui,
+    /// The entities shown by the windows' entity containers.
+    pub(crate) ui_entities: Vec<crate::ui::UiEntity>,
     pub(crate) inventory: Inventory,
     pub(crate) video: Option<VideoPlayer>,
     pub(crate) video_texture: Option<luma_render::Texture>,
@@ -180,6 +183,7 @@ impl World {
             fader: Fader::default(),
             fader_id,
             ui: Ui::default(),
+            ui_entities: Vec::new(),
             inventory: Inventory::default(),
             video: None,
             video_texture: None,
@@ -796,10 +800,17 @@ impl World {
             .objects
             .iter()
             .filter(|(id, n)| {
-                matches!(
+                // The windows' container entities live outside the scene.
+                let scene_entity = matches!(
                     n.kind,
-                    Kind::Layer(_) | Kind::Entity(_) | Kind::Region { .. } | Kind::Sprite(_)
-                ) || scene_actors.contains(id)
+                    Kind::Entity(r) if !matches!(r, crate::scene_view::EntityRef::Ui(_))
+                );
+                scene_entity
+                    || matches!(
+                        n.kind,
+                        Kind::Layer(_) | Kind::Region { .. } | Kind::Sprite(_)
+                    )
+                    || scene_actors.contains(id)
             })
             .map(|(id, _)| id)
             .collect();
@@ -1323,7 +1334,27 @@ impl World {
         self.queue_events(id, events);
     }
 
-    /// The handle of a scene node or free entity.
+    /// An entity's definition: a scene node, a free entity or a window
+    /// container's entity.
+    pub(crate) fn entity_def(&self, r: crate::scene_view::EntityRef) -> Option<&Entity> {
+        match r {
+            crate::scene_view::EntityRef::Ui(i) => self.ui_entities.get(i).map(|e| &e.def),
+            r => self.scene().and_then(|v| v.entity(r)),
+        }
+    }
+
+    /// See [`World::entity_def`].
+    pub(crate) fn entity_def_mut(
+        &mut self,
+        r: crate::scene_view::EntityRef,
+    ) -> Option<&mut Entity> {
+        match r {
+            crate::scene_view::EntityRef::Ui(i) => self.ui_entities.get_mut(i).map(|e| &mut e.def),
+            r => self.scene_mut().and_then(|v| v.entity_mut(r)),
+        }
+    }
+
+    /// The handle of a scene node, free entity or container entity.
     pub fn node_id(&self, r: crate::scene_view::EntityRef) -> Option<NativeId> {
         self.objects.find(|k| *k == Kind::Entity(r))
     }

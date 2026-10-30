@@ -184,6 +184,7 @@ world_state! {
     cursors: Cursors,
     fader: Fader,
     ui: Ui,
+    ui_entities: Vec<crate::ui::UiEntity>,
     inventory: Inventory,
     video_subtitles: bool,
     video_font: Option<String>,
@@ -617,6 +618,12 @@ impl World {
         fonts.extend(self.video_font.clone());
         let mut images: Vec<String> = Vec::new();
         let mut cursors: Vec<String> = Vec::new();
+        for entity in &self.ui_entities {
+            images.extend(entity.def.sprite.clone());
+            images.extend(entity.def.talk_sprites.iter().cloned());
+            images.extend(entity.def.talk_special_sprites.iter().cloned());
+            fonts.extend(entity.def.font.clone());
+        }
         for control in self.ui.controls.values() {
             images.extend(control.image.clone());
             images.extend(control.back.as_ref().and_then(|b| b.image.clone()));
@@ -655,6 +662,7 @@ impl World {
                 }
                 ControlKind::Static(_) => {}
                 ControlKind::Edit(e) => fonts.extend(e.font_selected.clone()),
+                ControlKind::EntityContainer(_) => {}
             }
         }
         for (_, item) in &self.inventory.items {

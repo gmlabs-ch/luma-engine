@@ -108,6 +108,11 @@ impl World {
                 "CursorBlinkRate" => Value::Int(e.cursor_blink_rate),
                 _ => return None,
             },
+            ControlKind::EntityContainer(_) => match name {
+                // The entity of a container is never frozen with the game.
+                "Freezable" => Value::Bool(false),
+                _ => return None,
+            },
         })
     }
 
@@ -224,6 +229,7 @@ impl World {
                         }
                         _ => false,
                     },
+                    ControlKind::EntityContainer(_) => name == "Freezable",
                 };
             }
         }
@@ -244,6 +250,7 @@ impl World {
             Some(ControlKind::Button(_)) => "button",
             Some(ControlKind::Static(_)) => "static",
             Some(ControlKind::Edit(_)) => "editor",
+            Some(ControlKind::EntityContainer(_)) => "entity container",
             None => return None,
         };
         // Methods every control has (CUIObject).
@@ -439,6 +446,13 @@ impl World {
             ) => {
                 self.stub(&format!("button.{name}"));
                 Return::null()
+            }
+            ("entity container", "GetEntity") => {
+                Return::value(native_or_null(self.container_entity(id)))
+            }
+            ("entity container", "SetEntity") => {
+                let path = arg(0).get_string(self);
+                Return::value(self.set_container_entity(ctx.engine, id, &path))
             }
             ("static", "SizeToFit") => {
                 self.size_static_to_fit(id, true);

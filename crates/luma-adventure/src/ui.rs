@@ -11,15 +11,15 @@ use std::collections::HashMap;
 use luma_formats::font::TextAlign;
 use luma_formats::sprite::Rect as SpriteRect;
 use luma_formats::{
-    ButtonDef, ControlDef, DEFAULT_COLOR_KEY, EditDef, Rgba, StaticDef, TiledImage, VerticalAlign,
-    WidgetDef, WindowDef,
+    ButtonDef, ControlDef, DEFAULT_COLOR_KEY, EditDef, Entity, Rgba, StaticDef, TiledImage,
+    VerticalAlign, WidgetDef, WindowDef,
 };
 use luma_render::{DrawList, Quad, Rect, Texture};
 use luma_script::{Engine, NativeId};
 
 use crate::input::{HitArea, HitBank};
 use crate::objects::Kind;
-use crate::scene_view::{AnimState, SpriteBank, place};
+use crate::scene_view::{AnimState, EntityRef, SpriteBank, place};
 use crate::world::World;
 
 /// Windows' virtual key codes the controls react to.
@@ -247,6 +247,23 @@ pub enum ControlKind {
     Static(StaticState),
     /// A text editor.
     Edit(Box<EditState>),
+    /// An entity container: the index of its entity in the world's list,
+    /// `None` when the entity file could not be loaded.
+    EntityContainer(Option<usize>),
+}
+
+/// An entity shown by a window's entity container (`CUIEntity`'s
+/// `CAdEntity`): it lives outside the scene, at the container's position.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct UiEntity {
+    /// The entity, as its file defines it and scripts modify it.
+    pub def: Entity,
+    /// The file it was loaded from.
+    pub filename: String,
+    /// The animation of its sprite.
+    pub anim: Option<AnimState>,
+    /// The control showing it.
+    pub container: NativeId,
 }
 
 /// A control: a window, a button, a static text or an editor
@@ -406,6 +423,7 @@ impl Control {
             ControlKind::Button(_) => "button",
             ControlKind::Static(_) => "static",
             ControlKind::Edit(_) => "editor",
+            ControlKind::EntityContainer(_) => "entity container",
         }
     }
 
@@ -745,6 +763,17 @@ impl World {
             WidgetDef::Window(def) => {
                 let id = self.new_control(ControlKind::Window(Box::default()), Some(parent));
                 self.apply_window_def(engine, id, *def, None);
+                id
+            }
+            WidgetDef::EntityContainer(def) => {
+                let id = self.new_control(ControlKind::EntityContainer(None), Some(parent));
+                self.apply_control_def(engine, id, &def.base);
+                if let Some(control) = self.control_mut(id) {
+                    control.can_focus = false;
+                }
+                if let Some(path) = &def.entity {
+                    self.set_container_entity(engine, id, path);
+                }
                 id
             }
         };
@@ -1461,8 +1490,100 @@ impl World {
                 ControlKind::Button(_) => self.update_button(engine, widget),
                 ControlKind::Static(_) => self.update_static(widget),
                 ControlKind::Edit(_) => self.update_edit(widget),
+                ControlKind::EntityContainer(entity) => self.step_ui_entity_anim(*entity),
             }
         }
+    }
+
+    /// Gives an entity container the entity of a file (`ENTITY`,
+    /// `SetEntity`): the entity's sprite is loaded, its scripts attached
+    /// to its own handle, and a previous entity is dropped. The entity
+    /// cannot be frozen and gets mouse events while the game is not
+    /// interactive, as the original engine sets it up.
+    pub fn set_container_entity(&mut self, engine: &mut Engine, id: NativeId, path: &str) -> bool {
+        let def = match self
+            .vfs
+            .read(path)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| Entity::parse(&bytes).map_err(|e| e.to_string()))
+        {
+            Ok(def) => def,
+            Err(reason) => {
+                self.log(format!("Error parsing ENTITY file '{path}': {reason}"));
+                return false;
+            }
+        };
+        let Some(ControlKind::EntityContainer(previous)) = self.control(id).map(|c| c.kind.clone())
+        else {
+            return false;
+        };
+        if let Some(previous) = previous {
+            if let Some(old) = self.node_id(EntityRef::Ui(previous)) {
+                for script in engine.scripts_of(old) {
+                    engine.finish(script, true);
+                }
+                self.objects.remove(old);
+            }
+        }
+        let index = self.ui_entities.len();
+        let caption = self.expand(&def.caption);
+        let scripts = def.scripts.clone();
+        let sprites: Vec<String> = def
+            .sprite
+            .iter()
+            .chain(def.talk_sprites.iter())
+            .chain(def.talk_special_sprites.iter())
+            .cloned()
+            .collect();
+        for sprite in &sprites {
+            if !self.ui.bank.add_sprite(&self.vfs, sprite) {
+                self.log(format!("  missing: {sprite}"));
+            }
+        }
+        let mut def = def;
+        def.caption = caption;
+        self.ui_entities.push(UiEntity {
+            def,
+            filename: path.to_string(),
+            anim: None,
+            container: id,
+        });
+        let entity = self.objects.insert(Kind::Entity(EntityRef::Ui(index)));
+        for script in scripts {
+            self.attach(engine, entity, &script);
+        }
+        if let Some(control) = self.control_mut(id) {
+            control.kind = ControlKind::EntityContainer(Some(index));
+        }
+        true
+    }
+
+    /// The entity of a container, if it has one.
+    pub fn container_entity(&self, id: NativeId) -> Option<NativeId> {
+        match self.control(id).map(|c| &c.kind) {
+            Some(ControlKind::EntityContainer(Some(index))) => self.node_id(EntityRef::Ui(*index)),
+            _ => None,
+        }
+    }
+
+    /// Advances the animation of a container's entity sprite.
+    fn step_ui_entity_anim(&mut self, index: Option<usize>) {
+        let timer = self.timer();
+        let Some(entity) = index.and_then(|i| self.ui_entities.get_mut(i)) else {
+            return;
+        };
+        let Some(path) = entity.def.sprite.clone() else {
+            entity.anim = None;
+            return;
+        };
+        let Some(loaded) = self.ui.bank.sprite(&path) else {
+            return;
+        };
+        let anim = entity.anim.get_or_insert_with(|| AnimState::new(&path));
+        if anim.sprite != crate::scene_view::key(&path) {
+            *anim = AnimState::new(&path);
+        }
+        anim.step(&loaded.sprite, timer);
     }
 
     /// Advances the animation of a control's image.
@@ -1821,6 +1942,40 @@ impl World {
                 ControlKind::Edit(_) => {
                     hits.push(HitArea::rect(widget, c.x + x, c.y + y, c.width, c.height));
                 }
+                ControlKind::EntityContainer(index) => {
+                    // The entity is the object under the mouse, through its
+                    // sprite, when it is active and registrable and the
+                    // container is enabled (`CUIEntity::Display`).
+                    let (cx, cy, disabled) = (c.x + x, c.y + y, c.disabled);
+                    let Some(entity) = index.and_then(|i| self.ui_entities.get(i)) else {
+                        continue;
+                    };
+                    if disabled || !entity.def.active || !entity.def.interactive {
+                        continue;
+                    }
+                    let Some(owner) = self.node_id(EntityRef::Ui(index.unwrap_or(0))) else {
+                        continue;
+                    };
+                    let frame = entity.anim.as_ref().map_or(0, |a| a.current_frame);
+                    if let Some(loaded) = entity
+                        .def
+                        .sprite
+                        .as_deref()
+                        .and_then(|p| self.ui.bank.sprite(p))
+                    {
+                        World::sprite_hits(
+                            owner,
+                            HitBank::Ui,
+                            &loaded.sprite,
+                            frame,
+                            cx + entity.def.x,
+                            cy + entity.def.y,
+                            100.0,
+                            (0, 0),
+                            hits,
+                        );
+                    }
+                }
             }
         }
     }
@@ -2092,7 +2247,64 @@ impl World {
                 ControlKind::Button(_) => self.draw_button(list, *widget, x, y, tint),
                 ControlKind::Static(_) => self.draw_static(list, *widget, x, y, tint),
                 ControlKind::Edit(_) => self.draw_edit(list, *widget, x, y, tint),
+                ControlKind::EntityContainer(index) => {
+                    self.draw_ui_entity(list, *widget, *index, x, y, tint);
+                }
             }
+        }
+    }
+
+    /// Draws a container's entity at the container's position inside its
+    /// window, with the sprite's hotspot, as the scene draws an entity.
+    fn draw_ui_entity<'a>(
+        &'a self,
+        list: &mut DrawList<'a>,
+        id: NativeId,
+        index: Option<usize>,
+        ox: i32,
+        oy: i32,
+        tint: Rgba,
+    ) {
+        let Some(control) = self.control(id) else {
+            return;
+        };
+        let Some(entity) = index.and_then(|i| self.ui_entities.get(i)) else {
+            return;
+        };
+        if !control.visible || !entity.def.active {
+            return;
+        }
+        let Some(loaded) = entity
+            .def
+            .sprite
+            .as_deref()
+            .and_then(|p| self.ui.bank.sprite(p))
+        else {
+            return;
+        };
+        let frame = entity.anim.as_ref().map_or(0, |a| a.current_frame);
+        let Some(frame) = loaded
+            .sprite
+            .frames
+            .get(frame.min(loaded.sprite.frames.len().saturating_sub(1)))
+        else {
+            return;
+        };
+        let (x, y) = (ox + control.x + entity.def.x, oy + control.y + entity.def.y);
+        let tint = entity.def.tint.unwrap_or(tint);
+        for sub in &frame.subframes {
+            let Some(image) = &sub.image else { continue };
+            let Some(texture) = self.ui.bank.texture(image, sub.color_key) else {
+                continue;
+            };
+            list.push(place(
+                sub,
+                texture,
+                x - sub.hotspot_x,
+                y - sub.hotspot_y,
+                1.0,
+                tint,
+            ));
         }
     }
 

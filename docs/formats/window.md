@@ -98,6 +98,7 @@ height. A `BACK` tiled image then rounds the size down to whole tiles.
 | `ALPHA_COLOR` | `r, g, b` | | A colour multiplied with the window and its controls. |
 | `ALPHA` | int | `255` | Its opacity. |
 | `BUTTON`, `STATIC`, `EDIT`, `WINDOW` | block | | A control, in drawing order. |
+| `ENTITY_CONTAINER` | block | | A control showing an entity: `NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, and `ENTITY`, an `.entity` file (an `ENTITY` block as in a scene). The entity is drawn at the container's position with its own sprite and animation, takes the mouse through its sprite when it is active and registrable and the container is enabled, and its own scripts get the mouse events; `GetEntity` hands it to scripts, `SetEntity` loads another file. OpenQuest's verb bar is made of them. |
 
 A window with a `TITLE` but no `TITLE_RECT` shows no title. A window
 whose size is `0` after the correction has the width of its image or

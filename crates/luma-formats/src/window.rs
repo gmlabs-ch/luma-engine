@@ -602,6 +602,8 @@ pub enum WidgetDef {
     Edit(EditDef),
     /// A nested window.
     Window(Box<WindowDef>),
+    /// An entity container.
+    EntityContainer(EntityContainerDef),
 }
 
 impl WidgetDef {
@@ -612,6 +614,34 @@ impl WidgetDef {
             WidgetDef::Static(s) => &s.base,
             WidgetDef::Edit(e) => &e.base,
             WidgetDef::Window(w) => &w.base,
+            WidgetDef::EntityContainer(c) => &c.base,
+        }
+    }
+}
+
+/// An entity container (`ENTITY_CONTAINER`): a control that shows an
+/// entity loaded from an `.entity` file at its position, with the
+/// entity's own sprite, scripts and mouse events (`CUIEntity`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct EntityContainerDef {
+    /// The common keys (`NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`).
+    pub base: ControlDef,
+    /// `ENTITY`: the entity file shown.
+    pub entity: Option<String>,
+}
+
+impl EntityContainerDef {
+    /// Applies the keys of an `ENTITY_CONTAINER` block.
+    pub fn apply(&mut self, node: &Node) {
+        for child in node.nodes() {
+            let key = child.key.to_ascii_uppercase();
+            if self.base.apply_key(&key, child) {
+                continue;
+            }
+            if key == "ENTITY" {
+                self.entity = path(child);
+            }
         }
     }
 }
@@ -742,6 +772,11 @@ impl WindowDef {
                     let mut def = WindowDef::default();
                     def.apply(child);
                     self.widgets.push(WidgetDef::Window(Box::new(def)));
+                }
+                "ENTITY_CONTAINER" => {
+                    let mut def = EntityContainerDef::default();
+                    def.apply(child);
+                    self.widgets.push(WidgetDef::EntityContainer(def));
                 }
                 _ => {}
             }

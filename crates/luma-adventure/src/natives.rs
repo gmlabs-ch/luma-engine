@@ -1003,8 +1003,7 @@ impl World {
     // ----------------------------------------------------------------
 
     fn entity_get(&self, r: EntityRef, name: &str) -> Option<Value> {
-        let view = self.scene()?;
-        let e = view.entity(r)?;
+        let e = self.entity_def(r)?;
         Some(match name {
             "Type" => Value::from("entity"),
             "Name" => Value::from(e.name.clone()),
@@ -1013,7 +1012,7 @@ impl World {
             "X" => Value::Int(e.x),
             "Y" => Value::Int(e.y),
             "Height" => Value::Int(self.entity_height(r)),
-            "Ready" => Value::Bool(!view.is_talking(r)),
+            "Ready" => Value::Bool(!self.scene().is_some_and(|v| v.is_talking(r))),
             "Movable" => Value::Bool(true),
             "Registrable" | "Interactive" => Value::Bool(e.interactive),
             "Zoomable" | "Scalable" => Value::Bool(e.scalable),
@@ -1033,13 +1032,15 @@ impl World {
             "Active" => Value::Bool(e.active),
             "IgnoreItems" => Value::Bool(e.ignore_items),
             "SceneIndependent" => Value::Bool(false),
-            "SubtitlesWidth" => Value::Int(view.subtitles.get(&r).map_or(0, |m| m.width)),
-            "SubtitlesPosX" => Value::Int(view.subtitles.get(&r).map_or(0, |m| m.x)),
-            "SubtitlesPosY" => Value::Int(view.subtitles.get(&r).map_or(0, |m| m.y)),
+            "SubtitlesWidth" => Value::Int(self.subtitle_mods_of(r).map_or(0, |m| m.width)),
+            "SubtitlesPosX" => Value::Int(self.subtitle_mods_of(r).map_or(0, |m| m.x)),
+            "SubtitlesPosY" => Value::Int(self.subtitle_mods_of(r).map_or(0, |m| m.y)),
             "SubtitlesPosRelative" => {
-                Value::Bool(view.subtitles.get(&r).is_none_or(|m| m.relative))
+                Value::Bool(self.subtitle_mods_of(r).is_none_or(|m| m.relative))
             }
-            "SubtitlesPosXCenter" => Value::Bool(view.subtitles.get(&r).is_none_or(|m| m.x_center)),
+            "SubtitlesPosXCenter" => {
+                Value::Bool(self.subtitle_mods_of(r).is_none_or(|m| m.x_center))
+            }
             "NumItems" => Value::Int(self.inventory.taken.len() as i32),
             "NumAttachments" => Value::Int(0),
             "ParticleEmitter" => Value::Null,
@@ -1080,7 +1081,7 @@ impl World {
             }
             return true;
         }
-        let Some(e) = self.scene_mut().and_then(|v| v.entity_mut(r)) else {
+        let Some(e) = self.entity_def_mut(r) else {
             return false;
         };
         match name {
@@ -1124,7 +1125,7 @@ impl World {
         Some(match name {
             "SkipTo" => {
                 let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
-                if let Some(e) = self.scene_mut().and_then(|v| v.entity_mut(r)) {
+                if let Some(e) = self.entity_def_mut(r) {
                     e.x = x;
                     e.y = y;
                 }
@@ -1132,8 +1133,7 @@ impl World {
             }
             "Caption" => {
                 let caption = self
-                    .scene()
-                    .and_then(|v| v.entity(r))
+                    .entity_def(r)
                     .map(|e| e.caption.clone())
                     .unwrap_or_default();
                 Return::value(caption)
@@ -1143,17 +1143,19 @@ impl World {
                     Value::Null => None,
                     v => Some(v.get_string(self)),
                 };
-                let ok = match (&path, self.scene.as_mut()) {
-                    (Some(path), Some(view)) => view.add_sprite(&self.vfs, path),
-                    _ => true,
+                let ok = match (&path, r) {
+                    (Some(path), EntityRef::Ui(_)) => self.ui.bank.add_sprite(&self.vfs, path),
+                    (Some(path), _) => match self.scene.as_mut() {
+                        Some(view) => view.add_sprite(&self.vfs, path),
+                        None => true,
+                    },
+                    (None, _) => true,
                 };
                 if ok {
-                    if let Some(e) = self.scene_mut().and_then(|v| v.entity_mut(r)) {
+                    if let Some(e) = self.entity_def_mut(r) {
                         e.sprite = path;
                     }
-                    if let Some(view) = self.scene_mut() {
-                        view.reset_anim(r);
-                    }
+                    self.reset_entity_anim(r);
                 } else {
                     let path = path.unwrap_or_default();
                     self.log(format!("SetSprite method failed for file '{path}'"));
@@ -1161,17 +1163,12 @@ impl World {
                 Return::value(ok)
             }
             "GetSprite" => {
-                let sprite = self
-                    .scene()
-                    .and_then(|v| v.entity(r))
-                    .and_then(|e| e.sprite.clone());
+                let sprite = self.entity_def(r).and_then(|e| e.sprite.clone());
                 Return::value(sprite.map_or(Value::Null, Value::from))
             }
             "GetSpriteObject" => Return::value(native_or_null(self.sprite_object(id))),
             "Reset" => {
-                if let Some(view) = self.scene_mut() {
-                    view.reset_anim(r);
-                }
+                self.reset_entity_anim(r);
                 Return::null()
             }
             "Talk" | "TalkAsync" => self.talk_call(id, name == "Talk", args),
@@ -1186,8 +1183,7 @@ impl World {
                 Return::null()
             }
             "GetFont" => Return::value(
-                self.scene()
-                    .and_then(|v| v.entity(r))
+                self.entity_def(r)
                     .and_then(|e| e.font.clone())
                     .map_or(Value::Null, Value::from),
             ),
@@ -1453,4 +1449,27 @@ fn math_call(name: &str, args: &[Value]) -> Option<Value> {
         _ => return None,
     };
     Some(Value::Float(result))
+}
+
+impl World {
+    /// The subtitle placement scripts set on a scene entity.
+    fn subtitle_mods_of(&self, r: EntityRef) -> Option<&crate::talk::SubtitleMods> {
+        self.scene().and_then(|v| v.subtitles.get(&r))
+    }
+
+    /// Restarts the animation of an entity's sprite (`SetSprite`, `Reset`).
+    fn reset_entity_anim(&mut self, r: EntityRef) {
+        match r {
+            EntityRef::Ui(i) => {
+                if let Some(entity) = self.ui_entities.get_mut(i) {
+                    entity.anim = None;
+                }
+            }
+            r => {
+                if let Some(view) = self.scene_mut() {
+                    view.reset_anim(r);
+                }
+            }
+        }
+    }
 }

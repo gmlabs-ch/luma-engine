@@ -97,6 +97,9 @@ pub enum EntityRef {
     },
     /// A free entity of the scene, by index.
     Free(usize),
+    /// An entity shown by a window's entity container, by index in the
+    /// world's list; it lives outside the scene.
+    Ui(usize),
 }
 
 /// The animation state of a sprite shown by an object, advanced like the
@@ -567,6 +570,7 @@ impl SceneView {
                 SceneNode::Region(_) => None,
             },
             EntityRef::Free(i) => self.scene.free_entities.get(i),
+            EntityRef::Ui(_) => None,
         }
     }
 
@@ -580,6 +584,7 @@ impl SceneView {
                 }
             }
             EntityRef::Free(i) => self.scene.free_entities.get_mut(i),
+            EntityRef::Ui(_) => None,
         }
     }
 
