@@ -168,9 +168,38 @@ states are part of a saved game (see [saving.md](saving.md)). The
 original engine also remembers whether each waypoint group is active;
 Luma uses every group, so this is not kept yet.
 
+## Dialogue responses
+
+A conversation's choices go through the **response box**
+(`RESPONSE_BOX` in the game file, a `.def` file with `FONT`,
+`FONT_HOVER`, `AREA`, `HORIZONTAL`, `SPACING`, `TEXT_ALIGN`,
+`VERTICAL_ALIGN`, `CURSOR` and a `WINDOW` with `prev` and `next`
+buttons), as the original engine's `CAdResponseBox` does. The script
+adds its choices with `Game.AddResponse(id, text)`,
+`AddResponseOnce` (not offered again in the current dialogue branch) or
+`AddResponseOnceGame` (never again), then `Game.GetResponse()` shows
+them and waits: one text button per choice in the box's fonts (or its
+icons), laid out in the area from the scroll offset, `prev` and `next`
+shown when they do not fit, the window exclusive meanwhile. The pick
+returns the choice's id to the script, sets `Game.LastResponse` and
+`LastResponseOrig`, and closes the box; without any choice left
+`GetResponse` returns `null` at once, and with a single one it returns
+it at once when asked to (`GetResponse(true)`). `StartDlgBranch` and
+`EndDlgBranch` name the branch the once-only choices are remembered in
+(qualified by the script file and event, as the original does; the
+innermost without a name); when the last branch ends they are
+forgotten. `ResetResponse(id)` forgets one, `ClearResponses` drops the
+pending ones, `GetNumResponses` counts them after weeding,
+`Game.ResponsesVisible` says whether the box waits, and
+`GetResponsesWindow` and `LoadResponseBox` serve the box itself.
+
+While the box waits (the original's semi-frozen state), and while an
+exclusive window is up, the windows and their controls take the mouse
+even when `Game.Interactive` is off, so a choice can be picked during
+the actors' lines; the scene's objects do not.
+
 ## Not yet
 
-- Dialogue responses (`AddResponse`, `GetResponse`).
 - Each object's own inventory (`Game.InventoryObject`): one inventory
   serves every object.
 - The mouse wheel, which the engine gives to the focused window.

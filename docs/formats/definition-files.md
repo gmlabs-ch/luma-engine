@@ -130,6 +130,7 @@ root block named after the type:
 | `.window` | `WINDOW` | WindowEdit or by hand |
 | `.font` | `FONT` (bitmap) or `TTFONT` (TrueType) | by hand |
 | `.items` | one `ITEM` block per item | by hand |
+| `.def` | `INVENTORY_BOX` or `RESPONSE_BOX` | by hand |
 | `.def` | `INVENTORY_BOX`, `RESPONSE_BOX` | by hand |
 
 Not definition files, despite living next to them: `*.script` (compiled
