@@ -44,6 +44,10 @@ fn game() -> std::path::PathBuf {
     pkg.add_stored_file("art\\red.png", png(4, 4, [255, 0, 0, 255]));
     pkg.add_stored_file("art\\green.png", png(2, 2, [0, 255, 0, 255]));
     pkg.add_file(
+        "art\\loop.sprite",
+        b"SPRITE { LOOPING=TRUE FRAME { DELAY=100 IMAGE=\"art\\red.png\" MOVE {4, 0} } FRAME { DELAY=100 IMAGE=\"art\\green.png\" MOVE {4, 0} } }".to_vec(),
+    );
+    pkg.add_file(
         "art\\prop.sprite",
         b"SPRITE { FRAME { DELAY=100 IMAGE=\"art\\red.png\" HOTSPOT {0, 4} } FRAME { DELAY=100 IMAGE=\"art\\green.png\" } }".to_vec(),
     );
@@ -261,6 +265,21 @@ fn play_anim_shows_a_sprite_once_then_gives_the_entity_its_own_back() {
     assert_eq!(view.shown_sprite(bg).as_deref(), Some("art\\bg.png"));
     // Reset cuts a playing sprite short.
     assert!(view.play_anim(&vfs, bg, "art\\prop.sprite"));
+    view.reset_anim(bg);
+    assert!(!view.is_playing_anim(bg));
+    // A looping sprite plays on, moving the entity by its frames' MOVE
+    // (a character wandering or walking across the scene).
+    let x = view.entity(bg).unwrap().x;
+    assert!(view.play_anim(&vfs, bg, "art\\loop.sprite"));
+    for t in (400..=2400).step_by(50) {
+        view.advance(t);
+    }
+    assert!(view.is_playing_anim(bg), "a looping sprite never ends");
+    assert!(
+        view.entity(bg).unwrap().x >= x + 32,
+        "{}",
+        view.entity(bg).unwrap().x
+    );
     view.reset_anim(bg);
     assert!(!view.is_playing_anim(bg));
 }

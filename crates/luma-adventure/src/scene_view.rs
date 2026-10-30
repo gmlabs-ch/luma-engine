@@ -515,6 +515,8 @@ impl SceneView {
                 paths.extend(e.talk_special_sprites.iter().cloned());
             }
         }
+        // The sprites `PlayAnim` is showing instead of the entities' own.
+        paths.extend(self.playing.values().cloned());
         for path in paths {
             self.bank.add_sprite(vfs, &path);
         }
@@ -658,17 +660,19 @@ impl SceneView {
         self.entity(r)?.sprite.clone()
     }
 
-    /// Plays a sprite once on an entity (`CAdObject::PlayAnim`): shown in
-    /// place of the entity's sprite until it finishes; `false` when the
-    /// file cannot be loaded.
+    /// Shows a sprite in place of the entity's own (`PlayAnim`): a
+    /// sprite that does not loop gives the entity its own back when it
+    /// ends; a looping one plays until `Reset`, a sentence or another
+    /// `PlayAnim`, moving the entity by its frames' `MOVE` all along.
+    /// `false` when the file cannot be loaded.
     pub fn play_anim(&mut self, vfs: &Vfs, r: EntityRef, path: &str) -> bool {
         if self.entity(r).is_none() || !self.bank.add_sprite(vfs, path) {
             return false;
         }
+        // The sprite plays as it is: a looping one goes on until `Reset`,
+        // a sentence or another `PlayAnim` (a wandering character).
         self.playing.insert(r, path.to_string());
-        let mut state = AnimState::new(path);
-        state.looping = Some(false);
-        self.anims.insert(r, state);
+        self.anims.insert(r, AnimState::new(path));
         true
     }
 
@@ -678,8 +682,12 @@ impl SceneView {
         self.playing.contains_key(&r)
     }
 
-    /// Starts a sentence on an entity (`CAdObject::Talk`).
+    /// Starts a sentence on an entity (`CAdObject::Talk`): talking is the
+    /// entity's state now, so a sprite `PlayAnim` was showing is dropped
+    /// (`CAdEntity::Update` frees it once the entity is ready again) and
+    /// the entity is ready as soon as the sentence ends.
     pub fn talk(&mut self, r: EntityRef, sentence: Sentence) {
+        self.playing.remove(&r);
         self.talks.insert(
             r,
             EntityTalk {

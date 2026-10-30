@@ -2448,3 +2448,90 @@ fn dialogue_responses_wait_for_a_pick_and_remember_once_choices() {
     runtime.tick(16);
     assert_eq!(result(&runtime, "num"), Value::Int(2));
 }
+
+#[test]
+fn a_played_animation_survives_a_saved_game() {
+    use luma_adventure::EntityRef;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    // "prop" is node 0 of the main layer, at (8, 12); stand.sprite loops,
+    // so it plays until something ends it, as a wandering character's does.
+    let prop = EntityRef::Node { layer: 0, index: 0 };
+    // The camera follows the walking actor: the prop goes where the
+    // screen is, and the point tested follows the offset of the frame.
+    let (ox, oy) = runtime.world.offset();
+    {
+        let e = runtime.world.scene_mut().unwrap().entity_mut(prop).unwrap();
+        e.x = ox + 8;
+        e.y = oy + 12;
+    }
+    let (px, py) = (ox + 9, oy + 5);
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop)
+        .unwrap()
+        .active = true;
+    let files = Vfs::open_game(&dir).unwrap();
+    assert!(
+        runtime
+            .world
+            .scene_mut()
+            .unwrap()
+            .play_anim(&files, prop, "art\\stand.sprite")
+    );
+    runtime.tick(16);
+    assert!(runtime.world.scene().unwrap().is_playing_anim(prop));
+    let (ox, oy) = runtime.world.offset();
+    let under_mouse = runtime.world.object_at(px - ox, py - oy);
+    assert!(under_mouse.is_some(), "the played sprite takes the mouse");
+    runtime.save_game(7, "anim", false).unwrap();
+
+    // A fresh engine loads the slot: the played sprite is loaded again,
+    // so the entity is drawn and takes the mouse as before.
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(7).unwrap();
+    loaded.tick(16);
+    let view = loaded.world.scene().unwrap();
+    assert!(view.is_playing_anim(prop));
+    assert_eq!(
+        view.shown_sprite(prop).as_deref(),
+        Some("art\\stand.sprite")
+    );
+    assert!(view.sprite("art\\stand.sprite").is_some(), "loaded again");
+    let (ox, oy) = loaded.world.offset();
+    assert_eq!(loaded.world.object_at(px - ox, py - oy), under_mouse);
+
+    // A sentence takes over: the played sprite is dropped and the entity
+    // is ready once the sentence ends, as a script waiting on it expects.
+    let id = loaded.world.find_node("prop").unwrap();
+    assert!(loaded.world.talk(
+        id,
+        "Hi",
+        None,
+        100,
+        None,
+        luma_formats::font::TextAlign::Center
+    ));
+    loaded.tick(16);
+    let view = loaded.world.scene().unwrap();
+    assert!(
+        !view.is_playing_anim(prop),
+        "talking replaced the animation"
+    );
+    assert!(view.is_talking(prop));
+    for _ in 0..12 {
+        loaded.tick(16);
+    }
+    let view = loaded.world.scene().unwrap();
+    assert!(!view.is_talking(prop));
+    assert_eq!(view.shown_sprite(prop).as_deref(), Some("art\\prop.sprite"));
+}
