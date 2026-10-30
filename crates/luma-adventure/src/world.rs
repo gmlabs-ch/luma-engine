@@ -448,9 +448,7 @@ impl World {
                 .map(|s| s.scene.name.clone())
                 .unwrap_or_default(),
             Some(Kind::Entity(r)) => self
-                .scene
-                .as_ref()
-                .and_then(|s| s.entity(*r))
+                .entity_def(*r)
                 .map(|e| e.name.clone())
                 .unwrap_or_default(),
             Some(Kind::Region { layer, index }) => self

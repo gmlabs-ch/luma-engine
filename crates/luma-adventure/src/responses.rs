@@ -492,6 +492,18 @@ impl World {
         self.responses.branches.last().cloned()
     }
 
+    /// The texts of the choices the box shows, in order (for listings).
+    pub fn response_texts(&self) -> Vec<String> {
+        if !self.responses_visible() {
+            return Vec::new();
+        }
+        self.responses
+            .pending
+            .iter()
+            .map(|r| r.text.clone())
+            .collect()
+    }
+
     /// Whether the box waits for a pick (`Game.ResponsesVisible`).
     pub fn responses_visible(&self) -> bool {
         self.responses.waiting.is_some()

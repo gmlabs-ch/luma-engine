@@ -55,6 +55,9 @@ OPTIONS:
                           default), for scripts that poll Keyboard.IsKeyDown
     --type <text>         In headless mode, type the text, a key per character (into the
                           focused editor)
+    --drag <x>,<y>:<x>,<y>
+                          In headless mode, press the left button at the first point, move to
+                          the second over --after frames and release there (a puzzle piece)
     --wait <n>            In headless mode, run n frames, e.g. for a loaded game's sentence to end
     --after <n>           In headless mode, frames between two steps (default 3), e.g. to let
                           a script finish first
@@ -70,8 +73,8 @@ OPTIONS:
                           saved ones
     --help                Show this message
 
---click, --click-at, --right-click-at, --key, --hold-key, --type and --wait
-are steps: they run in the order given, --after frames apart, starting one
+--click, --click-at, --right-click-at, --drag, --key, --hold-key, --type
+and --wait are steps: they run in the order given, --after frames apart, starting one
 frame after the scene is up, once its scripts have placed the actor, as
 for a player who acts when the scene shows.
 
@@ -105,6 +108,9 @@ enum Step {
     /// Run that many frames.
     Wait(u64),
     Type(String),
+    /// Press the left button at one point, move to another over the
+    /// `--after` frames, hold a few frames there and release.
+    Drag(i32, i32, i32, i32),
 }
 
 struct Options {
@@ -195,6 +201,18 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                 steps.push(Step::ClickAt(x, y));
             }
             "--type" => steps.push(Step::Type(value(&mut i)?.clone())),
+            "--drag" => {
+                let v = value(&mut i)?;
+                let point = |p: &str| -> Option<(i32, i32)> {
+                    let (x, y) = p.split_once(',')?;
+                    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+                };
+                let (from, to) = v
+                    .split_once(':')
+                    .and_then(|(from, to)| Some((point(from)?, point(to)?)))
+                    .ok_or_else(|| format!("--drag expects <x>,<y>:<x>,<y>, got `{v}`"))?;
+                steps.push(Step::Drag(from.0, from.1, to.0, to.1));
+            }
             "--wait" => {
                 let v = value(&mut i)?;
                 let frames = v
@@ -483,6 +501,40 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                         }
                         continue;
                     }
+                    Step::Drag(x1, y1, x2, y2) => {
+                        runtime.mouse_move(*x1, *y1);
+                        for line in runtime.tick(options.dt) {
+                            println!("[{tick}] {line}");
+                        }
+                        let over = runtime
+                            .world
+                            .active_object()
+                            .map(|id| runtime.world.describe_object(id))
+                            .unwrap_or_else(|| "nothing".to_string());
+                        println!(
+                            "[{tick}] mouse at ({x1}, {y1}) over {over}; drag to ({x2}, {y2})"
+                        );
+                        runtime.mouse_left_down();
+                        let frames = options.after.max(1);
+                        for frame in 1..=frames {
+                            let t = frame as f64 / frames as f64;
+                            let x = x1 + ((x2 - x1) as f64 * t).round() as i32;
+                            let y = y1 + ((y2 - y1) as f64 * t).round() as i32;
+                            runtime.mouse_move(x, y);
+                            for line in runtime.tick(options.dt) {
+                                println!("[{tick}] {line}");
+                            }
+                        }
+                        // Hold the piece at the end point so that a script
+                        // that follows the mouse (`Sleep` loop) catches up.
+                        for _ in 0..10 {
+                            for line in runtime.tick(options.dt) {
+                                println!("[{tick}] {line}");
+                            }
+                        }
+                        runtime.mouse_left_up();
+                        continue;
+                    }
                     Step::Type(text) => {
                         println!("[{tick}] typing {text:?}");
                         for ch in text.chars() {
@@ -575,11 +627,19 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         if let Some(view) = runtime.world.scene() {
             for r in view.entity_refs() {
                 if let Some(e) = view.entity(r) {
+                    let shown = view.shown_sprite(r);
                     println!(
-                        "entity {:?}: {}, sprite {:?}, caption {:?}, alpha {:?}",
+                        "entity {:?}: {}, at ({}, {}), sprite {:?}{}, caption {:?}, alpha {:?}",
                         e.name,
                         if e.active { "active" } else { "inactive" },
+                        e.x,
+                        e.y,
                         e.sprite.as_deref().unwrap_or("none"),
+                        match &shown {
+                            Some(s) if Some(s.as_str()) != e.sprite.as_deref() =>
+                                format!(", showing {s:?}"),
+                            _ => String::new(),
+                        },
                         e.caption,
                         e.tint
                     );
@@ -613,7 +673,14 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
             );
         }
     }
-    for id in runtime.world.window_ids() {
+    // The game's windows, then the response box's when it is up.
+    let mut windows: Vec<_> = runtime.world.window_ids().to_vec();
+    if let Some(responses) = runtime.world.responses_window() {
+        if runtime.world.responses_visible() && !windows.contains(&responses) {
+            windows.push(responses);
+        }
+    }
+    for id in &windows {
         if let Some(control) = runtime.world.control(*id) {
             let mode = control.window().map(|w| w.mode);
             println!(
@@ -708,6 +775,10 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 .and_then(|id| runtime.world.item(id))
                 .map_or("none".to_string(), |i| format!("{:?}", i.def.name))
         );
+        let responses = runtime.world.response_texts();
+        if !responses.is_empty() {
+            println!("responses: {responses:?}");
+        }
     }
     for channel in 0..luma::adventure::MUSIC_CHANNELS {
         if let Some(music) = runtime.world.music(channel) {
