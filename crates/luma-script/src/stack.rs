@@ -135,11 +135,13 @@ impl Stack {
     }
 
     /// Every slot, live or not, for snapshots.
+    #[cfg(feature = "serde")]
     pub(crate) fn slots(&self) -> &[Slot] {
         &self.slots
     }
 
     /// A stack from its slots and the number of live ones.
+    #[cfg(feature = "serde")]
     pub(crate) fn from_parts(slots: Vec<Slot>, len: usize) -> Stack {
         let len = len.min(slots.len());
         Stack { slots, len }
