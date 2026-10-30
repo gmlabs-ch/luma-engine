@@ -1682,7 +1682,9 @@ impl World {
     /// states, and the press fired on release.
     pub(crate) fn update_button(&mut self, engine: &mut Engine, id: NativeId) {
         let clock = self.clock;
-        let interactive = self.interactive;
+        // A held game (an exclusive window, the response box) keeps its
+        // buttons live even while the game is not interactive.
+        let interactive = self.interactive || self.semi_frozen();
         let active = self.active_object();
         let left_down = self.mouse.left_down;
         let captured = self.ui.captured;
