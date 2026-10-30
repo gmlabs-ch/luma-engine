@@ -151,6 +151,7 @@ world_state! {
     objects: Objects,
     game_id: NativeId,
     keyboard_id: NativeId,
+    math_id: NativeId,
     scene_id: NativeId,
     fader_id: NativeId,
     scene: Option<SceneView>,

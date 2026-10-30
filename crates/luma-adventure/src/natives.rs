@@ -118,6 +118,11 @@ impl World {
                 "KeyCode" => Some(Value::Int(self.keyboard.key_code)),
                 _ => None,
             },
+            Kind::Math => match name {
+                "Type" => Some(Value::from("math")),
+                "PI" => Some(Value::Float(std::f64::consts::PI)),
+                _ => None,
+            },
             Kind::Fader => match name {
                 "Type" => Some(Value::from("fader")),
                 "Ready" => Some(Value::Bool(self.fader.ready)),
@@ -156,7 +161,7 @@ impl World {
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
-            Kind::Keyboard | Kind::Fader | Kind::Inert(_) => false,
+            Kind::Keyboard | Kind::Math | Kind::Fader | Kind::Inert(_) => false,
         }
     }
 
@@ -188,6 +193,7 @@ impl World {
                 }
                 _ => None,
             },
+            Kind::Math => math_call(name, args).map(Return::value),
             Kind::Fader => None,
             Kind::Scene => self.scene_call(name, args, ctx),
             Kind::Layer(index) => self.layer_call(index, name, args),
@@ -1399,4 +1405,43 @@ impl World {
             _ => return None,
         })
     }
+}
+
+/// The `Math` object's methods (`SXMath`): every one takes floats and
+/// returns a float, as the original engine does (`Floor` included).
+fn math_call(name: &str, args: &[Value]) -> Option<Value> {
+    let arg = |i: usize| -> f64 {
+        match args.get(i) {
+            Some(Value::Int(n)) => f64::from(*n),
+            Some(Value::Float(f)) => *f,
+            Some(Value::Bool(b)) => f64::from(u8::from(*b)),
+            Some(Value::String(s)) => s.trim().parse().unwrap_or(0.0),
+            _ => 0.0,
+        }
+    };
+    let x = arg(0);
+    let result = match name {
+        "Abs" => x.abs(),
+        "Acos" => x.acos(),
+        "Asin" => x.asin(),
+        "Atan" => x.atan(),
+        "Atan2" => x.atan2(arg(1)),
+        "Ceil" => x.ceil(),
+        "Cos" => x.cos(),
+        "Cosh" => x.cosh(),
+        "Exp" => x.exp(),
+        "Floor" => x.floor(),
+        "Log" => x.ln(),
+        "Log10" => x.log10(),
+        "Pow" => x.powf(arg(1)),
+        "Sin" => x.sin(),
+        "Sinh" => x.sinh(),
+        "Tan" => x.tan(),
+        "Tanh" => x.tanh(),
+        "Sqrt" => x.sqrt(),
+        "DegToRad" => x.to_radians(),
+        "RadToDeg" => x.to_degrees(),
+        _ => return None,
+    };
+    Some(Value::Float(result))
 }

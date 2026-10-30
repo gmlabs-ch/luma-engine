@@ -14,6 +14,8 @@ pub enum Kind {
     Game,
     /// `Game.Keyboard`.
     Keyboard,
+    /// The `Math` global (`SXMath`): trigonometry, rounding, `PI`.
+    Math,
     /// The current scene (`Scene`, `Game.Scene`); the same object across
     /// scene changes, as in the engine.
     Scene,

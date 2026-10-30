@@ -40,6 +40,8 @@ pub struct World {
     pub(crate) objects: Objects,
     pub(crate) game_id: NativeId,
     pub(crate) keyboard_id: NativeId,
+    /// The `Math` object scripts see as a global.
+    pub(crate) math_id: NativeId,
     pub(crate) scene_id: NativeId,
     pub(crate) scene: Option<SceneView>,
     pub(crate) prev_scene_name: String,
@@ -123,6 +125,7 @@ impl World {
         let mut objects = Objects::new();
         let game_id = objects.insert(Kind::Game);
         let keyboard_id = objects.insert(Kind::Keyboard);
+        let math_id = objects.insert(Kind::Math);
         let scene_id = objects.insert(Kind::Scene);
         let fader_id = objects.insert(Kind::Fader);
         let personal_savegames = game_file.personal_savegames;
@@ -136,6 +139,7 @@ impl World {
             objects,
             game_id,
             keyboard_id,
+            math_id,
             scene_id,
             scene: None,
             prev_scene_name: String::new(),
@@ -191,8 +195,15 @@ impl World {
             personal_save: personal_savegames,
             save_dir_checked: false,
         };
-        if let Some(path) = world.game_file.string_table.clone() {
+        // The settings' table first, then the game file's on top, as the
+        // original engine loads them.
+        let mut first = true;
+        if let Some(path) = world.settings.string_table.clone() {
             world.load_string_table(&path, true);
+            first = false;
+        }
+        if let Some(path) = world.game_file.string_table.clone() {
+            world.load_string_table(&path, first);
         }
         world.subtitles = world.game_file.subtitles;
         world.subtitles_speed = world.game_file.subtitles_speed;
@@ -401,6 +412,7 @@ impl World {
                 .map(|l| l.name.clone())
                 .unwrap_or_default(),
             Some(Kind::Keyboard) => "keyboard".to_string(),
+            Some(Kind::Math) => "math".to_string(),
             Some(Kind::Sprite(_)) => "sprite".to_string(),
             Some(Kind::Fader) => "fader".to_string(),
             Some(Kind::Actor) => self
@@ -1385,6 +1397,7 @@ impl Natives for World {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Game) => "game".to_string(),
             Some(Kind::Keyboard) => "keyboard".to_string(),
+            Some(Kind::Math) => "math".to_string(),
             Some(Kind::Scene) => "scene".to_string(),
             Some(Kind::Layer(_)) => "layer".to_string(),
             Some(Kind::Entity(_)) => "entity".to_string(),
@@ -1542,6 +1555,7 @@ impl Runtime {
         let mut engine = Engine::new();
         // The engine publishes the game object to every script.
         engine.set_global("Game", Value::Native(world.game_id));
+        engine.set_global("Math", Value::Native(world.math_id));
         Ok(Runtime { engine, world })
     }
 

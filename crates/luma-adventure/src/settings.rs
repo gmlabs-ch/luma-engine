@@ -17,6 +17,8 @@ pub struct GameSettings {
     pub width: u32,
     /// Height of the game's resolution in pixels.
     pub height: u32,
+    /// `STRING_TABLE`: a string table loaded before the game file's.
+    pub string_table: Option<String>,
 }
 
 impl Default for GameSettings {
@@ -26,6 +28,7 @@ impl Default for GameSettings {
             game_file: "default.game".into(),
             width: 800,
             height: 600,
+            string_table: None,
         }
     }
 }
@@ -54,6 +57,9 @@ impl GameSettings {
         if let Some(game) = root.get_str("GAME") {
             settings.game_file = game.to_string();
         }
+        if let Some(table) = root.get_str("STRING_TABLE") {
+            settings.string_table = Some(table.to_string());
+        }
         if let Some(res) = root.get_ints("RESOLUTION") {
             if let [w, h, ..] = res[..] {
                 if w > 0 && h > 0 {
@@ -78,6 +84,12 @@ mod tests {
         .unwrap();
         assert_eq!(s.width, 1024);
         assert_eq!(s.height, 768);
+        assert_eq!(s.string_table, None);
+        let s = GameSettings::parse(
+            b"SETTINGS {\n  GAME=\"default.game\"\n  STRING_TABLE=\"string.tab\"\n  RESOLUTION { 320,200 }\n}\n",
+        )
+        .unwrap();
+        assert_eq!(s.string_table.as_deref(), Some("string.tab"));
         assert_eq!(s.game_file, "default.game");
 
         let s = GameSettings::parse(b"SETTINGS { GAME=\"wc.game\" }").unwrap();
