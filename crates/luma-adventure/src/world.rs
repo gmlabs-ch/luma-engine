@@ -312,6 +312,28 @@ impl World {
         self.interactive
     }
 
+    /// Whether a window holds the game (`GAME_SEMI_FROZEN`,
+    /// `GAME_FROZEN`): an exclusive window is up or the response box
+    /// waits for a pick. Clicks then reach the windows even while the
+    /// game is not interactive.
+    pub fn semi_frozen(&self) -> bool {
+        self.responses_visible()
+            || self.ui.controls.values().any(|c| {
+                c.window()
+                    .is_some_and(|w| w.mode != crate::ui::WindowMode::Normal)
+            })
+    }
+
+    /// Whether an object takes mouse events while the game is not
+    /// interactive (`m_NonIntMouseEvents`): the windows, their controls
+    /// and the containers' entities do, the scene's objects do not.
+    pub(crate) fn non_int_mouse_events(&self, id: NativeId) -> bool {
+        matches!(
+            self.objects.get(id).map(|n| &n.kind),
+            Some(Kind::Control | Kind::Entity(crate::scene_view::EntityRef::Ui(_)))
+        )
+    }
+
     /// Whether a script asked to quit (`Game.QuitGame`).
     pub fn quit_requested(&self) -> bool {
         self.quit
@@ -1800,7 +1822,10 @@ impl Runtime {
             }
             return;
         }
-        if !self.world.interactive {
+        // A click while the game is not interactive only skips a
+        // sentence, unless a window or the response box holds the game
+        // (`GAME_SEMI_FROZEN`), where the windows still take clicks.
+        if !self.world.interactive && !self.world.semi_frozen() {
             self.world.click_while_busy(false);
             return;
         }

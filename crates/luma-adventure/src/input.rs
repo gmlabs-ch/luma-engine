@@ -637,7 +637,10 @@ impl World {
     pub(crate) fn update_active_object(&mut self) {
         let (x, y) = (self.mouse.x, self.mouse.y);
         let mut object = self.object_at(x, y);
-        if object.is_some() && !self.interactive {
+        // Not active while the game is not interactive, except the
+        // objects that take mouse events then (`m_NonIntMouseEvents`):
+        // the windows and their controls, and the containers' entities.
+        if !self.interactive && !object.is_some_and(|o| self.non_int_mouse_events(o)) {
             object = None;
         }
         let current = self.active_object();
