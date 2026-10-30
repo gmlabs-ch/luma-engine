@@ -20,6 +20,7 @@ luma-render = { path = "crates/luma-render" }
 luma-audio = { path = "crates/luma-audio" }
 luma-video = { path = "crates/luma-video" }
 luma-adventure = { path = "crates/luma-adventure" }
+luma = { path = "crates/luma", default-features = false }
 
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 image = { version = "0.25", default-features = false, features = ["png", "bmp", "jpeg", "tga"] }

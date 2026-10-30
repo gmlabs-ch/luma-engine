@@ -8,14 +8,14 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use luma_adventure::{Audio, Camera, GameSettings, Runtime, SceneView};
-use luma_archive::Vfs;
-use luma_formats::Rgba;
-use luma_formats::font::TextAlign;
-use luma_render::winit::dpi::PhysicalSize;
-use luma_render::winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
-use luma_render::winit::keyboard::{Key, ModifiersState, NamedKey};
-use luma_render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig, letterbox};
+use luma::adventure::{Audio, Camera, GameSettings, Runtime, SceneView};
+use luma::archive::Vfs;
+use luma::formats::Rgba;
+use luma::formats::font::TextAlign;
+use luma::render::winit::dpi::PhysicalSize;
+use luma::render::winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
+use luma::render::winit::keyboard::{Key, ModifiersState, NamedKey};
+use luma::render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig, letterbox};
 
 const USAGE: &str = "\
 luma-player - desktop player for Luma Engine
@@ -324,7 +324,7 @@ fn main() -> ExitCode {
 
 fn open(game: &Path) -> Result<(Vfs, GameSettings), String> {
     let vfs = Vfs::open_game(game).map_err(|e| format!("{}: {e}", game.display()))?;
-    if vfs.packages().is_empty() && !vfs.exists(luma_adventure::SETTINGS_FILE) {
+    if vfs.packages().is_empty() && !vfs.exists(luma::adventure::SETTINGS_FILE) {
         return Err(format!("{}: not a game directory", game.display()));
     }
     let settings = GameSettings::load(&vfs).map_err(|e| e.to_string())?;
@@ -621,8 +621,8 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 control.name,
                 if control.visible { "visible" } else { "hidden" },
                 match mode {
-                    Some(luma_adventure::WindowMode::Exclusive) => ", exclusive",
-                    Some(luma_adventure::WindowMode::SystemExclusive) => ", system exclusive",
+                    Some(luma::adventure::WindowMode::Exclusive) => ", exclusive",
+                    Some(luma::adventure::WindowMode::SystemExclusive) => ", system exclusive",
                     _ => "",
                 },
                 control.x,
@@ -709,7 +709,7 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 .map_or("none".to_string(), |i| format!("{:?}", i.def.name))
         );
     }
-    for channel in 0..luma_adventure::MUSIC_CHANNELS {
+    for channel in 0..luma::adventure::MUSIC_CHANNELS {
         if let Some(music) = runtime.world.music(channel) {
             println!(
                 "music channel {channel}: {} ({}, at {} ms)",
@@ -821,7 +821,7 @@ fn run(options: Options) -> Result<(), String> {
         started: Instant::now(),
         keys: Keys::default(),
     };
-    luma_render::window::run(
+    luma::render::window::run(
         WindowConfig {
             title: format!("Luma Engine - {}", options.scene.unwrap_or_default()),
             width: settings.width,
@@ -858,7 +858,7 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         modifiers: ModifiersState::empty(),
         started: false,
     };
-    luma_render::window::run(
+    luma::render::window::run(
         WindowConfig {
             title: if caption.is_empty() { name } else { caption },
             width: settings.width,
@@ -953,7 +953,7 @@ impl GamePlayer {
 }
 
 impl App for GamePlayer {
-    fn init(&mut self, renderer: &Renderer) -> luma_render::Result<()> {
+    fn init(&mut self, renderer: &Renderer) -> luma::render::Result<()> {
         eprintln!("adapter: {}", renderer.gpu().describe());
         Ok(())
     }
@@ -1056,10 +1056,10 @@ struct Player {
 }
 
 impl App for Player {
-    fn init(&mut self, renderer: &Renderer) -> luma_render::Result<()> {
+    fn init(&mut self, renderer: &Renderer) -> luma::render::Result<()> {
         eprintln!("adapter: {}", renderer.gpu().describe());
         let view = load(&self.vfs, renderer, &self.scene)
-            .map_err(|reason| luma_render::Error::Render { reason })?;
+            .map_err(|reason| luma::render::Error::Render { reason })?;
         self.camera.clamp_to(&view.scene);
         self.view = Some(view);
         self.started = Instant::now();

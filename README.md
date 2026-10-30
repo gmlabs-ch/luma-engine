@@ -51,11 +51,15 @@ Luma Engine reads the same game data with a new engine built for today:
 | `luma-audio` | Music, sound effects and voice | `kira` (Symphonia for decoding, `cpal` with the `device` feature) |
 | `luma-video` | Ogg Theora videos decoded to frames | `ogg`, `oxideav-theora`, `oxideav-core` |
 | `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six core crates, `fontdue`, `serde`, `postcard`, `flate2` |
+| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature |
 | `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script` |
-| `luma-player` | The desktop player | `luma-adventure`, `luma-archive`, `luma-formats`, `luma-render` |
+| `luma-player` | The desktop player | `luma` (features `adventure`, `audio-device`) |
 
 The first six are the core; `luma-adventure` is the first optional
-module, and the front-ends depend on the modules they use.
+module. A game or a front-end depends on `luma` and enables the modules
+it needs through its features (`adventure` is on by default, `audio-device`
+plays the sounds, `serde` serializes the core); see
+[docs/modules.md](docs/modules.md).
 
 ## Building
 
@@ -97,8 +101,9 @@ luma script path/to/game scenes/room/scr/scene_init.script
 `list` and `unpack` also accept a single `.dcp` file, and `dump` a file on
 disk. The formats are documented in [docs/formats](docs/formats/README.md),
 the renderer in [docs/rendering.md](docs/rendering.md), the script
-engine in [docs/scripting.md](docs/scripting.md) and saved games in
-[docs/saving.md](docs/saving.md).
+engine in [docs/scripting.md](docs/scripting.md), saved games in
+[docs/saving.md](docs/saving.md) and the crate layout in
+[docs/modules.md](docs/modules.md).
 
 The player shows one scene of a game, without running its scripts yet:
 

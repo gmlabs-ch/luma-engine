@@ -3,8 +3,8 @@
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use luma_archive::PackageBuilder;
-use luma_formats::Image;
+use luma::archive::PackageBuilder;
+use luma::formats::Image;
 
 fn player(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_luma-player"))
@@ -81,9 +81,9 @@ fn renders_a_screenshot() {
         stderr.contains("16x8, 1 layer(s), 1 entities, 1 texture(s)"),
         "{stderr}"
     );
-    let image = luma_formats::image::decode(
+    let image = luma::formats::image::decode(
         &std::fs::read(&shot).unwrap(),
-        luma_formats::DEFAULT_COLOR_KEY,
+        luma::formats::DEFAULT_COLOR_KEY,
     )
     .unwrap();
     assert_eq!((image.width, image.height), (16, 8));

@@ -1,0 +1,33 @@
+[package]
+name = "luma"
+description = "Luma Engine: the core crates re-exported, with the optional modules a game enables through Cargo features."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+luma-archive.workspace = true
+luma-formats.workspace = true
+luma-script.workspace = true
+luma-render.workspace = true
+luma-audio.workspace = true
+luma-video.workspace = true
+luma-adventure = { workspace = true, optional = true }
+
+[features]
+default = ["adventure"]
+## The adventure module: actors, scenes, speech, inventory, pathfinding
+## and saved games (`luma::adventure`).
+adventure = ["dep:luma-adventure"]
+## Sound output on the default device (needs ALSA on Linux); without it
+## the sounds run silently on the game clock.
+audio-device = ["luma-audio/device"]
+## Serialization of the core's definitions and script engine with serde.
+serde = ["luma-formats/serde", "luma-script/serde"]
+
+[lints]
+workspace = true

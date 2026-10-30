@@ -10,11 +10,7 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
-luma-adventure.workspace = true
-luma-audio = { workspace = true, features = ["device"] }
-luma-archive.workspace = true
-luma-formats.workspace = true
-luma-render.workspace = true
+luma = { workspace = true, features = ["adventure", "audio-device"] }
 
 [lints]
 workspace = true

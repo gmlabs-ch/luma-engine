@@ -50,9 +50,12 @@ optional modules that a compiled game only includes when it needs them.
   New capabilities that only some games need (for example MIDI input,
   management/simulation systems, mini-games) get their own crate, never code
   added to a core crate.
-- Official modules are workspace crates. The target is a top-level crate that
-  enables them through Cargo features; until it exists, front-ends such as
-  `luma-player` depend on the modules they use directly.
+- Official modules are workspace crates, enabled through Cargo features of
+  the top-level crate `luma` (`crates/luma`), which re-exports the core and
+  the enabled modules (`luma::adventure`). Front-ends such as `luma-player`
+  depend on `luma` with the features they need, never on a module directly.
+  A new official module gets a feature there, off by default unless every
+  game needs it. See `docs/modules.md`.
 - Community modules live in their own repositories and are published
   separately; the engine must expose what they need through public APIs, not
   through access to internals.
