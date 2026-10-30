@@ -138,6 +138,10 @@ pub enum ButtonListener {
     CloseParent,
     /// A button of the inventory box: `prev`, `next` and `close`.
     Inventory,
+    /// A choice of the response box, by index in the pending list.
+    Response(usize),
+    /// The response box's `prev` and `next` buttons.
+    ResponseBox,
 }
 
 /// The state of a button.
@@ -896,7 +900,7 @@ impl World {
     /// Gives a control without a size the size of its image, else 100
     /// wide; a button grows to its text; a tiled background rounds the
     /// size to whole tiles (`CorrectSize`).
-    fn correct_size(&mut self, id: NativeId) {
+    pub(crate) fn correct_size(&mut self, id: NativeId) {
         let Some(control) = self.control(id) else {
             return;
         };
@@ -1418,6 +1422,7 @@ impl World {
     /// buttons note the mouse and fire their presses, the texts are
     /// measured and prepared for drawing.
     pub(crate) fn update_ui(&mut self, engine: &mut Engine) {
+        self.layout_responses();
         // Did we lose the focused window? Focus the topmost one.
         let focused_ok = self
             .ui
@@ -1436,6 +1441,11 @@ impl World {
         let mut order = self.windows_in_pass(true);
         order.extend(self.windows_in_pass(false));
         for window in order {
+            self.update_window(engine, window);
+        }
+        // The response box's window is not one of the game's windows;
+        // its buttons are driven here while it waits for a pick.
+        if let (true, Some(window)) = (self.responses_visible(), self.responses.window) {
             self.update_window(engine, window);
         }
     }
@@ -1739,6 +1749,8 @@ impl World {
                 }
             }
             Some(ButtonListener::Inventory) => self.inventory_listen(&name),
+            Some(ButtonListener::Response(index)) => self.select_response(engine, index),
+            Some(ButtonListener::ResponseBox) => self.responses_listen(&name),
             None => {}
         }
         if parent_notify {

@@ -81,6 +81,10 @@ pub struct World {
     pub(crate) fader: Fader,
     pub(crate) fader_id: NativeId,
     pub(crate) ui: Ui,
+    /// The dialogue response box and its state.
+    pub(crate) responses: crate::responses::Responses,
+    /// The object the script waiting in `GetResponse` waits for.
+    pub(crate) response_box_id: NativeId,
     /// The entities shown by the windows' entity containers.
     pub(crate) ui_entities: Vec<crate::ui::UiEntity>,
     pub(crate) inventory: Inventory,
@@ -132,6 +136,7 @@ impl World {
         let game_id = objects.insert(Kind::Game);
         let keyboard_id = objects.insert(Kind::Keyboard);
         let math_id = objects.insert(Kind::Math);
+        let response_box_id = objects.insert(Kind::ResponseBox);
         let scene_id = objects.insert(Kind::Scene);
         let fader_id = objects.insert(Kind::Fader);
         let personal_savegames = game_file.personal_savegames;
@@ -183,6 +188,8 @@ impl World {
             fader: Fader::default(),
             fader_id,
             ui: Ui::default(),
+            responses: crate::responses::Responses::default(),
+            response_box_id,
             ui_entities: Vec::new(),
             inventory: Inventory::default(),
             video: None,
@@ -438,6 +445,7 @@ impl World {
                 .unwrap_or_default(),
             Some(Kind::Keyboard) => "keyboard".to_string(),
             Some(Kind::Math) => "math".to_string(),
+            Some(Kind::ResponseBox) => "response box".to_string(),
             Some(Kind::Sprite(_)) => "sprite".to_string(),
             Some(Kind::Fader) => "fader".to_string(),
             Some(Kind::Actor) => self
@@ -749,6 +757,7 @@ impl World {
         self.draw_windows(list, true, white);
         self.draw_inventory(list, white);
         self.draw_windows(list, false, white);
+        self.draw_responses(list, white);
         if self.subtitles {
             for draw in &self.sentences {
                 if let Some(font) = self.fonts.get(&draw.font) {
@@ -1453,6 +1462,7 @@ impl Natives for World {
             Some(Kind::Game) => "game".to_string(),
             Some(Kind::Keyboard) => "keyboard".to_string(),
             Some(Kind::Math) => "math".to_string(),
+            Some(Kind::ResponseBox) => "responses".to_string(),
             Some(Kind::Scene) => "scene".to_string(),
             Some(Kind::Layer(_)) => "layer".to_string(),
             Some(Kind::Entity(_)) => "entity".to_string(),
@@ -1537,6 +1547,7 @@ impl Host for World {
                 .is_none_or(|v| !v.is_talking(*r) && !v.is_playing_anim(*r)),
             Some(Kind::Scene) => self.is_scrolled(),
             Some(Kind::Fader) => self.fader.ready,
+            Some(Kind::ResponseBox) => self.responses.waiting.is_none(),
             Some(Kind::Control) => self
                 .control(id)
                 .is_none_or(|c| c.window().is_none_or(|w| w.ready)),
@@ -1625,6 +1636,7 @@ impl Runtime {
         }
         self.world.load_items(&mut self.engine);
         self.world.load_inventory_box(&mut self.engine);
+        self.world.load_response_box(&mut self.engine);
         let game = self.world.game_id;
         for script in self.world.game_file.scripts.clone() {
             self.world.attach(&mut self.engine, game, &script);

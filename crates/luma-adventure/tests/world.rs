@@ -205,6 +205,46 @@ fn window_script() -> Vec<u8> {
     a.build()
 }
 
+/// A dialogue: two choices, one of them offered once per branch; the
+/// pick, its text and the count go to `result`.
+fn dialogue_script() -> Vec<u8> {
+    let mut a = Assembler::new("dialogue.script");
+    a.emit(Instruction::Ret);
+    a.event("dlg");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(&mut a, "Game", "StartDlgBranch", &[Arg::Str("chat")]);
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "AddResponse",
+        &[Arg::Int(1), Arg::Str("Yes")],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "AddResponseOnce",
+        &[Arg::Int(2), Arg::Str("/GREET/x")],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "Game", "GetNumResponses", &[]);
+    store(&mut a, "num");
+    call(&mut a, "Game", "GetResponse", &[]);
+    store(&mut a, "chosen");
+    get(&mut a, "Game", "LastResponse");
+    store(&mut a, "last");
+    a.emit(Instruction::RetEvent);
+    a.event("bye");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(&mut a, "Game", "EndDlgBranch", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
 /// The script of a verb entity in a window's container: a click notes
 /// it and swaps its sprite.
 fn verb_script() -> Vec<u8> {
@@ -805,7 +845,7 @@ fn game() -> std::path::PathBuf {
     );
     pkg.add_file(
         "default.game",
-        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" }"
+        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" RESPONSE_BOX=\"responses.def\" }"
             .to_vec(),
     );
     pkg.add_file("art\\font.png", png(128, 128, [255, 255, 255, 255]));
@@ -849,6 +889,20 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     );
     pkg.add_file("menu.script", menu_script());
     pkg.add_file("verb.script", verb_script());
+    pkg.add_file("dialogue.script", dialogue_script());
+    pkg.add_file(
+        "responses.def",
+        b"RESPONSE_BOX {
+  FONT=\"fonts\\sys.font\" FONT_HOVER=\"fonts\\test.font\" SPACING=1 VERTICAL_ALIGN=\"top\"
+  AREA { 2, 2, 30, 30 }
+  WINDOW {
+    X=0 Y=0 WIDTH=32 HEIGHT=32
+    BUTTON { NAME=\"prev\" X=0 Y=0 WIDTH=2 HEIGHT=2 }
+    BUTTON { NAME=\"next\" X=30 Y=0 WIDTH=2 HEIGHT=2 }
+  }
+}"
+        .to_vec(),
+    );
     pkg.add_file(
         "verb.entity",
         b"ENTITY { NAME=\"pick\" CAPTION=\"/GREET/x\" ACTIVE=TRUE REGISTRABLE=TRUE SPRITE=\"art\\green.png\" SCRIPT=\"verb.script\" }"
@@ -2298,4 +2352,99 @@ fn entity_containers_show_their_entity_and_give_it_the_mouse() {
         .set_property(verb, "Visible", &Value::Bool(false));
     runtime.tick(16);
     assert_ne!(runtime.world.active_object(), Some(entity));
+}
+
+#[test]
+fn dialogue_responses_wait_for_a_pick_and_remember_once_choices() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "dialogue.script")
+    );
+    runtime.tick(16);
+    // The dialogue offers two choices and waits.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "dlg", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "num"), Value::Int(2));
+    assert_eq!(result(&runtime, "chosen"), Value::Null);
+    assert_eq!(
+        runtime.world.get_property(game, "ResponsesVisible"),
+        Some(Value::Bool(true))
+    );
+    let window = runtime.world.responses_window().unwrap();
+    assert!(runtime.world.control(window).unwrap().visible);
+    let buttons: Vec<_> = runtime
+        .world
+        .widgets_of(window)
+        .into_iter()
+        .filter(|w| runtime.world.control(*w).unwrap().name == "response")
+        .collect();
+    assert_eq!(buttons.len(), 2);
+    let second = runtime.world.control(buttons[1]).unwrap();
+    assert_eq!(second.text, "Hello", "through the string table");
+    assert!(second.visible && second.y > 2, "laid out under the first");
+    let (x, y) = (second.x + 2, second.y + second.height / 2);
+    // Picking the second choice resumes the script with its id.
+    runtime.mouse_move(x, y);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(buttons[1]));
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "chosen"), Value::Int(2));
+    assert_eq!(result(&runtime, "last"), Value::from("Hello"));
+    assert_eq!(
+        runtime.world.get_property(game, "ResponsesVisible"),
+        Some(Value::Bool(false))
+    );
+    assert!(!runtime.world.control(window).unwrap().visible);
+    // Asked again in the same branch, the once-only choice is gone; the
+    // dialogue then auto-selects nothing and waits with one choice.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "dlg", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "num"), Value::Int(1));
+    let buttons: Vec<_> = runtime
+        .world
+        .widgets_of(window)
+        .into_iter()
+        .filter(|w| runtime.world.control(*w).unwrap().name == "response")
+        .collect();
+    assert_eq!(buttons.len(), 1);
+    let first = runtime.world.control(buttons[0]).unwrap();
+    runtime.mouse_move(first.x + 2, first.y + first.height / 2);
+    runtime.tick(16);
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "chosen"), Value::Int(1));
+    // Each dialogue opened its own "chat" branch: ending both forgets
+    // the once-only choices.
+    for _ in 0..2 {
+        runtime
+            .engine
+            .apply_event(&mut runtime.world, game, "bye", false);
+        runtime.tick(16);
+    }
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "dlg", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "num"), Value::Int(2));
 }

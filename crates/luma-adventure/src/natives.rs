@@ -61,14 +61,6 @@ const GAME_STUBS: &[&str] = &[
     "DeleteSaveThumbnail",
     "ShowStatusLine",
     "HideStatusLine",
-    "AddResponse",
-    "AddResponseOnce",
-    "AddResponseOnceGame",
-    "ResetResponse",
-    "ClearResponses",
-    "StartDlgBranch",
-    "EndDlgBranch",
-    "LoadResponseBox",
     "LoadInventoryBox",
     "LoadItems",
     "LoadEntity",
@@ -117,6 +109,10 @@ impl World {
                 "KeyCode" => Some(Value::Int(self.keyboard.key_code)),
                 _ => None,
             },
+            Kind::ResponseBox => match name {
+                "Type" => Some(Value::from("responses")),
+                _ => None,
+            },
             Kind::Math => match name {
                 "Type" => Some(Value::from("math")),
                 "PI" => Some(Value::Float(std::f64::consts::PI)),
@@ -160,7 +156,7 @@ impl World {
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
-            Kind::Keyboard | Kind::Math | Kind::Fader | Kind::Inert(_) => false,
+            Kind::Keyboard | Kind::Math | Kind::ResponseBox | Kind::Fader | Kind::Inert(_) => false,
         }
     }
 
@@ -193,6 +189,7 @@ impl World {
                 _ => None,
             },
             Kind::Math => math_call(name, args).map(Return::value),
+            Kind::ResponseBox => None,
             Kind::Fader => None,
             Kind::Scene => self.scene_call(name, args, ctx),
             Kind::Layer(index) => self.layer_call(index, name, args),
@@ -369,7 +366,6 @@ impl World {
             | "SoundAvailable"
             | "WindowedMode"
             | "TextRTL"
-            | "ResponsesVisible"
             | "SuspendedRendering"
             | "SuppressScriptErrors"
             | "AutorunDisabled"
@@ -381,7 +377,17 @@ impl World {
             "SaveDirectory" => Value::from(self.save_directory().to_string_lossy().into_owned()),
             "MostRecentSaveSlot" => Value::Int(self.most_recent_save_slot()),
             "TalkSkipButton" => Value::Int(self.talk_skip_button.code()),
-            "LastResponse" | "LastResponseOrig" => Value::Null,
+            "ResponsesVisible" => Value::Bool(self.responses_visible()),
+            "LastResponse" => self
+                .responses
+                .last_text
+                .clone()
+                .map_or(Value::Null, Value::from),
+            "LastResponseOrig" => self
+                .responses
+                .last_text_orig
+                .clone()
+                .map_or(Value::Null, Value::from),
             "Platform" => Value::from("luma"),
             "DeviceType" => Value::from("desktop"),
             _ => return None,
@@ -663,13 +669,69 @@ impl World {
                 self.stub(&format!("Game.{name}"));
                 Return::value("")
             }
-            "RegReadNumber" | "GetNumResponses" => {
+            "RegReadNumber" => {
                 self.stub(&format!("Game.{name}"));
                 Return::value(0)
             }
-            "GetResponse" | "GetCurrentDlgBranch" | "GetResponsesWindow" => {
-                self.stub(&format!("Game.{name}"));
+            "AddResponse" | "AddResponseOnce" | "AddResponseOnceGame" => {
+                let kind = match name {
+                    "AddResponseOnce" => crate::responses::ResponseKind::Once,
+                    "AddResponseOnceGame" => crate::responses::ResponseKind::OnceGame,
+                    _ => crate::responses::ResponseKind::Normal,
+                };
+                let optional = |v: Value, w: &World| match v {
+                    Value::Null => None,
+                    v => Some(v.get_string(w)),
+                };
+                let id = arg(0).get_int(self);
+                let text = arg(1).get_string(self);
+                let (icon, hover, pressed, font) = (
+                    optional(arg(2), self),
+                    optional(arg(3), self),
+                    optional(arg(4), self),
+                    optional(arg(5), self),
+                );
+                self.add_response(kind, id, &text, icon, hover, pressed, font);
                 Return::null()
+            }
+            "ResetResponse" => {
+                self.reset_response(arg(0).get_int(self));
+                Return::null()
+            }
+            "ClearResponses" => {
+                self.clear_responses(ctx.engine);
+                Return::null()
+            }
+            "GetResponse" => {
+                let auto = arg(0).get_bool(self);
+                return Some(self.get_response(ctx.engine, ctx.script, auto));
+            }
+            "GetNumResponses" => Return::value(self.num_responses() as i32),
+            "StartDlgBranch" => {
+                let name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                self.start_dlg_branch(ctx.engine, ctx.script, ctx.line, name);
+                Return::null()
+            }
+            "EndDlgBranch" => {
+                let name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                self.end_dlg_branch(ctx.engine, ctx.script, name);
+                Return::null()
+            }
+            "GetCurrentDlgBranch" => {
+                Return::value(self.current_dlg_branch().map_or(Value::Null, Value::from))
+            }
+            "GetResponsesWindow" | "GetResponseWindow" => {
+                Return::value(native_or_null(self.responses.window))
+            }
+            "LoadResponseBox" => {
+                let path = arg(0).get_string(self);
+                Return::value(self.load_response_box_from(ctx.engine, &path))
             }
             _ if GAME_STUBS.contains(&name) => {
                 self.stub(&format!("Game.{name}"));

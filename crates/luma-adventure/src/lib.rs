@@ -49,6 +49,7 @@ mod natives_sound;
 mod natives_ui;
 pub mod objects;
 pub mod path;
+pub mod responses;
 pub mod save;
 pub mod scene_state;
 pub mod scene_view;
@@ -68,6 +69,7 @@ pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;
 pub use objects::{Kind, Native, Objects};
 pub use path::Floor;
+pub use responses::{Response, ResponseKind, Responses};
 pub use save::{SAVE_EXTENSION, SaveHeader, read_save_header};
 pub use scene_state::{NodeState, SceneState, state_key};
 pub use scene_view::{

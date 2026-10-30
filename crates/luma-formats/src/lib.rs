@@ -55,6 +55,6 @@ pub use scene::{
 pub use sprite::{Frame, Rect, Sprite, SubFrame};
 pub use strings::StringTable;
 pub use window::{
-    ButtonDef, ControlDef, EditDef, InventoryBoxDef, ItemDef, StaticDef, TiledImage, VerticalAlign,
-    WidgetDef, WindowDef,
+    ButtonDef, ControlDef, EditDef, InventoryBoxDef, ItemDef, ResponseBoxDef, StaticDef,
+    TiledImage, VerticalAlign, WidgetDef, WindowDef,
 };

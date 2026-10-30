@@ -378,6 +378,7 @@ impl World {
         self.ui_hits_in_game(&mut hits);
         self.inventory_hits(&mut hits);
         self.ui_hits_normal(&mut hits);
+        self.responses_hits(&mut hits);
         self.hits = hits;
     }
 

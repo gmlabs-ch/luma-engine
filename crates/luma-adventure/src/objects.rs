@@ -16,6 +16,8 @@ pub enum Kind {
     Keyboard,
     /// The `Math` global (`SXMath`): trigonometry, rounding, `PI`.
     Math,
+    /// The dialogue response box, which `GetResponse` waits for.
+    ResponseBox,
     /// The current scene (`Scene`, `Game.Scene`); the same object across
     /// scene changes, as in the engine.
     Scene,

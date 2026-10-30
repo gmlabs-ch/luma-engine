@@ -185,6 +185,8 @@ world_state! {
     fader: Fader,
     ui: Ui,
     ui_entities: Vec<crate::ui::UiEntity>,
+    responses: crate::responses::Responses,
+    response_box_id: NativeId,
     inventory: Inventory,
     video_subtitles: bool,
     video_font: Option<String>,
@@ -618,6 +620,10 @@ impl World {
         fonts.extend(self.video_font.clone());
         let mut images: Vec<String> = Vec::new();
         let mut cursors: Vec<String> = Vec::new();
+        if let Some(def) = &self.responses.def {
+            fonts.extend(def.font.clone());
+            fonts.extend(def.font_hover.clone());
+        }
         for entity in &self.ui_entities {
             images.extend(entity.def.sprite.clone());
             images.extend(entity.def.talk_sprites.iter().cloned());

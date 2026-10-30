@@ -619,6 +619,90 @@ impl WidgetDef {
     }
 }
 
+/// The dialogue response box (`RESPONSE_BOX`, `CAdResponseBox`): where
+/// the choices of a dialogue are listed for the player.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ResponseBoxDef {
+    /// A `.def` file loaded first (`TEMPLATE`).
+    pub template: Option<String>,
+    /// The font of the choices; the system font without one.
+    pub font: Option<String>,
+    /// The font of the choice under the mouse.
+    pub font_hover: Option<String>,
+    /// Where the choices are laid out, relative to the window.
+    pub area: Rect,
+    /// Choices side by side instead of one under the other.
+    pub horizontal: bool,
+    /// Pixels between choices.
+    pub spacing: i32,
+    /// The box's window, with its `prev` and `next` buttons.
+    pub window: Option<WindowDef>,
+    /// The cursor over the choices.
+    pub cursor: Option<String>,
+    /// Alignment of the text of a choice.
+    pub text_align: TextAlign,
+    /// Where the choices sit in the area when they do not fill it.
+    pub vertical_align: VerticalAlign,
+}
+
+impl Default for ResponseBoxDef {
+    fn default() -> Self {
+        ResponseBoxDef {
+            template: None,
+            font: None,
+            font_hover: None,
+            area: Rect::default(),
+            horizontal: false,
+            spacing: 0,
+            window: None,
+            cursor: None,
+            text_align: TextAlign::Left,
+            vertical_align: VerticalAlign::Bottom,
+        }
+    }
+}
+
+impl ResponseBoxDef {
+    /// Parses a `.def` file: a `RESPONSE_BOX` root block.
+    pub fn parse(bytes: &[u8]) -> Result<ResponseBoxDef> {
+        let doc = Document::parse(bytes)?;
+        let root = doc.get("RESPONSE_BOX").ok_or_else(|| Error::Invalid {
+            reason: "'RESPONSE_BOX' keyword expected".into(),
+        })?;
+        let mut def = ResponseBoxDef::default();
+        def.apply(root);
+        Ok(def)
+    }
+
+    /// Reads the keys of a `RESPONSE_BOX` block, overriding what is there.
+    pub fn apply(&mut self, node: &Node) {
+        for child in node.nodes() {
+            match child.key.to_ascii_uppercase().as_str() {
+                "TEMPLATE" => self.template = path(child),
+                "FONT" => self.font = path(child),
+                "FONT_HOVER" => self.font_hover = path(child),
+                "AREA" => {
+                    if let Some(rect) = rect_of(child) {
+                        self.area = rect;
+                    }
+                }
+                "HORIZONTAL" => self.horizontal = child.as_bool().unwrap_or(false),
+                "SPACING" => self.spacing = child.as_int().unwrap_or(0) as i32,
+                "WINDOW" => {
+                    let mut window = WindowDef::default();
+                    window.apply(child);
+                    self.window = Some(window);
+                }
+                "CURSOR" => self.cursor = path(child),
+                "TEXT_ALIGN" => self.text_align = text_align(&text(child), TextAlign::Left),
+                "VERTICAL_ALIGN" => self.vertical_align = VerticalAlign::from_name(&text(child)),
+                _ => {}
+            }
+        }
+    }
+}
+
 /// An entity container (`ENTITY_CONTAINER`): a control that shows an
 /// entity loaded from an `.entity` file at its position, with the
 /// entity's own sprite, scripts and mouse events (`CUIEntity`).
