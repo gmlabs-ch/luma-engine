@@ -24,11 +24,17 @@ COMMANDS:
     sprite <game> <name>   Describe a sprite and the images it uses
     scene <game> <name>    Describe a scene: layers, entities, regions
     script <game> <name>   Disassemble a compiled script
+    lumen check <story>    Check a Lumen story (a folder or a .lumen file)
+    lumen play <story>     Play a Lumen story as text in the terminal
     help                   Show this message
     version                Show the version
 
 <game> is a game directory (its *.dcp packages, and those of its `data`
 sub-directory, are read the way the engine does) or a single .dcp file.
+
+lumen play takes --start <knot> to begin elsewhere than the manifest's
+start knot, --seed <n> for the random functions, and --choose <n,n,...>
+to answer the first choices without asking (then quits when they run out).
 ";
 
 fn main() -> ExitCode {
@@ -66,6 +72,7 @@ fn main() -> ExitCode {
             [_, game, name] => script(Path::new(game), name),
             _ => usage_error("script takes exactly two arguments: <game> <name>"),
         },
+        Some("lumen") => lumen::run(&args[1..]),
         Some("dump") => match args.as_slice() {
             [_, file] => dump(Path::new(file), None),
             [_, game, name] => dump(Path::new(game), Some(name)),
@@ -86,8 +93,13 @@ fn main() -> ExitCode {
     }
 }
 
-enum Failure {
+mod lumen;
+
+/// How a command fails: a usage error (exit code 2) or an error (1).
+pub enum Failure {
+    /// Wrong arguments; the usage is printed.
     Usage(String),
+    /// Something went wrong.
     Error(String),
 }
 
@@ -97,7 +109,8 @@ impl<E: std::fmt::Display> From<E> for Failure {
     }
 }
 
-fn usage_error(message: &str) -> Result<(), Failure> {
+/// A usage error, for a command given the wrong arguments.
+pub fn usage_error(message: &str) -> Result<(), Failure> {
     Err(Failure::Usage(message.to_string()))
 }
 

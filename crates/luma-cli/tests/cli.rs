@@ -418,3 +418,124 @@ fn sprite_describes_frames_and_images() {
     assert_eq!(out.status.code(), Some(1));
     fs::remove_dir_all(&game).unwrap();
 }
+
+fn lithium() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../luma-lumen/tests/stories/lithium")
+}
+
+#[test]
+fn lumen_check_reports_the_story_and_its_errors() {
+    let out = luma(&["lumen", "check", lithium().to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("2 file(s), 54 line(s), 3 knot(s), 2 character(s): no error"),
+        "{stderr}"
+    );
+
+    let dir = temp_dir();
+    fs::write(
+        dir.join("broken.lumen"),
+        "== start\n- Test it in the flame -> flamme\n== flame\n-> END\n",
+    )
+    .unwrap();
+    let out = luma(&["lumen", "check", dir.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("error: an option outside a choice"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("--> broken.lumen:2:1"), "{stderr}");
+    assert!(
+        stderr.contains("warning: no divert reaches knot `flame`"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("luma: 1 error, "), "{stderr}");
+    fs::write(
+        dir.join("broken.lumen"),
+        "== start\n? Now\n  - Test it in the flame -> flamme\n== flame\n-> END\n",
+    )
+    .unwrap();
+    let out = luma(&["lumen", "check", dir.to_str().unwrap()]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let expected = format!(
+        "3 |   - Test it in the flame -> flamme\n  | {}^^^^^^ did you mean `flame`?",
+        " ".repeat(28)
+    );
+    assert!(stderr.contains(&expected), "{stderr}");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn lumen_play_runs_the_story_with_given_answers() {
+    let out = luma(&[
+        "lumen",
+        "play",
+        lithium().to_str().unwrap(),
+        "--choose",
+        "1,1,1",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains(
+            "Johan August Arfwedson (inquiet): Il manque toujours trois pour cent de la masse.\n"
+        ),
+        "{stdout}"
+    );
+    assert!(stdout.contains("Que faire ?\n  1. Refaire la pesée\n  2. Demander conseil\n  3. Regarder par la fenêtre\n"), "{stdout}");
+    assert!(
+        stdout.contains(
+            "[& move berzelius to=porte 1.5s]\nJohan August Arfwedson (thinks): Lentement."
+        ),
+        "{stdout}"
+    );
+    assert!(stdout.contains("[give bec_bunsen]"), "{stdout}");
+    assert!(
+        stdout
+            .ends_with("[scene labo_interactif] -- the scene takes over; the scenario ends here\n"),
+        "{stdout}"
+    );
+
+    // --start begins elsewhere; a wrong answer with --choose fails.
+    let out = luma(&[
+        "lumen",
+        "play",
+        lithium().to_str().unwrap(),
+        "--start",
+        "labo_nuit",
+        "--choose",
+        "9",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no option 9"));
+    let out = luma(&[
+        "lumen",
+        "play",
+        lithium().to_str().unwrap(),
+        "--start",
+        "flamme",
+    ]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("[sfx crepitement]\n"));
+    let out = luma(&[
+        "lumen",
+        "play",
+        lithium().to_str().unwrap(),
+        "--start",
+        "nowhere",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown knot `nowhere`"));
+    let out = luma(&["lumen", "frobnicate"]);
+    assert_eq!(out.status.code(), Some(2));
+}
