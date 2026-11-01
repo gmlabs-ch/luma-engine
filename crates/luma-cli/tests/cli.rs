@@ -192,6 +192,76 @@ fn unpack_extracts_everything() {
 }
 
 #[test]
+fn pack_builds_a_package_from_a_directory() {
+    let dir = temp_dir();
+    let source = dir.join("project");
+    fs::create_dir_all(source.join("scenes/Room")).unwrap();
+    fs::write(source.join("default.game"), b"GAME { NAME=\"packed\" }").unwrap();
+    fs::write(
+        source.join("scenes/Room/room.scene"),
+        "SCENE { }".repeat(200),
+    )
+    .unwrap();
+    fs::write(source.join("scenes/.DS_Store"), b"junk").unwrap();
+    let package = dir.join("data.dcp");
+    let out = luma(&["pack", source.to_str().unwrap(), package.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("Packed 2 files"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let first = fs::read(&package).unwrap();
+
+    // The package lists and unpacks back to the same files, in path order.
+    let out = luma(&["list", package.to_str().unwrap()]);
+    let listing = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        listing.lines().count(),
+        2,
+        "hidden files are skipped: {listing}"
+    );
+    assert!(listing.contains("\tdefault.game\n"), "{listing}");
+    assert!(listing.contains("\tscenes/Room/room.scene\n"), "{listing}");
+    let target = dir.join("out");
+    let out = luma(&[
+        "unpack",
+        package.to_str().unwrap(),
+        target.to_str().unwrap(),
+    ]);
+    assert!(out.status.success());
+    assert_eq!(
+        fs::read(target.join("default.game")).unwrap(),
+        b"GAME { NAME=\"packed\" }"
+    );
+    assert_eq!(
+        fs::read(target.join("scenes/Room/room.scene")).unwrap(),
+        "SCENE { }".repeat(200).as_bytes()
+    );
+
+    // Packing again gives the same bytes (the package's internal name is
+    // the file's stem, so the file is named the same).
+    fs::create_dir_all(dir.join("again")).unwrap();
+    let again = dir.join("again/data.dcp");
+    let out = luma(&["pack", source.to_str().unwrap(), again.to_str().unwrap()]);
+    assert!(out.status.success());
+    assert_eq!(fs::read(&again).unwrap(), first);
+
+    let out = luma(&[
+        "pack",
+        dir.join("missing").to_str().unwrap(),
+        again.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not a directory"));
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn unpack_refuses_names_escaping_the_target() {
     let game = temp_dir();
     let mut evil = PackageBuilder::new("data");

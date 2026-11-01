@@ -5,7 +5,7 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use luma_archive::{Package, PackagedFile, Vfs};
+use luma_archive::{Package, PackageBuilder, PackagedFile, Vfs};
 use luma_formats::{Document, Scene, SceneNode, Sprite};
 use luma_script::Program;
 
@@ -18,6 +18,7 @@ USAGE:
 COMMANDS:
     list <game>            List the files contained in a game's packages
     unpack <game> <dir>    Extract every file from a game's packages
+    pack <dir> <file.dcp>  Build a package from the files of a directory
     dump <file>            Parse a definition file and print it in canonical form
     dump <game> <name>     Same, for a file inside a game's packages
     sprite <game> <name>   Describe a sprite and the images it uses
@@ -48,6 +49,10 @@ fn main() -> ExitCode {
         Some("unpack") => match args.as_slice() {
             [_, game, dir] => unpack(Path::new(game), Path::new(dir)),
             _ => usage_error("unpack takes exactly two arguments: <game> <dir>"),
+        },
+        Some("pack") => match args.as_slice() {
+            [_, dir, file] => pack(Path::new(dir), Path::new(file)),
+            _ => usage_error("pack takes exactly two arguments: <dir> <file.dcp>"),
         },
         Some("sprite") => match args.as_slice() {
             [_, game, name] => sprite(Path::new(game), name),
@@ -170,6 +175,81 @@ fn unpack(game: &Path, dir: &Path) -> Result<(), Failure> {
         total,
         dir.display()
     );
+    Ok(())
+}
+
+/// Packs the files under `dir` into one package, the way the project
+/// manager builds `data.dcp`: paths relative to `dir` with `\\`, each file
+/// compressed when that makes it smaller. Files are added in path order with
+/// no timestamps, so packing the same files twice gives the same bytes.
+/// Hidden files and directories (names starting with `.`) are skipped.
+fn pack(dir: &Path, file: &Path) -> Result<(), Failure> {
+    if !dir.is_dir() {
+        return Err(Failure::Error(format!(
+            "{}: not a directory",
+            dir.display()
+        )));
+    }
+    let mut paths = Vec::new();
+    collect_files(dir, dir, &mut paths)?;
+    paths.sort();
+    let name = file
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("data");
+    let mut builder = PackageBuilder::new(name);
+    let mut total = 0u64;
+    for relative in &paths {
+        let data = fs::read(dir.join(relative))
+            .map_err(|err| Failure::Error(format!("{}: {err}", dir.join(relative).display())))?;
+        total += data.len() as u64;
+        let name = relative
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("\\");
+        builder.add_file(name, data);
+    }
+    let out =
+        File::create(file).map_err(|err| Failure::Error(format!("{}: {err}", file.display())))?;
+    let mut out = BufWriter::new(out);
+    builder.write(&mut out)?;
+    out.into_inner()
+        .map_err(|err| err.into_error())?
+        .sync_all()?;
+    eprintln!(
+        "Packed {} files, {} bytes, into {}",
+        paths.len(),
+        total,
+        file.display()
+    );
+    Ok(())
+}
+
+/// Collects the files under `dir`, as paths relative to `root`.
+fn collect_files(root: &Path, dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Failure> {
+    for entry in
+        fs::read_dir(dir).map_err(|err| Failure::Error(format!("{}: {err}", dir.display())))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let hidden = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with('.'));
+        if hidden {
+            continue;
+        }
+        if path.is_dir() {
+            collect_files(root, &path, paths)?;
+        } else if path.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .expect("under the root")
+                .to_path_buf();
+            paths.push(relative);
+        }
+    }
     Ok(())
 }
 

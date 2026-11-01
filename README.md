@@ -85,6 +85,9 @@ luma list path/to/game
 # Extract everything into a directory
 luma unpack path/to/game path/to/output
 
+# Build a package from a directory's files, the way the project manager does
+luma pack path/to/files path/to/game/data.dcp
+
 # Parse a definition file (scene, sprite, window, ...) and print it
 luma dump path/to/game scenes/intro/intro.scene
 
