@@ -26,7 +26,8 @@
 ## Game data
 
 - Never commit game data. Local test games live in `testdata/local/`
-  (git-ignored). CI uses only freely redistributable test data.
+  (git-ignored). The one exception is `testdata/openquest`, a CC BY game
+  the tests and CI play; it is the only freely redistributable test data.
 
 ## Engineering
 

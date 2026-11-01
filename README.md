@@ -166,9 +166,17 @@ luma-player path/to/game --headless --load 5 --entities
 
 ## Games
 
-Luma Engine does not ship any game. To play a game, you need its data files,
-obtained legally from its authors. Some Wintermute games are freeware; check
-each game's license before redistributing anything.
+Luma Engine does not ship any commercial game. To play a game, you need its
+data files, obtained legally from its authors. Some Wintermute games are
+freeware; check each game's license before redistributing anything.
+
+The repository does include one small game, [OpenQuest](testdata/openquest),
+a two-room adventure released under CC BY 4.0: the tests and CI play it
+from the opening to the ending with the headless player, and you can too:
+
+```sh
+luma-player testdata/openquest
+```
 
 ## Contributing
 

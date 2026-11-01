@@ -25,8 +25,10 @@ Luma Engine is dual-licensed under MIT and Apache-2.0. To keep it that way:
 
 ## Game data
 
-Never commit game data to this repository, even freeware. Put local test games
-under `testdata/local/`, which is ignored by git.
+Never commit game data to this repository, even freeware: the only game in it
+is `testdata/openquest`, whose Creative Commons licence allows redistribution
+(see its README). Put local test games under `testdata/local/`, which is
+ignored by git.
 
 ## Code style
 

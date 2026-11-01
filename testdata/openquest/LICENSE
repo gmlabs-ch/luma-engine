@@ -1,0 +1,10 @@
+OpenQuest, by Michael Sheail (2007). Wintermute Engine port by Jenni
+McMurray (https://jennibee.itch.io/openquest-wintermute).
+
+This work is licensed under the Creative Commons Attribution 4.0
+International Licence. To view a copy of this licence, visit
+https://creativecommons.org/licenses/by/4.0/
+
+The copy in this directory is modified: the Wintermute runtime binaries are
+not included, and the music tracks are replaced by silence (see README.md).
+Everything else is the original work, unchanged.
