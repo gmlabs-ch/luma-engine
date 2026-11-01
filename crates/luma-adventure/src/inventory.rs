@@ -104,28 +104,82 @@ impl World {
     /// Loads the game's items file (`ITEMS` of `default.game`) and
     /// attaches the items' scripts.
     pub(crate) fn load_items(&mut self, engine: &mut Engine) {
-        let Some(path) = self.game_file().items.clone() else {
-            return;
-        };
-        let bytes = match self.vfs.read(&path) {
+        if let Some(path) = self.game_file().items.clone() {
+            self.load_items_from(engine, &path, false);
+        }
+    }
+
+    /// Loads an items file (`Game.LoadItems`, `CAdGame::LoadItemsFile`).
+    /// Without `merge`, the items the game had go first, and with them
+    /// what the inventory held and the selected item, as in the original
+    /// engine; with `merge`, an item of the file replaces the one of the
+    /// same name. The captions expand with the string table of the
+    /// moment, which is what a language menu reloads the items for.
+    /// Returns whether the file loaded.
+    pub fn load_items_from(&mut self, engine: &mut Engine, path: &str, merge: bool) -> bool {
+        let bytes = match self.vfs.read(path) {
             Ok(bytes) => bytes,
             Err(err) => {
                 self.log(format!(
                     "CAdGame::LoadItemsFile failed for file '{path}': {err}"
                 ));
-                return;
+                return false;
             }
         };
         let defs = match ItemDef::parse_all(&bytes) {
             Ok(defs) => defs,
             Err(err) => {
                 self.log(format!("Error parsing ITEMS file '{path}': {err}"));
-                return;
+                return false;
             }
         };
+        if !merge {
+            let ids: Vec<NativeId> = self.inventory.items.iter().map(|(id, _)| *id).collect();
+            for id in ids {
+                self.delete_item(engine, id);
+            }
+        }
         for def in defs {
+            if merge {
+                if let Some(previous) = self.item_by_name(&def.name) {
+                    self.delete_item(engine, previous);
+                }
+            }
             self.add_item(engine, def);
         }
+        true
+    }
+
+    /// Creates an item from nothing (`Game.CreateItem`): scripts set its
+    /// properties afterwards.
+    pub fn create_item(&mut self, engine: &mut Engine, name: Option<&str>) -> NativeId {
+        let mut def = ItemDef::default();
+        if let Some(name) = name {
+            def.name = name.to_string();
+        }
+        self.add_item(engine, def)
+    }
+
+    /// Removes an item (`Game.DeleteItem`, `CAdGame::DeleteItem`): it is
+    /// deselected, leaves the inventory, the scene entities named after
+    /// it hide, and its scripts end. `false` when the handle is not an
+    /// item's.
+    pub fn delete_item(&mut self, engine: &mut Engine, id: NativeId) -> bool {
+        let Some(index) = self.inventory.items.iter().position(|(i, _)| *i == id) else {
+            return false;
+        };
+        let name = self.inventory.items[index].1.def.name.clone();
+        if self.selected_item == Some(id) {
+            self.selected_item = None;
+        }
+        self.handle_item_associations(&name, false);
+        self.inventory.taken.retain(|t| *t != id);
+        for script in engine.scripts_of(id) {
+            engine.finish(script, true);
+        }
+        self.inventory.items.remove(index);
+        self.objects.remove(id);
+        true
     }
 
     /// Adds an item from its definition, loading its sprites and

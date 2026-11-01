@@ -138,7 +138,7 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 
 | Object | Properties | Methods |
 |--------|------------|---------|
-| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `ActiveObject`, `MouseX`, `MouseY`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`, `SubtitlesSpeed`, `TalkSkipButton`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadActor`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
+| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `ActiveObject`, `MouseX`, `MouseY`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`, `SubtitlesSpeed`, `TalkSkipButton`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadItems`, `CreateItem`, `DeleteItem`, `LoadActor`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
 | `Scene` | `Name`, `Width`, `Height`, `NumLayers`, `MainLayer`, `OffsetX`, `OffsetY`, `MouseX`, `MouseY`, `NumFreeNodes`, `AutoScroll`, `ScrollPixelsX`, `ScrollSpeedX`... | `GetNode`, `GetLayer`, `GetFreeNode`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `SkipTo`, `ScrollTo`, `ScrollToAsync`, `IsScrolling`, `IsPointInViewport`, `LoadActor`, `UnloadObject` |
 | Layers | `Name`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active` | `GetNode` |
 | Entities | `Name`, `Caption`, `X`, `Y`, `Height`, `Active`, `Interactive`, `Scalable`, `Scale`, `RelativeScale`, `AlphaColor`, `Colorable`, `Item`, `Subtype`, `WalkToX`, `WalkToY`, `WalkToDirection`, `SaveState`, `IgnoreItems`... | `SkipTo`, `SetSprite`, `GetSprite`, `GetSpriteObject`, `Reset`, `Caption`, `PlayAnim`, `PlayAnimAsync` (a sprite shown in place of the entity's: one that does not loop gives the entity its own back at its end, a looping one plays on, moving the entity by its frames' `MOVE`; `PlayAnim` waits for the end, `Reset` or a sentence cuts it: talking is the entity's state then, and it is ready when the sentence ends) |
@@ -212,7 +212,13 @@ list of taken items shared by the game, the actors and the entities
 (the engine gives each object its own, switched with
 `Game.InventoryObject`); taking an item hides the scene entities whose
 `ITEM` names it, dropping it shows them again, and the selected item
-draws its cursor.
+draws its cursor. `Game.LoadItems(file, merge)` loads another items
+file: without `merge` the items are replaced and what the inventory
+held is lost, as in the original engine (a language menu does this
+before anything is taken, so that the captions expand with the string
+table it just loaded); with `merge` an item of the file replaces the
+one of the same name. `Game.CreateItem` and `Game.DeleteItem` add and
+remove single items the same way.
 
 Videos (see [docs/video.md](video.md)) take the frame over: while one
 plays, the game is frozen and no script runs, so the script that called

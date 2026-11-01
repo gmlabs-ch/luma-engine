@@ -791,6 +791,16 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 .and_then(|id| runtime.world.item(id))
                 .map_or("none".to_string(), |i| format!("{:?}", i.def.name))
         );
+        if options.entities {
+            for (_, item) in &inventory.items {
+                println!(
+                    "  item {:?}: caption {:?}, sprite {:?}",
+                    item.def.name,
+                    item.def.caption,
+                    item.def.sprite.as_deref().unwrap_or("none")
+                );
+            }
+        }
         let responses = runtime.world.response_texts();
         if !responses.is_empty() {
             println!("responses: {responses:?}");

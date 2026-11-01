@@ -62,11 +62,8 @@ const GAME_STUBS: &[&str] = &[
     "ShowStatusLine",
     "HideStatusLine",
     "LoadInventoryBox",
-    "LoadItems",
     "LoadEntity",
     "CreateEntity",
-    "CreateItem",
-    "DeleteItem",
     "Reset",
     "AccOutputText",
     "DumpTextureStats",
@@ -593,6 +590,32 @@ impl World {
             ),
             "QuitGame" => {
                 self.quit = true;
+                Return::null()
+            }
+            "LoadItems" => {
+                let path = arg(0).get_string(self);
+                let merge = arg(1).get_bool(self);
+                Return::value(self.load_items_from(ctx.engine, &path, merge))
+            }
+            "CreateItem" => {
+                let name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                Return::value(Value::Native(self.create_item(ctx.engine, name.as_deref())))
+            }
+            "DeleteItem" => {
+                let item = match arg(0) {
+                    Value::Native(id) => Some(id),
+                    Value::Null => None,
+                    v => {
+                        let name = v.get_string(self);
+                        self.item_by_name(&name)
+                    }
+                };
+                if let Some(id) = item {
+                    self.delete_item(ctx.engine, id);
+                }
                 Return::null()
             }
             "LoadStringTable" => {

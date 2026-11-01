@@ -864,6 +864,13 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("audio\\beep.wav", luma_audio::silent_wav(8000, 1, 300));
     pkg.add_file("voices\\GREET.wav", luma_audio::silent_wav(8000, 2, 250));
     pkg.add_file("string.tab", b"GREET\tHello\r\n".to_vec());
+    pkg.add_file("fr.tab", b"GREET\tBonjour\r\n".to_vec());
+    pkg.add_file(
+        "items2.items",
+        b"ITEM { NAME=\"key\" CAPTION=\"/GREET/x\" IMAGE=\"art\\green.png\" }
+ITEM { NAME=\"gem\" CAPTION=\"Gem\" IMAGE=\"art\\red.png\" }"
+            .to_vec(),
+    );
     pkg.add_file("game.script", game_script());
     pkg.add_file("win.script", window_script());
     pkg.add_file("intro.ogv", luma_video::synthetic_clip(32, 32, 10, 10));
@@ -2571,4 +2578,70 @@ fn hotspots_of_a_scene_smaller_than_the_screen_are_where_they_are_drawn() {
     let spot = runtime.world.find_node("spot").unwrap();
     assert_eq!(runtime.world.object_at(16, 14), Some(spot));
     assert_eq!(runtime.world.object_at(16, 5), None);
+}
+
+#[test]
+fn load_items_reloads_the_items_as_the_original_engine_does() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let names = |runtime: &Runtime| -> Vec<String> {
+        runtime
+            .world
+            .inventory()
+            .items
+            .iter()
+            .map(|(_, i)| i.def.name.clone())
+            .collect()
+    };
+    assert_eq!(names(&runtime), ["key", "coin"]);
+    assert!(runtime.world.take_item("key", None));
+    let key = runtime.world.item_by_name("key").unwrap();
+    assert_eq!(runtime.world.item(key).unwrap().def.caption, "Hello");
+
+    // Merging: an item of the file replaces the one of the same name,
+    // which leaves the inventory (the original engine deletes it first).
+    assert!(
+        runtime
+            .world
+            .load_items_from(&mut runtime.engine, "items2.items", true)
+    );
+    assert_eq!(names(&runtime), ["coin", "key", "gem"]);
+    assert!(
+        !runtime.world.has_item("key"),
+        "the replaced item was dropped"
+    );
+    assert_ne!(runtime.world.item_by_name("key"), Some(key), "a new object");
+    assert!(runtime.world.item(key).is_none());
+
+    // A language menu: the string table changes, then the items reload
+    // so that their captions expand with it; what was taken is lost.
+    assert!(runtime.world.take_item("coin", None));
+    assert!(runtime.world.load_string_table("fr.tab", true));
+    assert!(
+        runtime
+            .world
+            .load_items_from(&mut runtime.engine, "items2.items", false)
+    );
+    assert_eq!(names(&runtime), ["key", "gem"]);
+    assert!(runtime.world.taken_items().is_empty());
+    let key = runtime.world.item_by_name("key").unwrap();
+    assert_eq!(runtime.world.item(key).unwrap().def.caption, "Bonjour");
+    assert!(
+        !runtime
+            .world
+            .load_items_from(&mut runtime.engine, "missing.items", false),
+        "a missing file fails and changes nothing"
+    );
+    assert_eq!(names(&runtime), ["key", "gem"]);
+
+    // Single items come and go the same way.
+    let gem = runtime.world.item_by_name("gem").unwrap();
+    assert!(runtime.world.delete_item(&mut runtime.engine, gem));
+    assert!(!runtime.world.delete_item(&mut runtime.engine, gem));
+    let rock = runtime.world.create_item(&mut runtime.engine, Some("rock"));
+    assert_eq!(runtime.world.item_by_name("rock"), Some(rock));
+    assert_eq!(names(&runtime), ["key", "rock"]);
 }
