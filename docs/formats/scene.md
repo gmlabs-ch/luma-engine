@@ -375,8 +375,14 @@ layer_x  = ratio_x  * (layer_width  - viewport_width)
 and the same for `y`. A layer the size of the main layer scrolls with it;
 a wider layer scrolls faster (foreground), a narrower one slower
 (background). The main layer, by definition, scrolls by exactly
-`offset_x`. Parallax can be switched off by scripts, in which case every
-layer scrolls by the scene offset.
+`offset_x`.
+
+Wintermute Engine 1.x keeps a flag that would instead scroll every layer by
+the scene offset (`CAdScene::m_ParalaxScrolling`, the `else` branch of
+`TraverseNodes`), but nothing in a game reaches it: no scene key sets it
+(there is no `PARALLAX_SCROLLING` token in the scene loader) and no script
+property exposes it; only the editor's preview turns it off. Games always
+scroll with parallax, so Luma Engine implements only that branch.
 
 `CAMERA` names a camera of the 3D geometry in the 3D version of the
 engine, which sets up a perspective view for 3D actors from it; the 2D
