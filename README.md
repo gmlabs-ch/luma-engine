@@ -155,6 +155,10 @@ luma-player path/to/game --headless --scene scenes/minigame/minigame.scene --hol
 luma-player path/to/game --headless --scene scenes/room/room.scene --click-at 500,520 --ticks 300 --screenshot walk.png
 luma-player path/to/game --headless --scene scenes/room/room.scene --click Cupboard:Take --after 250 --then-scene scenes/hall/hall.scene --then-scene scenes/room/room.scene --entities
 
+# Click a character where he stands at that moment, and drag a puzzle piece
+luma-player path/to/game --headless --click-at 101,176 --click-on Zif --wait 700
+luma-player path/to/game --headless --load 36 --drag 61,100:261,109
+
 # Save to slot 5 after the clicks, then load it back before the first frame
 luma-player path/to/game --headless --scene scenes/room/room.scene --click Cupboard:Take --after 250 --save 5
 luma-player path/to/game --headless --load 5 --entities

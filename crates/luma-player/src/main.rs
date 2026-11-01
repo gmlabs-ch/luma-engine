@@ -45,6 +45,9 @@ OPTIONS:
     --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
                           node, e.g. --click Door or --click Freezer:LookAt
     --click-at <x>,<y>    In headless mode, move the mouse there and click
+    --click-on <node>     In headless mode, move the mouse over a scene node where it is
+                          now (the centre of its hit area) and click, e.g. a wandering
+                          character
     --right-click-at <x>,<y>
                           In headless mode, move the mouse there and right-click (a verb menu
                           centred on the mouse is then clicked with --click-at at the same point)
@@ -75,7 +78,7 @@ OPTIONS:
                           saved ones
     --help                Show this message
 
---click, --click-at, --right-click-at, --drag, --key, --hold-key, --type
+--click, --click-at, --click-on, --right-click-at, --drag, --key, --hold-key, --type
 and --wait are steps: they run in the order given, --after frames apart, starting one
 frame after the scene is up, once its scripts have placed the actor, as
 for a player who acts when the scene shows.
@@ -102,6 +105,8 @@ enum Step {
     /// Raise an event on a scene node by name (`node` or `node:event`).
     Node(String),
     ClickAt(i32, i32),
+    /// Click a scene node where it is at that moment.
+    ClickOn(String),
     RightClickAt(i32, i32),
     /// Press and release a key.
     Key(i32),
@@ -206,6 +211,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .ok_or_else(|| format!("--click-at expects <x>,<y>, got `{v}`"))?;
                 steps.push(Step::ClickAt(x, y));
             }
+            "--click-on" => steps.push(Step::ClickOn(value(&mut i)?.clone())),
             "--type" => steps.push(Step::Type(value(&mut i)?.clone())),
             "--drag" => {
                 let v = value(&mut i)?;
@@ -462,6 +468,19 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 }
                 let (x, y, right) = match step {
                     Step::ClickAt(x, y) => (*x, *y, false),
+                    Step::ClickOn(node) => {
+                        let point = runtime
+                            .world
+                            .find_node(node)
+                            .and_then(|id| runtime.world.hit_point(id));
+                        match point {
+                            Some((x, y)) => (x, y, false),
+                            None => {
+                                println!("[{tick}] click on {node:?}: not on screen");
+                                continue;
+                            }
+                        }
+                    }
                     Step::RightClickAt(x, y) => (*x, *y, true),
                     Step::Node(click) => {
                         let (node, event) = click.split_once(':').unwrap_or((click, "LeftClick"));

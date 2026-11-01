@@ -564,6 +564,79 @@ impl World {
         );
     }
 
+    /// A point of the screen inside an object's hit area: the centre of the
+    /// last area drawn for it (its sprite's frame, its region's bounding
+    /// box or its rectangle), or `None` when the object is not on screen.
+    /// For tooling that clicks an object where it is at the moment, such
+    /// as a wandering character; the centre of a sprite may fall on a
+    /// transparent pixel, which nothing here checks.
+    pub fn hit_point(&mut self, id: NativeId) -> Option<(i32, i32)> {
+        let hits = std::mem::take(&mut self.hits);
+        let mut found = None;
+        for hit in hits.iter().rev() {
+            if hit.owner != id {
+                continue;
+            }
+            let (x, y, w, h) = match &hit.shape {
+                HitShape::Polygon(points) => {
+                    let Some(first) = points.first() else {
+                        continue;
+                    };
+                    let (mut l, mut t, mut r, mut b) = (first.x, first.y, first.x, first.y);
+                    for p in points {
+                        l = l.min(p.x);
+                        t = t.min(p.y);
+                        r = r.max(p.x);
+                        b = b.max(p.y);
+                    }
+                    (l, t, r - l, b - t)
+                }
+                HitShape::Rect(x, y, w, h) => (*x, *y, *w, *h),
+                HitShape::Pixels {
+                    bank,
+                    image,
+                    color_key,
+                    dst,
+                    src,
+                    zoom,
+                    ..
+                } => {
+                    let (dx, dy, mut dw, mut dh) = *dst;
+                    if dw == 0 || dh == 0 {
+                        // The size comes from the image, as in `object_at`.
+                        let mask = match bank {
+                            HitBank::Scene => self
+                                .scene
+                                .as_mut()
+                                .and_then(|v| v.bank.mask(&self.vfs, image, *color_key).cloned()),
+                            HitBank::Actor(actor) => self
+                                .actor_and_vfs(*actor)
+                                .and_then(|(vfs, a)| a.bank.mask(vfs, image, *color_key).cloned()),
+                            HitBank::Ui => self.ui.bank.mask(&self.vfs, image, *color_key).cloned(),
+                        };
+                        let Some(mask) = mask else { continue };
+                        let (sw, sh) =
+                            src.map_or((mask.width as i32, mask.height as i32), |s| (s.2, s.3));
+                        let z = zoom / 100.0;
+                        dw = (sw as f32 * z) as i32;
+                        dh = (sh as f32 * z) as i32;
+                    }
+                    (dx, dy, dw, dh)
+                }
+            };
+            if w <= 0 || h <= 0 {
+                continue;
+            }
+            found = Some((
+                x + w / 2 - hit.layer_offset.0,
+                y + h / 2 - hit.layer_offset.1,
+            ));
+            break;
+        }
+        self.hits = hits;
+        found
+    }
+
     /// The object at a point of the screen (`CBRenderer::GetObjectAt`):
     /// the last hit area drawn that contains it, by its polygon or by an
     /// opaque pixel of its sprite.
