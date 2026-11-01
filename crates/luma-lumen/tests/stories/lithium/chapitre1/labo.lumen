@@ -1,0 +1,51 @@
+// story/chapitre1/labo.lumen
+include "common/personnages.lumen"
+
+var pesees = 0
+var decouverte = false
+
+== labo_nuit
+@bg labo_stockholm_nuit fade=1s
+@ambience fourneau volume=0.3
+@music tension_douce fade=2s
+Stockholm, 1817. Le laboratoire de Berzelius, après minuit.
+@show arfwedson at=center pose=penche
+[arfwedson] Encore cette pierre d'Utö…{pause 0.5} Elle ne réagit comme aucune autre.
+[arfwedson:inquiet] Il manque toujours trois pour cent de la masse. #l:7f3a
+-> labo_nuit.choix
+
+= choix
+? Que faire ?
+  - Refaire la pesée #repesee
+    ~ pesees += 1
+    @sfx balance
+    [arfwedson] ${pesees} pesées. Le même résultat, au milligramme près.
+    -> labo_nuit.choix
+  - Tester à la flamme [if has(bec_bunsen)] -> flamme
+  - Demander conseil [locked if seen(conseil) "Il est rentré chez lui."] -> conseil
+  * Regarder par la fenêtre
+    La neige tombe sur Riddarholmen. {seq: Rien de nouveau. | Toujours rien. | Tu perds ton temps, Johan.}
+    -> labo_nuit.choix
+
+== conseil
+@show berzelius at=right
+[berzelius] Vous cherchez un sel que vous ne connaissez pas encore.
+[berzelius] Recommencez. Lentement, cette fois.
+@give bec_bunsen
+&@move berzelius to=porte 1.5s
+[arfwedson~] Lentement. Comme si j'avais le temps.
+@wait
+@hide berzelius
+-> labo_nuit.choix
+
+== flamme
+@sfx crepitement
+@camera zoom=1.3 on=flamme 2s
+Une flamme rouge vif. {shake}Rouge carmin.{/shake}
+~ decouverte = true
+@emit succes premiere_flamme
+if pesees >= 3:
+  [arfwedson] Trois pesées pour rien. La réponse était dans le feu.
+else:
+  [arfwedson] Un nouvel élément. Il faut lui trouver un nom.
+@scene labo_interactif

@@ -978,6 +978,7 @@ dependencies = [
  "luma-archive",
  "luma-audio",
  "luma-formats",
+ "luma-lumen",
  "luma-render",
  "luma-script",
  "luma-video",
@@ -1017,6 +1018,7 @@ dependencies = [
 name = "luma-cli"
 version = "0.0.1"
 dependencies = [
+ "luma",
  "luma-archive",
  "luma-formats",
  "luma-script",
@@ -1029,6 +1031,10 @@ dependencies = [
  "image",
  "serde",
 ]
+
+[[package]]
+name = "luma-lumen"
+version = "0.0.1"
 
 [[package]]
 name = "luma-player"

@@ -17,12 +17,16 @@ luma-render.workspace = true
 luma-audio.workspace = true
 luma-video.workspace = true
 luma-adventure = { workspace = true, optional = true }
+luma-lumen = { workspace = true, optional = true }
 
 [features]
 default = ["adventure"]
 ## The adventure module: actors, scenes, speech, inventory, pathfinding
 ## and saved games (`luma::adventure`).
 adventure = ["dep:luma-adventure"]
+## Lumen, the scenario format for games made for Luma: parser, checker
+## and text runner (`luma::lumen`).
+lumen = ["dep:luma-lumen"]
 ## Sound output on the default device (needs ALSA on Linux); without it
 ## the sounds run silently on the game clock.
 audio-device = ["luma-audio/device"]

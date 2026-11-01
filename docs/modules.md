@@ -19,6 +19,7 @@ core crates under short names and the modules behind Cargo features:
 | `luma::audio` | `luma-audio`: music, sound effects, voice | yes |
 | `luma::video` | `luma-video`: Ogg Theora videos | yes |
 | `luma::adventure` | `luma-adventure`: the point-and-click adventure game as Wintermute runs it | feature `adventure`, on by default |
+| `luma::lumen` | `luma-lumen`: the Lumen scenario format for games made for Luma (parser, checker, text runner; see [lumen.md](lumen.md)) | feature `lumen`, off by default |
 
 Two more features configure the core rather than add a module:
 `audio-device` plays the sounds on the default output device (without
@@ -61,7 +62,8 @@ and gets the core alone; the CI checks that this builds.
 
 ## Not yet
 
-- A second module, to prove the public API carries a genre other than
-  the adventure game without touching the core.
+- A module of another genre, to prove the public API carries one without
+  touching the core (`luma-lumen` is a second module, but it needs nothing
+  from the core yet).
 - Features for the parts of the core a game may not need (the video
   decoder, the TrueType rasterizer).

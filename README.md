@@ -51,15 +51,16 @@ Luma Engine reads the same game data with a new engine built for today:
 | `luma-audio` | Music, sound effects and voice | `kira` (Symphonia for decoding, `cpal` with the `device` feature) |
 | `luma-video` | Ogg Theora videos decoded to frames | `ogg`, `oxideav-theora`, `oxideav-core` |
 | `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six core crates, `fontdue`, `serde`, `postcard`, `flate2` |
-| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature |
+| `luma-lumen` | Lumen, the scenario format for games made for Luma: parser, checker, text runner | nothing |
+| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen` |
 | `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script` |
 | `luma-player` | The desktop player | `luma` (features `adventure`, `audio-device`) |
 
-The first six are the core; `luma-adventure` is the first optional
-module. A game or a front-end depends on `luma` and enables the modules
-it needs through its features (`adventure` is on by default, `audio-device`
-plays the sounds, `serde` serializes the core); see
-[docs/modules.md](docs/modules.md).
+The first six are the core; `luma-adventure` and `luma-lumen` are the
+optional modules. A game or a front-end depends on `luma` and enables the
+modules it needs through its features (`adventure` is on by default,
+`lumen` is off, `audio-device` plays the sounds, `serde` serializes the
+core); see [docs/modules.md](docs/modules.md).
 
 ## Building
 

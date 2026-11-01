@@ -17,7 +17,9 @@
 //!
 //! - `adventure` (on by default): [`adventure`], the point-and-click
 //!   adventure game as Wintermute Engine runs it, with actors, scenes,
-//!   speech, inventory, pathfinding and saved games.
+//!   speech, inventory, pathfinding and saved games;
+//! - `lumen` (off by default): [`lumen`], the Lumen scenario format for
+//!   games made for Luma, with its parser, checker and text runner.
 //!
 //! Two more features configure the core: `audio-device` plays the sounds
 //! on the default output device (without it they run silently, on the
@@ -38,6 +40,8 @@ pub use luma_video as video;
 
 #[cfg(feature = "adventure")]
 pub use luma_adventure as adventure;
+#[cfg(feature = "lumen")]
+pub use luma_lumen as lumen;
 
 #[cfg(test)]
 mod tests {
@@ -65,5 +69,11 @@ mod tests {
     #[test]
     fn the_adventure_module_is_reachable_with_its_feature() {
         assert_eq!(crate::adventure::SAVE_EXTENSION, "dsv");
+    }
+
+    #[cfg(feature = "lumen")]
+    #[test]
+    fn the_lumen_module_is_reachable_with_its_feature() {
+        assert_eq!(crate::lumen::EXTENSION, "lumen");
     }
 }
