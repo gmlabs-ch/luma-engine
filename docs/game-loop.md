@@ -92,8 +92,13 @@ exclusive window or a menu a shield covering the whole screen. The
 object under the mouse is the **last one drawn** whose area contains the
 point: a region by its polygon (in scene coordinates), a sprite by its
 rectangle on screen, and, when the sprite is `PRECISE` (the default),
-only where the pixel's alpha is above 128, with the sprite's scale and
-mirroring applied.
+only where the pixel's alpha is above 128, with the sprite's scale (per
+axis, `ScaleX`/`ScaleY`) and mirroring applied. A rotated sprite
+(`Rotatable`, see [scene.md](formats/scene.md#rotation-of-an-object)) is
+hit where it is seen: the point is turned back around the hotspot before
+the tests. The original engine registers the unrotated rectangle and
+hits a turned sprite where it would be unrotated; Luma follows the
+transform instead, deliberately.
 
 While the game is not interactive there is no active object, so a
 click skips the sentences and nothing else (per `TALK_SKIP_BUTTON`).

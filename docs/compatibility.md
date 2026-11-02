@@ -110,7 +110,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BObject.cpp
 - Hierarchy and Luma: CBScriptHolder → CBObject; Luma: game, entities, actors (sound, position, flags); controls, regions, layers have their own subsets
-- Count: 45 done, 27 todo, 0 no-op
+- Count: 55 done, 17 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -141,14 +141,14 @@ How the list was made. For every class with a script interface, the names tested
 | `Registrable` | get/set | **done** | Whether the object is registered for mouse interaction (same as `Interactive`). |
 | `Interactive` | get/set | **done** | Whether the object reacts to the mouse. |
 | `Zoomable`, `Scalable` | get/set | **done** | Whether the scene's scale levels apply to the object. |
-| `Rotatable` | get/set | **done** | Whether the scene's rotation levels apply. The flag is stored; rotation is not rendered. |
+| `Rotatable` | get/set | **done** | Whether the scene's rotation levels (and `Rotate`, `RelativeRotate`) apply; the sprite turns around its hotspot. |
 | `AlphaColor` | get/set | **done** | Tint colour and alpha (0xAARRGGBB). |
-| `BlendMode` | get/set | **todo** | Blend mode (normal / additive / subtractive). Luma reads 0, ignores the set; no blend modes in the renderer. |
+| `BlendMode` | get/set | **done** | Blend mode (0 normal, 1 additive, 2 subtractive; another value is normal). Pipeline states of the renderer, see `docs/rendering.md`. |
 | `Scale` | get/set | **done** | Absolute scale in percent (null = use the scene's scale). |
-| `ScaleX`, `ScaleY` | get/set | **todo** | Independent horizontal / vertical scale. Luma reads null, ignores the set. |
+| `ScaleX`, `ScaleY` | get/set | **done** | Independent horizontal / vertical scale in percent (null = unset); when either is set they replace `Scale` and the scene's, the other axis at 100 (`CAdObject::GetScale`). The hit area follows. |
 | `RelativeScale` | get/set | **done** | Scale adjustment in percent added to the scene's scale. |
-| `Rotate` | get/set | **todo** | Absolute rotation in degrees. Luma reads null, ignores the set. |
-| `RelativeRotate` | get/set | **todo** | Rotation added to the scene's rotation level. Luma reads 0, ignores the set. |
+| `Rotate` | get/set | **done** | Absolute rotation in degrees (null = use the scene's), applied when `Rotatable`. Luma also hit-tests the sprite where it is drawn turned; WME tests it where it would be unrotated. |
+| `RelativeRotate` | get/set | **done** | Rotation added to the scene's rotation level, when `Rotatable` and no `Rotate` is set. |
 | `Colorable` | get/set | **done** | Whether the scene's ambient colour tints the object. |
 | `SoundPanning` | get/set | **done** | Whether the object's sound pans with its screen position. |
 | `SaveState` | get/set | **done** | Whether the object is saved with the scene state (entities; actors always read true and ignore the set). |
@@ -1031,7 +1031,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Global variables | 4 | 1 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
-| CBObject | 45 | 27 | 0 | 72 |
+| CBObject | 55 | 17 | 0 | 72 |
 | CBGame | 123 | 24 | 18 | 165 |
 | CAdGame | 59 | 6 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |

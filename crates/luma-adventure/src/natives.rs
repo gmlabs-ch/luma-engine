@@ -11,8 +11,8 @@
 //! `BKeyboardState.cpp` and `BScriptHolder.cpp` of WME Lite (MIT
 //! License, Copyright (c) 2011 Jan Nedoma); see `NOTICE`.
 
-use luma_formats::Rgba;
 use luma_formats::scene::Direction;
+use luma_formats::{BlendMode, Rgba};
 use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 
 use crate::objects::Kind;
@@ -1250,12 +1250,17 @@ impl World {
             "Zoomable" | "Scalable" => Value::Bool(e.scalable),
             "Rotatable" => Value::Bool(e.rotatable),
             "AlphaColor" => Value::Int(e.tint.map_or(0, color_int)),
-            "BlendMode" => Value::Int(0),
+            "BlendMode" => Value::Int(e.blend_mode.to_int()),
             "Scale" => e.scale.map_or(Value::Null, |s| Value::Float(f64::from(s))),
-            "ScaleX" | "ScaleY" => Value::Null,
+            "ScaleX" => e
+                .scale_x
+                .map_or(Value::Null, |s| Value::Float(f64::from(s))),
+            "ScaleY" => e
+                .scale_y
+                .map_or(Value::Null, |s| Value::Float(f64::from(s))),
             "RelativeScale" => Value::Float(f64::from(e.relative_scale)),
-            "Rotate" => Value::Null,
-            "RelativeRotate" => Value::Float(0.0),
+            "Rotate" => e.rotate.map_or(Value::Null, |r| Value::Float(f64::from(r))),
+            "RelativeRotate" => Value::Float(f64::from(e.relative_rotate)),
             "Colorable" => Value::Bool(e.colorable),
             "SoundPanning" => Value::Bool(e.sound_panning),
             "SaveState" => Value::Bool(e.save_state),
@@ -1325,8 +1330,13 @@ impl World {
             "Zoomable" | "Scalable" => e.scalable = flag,
             "Rotatable" => e.rotatable = flag,
             "AlphaColor" => e.tint = Some(color_of(int)),
+            "BlendMode" => e.blend_mode = BlendMode::from_int(int),
             "Scale" => e.scale = if is_null { None } else { Some(float as f32) },
+            "ScaleX" => e.scale_x = if is_null { None } else { Some(float as f32) },
+            "ScaleY" => e.scale_y = if is_null { None } else { Some(float as f32) },
             "RelativeScale" => e.relative_scale = float as f32,
+            "Rotate" => e.rotate = if is_null { None } else { Some(float as f32) },
+            "RelativeRotate" => e.relative_rotate = float as f32,
             "Colorable" => e.colorable = flag,
             "SoundPanning" => e.sound_panning = flag,
             "SaveState" => e.save_state = flag,
@@ -1336,8 +1346,7 @@ impl World {
             "WalkToX" => e.walk_to_x = int,
             "WalkToY" => e.walk_to_y = int,
             "WalkToDirection" => e.walk_to_dir = Direction::from_code(i64::from(int)),
-            "Movable" | "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate"
-            | "NonIntMouseEvents" | "AccCaption" | "SceneIndependent" => {}
+            "Movable" | "NonIntMouseEvents" | "AccCaption" | "SceneIndependent" => {}
             _ => return false,
         }
         true
