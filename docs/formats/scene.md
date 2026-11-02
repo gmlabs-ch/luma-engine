@@ -342,6 +342,23 @@ An entity then uses, in order: its own `SCALE` if set, else the scale at
 its position plus its `RELATIVE_SCALE`. A non-scalable entity is drawn at
 100 %.
 
+Scripts can also set a scale per axis (`ScaleX`, `ScaleY`); the engine
+(`CAdObject::GetScale`) then uses them in place of the rule above, with
+the axis left unset at 100 %. The scale applies around the sprite's
+hotspot, which stays at the object's position. The same rule holds for
+actors.
+
+### Rotation of an object
+
+A `ROTATABLE` entity or actor is drawn rotated by the rotation at its
+`X` (see above) plus the `RelativeRotate` a script may set, or by the
+script's `Rotate` when set, which replaces both. The angle is in degrees,
+positive clockwise on screen, and the sprite turns around its hotspot,
+which stays at the object's position (`CBSubFrame::Draw`,
+`CBSurface::DisplayTransform`). An object that is not rotatable is never
+rotated, whatever a script sets. How the renderer draws the rotated and
+scaled sprite is in [docs/rendering.md](../rendering.md#transforms).
+
 ### Tint at a point
 
 The tint of a colorable object at `(x, y)` is the `ALPHA_COLOR` and

@@ -14,12 +14,14 @@
 //! License, Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
 use luma_archive::Vfs;
-use luma_formats::Rgba;
 use luma_formats::scene::Region;
-use luma_render::Quad;
+use luma_formats::{BlendMode, Rgba};
+use luma_render::{Attributes, Quad};
 use luma_script::NativeId;
 
-use crate::scene_view::{AnimState, SpriteBank, drawn_subframes, key, place};
+use crate::scene_view::{
+    AnimState, SpriteBank, Transform, drawn_subframes, key, place_transformed,
+};
 
 /// The random generator the emitters draw from: xorshift64*, the same
 /// algorithm as the world's, so that a run is deterministic under a
@@ -467,6 +469,10 @@ pub struct Emitter {
     pub alpha_time_based: bool,
     /// Whether only the particles inside the owner's region are drawn.
     pub use_region: bool,
+    /// How the particles are blended: the emitter's own `BlendMode`, a
+    /// `CBObject` property of the emitter object (`CPartParticle::Display`
+    /// passes `Emitter->m_BlendMode`).
+    pub blend_mode: BlendMode,
     /// The event raised on the owner when a batch is born.
     pub emit_event: Option<String>,
     /// When the last batch was born.
@@ -532,6 +538,7 @@ impl Emitter {
             alpha2: 255,
             alpha_time_based: false,
             use_region: false,
+            blend_mode: BlendMode::Normal,
             emit_event: None,
             last_gen_time: 0,
             particles: Vec::new(),
@@ -844,12 +851,13 @@ impl Emitter {
         particle.fade_in(now, self.fade_in_time);
     }
 
-    /// The quads drawing the live particles (`CPartEmitter::Display`),
-    /// in the particles' order: each one its sprite's current frame at
-    /// its position, scaled, with its opacity; only those inside
-    /// `region` when the emitter uses the owner's region. Rotation is
-    /// not drawn yet (the renderer has no per-quad rotation).
-    pub fn quads<'a>(&'a self, region: Option<&Region>) -> Vec<Quad<'a>> {
+    /// The quads drawing the live particles (`CPartEmitter::Display`,
+    /// `CPartParticle::Display`), in the particles' order: each one its
+    /// sprite's current frame at its position, scaled, turned by its
+    /// rotation around its hotspot, with its opacity and the emitter's
+    /// blend mode; only those inside `region` when the emitter uses the
+    /// owner's region.
+    pub fn quads<'a>(&'a self, region: Option<&Region>) -> Vec<(Quad<'a>, Attributes)> {
         let mut quads = Vec::new();
         for particle in self.particles.iter().filter(|p| !p.is_dead) {
             if self.use_region
@@ -883,13 +891,24 @@ impl Emitter {
                 let Some(texture) = self.bank.texture(image, sub.color_key) else {
                     continue;
                 };
-                quads.push(place(
+                let (quad, attributes) = place_transformed(
                     sub,
                     texture,
                     particle.x as i32,
                     particle.y as i32,
-                    particle.scale / 100.0,
+                    Transform {
+                        scale_x: particle.scale,
+                        scale_y: particle.scale,
+                        rotation: particle.rotation,
+                    },
                     tint,
+                );
+                quads.push((
+                    quad,
+                    Attributes {
+                        blend: self.blend_mode,
+                        ..attributes
+                    },
                 ));
             }
         }

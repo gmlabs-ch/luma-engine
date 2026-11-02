@@ -110,7 +110,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BObject.cpp
 - Hierarchy and Luma: CBScriptHolder → CBObject; Luma: game, entities, actors (sound, position, flags); controls, regions, layers have their own subsets
-- Count: 55 done, 17 todo, 0 no-op
+- Count: 65 done, 7 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -141,14 +141,14 @@ How the list was made. For every class with a script interface, the names tested
 | `Registrable` | get/set | **done** | Whether the object is registered for mouse interaction (same as `Interactive`). |
 | `Interactive` | get/set | **done** | Whether the object reacts to the mouse. |
 | `Zoomable`, `Scalable` | get/set | **done** | Whether the scene's scale levels apply to the object. |
-| `Rotatable` | get/set | **done** | Whether the scene's rotation levels apply. The flag is stored; rotation is not rendered. |
+| `Rotatable` | get/set | **done** | Whether the scene's rotation levels (and `Rotate`, `RelativeRotate`) apply; the sprite turns around its hotspot. |
 | `AlphaColor` | get/set | **done** | Tint colour and alpha (0xAARRGGBB). |
-| `BlendMode` | get/set | **todo** | Blend mode (normal / additive / subtractive). Luma reads 0, ignores the set; no blend modes in the renderer. |
+| `BlendMode` | get/set | **done** | Blend mode (0 normal, 1 additive, 2 subtractive; another value is normal). Pipeline states of the renderer, see `docs/rendering.md`. |
 | `Scale` | get/set | **done** | Absolute scale in percent (null = use the scene's scale). |
-| `ScaleX`, `ScaleY` | get/set | **todo** | Independent horizontal / vertical scale. Luma reads null, ignores the set. |
+| `ScaleX`, `ScaleY` | get/set | **done** | Independent horizontal / vertical scale in percent (null = unset); when either is set they replace `Scale` and the scene's, the other axis at 100 (`CAdObject::GetScale`). The hit area follows. |
 | `RelativeScale` | get/set | **done** | Scale adjustment in percent added to the scene's scale. |
-| `Rotate` | get/set | **todo** | Absolute rotation in degrees. Luma reads null, ignores the set. |
-| `RelativeRotate` | get/set | **todo** | Rotation added to the scene's rotation level. Luma reads 0, ignores the set. |
+| `Rotate` | get/set | **done** | Absolute rotation in degrees (null = use the scene's), applied when `Rotatable`. Luma also hit-tests the sprite where it is drawn turned; WME tests it where it would be unrotated. |
+| `RelativeRotate` | get/set | **done** | Rotation added to the scene's rotation level, when `Rotatable` and no `Rotate` is set. |
 | `Colorable` | get/set | **done** | Whether the scene's ambient colour tints the object. |
 | `SoundPanning` | get/set | **done** | Whether the object's sound pans with its screen position. |
 | `SaveState` | get/set | **done** | Whether the object is saved with the scene state (entities; actors always read true and ignore the set). |
@@ -325,7 +325,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdScene.cpp
 - Hierarchy and Luma: CBObject → CAdScene; Luma: scene (`scene_call`, `scene_get`, `scene_set`, `scene_view.rs`)
-- Count: 52 done, 29 todo, 2 no-op
+- Count: 57 done, 24 todo, 2 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -345,8 +345,8 @@ How the list was made. For every class with a script interface, the names tested
 | `IsBlockedAt`, `IsWalkableAt` | method | **done** | Walkplane tests at a point. |
 | `GetScaleAt`, `GetRotationAt` | method | **done** | Scale / rotation level at a point. |
 | `IsScrolling` | method | **done** | True while the view scrolls. |
-| `FadeOut`, `FadeOutAsync`, `FadeIn`, `FadeInAsync` | method | **todo** | Fades only the scene (not the UI). Stubbed. |
-| `GetFadeColor` | method | **todo** | Colour of the scene fade. |
+| `FadeOut`, `FadeOutAsync`, `FadeIn`, `FadeInAsync` | method | **done** | Fades only the scene viewport (not the UI), on the game timer; the scene's own fader, new with every scene. |
+| `GetFadeColor` | method | **done** | Colour of the scene fade (0xAARRGGBB, the alpha as it is now). |
 | `IsPointInViewport` | method | **done** | True when a point is inside the scene viewport. |
 | `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled` | method | **todo** | Shows / hides / queries a mesh node of the scene's 3D geometry. |
 | `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `GetLightColor`, `GetLightPosition` | method | **todo** | Controls the lights of the scene's 3D geometry. |
@@ -876,7 +876,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 ### CPartEmitter (particle emitter)
 
 - WME source: src/engine_core/wme_base/PartEmitter.cpp
-- Hierarchy and Luma: CBObject → CPartEmitter; Luma: luma-adventure/src/particles.rs, natives_particles.rs (`emitter_call`, `emitter_get`, `emitter_set`); see `docs/particles.md`
+- Hierarchy and Luma: CBObject → CPartEmitter; Luma: luma-adventure/src/particles.rs, natives_particles.rs (`emitter_call`, `emitter_get`, `emitter_set`); see `docs/particles.md`. Of the inherited CBObject members, `BlendMode` is implemented on the emitter (its particles blend with it); the others are not exposed on emitters.
 - Count: 79 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
@@ -890,7 +890,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | `Scale1`, `Scale2`, `ScaleZBased` | get/set | **done** | Particle scale range, optionally by depth. |
 | `Velocity1`, `Velocity2`, `VelocityZBased` | get/set | **done** | Speed range. |
 | `LifeTime1`, `LifeTime2`, `LifeTimeZBased` | get/set | **done** | Lifetime range. |
-| `Angle1`, `Angle2`, `AngVelocity1`, `AngVelocity2`, `Rotation1`, `Rotation2` | get/set | **done** | Direction, spin and initial rotation ranges. The rotation is computed but not drawn yet (no per-quad rotation in the renderer). |
+| `Angle1`, `Angle2`, `AngVelocity1`, `AngVelocity2`, `Rotation1`, `Rotation2` | get/set | **done** | Direction, spin and initial rotation ranges; each particle turns around its position. |
 | `Alpha1`, `Alpha2`, `AlphaTimeBased` | get/set | **done** | Opacity range, clamped to 0..255 on set. |
 | `MaxParticles`, `GenerationInterval`, `GenerationAmount`, `MaxBatches` | get/set | **done** | Emission rate and caps. |
 | `NumLiveParticles` | get | **done** | Particles alive now. |
@@ -1031,11 +1031,11 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Global variables | 4 | 1 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
-| CBObject | 55 | 17 | 0 | 72 |
+| CBObject | 65 | 7 | 0 | 72 |
 | CBGame | 123 | 24 | 18 | 165 |
 | CAdGame | 63 | 2 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
-| CAdScene | 52 | 29 | 2 | 83 |
+| CAdScene | 57 | 24 | 2 | 83 |
 | CAdLayer | 18 | 0 | 0 | 18 |
 | CBRegion | 11 | 0 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
@@ -1071,9 +1071,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 6 | 0 | 21 |
-| **All** | **857** | **266** | **30** | **1153** |
+| **All** | **872** | **251** | **30** | **1153** |
 
-Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 842 done, 260 todo, 30 no-op.
+Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 857 done, 245 todo, 30 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1102,14 +1102,14 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Game services | 10 | `TextRTL`, `SuspendedRendering`, `Scene.SetViewport`, the items' hover-sprite and cursor objects (`GetHoverSpriteObject`, `GetNormalCursorObject`, `GetHoverCursorObject`) and the game's cursor objects (`GetActiveCursorObject`, `GetWaitCursorObject`). Done: private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`. |
 | Script library | 17 | The `Directory` object (its `var` and the `CSXDirectory` members), `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. (`String`, `Array`, `Date`, `File` and `MemBuffer` are done.) |
 | Object model (2D) | 0 | Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories (`Game.InventoryObject`). |
-| Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
+| Rendering features | 0 | Done: rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades (see `docs/rendering.md`). |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
 | Video | 7 | Entity-bound Theora video (`PlayTheora` on an entity and its pause/stop family), AVI for the deprecated `PlayVideo`. |
 | Sound effects | 2 | `SoundFXEcho`, `SoundFXReverb` (also listed in `docs/audio.md`). |
 | Input and system events | 6 | Wheel, middle and right-double-click events, the `QuitGame` event. |
 | Accessibility | 10 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **266** | |
+| **All** | **251** | |
 
 ## Members in Luma that WME 1.x does not define
 

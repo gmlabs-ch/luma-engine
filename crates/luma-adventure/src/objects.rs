@@ -73,6 +73,9 @@ pub enum Kind {
     Actor,
     /// The screen fader scripts wait for (`Game.FadeOut`).
     Fader,
+    /// The current scene's own fader, over the scene only
+    /// (`Scene.FadeOut`); a new one with every scene, as in the engine.
+    SceneFader,
     /// A window or one of its controls (`Game.LoadWindow`, `GetWidget`);
     /// its state lives in the world's UI.
     Control,

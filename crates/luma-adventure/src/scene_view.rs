@@ -10,8 +10,8 @@ use std::collections::HashMap;
 
 use luma_archive::Vfs;
 use luma_formats::scene::{Entity, EntityKind, Layer, Region, SceneNode};
-use luma_formats::{Frame, Rgb, Rgba, Scene, Sprite, SubFrame};
-use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
+use luma_formats::{BlendMode, Frame, Rgb, Rgba, Scene, Sprite, SubFrame};
+use luma_render::{Attributes, DrawList, Quad, Rect, Renderer, Texture};
 
 use crate::error::{Error, Result};
 use crate::talk::{Sentence, SubtitleMods};
@@ -459,6 +459,66 @@ pub struct FreeObject {
     pub stick: Option<(usize, usize)>,
 }
 
+/// How an object's sprite is transformed when drawn: its scale per axis
+/// in percent (`CAdObject::GetScale`) and its rotation in degrees
+/// (`CAdEntity::Display`, `CAdActor::Display`), both around the hotspot,
+/// which stays at the object's position.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform {
+    /// Horizontal scale in percent.
+    pub scale_x: f32,
+    /// Vertical scale in percent.
+    pub scale_y: f32,
+    /// Rotation in degrees, positive clockwise on screen.
+    pub rotation: f32,
+}
+
+impl Default for Transform {
+    fn default() -> Self {
+        Transform::IDENTITY
+    }
+}
+
+impl Transform {
+    /// Unscaled and unrotated.
+    pub const IDENTITY: Transform = Transform {
+        scale_x: 100.0,
+        scale_y: 100.0,
+        rotation: 0.0,
+    };
+
+    /// The same scale on both axes, no rotation.
+    pub fn uniform(scale: f32) -> Transform {
+        Transform {
+            scale_x: scale,
+            scale_y: scale,
+            rotation: 0.0,
+        }
+    }
+
+    /// The transform of an entity in a scene.
+    pub fn of_entity(scene: &Scene, entity: &Entity) -> Transform {
+        let (scale_x, scale_y) = scene.entity_scale_xy(entity);
+        Transform {
+            scale_x,
+            scale_y,
+            rotation: scene.entity_rotation(entity),
+        }
+    }
+
+    /// Whether the sprite is drawn at its own size (the engine's
+    /// `ZoomX == 100 && ZoomY == 100` test, which skips the scaling
+    /// arithmetic and its truncation).
+    pub fn is_unscaled(&self) -> bool {
+        self.scale_x == 100.0 && self.scale_y == 100.0
+    }
+
+    /// Whether the sprite is turned.
+    pub fn is_rotated(&self) -> bool {
+        self.rotation != 0.0
+    }
+}
+
 /// An object drawn among the free objects of a scene: an actor, or an
 /// entity of another bank.
 pub struct Drawable<'a> {
@@ -472,10 +532,12 @@ pub struct Drawable<'a> {
     pub bank: &'a SpriteBank,
     /// The frame shown.
     pub frame: usize,
-    /// Scale in percent.
-    pub scale: f32,
+    /// Scale and rotation.
+    pub transform: Transform,
     /// Tint and opacity.
     pub tint: Rgba,
+    /// How the sprite is blended.
+    pub blend: BlendMode,
     /// The region node of the main layer the object is drawn in whatever
     /// its position (`StickToRegion`), as `(layer, node)`.
     pub stick: Option<(usize, usize)>,
@@ -551,10 +613,11 @@ impl DrawItem {
 /// draw the emitter after the sprite).
 #[derive(Default)]
 pub struct Overlays<'a> {
-    /// By entity, for the scene's entities.
-    pub entities: HashMap<EntityRef, Vec<Quad<'a>>>,
+    /// By entity, for the scene's entities: the quads with their
+    /// attributes (a particle's rotation, the emitter's blend mode).
+    pub entities: HashMap<EntityRef, Vec<(Quad<'a>, Attributes)>>,
     /// By index among the other objects given to the drawing (actors).
-    pub others: HashMap<usize, Vec<Quad<'a>>>,
+    pub others: HashMap<usize, Vec<(Quad<'a>, Attributes)>>,
 }
 
 /// A scene and everything needed to run and draw it.
@@ -1329,8 +1392,8 @@ impl SceneView {
                     overlays.others.get(&index)
                 }
             };
-            for quad in overlay.into_iter().flatten() {
-                list.push(*quad);
+            for (quad, attributes) in overlay.into_iter().flatten() {
+                list.push_with(*quad, *attributes);
             }
         }
         list.set_offset(0.0, 0.0);
@@ -1350,11 +1413,12 @@ impl SceneView {
             sprite: Some(loaded),
             bank: &self.bank,
             frame: self.frame_of(r),
-            scale: self.scene.entity_scale(entity),
+            transform: Transform::of_entity(&self.scene, entity),
             tint: self.scene.entity_tint(entity),
             stick: None,
             before: Vec::new(),
             after: Vec::new(),
+            blend: entity.blend_mode,
         })
     }
 }
@@ -1400,8 +1464,10 @@ pub fn drawn_subframes(frame: &Frame) -> impl Iterator<Item = &SubFrame> {
     frame.subframes.iter().filter(|sub| is_drawn(sub))
 }
 
-/// Draws an object's current frame (its drawn sub-frames, see
-/// [`is_drawn`]), between the attachments drawn before and after it.
+/// Draws an object's current frame (`CBSprite::Display`,
+/// `CBSubFrame::Draw`): each drawn sub-frame placed by its hotspot,
+/// scaled, turned around the hotspot and blended as the object says,
+/// between the attachments drawn before and after the object.
 pub fn draw_object<'a>(list: &mut DrawList<'a>, d: &Drawable<'a>) {
     for a in &d.before {
         draw_object(list, a);
@@ -1413,7 +1479,14 @@ pub fn draw_object<'a>(list: &mut DrawList<'a>, d: &Drawable<'a>) {
             let Some(texture) = d.bank.texture(image, sub.color_key) else {
                 continue;
             };
-            list.push(place(sub, texture, d.x, d.y, d.scale / 100.0, d.tint));
+            let (quad, attributes) = place_transformed(sub, texture, d.x, d.y, d.transform, d.tint);
+            list.push_with(
+                quad,
+                Attributes {
+                    blend: d.blend,
+                    ..attributes
+                },
+            );
         }
     }
     for a in &d.after {
@@ -1441,7 +1514,7 @@ pub fn frame_height(sprite: &Sprite, frame: usize, zoom: f32) -> i32 {
 /// scale factor (`1.0` for 100 %) and the owner's tint: the hotspot is
 /// placed at the position, scaled around it, and the sub-frame's own tint
 /// replaces the owner's when it has one. Integer truncation matches the
-/// engine.
+/// engine. See [`place_transformed`] for a scale per axis and a rotation.
 pub fn place<'a>(
     sub: &SubFrame,
     texture: &'a Texture,
@@ -1450,6 +1523,31 @@ pub fn place<'a>(
     scale: f32,
     owner_tint: Rgba,
 ) -> Quad<'a> {
+    place_transformed(
+        sub,
+        texture,
+        x,
+        y,
+        Transform::uniform(scale * 100.0),
+        owner_tint,
+    )
+    .0
+}
+
+/// Like [`place`], with a [`Transform`]: the sub-frame is scaled by a
+/// factor per axis around the hotspot, which stays at `(x, y)`, and the
+/// returned attributes turn it around that point by the transform's
+/// rotation (`CBSubFrame::Draw`: the hotspot is the centre handed to
+/// `DisplayTransform`). The attributes' blend mode is the default; the
+/// caller sets the owner's.
+pub fn place_transformed<'a>(
+    sub: &SubFrame,
+    texture: &'a Texture,
+    x: i32,
+    y: i32,
+    transform: Transform,
+    owner_tint: Rgba,
+) -> (Quad<'a>, Attributes) {
     let src = sub.rect.filter(|r| !r.is_empty()).map(|r| {
         Rect::new(
             r.left as f32,
@@ -1462,17 +1560,18 @@ pub fn place<'a>(
         Some(r) => (r.w, r.h),
         None => (texture.width as f32, texture.height as f32),
     };
-    let dst = if scale == 1.0 {
+    let (zx, zy) = (transform.scale_x / 100.0, transform.scale_y / 100.0);
+    let dst = if transform.is_unscaled() {
         Rect::new((x - sub.hotspot_x) as f32, (y - sub.hotspot_y) as f32, w, h)
     } else {
         Rect::new(
-            (x as f32 - sub.hotspot_x as f32 * scale).trunc(),
-            (y as f32 - sub.hotspot_y as f32 * scale).trunc(),
-            (w * scale).trunc(),
-            (h * scale).trunc(),
+            (x as f32 - sub.hotspot_x as f32 * zx).trunc(),
+            (y as f32 - sub.hotspot_y as f32 * zy).trunc(),
+            (w * zx).trunc(),
+            (h * zy).trunc(),
         )
     };
-    Quad {
+    let quad = Quad {
         texture,
         dst,
         src,
@@ -1483,5 +1582,16 @@ pub fn place<'a>(
         },
         flip_x: sub.mirror_x,
         flip_y: sub.mirror_y,
-    }
+    };
+    let attributes = Attributes {
+        rotation: transform.rotation,
+        // The centre `DisplayTransform` turns around: the hotspot, from
+        // the truncated top-left corner.
+        pivot: (
+            dst.x + sub.hotspot_x as f32 * zx,
+            dst.y + sub.hotspot_y as f32 * zy,
+        ),
+        blend: BlendMode::Normal,
+    };
+    (quad, attributes)
 }

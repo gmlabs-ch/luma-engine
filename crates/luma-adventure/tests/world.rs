@@ -847,6 +847,18 @@ fn fade_script() -> Vec<u8> {
     store(&mut a, "fadeT1");
     call(&mut a, "Game", "GetFadeColor", &[]);
     store(&mut a, "fadeColor");
+    // The scene's own fade, not waited for: its colour is read at once,
+    // before the first update, so with no alpha yet.
+    a.def_glob_var("Scene");
+    call(
+        &mut a,
+        "Scene",
+        "FadeOutAsync",
+        &[Arg::Int(100), Arg::Int(1), Arg::Int(2), Arg::Int(3)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "Scene", "GetFadeColor", &[]);
+    store(&mut a, "sceneFadeColor");
     a.push_bool(true);
     store(&mut a, "faded");
     a.emit(Instruction::Ret);
@@ -2204,6 +2216,147 @@ fn mouse_keyboard_cursors_and_fades() {
         Value::Int(luma_script::rgba(10, 20, 30, 255))
     );
     assert_eq!(runtime.world.fader().color().unwrap().a, 255);
+    // The scene's fader is separate from the game's and runs on its own.
+    assert_eq!(
+        result(&runtime, "sceneFadeColor"),
+        Value::Int(luma_script::rgba(1, 2, 3, 0))
+    );
+    for _ in 0..10 {
+        runtime.tick(16);
+    }
+    let scene_fade = runtime.world.scene_fader().color().unwrap();
+    assert_eq!(
+        (scene_fade.r, scene_fade.g, scene_fade.b, scene_fade.a),
+        (1, 2, 3, 255)
+    );
+    assert_eq!(runtime.world.fader().color().unwrap().a, 255);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn objects_scale_per_axis_rotate_and_blend() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    let prop_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    runtime.world.skip_to(0, 0);
+
+    // A layer entity is not scalable unless the file or a script says
+    // so; the scene has no scale levels, so the scene's scale is 100.
+    assert!(
+        runtime
+            .world
+            .set_property(prop, "Scalable", &Value::Bool(true))
+    );
+    // The properties read back what scripts set; null clears the fixed
+    // values, and an unknown blend mode is normal, as in the engine.
+    let get = |runtime: &Runtime, name: &str| runtime.world.get_property(prop, name);
+    assert_eq!(get(&runtime, "ScaleX"), Some(Value::Null));
+    assert_eq!(get(&runtime, "Rotate"), Some(Value::Null));
+    assert_eq!(get(&runtime, "RelativeRotate"), Some(Value::Float(0.0)));
+    assert_eq!(get(&runtime, "BlendMode"), Some(Value::Int(0)));
+    for (name, value) in [
+        ("ScaleX", Value::Int(200)),
+        ("RelativeRotate", Value::Float(1.5)),
+        ("BlendMode", Value::Int(1)),
+    ] {
+        assert!(runtime.world.set_property(prop, name, &value));
+    }
+    assert_eq!(get(&runtime, "ScaleX"), Some(Value::Float(200.0)));
+    assert_eq!(get(&runtime, "ScaleY"), Some(Value::Null));
+    assert_eq!(get(&runtime, "RelativeRotate"), Some(Value::Float(1.5)));
+    assert_eq!(get(&runtime, "BlendMode"), Some(Value::Int(1)));
+    runtime
+        .world
+        .set_property(prop, "BlendMode", &Value::Int(7));
+    assert_eq!(get(&runtime, "BlendMode"), Some(Value::Int(0)));
+
+    // The prop stands at (5, 6) with a 4x4 sprite. Twice as wide, it
+    // reaches x 13; the hit area follows (`CBSubFrame::Draw` registers
+    // the scaled rectangle).
+    runtime.mouse_move(11, 8);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(prop), "scaled wider");
+    runtime.world.set_property(prop, "ScaleX", &Value::Null);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), None, "back to 4 wide");
+
+    // Turned a quarter clockwise around its hotspot (the position), the
+    // sprite covers x 1..5, y 6..10: it is hit where it is seen, not
+    // where it would be unrotated.
+    runtime.world.set_property(prop, "Rotate", &Value::Int(90));
+    runtime.mouse_move(6, 7);
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.active_object(),
+        Some(prop),
+        "not rotatable: Rotate is ignored"
+    );
+    runtime
+        .world
+        .set_property(prop, "Rotatable", &Value::Bool(true));
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), None, "turned away");
+    runtime.mouse_move(3, 8);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(prop), "turned here");
+    let view = runtime.world.scene().unwrap();
+    let entity = view.entity(prop_ref).unwrap();
+    assert_eq!(
+        luma_adventure::Transform::of_entity(&view.scene, entity),
+        luma_adventure::Transform {
+            scale_x: 100.0,
+            scale_y: 100.0,
+            rotation: 90.0,
+        }
+    );
+
+    // Actors carry the same values.
+    let bob = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\bob.actor", false)
+        .unwrap();
+    assert!(runtime.world.set_property(bob, "ScaleY", &Value::Int(50)));
+    assert!(
+        runtime
+            .world
+            .set_property(bob, "Rotate", &Value::Float(-10.0))
+    );
+    assert!(runtime.world.set_property(bob, "BlendMode", &Value::Int(2)));
+    assert_eq!(
+        runtime.world.get_property(bob, "ScaleY"),
+        Some(Value::Float(50.0))
+    );
+    assert_eq!(
+        runtime.world.get_property(bob, "Rotate"),
+        Some(Value::Float(-10.0))
+    );
+    assert_eq!(
+        runtime.world.get_property(bob, "BlendMode"),
+        Some(Value::Int(2))
+    );
+    let actor = runtime.world.actor(bob).unwrap();
+    let scene = &runtime.world.scene().unwrap().scene;
+    assert_eq!(
+        actor.transform(scene),
+        luma_adventure::Transform::IDENTITY,
+        "bob is neither scalable nor rotatable"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

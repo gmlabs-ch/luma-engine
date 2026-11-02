@@ -10,6 +10,7 @@
 //! `ParticleEmitter` members of `AdObject.cpp` of Wintermute Engine 1.x
 //! (MIT License, Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
+use luma_formats::BlendMode;
 use luma_script::{NativeId, Return, Value};
 
 use crate::objects::Kind;
@@ -88,18 +89,24 @@ impl World {
         match &self.native(owner)?.kind {
             Kind::Actor => {
                 let actor = self.actor(owner)?;
-                let scale = self.scene().map_or(100.0, |view| actor.scale(&view.scene));
-                Some((actor.x, actor.y, scale, scale))
+                let (scale_x, scale_y) = self.scene().map_or((100.0, 100.0), |view| {
+                    let t = actor.transform(&view.scene);
+                    (t.scale_x, t.scale_y)
+                });
+                Some((actor.x, actor.y, scale_x, scale_y))
             }
             Kind::Entity(r) => {
                 let entity = self.entity_def(*r)?;
-                let scale = match r {
-                    crate::scene_view::EntityRef::Ui(_) => entity.scale.unwrap_or(100.0),
+                let (scale_x, scale_y) = match r {
+                    crate::scene_view::EntityRef::Ui(_) => {
+                        let s = entity.scale.unwrap_or(100.0);
+                        (s, s)
+                    }
                     _ => self
                         .scene()
-                        .map_or(100.0, |view| view.scene.entity_scale(entity)),
+                        .map_or((100.0, 100.0), |view| view.scene.entity_scale_xy(entity)),
                 };
-                Some((entity.x, entity.y, scale, scale))
+                Some((entity.x, entity.y, scale_x, scale_y))
             }
             _ => None,
         }
@@ -290,6 +297,7 @@ impl World {
             "GrowthRate2" => float(e.growth_rate2),
             "ExponentialGrowth" => flag(e.exponential_growth),
             "UseRegion" => flag(e.use_region),
+            "BlendMode" => int(e.blend_mode.to_int()),
             "EmitEvent" => Some(e.emit_event.clone().map_or(Value::Null, Value::from)),
             _ => None,
         }
@@ -344,6 +352,7 @@ impl World {
             "GrowthRate2" => e.growth_rate2 = float,
             "ExponentialGrowth" => e.exponential_growth = flag,
             "UseRegion" => e.use_region = flag,
+            "BlendMode" => e.blend_mode = BlendMode::from_int(int),
             "EmitEvent" => e.emit_event = text,
             _ => return false,
         }

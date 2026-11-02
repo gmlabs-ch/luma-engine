@@ -14,7 +14,7 @@ use luma_render::{DrawList, Quad, Rect};
 use luma_script::NativeId;
 
 use crate::objects::Kind;
-use crate::scene_view::{AnimState, DrawItem, EntityRef, SpriteBank, key};
+use crate::scene_view::{AnimState, DrawItem, EntityRef, Mask, SpriteBank, Transform, key};
 use crate::world::World;
 
 /// The mouse as scripts see it.
@@ -72,23 +72,130 @@ pub(crate) enum HitBank {
     Game,
 }
 
+/// The area of a drawn sub-frame, as the engine registers it
+/// (`CBActiveRect` from `CBSubFrame::Draw`) and tests it
+/// (`CBRenderer::GetObjectAt`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PixelArea {
+    /// Where the sub-frame is drawn before rotation, in layer
+    /// coordinates: `(x, y, width, height)`. A zero size means the size
+    /// is the image's, scaled, known only once the image is decoded.
+    pub dst: (i32, i32, i32, i32),
+    /// The part of the image drawn, `None` for the whole image.
+    pub src: Option<(i32, i32, i32, i32)>,
+    /// Scale in percent on each axis.
+    pub zoom_x: f32,
+    /// See `zoom_x`.
+    pub zoom_y: f32,
+    /// Rotation in degrees, and the point the sub-frame turns around (the
+    /// hotspot), in layer coordinates.
+    pub rotation: f32,
+    /// See `rotation`.
+    pub pivot: (f32, f32),
+    /// Mirrored horizontally.
+    pub mirror_x: bool,
+    /// Mirrored vertically.
+    pub mirror_y: bool,
+    /// Only the opaque pixels count (`PRECISE`).
+    pub precise: bool,
+}
+
+impl PixelArea {
+    /// The point of the unrotated sub-frame a point of the layer falls
+    /// on: the sub-frame is drawn turned around its pivot, so the point
+    /// is turned back. The engine's own test ignores the rotation and
+    /// hits the sprite where it would be unrotated; Luma follows the
+    /// transform, so a turned sprite is hit where it is seen.
+    fn unrotate(&self, x: i32, y: i32) -> (i32, i32) {
+        if self.rotation == 0.0 {
+            return (x, y);
+        }
+        let (sin, cos) = self.rotation.to_radians().sin_cos();
+        let (px, py) = self.pivot;
+        // The centre of the pixel, so that the rotation does not shift
+        // the sampled texel.
+        let (dx, dy) = (x as f32 + 0.5 - px, y as f32 + 0.5 - py);
+        (
+            (px + dx * cos + dy * sin).floor() as i32,
+            (py - dx * sin + dy * cos).floor() as i32,
+        )
+    }
+
+    /// The rectangle drawn before rotation, in layer coordinates, its
+    /// size taken from the image when the sub-frame has no rectangle.
+    fn rect(&self, mask: Option<&Mask>) -> (i32, i32, i32, i32) {
+        let (dx, dy, mut dw, mut dh) = self.dst;
+        if dw == 0 || dh == 0 {
+            let (sw, sh) = match (self.src, mask) {
+                (Some((_, _, w, h)), _) => (w, h),
+                (None, Some(mask)) => (mask.width as i32, mask.height as i32),
+                (None, None) => (0, 0),
+            };
+            dw = (sw as f32 * self.zoom_x / 100.0) as i32;
+            dh = (sh as f32 * self.zoom_y / 100.0) as i32;
+        }
+        (dx, dy, dw, dh)
+    }
+
+    /// Whether a point of the layer hits the sub-frame: inside its
+    /// rectangle and, when precise, on an opaque pixel of the image,
+    /// found as `CBRenderer::GetObjectAt` finds it, with the scale and
+    /// the mirroring undone.
+    pub fn contains(&self, mask: &Mask, x: i32, y: i32) -> bool {
+        let (lx, ly) = self.unrotate(x, y);
+        let (sx, sy, sw, sh) = self
+            .src
+            .unwrap_or((0, 0, mask.width as i32, mask.height as i32));
+        let (dx, dy, dw, dh) = self.rect(Some(mask));
+        if lx < dx || ly < dy || lx >= dx + dw || ly >= dy + dh {
+            return false;
+        }
+        if !self.precise {
+            return true;
+        }
+        let mut xx = ((sx + lx - dx) as f32 / (self.zoom_x / 100.0)) as i32;
+        let mut yy = ((sy + ly - dy) as f32 / (self.zoom_y / 100.0)) as i32;
+        if self.mirror_x {
+            xx = sw - xx;
+        }
+        if self.mirror_y {
+            yy = sh - yy;
+        }
+        mask.is_opaque(xx, yy)
+    }
+
+    /// The centre of the sub-frame as drawn, in layer coordinates, or
+    /// `None` when its size is unknown or empty.
+    pub fn center(&self, mask: Option<&Mask>) -> Option<(i32, i32)> {
+        let (dx, dy, dw, dh) = self.rect(mask);
+        if dw <= 0 || dh <= 0 {
+            return None;
+        }
+        let (cx, cy) = (dx as f32 + dw as f32 / 2.0, dy as f32 + dh as f32 / 2.0);
+        if self.rotation == 0.0 {
+            return Some((cx as i32, cy as i32));
+        }
+        let (sin, cos) = self.rotation.to_radians().sin_cos();
+        let (px, py) = self.pivot;
+        let (ox, oy) = (cx - px, cy - py);
+        Some((
+            (px + ox * cos - oy * sin) as i32,
+            (py + ox * sin + oy * cos) as i32,
+        ))
+    }
+}
+
 /// Where an object can be hit, as the engine registers it while drawing
 /// (`CBActiveRect`).
 #[derive(Debug, Clone, PartialEq)]
 enum HitShape {
-    /// A sub-frame drawn at `dst` (layer coordinates), from `src` of its
-    /// image, scaled by `zoom` percent, possibly mirrored; when `precise`,
-    /// only its opaque pixels count.
+    /// A sub-frame of an image, possibly scaled, turned or mirrored;
+    /// when precise, only its opaque pixels count.
     Pixels {
         bank: HitBank,
         image: String,
         color_key: Rgb,
-        dst: (i32, i32, i32, i32),
-        src: Option<(i32, i32, i32, i32)>,
-        zoom: f32,
-        mirror_x: bool,
-        mirror_y: bool,
-        precise: bool,
+        area: PixelArea,
     },
     /// A polygon in scene coordinates.
     Polygon(Vec<Point>),
@@ -432,13 +539,13 @@ impl World {
 
     /// The hit areas of an object's attachments, registered as the
     /// object itself (`m_RegisterAlias`), around its position with its
-    /// scale.
+    /// scale and rotation.
     fn attachment_hits(
         &self,
         owner: NativeId,
         x: i32,
         y: i32,
-        scale: f32,
+        transform: Transform,
         layer_offset: (i32, i32),
         hits: &mut Vec<HitArea>,
     ) {
@@ -456,20 +563,25 @@ impl World {
             let Some(loaded) = view.shown_sprite(*r).and_then(|p| view.sprite(&p)) else {
                 continue;
             };
-            World::sprite_hits(
+            World::sprite_hits_with(
                 owner,
                 HitBank::Game,
                 &loaded.sprite,
                 view.frame_of(*r),
-                x + (entity.x as f32 * scale / 100.0) as i32,
-                y + (entity.y as f32 * scale / 100.0) as i32,
-                scale,
+                (
+                    x + (entity.x as f32 * transform.scale_x / 100.0) as i32,
+                    y + (entity.y as f32 * transform.scale_y / 100.0) as i32,
+                ),
+                transform,
                 layer_offset,
                 hits,
             );
         }
     }
 
+    /// Registers the hit areas of a sprite's frame drawn at `(x, y)` at a
+    /// uniform `scale` in percent, unrotated; see
+    /// [`World::sprite_hits_with`].
     #[allow(
         clippy::too_many_arguments,
         reason = "the registration of a sprite's sub-frames takes what the engine's does"
@@ -485,40 +597,50 @@ impl World {
         layer_offset: (i32, i32),
         hits: &mut Vec<HitArea>,
     ) {
+        World::sprite_hits_with(
+            owner,
+            bank,
+            sprite,
+            frame,
+            (x, y),
+            Transform::uniform(scale),
+            layer_offset,
+            hits,
+        );
+    }
+
+    /// Registers the hit areas of a sprite's frame drawn with its hotspot
+    /// at `position` and a transform (`CBSubFrame::Draw` registering a
+    /// `CBActiveRect`): every drawn sub-frame that is not a decoration,
+    /// over the rectangle it is drawn in before rotation, with the scale
+    /// per axis, the rotation around the hotspot and the mirroring for
+    /// the pixel test.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the registration of a sprite's sub-frames takes what the engine's does"
+    )]
+    pub(crate) fn sprite_hits_with(
+        owner: NativeId,
+        bank: HitBank,
+        sprite: &Sprite,
+        frame: usize,
+        position: (i32, i32),
+        transform: Transform,
+        layer_offset: (i32, i32),
+        hits: &mut Vec<HitArea>,
+    ) {
         let Some(frame) = sprite
             .frames
             .get(frame.min(sprite.frames.len().saturating_sub(1)))
         else {
             return;
         };
+        let (x, y) = position;
         for sub in crate::scene_view::drawn_subframes(frame) {
             let Some(image) = &sub.image else { continue };
             if sub.decoration {
                 continue;
             }
-            let src = sub
-                .rect
-                .filter(|r| !r.is_empty())
-                .map(|r| (r.left, r.top, r.width() as i32, r.height() as i32));
-            // The size is known from the sub-frame's rectangle; without
-            // one, from the image, read at hit time.
-            let (w, h) = src.map_or((0, 0), |(_, _, w, h)| (w, h));
-            let zoom = scale / 100.0;
-            let dst = if (scale - 100.0).abs() < f32::EPSILON {
-                (
-                    x - sub.hotspot_x + src.map_or(0, |s| s.0),
-                    y - sub.hotspot_y + src.map_or(0, |s| s.1),
-                    w,
-                    h,
-                )
-            } else {
-                (
-                    (x as f32 - (sub.hotspot_x + src.map_or(0, |s| s.0)) as f32 * zoom) as i32,
-                    (y as f32 - (sub.hotspot_y + src.map_or(0, |s| s.1)) as f32 * zoom) as i32,
-                    (w as f32 * zoom) as i32,
-                    (h as f32 * zoom) as i32,
-                )
-            };
             hits.push(HitArea {
                 owner,
                 layer_offset,
@@ -526,12 +648,7 @@ impl World {
                     bank,
                     image: image.clone(),
                     color_key: sub.color_key,
-                    dst,
-                    src,
-                    zoom: scale,
-                    mirror_x: sub.mirror_x,
-                    mirror_y: sub.mirror_y,
-                    precise: sprite.precise,
+                    area: pixel_area(sub, x, y, transform, sprite.precise),
                 },
             });
         }
@@ -561,8 +678,8 @@ impl World {
         if entity.ignore_items && self.selected_item.is_some() {
             return;
         }
-        let scale = levels.entity_scale(entity);
-        self.attachment_hits(id, entity.x, entity.y, scale, layer_offset, hits);
+        let transform = Transform::of_entity(levels, entity);
+        self.attachment_hits(id, entity.x, entity.y, transform, layer_offset, hits);
         // The region's points are scene coordinates, registered with the
         // offset of the layer the entity is drawn in (`CAdEntity::Display`
         // hands `Game->m_OffsetX/Y` to the active rectangle), so a scene
@@ -581,14 +698,13 @@ impl World {
         let Some(loaded) = view.sprite(&path) else {
             return;
         };
-        World::sprite_hits(
+        World::sprite_hits_with(
             id,
             bank,
             &loaded.sprite,
             view.frame_of(r),
-            entity.x,
-            entity.y,
-            scale,
+            (entity.x, entity.y),
+            transform,
             layer_offset,
             hits,
         );
@@ -604,7 +720,7 @@ impl World {
             id,
             actor.x,
             actor.y,
-            actor.scale(&view.scene),
+            actor.transform(&view.scene),
             layer_offset,
             hits,
         );
@@ -614,14 +730,13 @@ impl World {
         let Some(loaded) = actor.bank.sprite(path) else {
             return;
         };
-        World::sprite_hits(
+        World::sprite_hits_with(
             id,
             HitBank::Actor(id),
             &loaded.sprite,
             actor.frame_of(path),
-            actor.x,
-            actor.y,
-            actor.scale(&view.scene),
+            (actor.x, actor.y),
+            actor.transform(&view.scene),
             layer_offset,
             hits,
         );
@@ -659,37 +774,15 @@ impl World {
                     bank,
                     image,
                     color_key,
-                    dst,
-                    src,
-                    zoom,
-                    ..
+                    area,
                 } => {
-                    let (dx, dy, mut dw, mut dh) = *dst;
-                    if dw == 0 || dh == 0 {
-                        // The size comes from the image, as in `object_at`.
-                        let mask = match bank {
-                            HitBank::Scene => self
-                                .scene
-                                .as_mut()
-                                .and_then(|v| v.bank.mask(&self.vfs, image, *color_key).cloned()),
-                            HitBank::Actor(actor) => self
-                                .actor_and_vfs(*actor)
-                                .and_then(|(vfs, a)| a.bank.mask(vfs, image, *color_key).cloned()),
-                            HitBank::Ui => self.ui.bank.mask(&self.vfs, image, *color_key).cloned(),
-                            HitBank::Game => self
-                                .game_view
-                                .bank
-                                .mask(&self.vfs, image, *color_key)
-                                .cloned(),
-                        };
-                        let Some(mask) = mask else { continue };
-                        let (sw, sh) =
-                            src.map_or((mask.width as i32, mask.height as i32), |s| (s.2, s.3));
-                        let z = zoom / 100.0;
-                        dw = (sw as f32 * z) as i32;
-                        dh = (sh as f32 * z) as i32;
-                    }
-                    (dx, dy, dw, dh)
+                    // The size may come from the image, as in `object_at`.
+                    let mask = self.hit_mask(*bank, image, *color_key);
+                    let Some((cx, cy)) = area.center(mask.as_ref()) else {
+                        continue;
+                    };
+                    found = Some((cx - hit.layer_offset.0, cy - hit.layer_offset.1));
+                    break;
                 }
             };
             if w <= 0 || h <= 0 {
@@ -703,6 +796,25 @@ impl World {
         }
         self.hits = hits;
         found
+    }
+
+    /// The opaque pixels of a hit area's image, decoded on first use.
+    fn hit_mask(&mut self, bank: HitBank, image: &str, color_key: Rgb) -> Option<Mask> {
+        match bank {
+            HitBank::Scene => self
+                .scene
+                .as_mut()
+                .and_then(|v| v.bank.mask(&self.vfs, image, color_key).cloned()),
+            HitBank::Actor(actor) => self
+                .actor_and_vfs(actor)
+                .and_then(|(vfs, a)| a.bank.mask(vfs, image, color_key).cloned()),
+            HitBank::Ui => self.ui.bank.mask(&self.vfs, image, color_key).cloned(),
+            HitBank::Game => self
+                .game_view
+                .bank
+                .mask(&self.vfs, image, color_key)
+                .cloned(),
+        }
     }
 
     /// The object at a point of the screen (`CBRenderer::GetObjectAt`):
@@ -722,53 +834,12 @@ impl World {
                     bank,
                     image,
                     color_key,
-                    dst,
-                    src,
-                    zoom,
-                    mirror_x,
-                    mirror_y,
-                    precise,
+                    area,
                 } => {
-                    let mask = match bank {
-                        HitBank::Scene => self
-                            .scene
-                            .as_mut()
-                            .and_then(|v| v.bank.mask(&self.vfs, image, *color_key).cloned()),
-                        HitBank::Actor(actor) => self
-                            .actor_and_vfs(*actor)
-                            .and_then(|(vfs, a)| a.bank.mask(vfs, image, *color_key).cloned()),
-                        HitBank::Ui => self.ui.bank.mask(&self.vfs, image, *color_key).cloned(),
-                        HitBank::Game => self
-                            .game_view
-                            .bank
-                            .mask(&self.vfs, image, *color_key)
-                            .cloned(),
+                    let Some(mask) = self.hit_mask(*bank, image, *color_key) else {
+                        continue;
                     };
-                    let Some(mask) = mask else { continue };
-                    let (sx, sy, sw, sh) =
-                        src.unwrap_or((0, 0, mask.width as i32, mask.height as i32));
-                    let (dx, dy, mut dw, mut dh) = *dst;
-                    if dw == 0 || dh == 0 {
-                        let z = zoom / 100.0;
-                        dw = (sw as f32 * z) as i32;
-                        dh = (sh as f32 * z) as i32;
-                    }
-                    if lx < dx || ly < dy || lx >= dx + dw || ly >= dy + dh {
-                        false
-                    } else if !*precise {
-                        true
-                    } else {
-                        let z = zoom / 100.0;
-                        let mut xx = ((sx + lx - dx) as f32 / z) as i32;
-                        let mut yy = ((sy + ly - dy) as f32 / z) as i32;
-                        if *mirror_x {
-                            xx = sw - xx;
-                        }
-                        if *mirror_y {
-                            yy = sh - yy;
-                        }
-                        mask.is_opaque(xx, yy)
-                    }
+                    area.contains(&mask, lx, ly)
                 }
             };
             if inside {
@@ -819,5 +890,189 @@ impl World {
                 flip_y: false,
             });
         }
+    }
+
+    /// Draws the scene fader's colour over the scene viewport
+    /// (`CBFader::Display` through `FadeToColor`, which fills the
+    /// current viewport).
+    pub fn draw_scene_fade<'a>(&self, list: &mut DrawList<'a>, white: &'a luma_render::Texture) {
+        if let Some(color) = self.scene_fader.color() {
+            let (x, y, w, h) = self.viewport();
+            list.push(Quad {
+                texture: white,
+                dst: Rect::new(x as f32, y as f32, w as f32, h as f32),
+                src: None,
+                tint: color,
+                flip_x: false,
+                flip_y: false,
+            });
+        }
+    }
+}
+
+/// The area a sub-frame drawn with its hotspot at `(x, y)` is registered
+/// over (`CBSubFrame::Draw`): unscaled, the sub-frame's rectangle moved
+/// by the hotspot (the engine adds the source rectangle's corner to the
+/// position, a quirk kept here); scaled, the same with each term scaled
+/// and truncated. The pivot of the rotation is the hotspot, from the
+/// truncated top-left corner the sub-frame is drawn at, as in
+/// `scene_view::place_transformed`.
+pub(crate) fn pixel_area(
+    sub: &luma_formats::SubFrame,
+    x: i32,
+    y: i32,
+    transform: Transform,
+    precise: bool,
+) -> PixelArea {
+    let src = sub
+        .rect
+        .filter(|r| !r.is_empty())
+        .map(|r| (r.left, r.top, r.width() as i32, r.height() as i32));
+    // The size is known from the sub-frame's rectangle; without one,
+    // from the image, read at hit time.
+    let (w, h) = src.map_or((0, 0), |(_, _, w, h)| (w, h));
+    let (sx, sy) = src.map_or((0, 0), |s| (s.0, s.1));
+    let (zx, zy) = (transform.scale_x / 100.0, transform.scale_y / 100.0);
+    let dst = if transform.is_unscaled() {
+        (x - sub.hotspot_x + sx, y - sub.hotspot_y + sy, w, h)
+    } else {
+        (
+            (x as f32 - (sub.hotspot_x + sx) as f32 * zx) as i32,
+            (y as f32 - (sub.hotspot_y + sy) as f32 * zy) as i32,
+            (w as f32 * zx) as i32,
+            (h as f32 * zy) as i32,
+        )
+    };
+    let drawn_x = if transform.is_unscaled() {
+        (x - sub.hotspot_x) as f32
+    } else {
+        (x as f32 - sub.hotspot_x as f32 * zx).trunc()
+    };
+    let drawn_y = if transform.is_unscaled() {
+        (y - sub.hotspot_y) as f32
+    } else {
+        (y as f32 - sub.hotspot_y as f32 * zy).trunc()
+    };
+    PixelArea {
+        dst,
+        src,
+        zoom_x: transform.scale_x,
+        zoom_y: transform.scale_y,
+        rotation: transform.rotation,
+        pivot: (
+            drawn_x + sub.hotspot_x as f32 * zx,
+            drawn_y + sub.hotspot_y as f32 * zy,
+        ),
+        mirror_x: sub.mirror_x,
+        mirror_y: sub.mirror_y,
+        precise,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use luma_formats::{Image, SubFrame};
+
+    /// A 4x2 image whose left half is opaque and right half clear.
+    fn half_mask() -> Mask {
+        let mut pixels = Vec::new();
+        for _ in 0..2 {
+            pixels.extend_from_slice(&[255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0]);
+        }
+        Mask::of(&Image {
+            width: 4,
+            height: 2,
+            pixels,
+            has_alpha_channel: true,
+        })
+    }
+
+    #[test]
+    fn scaled_areas_follow_each_axis_and_the_mirroring() {
+        let mask = half_mask();
+        let sub = SubFrame {
+            image: Some("i".into()),
+            hotspot_x: 2,
+            hotspot_y: 2,
+            ..SubFrame::default()
+        };
+        // Unscaled at (10, 10): the image covers (8..12, 8..10); the
+        // opaque half is x 8..10.
+        let area = pixel_area(&sub, 10, 10, Transform::IDENTITY, true);
+        assert_eq!(area.rect(Some(&mask)), (8, 8, 4, 2));
+        assert!(area.contains(&mask, 9, 9));
+        assert!(!area.contains(&mask, 10, 9), "the clear half");
+        assert!(!area.contains(&mask, 7, 9) && !area.contains(&mask, 9, 10));
+        let coarse = PixelArea {
+            precise: false,
+            ..area
+        };
+        assert!(coarse.contains(&mask, 10, 9), "imprecise: the rectangle");
+        assert_eq!(area.center(Some(&mask)), Some((10, 9)));
+
+        // Twice as wide, half as tall: (6..14, 9..10); the opaque half is
+        // x 6..10, and the pixel test maps back through each scale.
+        let wide = pixel_area(
+            &sub,
+            10,
+            10,
+            Transform {
+                scale_x: 200.0,
+                scale_y: 50.0,
+                rotation: 0.0,
+            },
+            true,
+        );
+        assert_eq!(wide.rect(Some(&mask)), (6, 9, 8, 1));
+        assert!(wide.contains(&mask, 9, 9));
+        assert!(!wide.contains(&mask, 10, 9));
+        assert!(!wide.contains(&mask, 9, 10));
+
+        // Mirrored: the opaque half is on the right.
+        let mirrored = pixel_area(
+            &SubFrame {
+                mirror_x: true,
+                ..sub.clone()
+            },
+            10,
+            10,
+            Transform::IDENTITY,
+            true,
+        );
+        assert!(mirrored.contains(&mask, 11, 9));
+        assert!(!mirrored.contains(&mask, 8, 9));
+    }
+
+    #[test]
+    fn rotated_areas_are_hit_where_they_are_drawn() {
+        let mask = half_mask();
+        let sub = SubFrame {
+            image: Some("i".into()),
+            hotspot_x: 0,
+            hotspot_y: 0,
+            ..SubFrame::default()
+        };
+        // Drawn at (10, 10) and turned a quarter clockwise around the
+        // hotspot: the image (4x2) now covers x 8..10, y 10..14, its
+        // opaque left half on top (y 10..12).
+        let area = pixel_area(
+            &sub,
+            10,
+            10,
+            Transform {
+                scale_x: 100.0,
+                scale_y: 100.0,
+                rotation: 90.0,
+            },
+            true,
+        );
+        assert_eq!(area.pivot, (10.0, 10.0));
+        assert!(area.contains(&mask, 9, 10));
+        assert!(area.contains(&mask, 8, 11));
+        assert!(!area.contains(&mask, 9, 12), "the clear half, turned");
+        assert!(!area.contains(&mask, 11, 10), "where it would be unrotated");
+        assert!(!area.contains(&mask, 9, 9));
+        assert_eq!(area.center(Some(&mask)), Some((9, 12)));
     }
 }

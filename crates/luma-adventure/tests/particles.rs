@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use luma_adventure::{Audio, Runtime};
 use luma_archive::{PackageBuilder, Vfs};
-use luma_formats::Image;
+use luma_formats::{BlendMode, Image};
 use luma_render::{DrawList, Gpu, Renderer};
 use luma_script::asm::Assembler;
 use luma_script::{Instruction, Value};
@@ -181,6 +181,11 @@ fn game_script() -> Vec<u8> {
     set_to(&mut a, "em", "GenerationAmount", Arg::Int(2));
     set_to(&mut a, "em", "GenerationInterval", Arg::Int(0));
     set_to(&mut a, "em", "Alpha1", Arg::Int(300));
+    set_to(&mut a, "em", "Rotation1", Arg::Int(90));
+    set_to(&mut a, "em", "Rotation2", Arg::Int(90));
+    set_to(&mut a, "em", "BlendMode", Arg::Int(1));
+    get(&mut a, "em", "BlendMode");
+    store(&mut a, "blend");
     set_to(&mut a, "em", "EmitEvent", Arg::Str("Puff"));
     call(&mut a, "em", "AddSprite", &[Arg::Str("art\\puff.sprite")]);
     store(&mut a, "addOk");
@@ -479,22 +484,39 @@ fn emitters_are_drawn_after_their_owner_survive_a_saved_game_and_go_with_the_sce
         let mut list = DrawList::new(32.0, 32.0);
         runtime.draw(&mut list, None);
         let quads = list.quads();
+        let attributes = list.attributes();
         assert_eq!(quads.len(), 1 + 5 + 1 + 3, "{:?}", quads.len());
         assert_eq!((quads[0].dst.x, quads[0].dst.y), (16.0, 16.0), "the entity");
-        for quad in &quads[1..6] {
+        assert_eq!(result(&runtime, "blend"), Value::Int(1));
+        for (quad, attrs) in quads[1..6].iter().zip(&attributes[1..6]) {
             // A particle of the entity's emitter: 2x2 scaled by 50..150
-            // percent around its hotspot, near the emission rectangle.
+            // percent around its hotspot, near the emission rectangle,
+            // turned a quarter around its position (the hotspot, scaled
+            // from the quad's corner) and added to what is under it.
             assert!(quad.dst.w >= 1.0 && quad.dst.w <= 3.0, "{:?}", quad.dst);
             assert!(quad.dst.x >= 5.0 && quad.dst.x <= 18.0, "{:?}", quad.dst);
             assert_eq!(quad.tint.a, 255);
+            assert_eq!(attrs.rotation, 90.0);
+            // The hotspot (1, 1) scaled by 50..150 percent from the
+            // truncated corner; the quad's size is truncated too, so
+            // only the range is known here.
+            let (px, py) = (attrs.pivot.0 - quad.dst.x, attrs.pivot.1 - quad.dst.y);
+            assert!(
+                (0.5..=1.5).contains(&px) && (0.5..=1.5).contains(&py),
+                "{:?}",
+                attrs
+            );
+            assert_eq!(attrs.blend, BlendMode::Additive);
         }
         assert_eq!((quads[6].dst.x, quads[6].dst.y), (10.0, 22.0), "the actor");
-        for quad in &quads[7..] {
+        for (quad, attrs) in quads[7..].iter().zip(&attributes[7..]) {
             assert_eq!(
                 (quad.dst.x, quad.dst.y),
                 (11.0, 19.0),
                 "point emitter at (12, 20)"
             );
+            assert_eq!(attrs.rotation, 0.0, "no rotation range set");
+            assert_eq!(attrs.blend, BlendMode::Normal);
         }
     } else {
         eprintln!("skipped drawing: no adapter");

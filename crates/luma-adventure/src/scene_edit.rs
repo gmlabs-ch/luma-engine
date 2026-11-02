@@ -414,15 +414,16 @@ impl World {
 
     /// The attachments of an object as drawn around it
     /// (`CAdObject::DisplaySpriteAttachment`): each at the object's
-    /// position plus its own scaled offset, with the object's scale and
-    /// tint. `scale` is in percent.
+    /// position plus its own offset scaled by the object's scale, with
+    /// the object's scale, rotation, tint and blend mode.
     pub(crate) fn attachment_draws(
         &self,
         owner: NativeId,
         x: i32,
         y: i32,
-        scale: f32,
+        transform: crate::scene_view::Transform,
         tint: luma_formats::Rgba,
+        blend: luma_formats::BlendMode,
     ) -> crate::scene_view::AttachedDraws<'_> {
         let mut draws = crate::scene_view::AttachedDraws::default();
         let Some(state) = self.object_state(owner) else {
@@ -443,13 +444,14 @@ impl World {
                 continue;
             };
             let drawable = crate::scene_view::Drawable {
-                x: x + (entity.x as f32 * scale / 100.0) as i32,
-                y: y + (entity.y as f32 * scale / 100.0) as i32,
+                x: x + (entity.x as f32 * transform.scale_x / 100.0) as i32,
+                y: y + (entity.y as f32 * transform.scale_y / 100.0) as i32,
                 sprite: Some(loaded),
                 bank: &view.bank,
                 frame: view.frame_of(*r),
-                scale,
+                transform,
                 tint,
+                blend,
                 stick: None,
                 before: Vec::new(),
                 after: Vec::new(),

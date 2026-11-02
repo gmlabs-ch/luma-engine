@@ -8,7 +8,7 @@
 
 use crate::def::{Document, Node, Nodes};
 use crate::error::{Error, Result};
-use crate::image::Rgba;
+use crate::image::{BlendMode, Rgba};
 use crate::scene::{Direction, Property, Region, WaypointGroup};
 
 /// A sprite for each direction (`SPRITESET`).
@@ -134,8 +134,20 @@ pub struct Actor {
     pub scale: Option<f32>,
     /// Added to the scene's scale, in percent.
     pub relative_scale: f32,
+    /// Horizontal scale in percent set by a script (`ScaleX`); with
+    /// `scale_y`, it replaces `scale` and the scene's.
+    pub scale_x: Option<f32>,
+    /// See `scale_x`.
+    pub scale_y: Option<f32>,
     /// Follows the scene's rotation levels.
     pub rotatable: bool,
+    /// Fixed rotation in degrees set by a script (`Rotate`), overriding
+    /// the scene's; only applies when rotatable.
+    pub rotate: Option<f32>,
+    /// Added to the scene's rotation, in degrees (`RelativeRotate`).
+    pub relative_rotate: f32,
+    /// How the sprites are blended (`BlendMode`).
+    pub blend_mode: BlendMode,
     /// Reacts to the mouse.
     pub interactive: bool,
     /// Takes the tint of the region it stands in.
@@ -190,7 +202,12 @@ impl Default for Actor {
             scalable: true,
             scale: None,
             relative_scale: 0.0,
+            scale_x: None,
+            scale_y: None,
             rotatable: false,
+            rotate: None,
+            relative_rotate: 0.0,
+            blend_mode: BlendMode::Normal,
             interactive: true,
             colorable: true,
             tint: None,

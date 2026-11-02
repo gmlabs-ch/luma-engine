@@ -48,6 +48,7 @@ value is drawn between at birth, uniformly.
 | `MaxBatches` (0) | Batches after which the emitter stops emitting; `0` for no limit. `Start` resets the count. |
 | `FadeInTime`, `FadeOutTime` (0, 0) | A particle fades in from transparent over `FadeInTime` ms after birth; at the end of its life, or when it leaves its border, it fades out over `FadeOutTime` ms (with `0` it dies at once). |
 | `UseRegion` (false) | Only the particles inside the owner's `REGION` are drawn (entities only). |
+| `BlendMode` (0) | How the particles are blended: 0 normal, 1 additive, 2 subtractive (see [rendering.md](rendering.md#transforms)). The emitter's own `CBObject` property, not the owner's: `CPartParticle::Display` passes `Emitter->m_BlendMode`. |
 | `EmitEvent` (null) | The name of an event raised on the owner each frame a batch is born (not during the run-ahead of `Start`). |
 | `NumLiveParticles` | Read only: the particles alive. |
 | `Type` | `particle-emitter`. |
@@ -106,12 +107,13 @@ An emitter's particles are drawn right after their owner's sprite
 (`CAdEntity::Display`, `CAdActor::Display`), in the owner's layer, each
 live particle as its sprite's current frame placed by its hotspot at
 the particle's position (truncated to pixels, as the original passes
-integers), scaled by its scale and tinted white with its opacity. The
-owner's `AlphaColor` does not apply. Rotation is not drawn yet: the
-renderer has no per-quad rotation (see [rendering.md](rendering.md)).
-The original engine batches the sprites of an emitter with a single
-sprite file; Luma's renderer already merges consecutive quads of one
-texture.
+integers), scaled by its scale, turned by its rotation around its
+hotspot (the particle's position, the pivot the renderer turns the quad
+around; see [rendering.md](rendering.md#transforms)), tinted white with
+its opacity and blended with the emitter's `BlendMode`. The owner's
+`AlphaColor` does not apply. The original engine batches the sprites of
+an emitter with a single sprite file; Luma's renderer already merges
+consecutive quads of one texture and blend mode.
 
 ## Saved games
 
@@ -124,9 +126,6 @@ loaded again after a load, as the other sprites are (see
 
 ## Not yet
 
-- Rotation of the particles (`Rotation1`, `Rotation2`, `AngVelocity1`,
-  `AngVelocity2` are kept and advanced, not drawn).
-- The owner's blend mode (`BlendMode`) on the particles.
 - Emitters of the entities of windows (entity containers) are not drawn.
 - `CreateParticleEmitterBone` of 3D actors (see the 3D group of
   [compatibility.md](compatibility.md)).

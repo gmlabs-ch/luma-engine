@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 9;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -155,6 +155,7 @@ world_state! {
     scene_viewport: Option<(i32, i32, i32, i32)>,
     scene_id: NativeId,
     fader_id: NativeId,
+    scene_fader_id: NativeId,
     scene: Option<SceneView>,
     game_view: SceneView,
     prev_scene_name: String,
@@ -185,6 +186,7 @@ world_state! {
     selected_item: Option<NativeId>,
     cursors: Cursors,
     fader: Fader,
+    scene_fader: Fader,
     ui: Ui,
     ui_entities: Vec<crate::ui::UiEntity>,
     responses: crate::responses::Responses,

@@ -60,7 +60,8 @@ A saved game holds:
 - the sounds: each object's sound and the music channels, by file,
   position, looping, volume and whether they play or are paused; the
   crossfade in progress; the speech directories;
-- the fader, the cursors chosen, the mouse and the keyboard state;
+- the game's fader and the scene's, the cursors chosen, the mouse and
+  the keyboard state;
 - the game's own settings a script may change: name, caption,
   subtitles, talk and video skip buttons, `Interactive`, the main
   object, `TextEncoding`, `StartupScene`, the mouse lock rectangle,
@@ -234,7 +235,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `8` today |
+| 4 | layout version, little-endian; `9` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -247,9 +248,11 @@ of The White Chamber is a few kilobytes). The header is read alone by
 layout version: a change of the state's shape bumps `VERSION`, and
 files of another version are then refused rather than misread (the
 header still reads, so a slot of an older file keeps its description).
-Version 8, after 7, added the objects' runtime state and the content
-created at run time (entities, layers, nodes, attachments, the game's
-own entities, per-object inventories).
+Version 7 added the particle emitters; version 8 the per-axis scale,
+rotation and blend mode of objects and emitters, and the scene's fader;
+version 9, after 8, the objects' runtime state and the content created
+at run time (entities, layers, nodes, attachments, the game's own
+entities, per-object inventories).
 
 ## Checking a game
 

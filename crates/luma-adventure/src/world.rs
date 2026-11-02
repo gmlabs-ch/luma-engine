@@ -136,6 +136,10 @@ pub struct World {
     pub(crate) hits: Vec<HitArea>,
     pub(crate) fader: Fader,
     pub(crate) fader_id: NativeId,
+    /// The scene's fader (`Scene.FadeOut`), drawn over the scene
+    /// viewport under the windows; reset with every scene.
+    pub(crate) scene_fader: Fader,
+    pub(crate) scene_fader_id: NativeId,
     pub(crate) ui: Ui,
     /// The dialogue response box and its state.
     pub(crate) responses: crate::responses::Responses,
@@ -230,6 +234,7 @@ impl World {
         let response_box_id = objects.insert(Kind::ResponseBox);
         let scene_id = objects.insert(Kind::Scene);
         let fader_id = objects.insert(Kind::Fader);
+        let scene_fader_id = objects.insert(Kind::SceneFader);
         let personal_savegames = game_file.personal_savegames;
         let startup_scene = game_file.startup_scene.clone();
         let scene_viewport = game_file.scene_viewport.map(|[x, y, w, h]| (x, y, w, h));
@@ -281,6 +286,8 @@ impl World {
             hits: Vec::new(),
             fader: Fader::default(),
             fader_id,
+            scene_fader: Fader::default(),
+            scene_fader_id,
             ui: Ui::default(),
             responses: crate::responses::Responses::default(),
             response_box_id,
@@ -911,7 +918,7 @@ impl World {
             Some(Kind::Frame { .. }) => "frame".to_string(),
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Emitter(_)) => "particle emitter".to_string(),
-            Some(Kind::Fader) => "fader".to_string(),
+            Some(Kind::Fader) | Some(Kind::SceneFader) => "fader".to_string(),
             Some(Kind::Actor) => self
                 .actor(id)
                 .map(|a| a.def.name.clone())
@@ -1354,45 +1361,57 @@ impl World {
                 let mut drawable = match self.objects.get(id).map(|n| &n.kind) {
                     Some(Kind::Actor) => {
                         let actor = self.actor(id).expect("a free actor");
-                        let (scale, tint) = (actor.scale(&view.scene), actor.tint(&view.scene));
+                        let (transform, tint) =
+                            (actor.transform(&view.scene), actor.tint(&view.scene));
+                        let blend = actor.def.blend_mode;
                         let mut d = actor.drawable(&view.scene).unwrap_or(Drawable {
                             x: actor.x,
                             y: actor.y,
                             sprite: None,
                             bank: &actor.bank,
                             frame: 0,
-                            scale,
+                            transform,
                             tint,
+                            blend,
                             stick: None,
                             before: Vec::new(),
                             after: Vec::new(),
                         });
-                        let around = self.attachment_draws(id, actor.x, actor.y, scale, tint);
+                        let around =
+                            self.attachment_draws(id, actor.x, actor.y, transform, tint, blend);
                         d.before = around.before;
                         d.after = around.after;
                         d
                     }
                     Some(Kind::Entity(r)) => {
-                        // A game-level entity is scaled and tinted by the
-                        // scene it is shown in.
+                        // A game-level entity is scaled, turned and tinted
+                        // by the scene it is shown in.
                         let entity = self.game_view.entity(*r).expect("a game entity");
-                        let (scale, tint) = (
-                            view.scene.entity_scale(entity),
+                        let (transform, tint) = (
+                            crate::scene_view::Transform::of_entity(&view.scene, entity),
                             view.scene.entity_tint(entity),
                         );
                         let sprite = self
                             .game_view
                             .shown_sprite(*r)
                             .and_then(|p| self.game_view.sprite(&p));
-                        let around = self.attachment_draws(id, entity.x, entity.y, scale, tint);
+                        let around = self.attachment_draws(
+                            id,
+                            entity.x,
+                            entity.y,
+                            transform,
+                            tint,
+                            entity.blend_mode,
+                        );
                         Drawable {
                             x: entity.x,
                             y: entity.y,
                             sprite,
                             bank: &self.game_view.bank,
                             frame: self.game_view.frame_of(*r),
-                            scale,
+                            transform,
                             tint,
+                            blend: entity.blend_mode,
                             stick: None,
                             before: around.before,
                             after: around.after,
@@ -1480,8 +1499,9 @@ impl World {
                     id,
                     entity.x,
                     entity.y,
-                    view.scene.entity_scale(entity),
+                    crate::scene_view::Transform::of_entity(&view.scene, entity),
                     view.scene.entity_tint(entity),
+                    entity.blend_mode,
                 ),
             );
         }
@@ -1536,6 +1556,11 @@ impl World {
                 &overlays,
                 |i| self.free_entity_stick(i),
             );
+            // The scene's fader covers the scene viewport, under the
+            // windows (`CAdScene::TraverseNodes` displays it last).
+            if let Some(white) = white {
+                self.draw_scene_fade(list, white);
+            }
         }
         self.draw_windows(list, true, white);
         self.draw_inventory(list, white);
@@ -1713,6 +1738,8 @@ impl World {
         self.active_object = None;
         self.hits.clear();
         self.scene = Some(view);
+        // Every scene has its own fader (`CAdScene::m_Fader`).
+        self.scene_fader = Fader::default();
         self.restore_scene_state();
         // The regions the game's objects stuck to went with the old scene
         // (`CAdGame::ChangeScene`).
@@ -1821,6 +1848,11 @@ impl World {
     /// The fader's handle, for scripts to wait on.
     pub fn fader_id(&self) -> NativeId {
         self.fader_id
+    }
+
+    /// The current scene's fader (`Scene.FadeOut`), over the scene only.
+    pub fn scene_fader(&self) -> &Fader {
+        &self.scene_fader
     }
 
     /// The fonts loaded.
@@ -2391,7 +2423,7 @@ impl Natives for World {
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Emitter(_)) => "particle-emitter".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
-            Some(Kind::Fader) => "fader".to_string(),
+            Some(Kind::Fader) | Some(Kind::SceneFader) => "fader".to_string(),
             Some(Kind::Control) => self
                 .control(id)
                 .map_or("control", Control::type_name)
@@ -2527,6 +2559,7 @@ impl Host for World {
                 .is_none_or(|v| !v.is_talking(*r) && !v.is_playing_anim(*r)),
             Some(Kind::Scene) => self.is_scrolled(),
             Some(Kind::Fader) => self.fader.ready,
+            Some(Kind::SceneFader) => self.scene_fader.ready,
             Some(Kind::ResponseBox) => self.responses.waiting.is_none(),
             Some(Kind::Control) => self
                 .control(id)
@@ -2704,6 +2737,7 @@ impl Runtime {
         self.world.update_speech();
         let (timer, clock) = (self.world.timer, self.world.clock);
         self.world.fader.update(timer, clock);
+        self.world.scene_fader.update(timer, clock);
         self.engine.tick(&mut self.world);
         self.world.update_scene();
         self.world.update_actors();

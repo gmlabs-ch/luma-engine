@@ -11,8 +11,8 @@
 //! `BKeyboardState.cpp` and `BScriptHolder.cpp` of WME Lite (MIT
 //! License, Copyright (c) 2011 Jan Nedoma); see `NOTICE`.
 
-use luma_formats::Rgba;
 use luma_formats::scene::Direction;
+use luma_formats::{BlendMode, Rgba};
 use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 
 use crate::natives_region::RegionRef;
@@ -93,6 +93,11 @@ impl World {
                 "Ready" => Some(Value::Bool(self.fader.ready)),
                 _ => None,
             },
+            Kind::SceneFader => match name {
+                "Type" => Some(Value::from("fader")),
+                "Ready" => Some(Value::Bool(self.scene_fader.ready)),
+                _ => None,
+            },
             Kind::Scene => self.scene_get(name),
             Kind::Layer(index) => self.layer_get(index, name),
             Kind::Entity(r) => self.entity_get(r, name),
@@ -155,6 +160,7 @@ impl World {
             | Kind::Math
             | Kind::ResponseBox
             | Kind::Fader
+            | Kind::SceneFader
             | Kind::Inert(_)
             | Kind::Class(_) => false,
         }
@@ -200,7 +206,7 @@ impl World {
             },
             Kind::Math => math_call(name, args).map(Return::value),
             Kind::ResponseBox => None,
-            Kind::Fader => None,
+            Kind::Fader | Kind::SceneFader => None,
             Kind::Scene => self.scene_call(name, args, ctx),
             Kind::Layer(index) => self.layer_call(index, name, args, ctx),
             Kind::Entity(r) => self.entity_call(id, r, name, args),
@@ -1185,10 +1191,42 @@ impl World {
                 };
                 Return::value(index.is_some_and(|i| self.delete_layer(ctx.engine, i)))
             }
-            "SetViewport" | "FadeOut" | "FadeOutAsync" | "FadeIn" | "FadeInAsync" => {
+            "SetViewport" => {
                 self.stub(&format!("Scene.{name}"));
                 Return::null()
             }
+            // The scene's own fader, over the scene viewport only; it
+            // runs on the game timer (`CAdScene::ScCallMethod`).
+            "FadeOut" | "FadeOutAsync" | "FadeIn" | "FadeInAsync" => {
+                let duration = match arg(0) {
+                    Value::Null => 500,
+                    v => u64::try_from(v.get_int(self)).unwrap_or(0),
+                };
+                let channel = |n: usize, default: i32| match arg(n) {
+                    Value::Null => default,
+                    v => v.get_int(self),
+                };
+                let color = Rgba {
+                    r: channel(1, 0).clamp(0, 255) as u8,
+                    g: channel(2, 0).clamp(0, 255) as u8,
+                    b: channel(3, 0).clamp(0, 255) as u8,
+                    a: channel(4, 255).clamp(0, 255) as u8,
+                };
+                let (timer, clock) = (self.timer(), self.clock);
+                if name.starts_with("FadeOut") {
+                    self.scene_fader
+                        .fade_out(color, duration, false, timer, clock);
+                } else {
+                    self.scene_fader
+                        .fade_in(color, duration, false, timer, clock);
+                }
+                if name.ends_with("Async") {
+                    Return::null()
+                } else {
+                    Return::effect(Effect::WaitFor(self.scene_fader_id))
+                }
+            }
+            "GetFadeColor" => Return::value(self.scene_fader.color_int()),
             _ => return None,
         })
     }
@@ -1352,12 +1390,17 @@ impl World {
             "Zoomable" | "Scalable" => Value::Bool(e.scalable),
             "Rotatable" => Value::Bool(e.rotatable),
             "AlphaColor" => Value::Int(e.tint.map_or(0, color_int)),
-            "BlendMode" => Value::Int(0),
+            "BlendMode" => Value::Int(e.blend_mode.to_int()),
             "Scale" => e.scale.map_or(Value::Null, |s| Value::Float(f64::from(s))),
-            "ScaleX" | "ScaleY" => Value::Null,
+            "ScaleX" => e
+                .scale_x
+                .map_or(Value::Null, |s| Value::Float(f64::from(s))),
+            "ScaleY" => e
+                .scale_y
+                .map_or(Value::Null, |s| Value::Float(f64::from(s))),
             "RelativeScale" => Value::Float(f64::from(e.relative_scale)),
-            "Rotate" => Value::Null,
-            "RelativeRotate" => Value::Float(0.0),
+            "Rotate" => e.rotate.map_or(Value::Null, |r| Value::Float(f64::from(r))),
+            "RelativeRotate" => Value::Float(f64::from(e.relative_rotate)),
             "Colorable" => Value::Bool(e.colorable),
             "SoundPanning" => Value::Bool(e.sound_panning),
             "SaveState" => Value::Bool(e.save_state),
@@ -1427,8 +1470,13 @@ impl World {
             "Zoomable" | "Scalable" => e.scalable = flag,
             "Rotatable" => e.rotatable = flag,
             "AlphaColor" => e.tint = Some(color_of(int)),
+            "BlendMode" => e.blend_mode = BlendMode::from_int(int),
             "Scale" => e.scale = if is_null { None } else { Some(float as f32) },
+            "ScaleX" => e.scale_x = if is_null { None } else { Some(float as f32) },
+            "ScaleY" => e.scale_y = if is_null { None } else { Some(float as f32) },
             "RelativeScale" => e.relative_scale = float as f32,
+            "Rotate" => e.rotate = if is_null { None } else { Some(float as f32) },
+            "RelativeRotate" => e.relative_rotate = float as f32,
             "Colorable" => e.colorable = flag,
             "SoundPanning" => e.sound_panning = flag,
             "SaveState" => e.save_state = flag,
@@ -1438,7 +1486,7 @@ impl World {
             "WalkToX" => e.walk_to_x = int,
             "WalkToY" => e.walk_to_y = int,
             "WalkToDirection" => e.walk_to_dir = Direction::from_code(i64::from(int)),
-            "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate" | "AccCaption" => {}
+            "AccCaption" => {}
             _ => return false,
         }
         true
