@@ -400,7 +400,7 @@ impl World {
     /// The save directory, after trying the game's own once
     /// (`GetSaveDir`): when a file cannot be written there, saves go to
     /// the user's directory from then on.
-    fn checked_save_directory(&mut self) -> PathBuf {
+    pub(crate) fn checked_save_directory(&mut self) -> PathBuf {
         if !self.personal_save && !self.save_dir_checked {
             self.save_dir_checked = true;
             let dir = self.local_save_dir();

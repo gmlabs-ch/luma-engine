@@ -7,11 +7,14 @@
 //! `BScriptHolder.cpp` of WME Lite (MIT License, Copyright (c) 2011 Jan
 //! Nedoma); see `NOTICE`.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
 
 use luma_archive::Vfs;
 use luma_formats::Entity;
 use luma_formats::{GameFile, Scene, StringTable};
+use luma_script::classes::{ClassHost, ClassObject, relative_path};
 use luma_script::{Context, Engine, Host, NativeId, Natives, Return, State, Value};
 
 use crate::actor::{Actor, ActorEvent, WalkContext, scene_obstacles};
@@ -478,6 +481,7 @@ impl World {
                 .map(|i| i.def.name.clone())
                 .unwrap_or_default(),
             Some(Kind::Inert(kind)) => kind.clone(),
+            Some(Kind::Class(object)) => object.type_name().to_string(),
             None => "invalid".to_string(),
         }
     }
@@ -1438,6 +1442,30 @@ impl World {
         self.objects.insert(Kind::Inert(kind.to_string()))
     }
 
+    /// Runs `f` on a library object with the world free for the call: the
+    /// object is taken out of its slot and put back afterwards. `None`
+    /// when the handle is not a library object.
+    pub(crate) fn with_class<T>(
+        &mut self,
+        id: NativeId,
+        f: impl FnOnce(&mut ClassObject, &mut World) -> T,
+    ) -> Option<T> {
+        let native = self.objects.get_mut(id)?;
+        if !matches!(native.kind, Kind::Class(_)) {
+            return None;
+        }
+        let Kind::Class(mut object) =
+            std::mem::replace(&mut native.kind, Kind::Inert(String::new()))
+        else {
+            return None;
+        };
+        let result = f(&mut object, self);
+        if let Some(native) = self.objects.get_mut(id) {
+            native.kind = Kind::Class(object);
+        }
+        Some(result)
+    }
+
     pub(crate) fn native(&self, id: NativeId) -> Option<&Native> {
         self.objects.get(id)
     }
@@ -1496,6 +1524,7 @@ impl Natives for World {
                 .to_string(),
             Some(Kind::Item) => "item".to_string(),
             Some(Kind::Inert(kind)) => kind.to_ascii_lowercase(),
+            Some(Kind::Class(object)) => object.type_name().to_string(),
             None => String::new(),
         }
     }
@@ -1503,6 +1532,7 @@ impl Natives for World {
     fn to_string(&self, id: NativeId) -> String {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Game) => "[game]".to_string(),
+            Some(Kind::Class(object)) => object.to_string(self),
             Some(Kind::Entity(_) | Kind::Region { .. } | Kind::Layer(_) | Kind::Scene) => {
                 format!("[{}]", self.describe(id))
             }
@@ -1514,7 +1544,22 @@ impl Natives for World {
     }
 
     fn to_bool(&self, id: NativeId) -> bool {
-        self.objects.contains(id)
+        match self.objects.get(id).map(|n| &n.kind) {
+            // The library classes keep the base class's `false`.
+            Some(Kind::Class(_)) => false,
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    fn compare(&self, a: NativeId, b: NativeId) -> Ordering {
+        match (self.objects.get(a), self.objects.get(b)) {
+            (Some(x), Some(y)) => match (&x.kind, &y.kind) {
+                (Kind::Class(p), Kind::Class(q)) => p.compare(q, a.cmp(&b)),
+                _ => a.cmp(&b),
+            },
+            _ => a.cmp(&b),
+        }
     }
 
     fn get_property(&self, id: NativeId, name: &str) -> Option<Value> {
@@ -1535,6 +1580,43 @@ impl Natives for World {
             native.props.insert(name.to_string(), value.clone());
         }
         true
+    }
+
+    fn assign_scalar(&mut self, id: NativeId, value: &Value) {
+        if let Some(Native {
+            kind: Kind::Class(object),
+            ..
+        }) = self.objects.get_mut(id)
+        {
+            object.assign_scalar(value);
+        }
+    }
+}
+
+impl ClassHost for World {
+    /// A file a script wrote first, then the game's files.
+    fn read_file(&mut self, name: &str) -> Option<Vec<u8>> {
+        if let Some(path) = self.writable_path(name) {
+            if path.is_file() {
+                return std::fs::read(path).ok();
+            }
+        }
+        self.vfs.read(name).ok()
+    }
+
+    /// Under the save directory (the game's, or the user's own when the
+    /// game's is not writable), never outside it.
+    fn writable_path(&mut self, name: &str) -> Option<PathBuf> {
+        let relative = relative_path(name)?;
+        Some(self.checked_save_directory().join(relative))
+    }
+
+    fn create_object(&mut self, object: ClassObject) -> NativeId {
+        self.objects.insert(Kind::Class(object))
+    }
+
+    fn log(&mut self, message: &str) {
+        self.log.push(message.to_string());
     }
 }
 
@@ -1588,13 +1670,19 @@ impl Host for World {
         (i64::from(from) + (value as i64).rem_euclid(span)) as i32
     }
 
-    fn call_function(&mut self, name: &str, _args: &[Value], _ctx: Context<'_>) -> Option<Return> {
+    fn call_function(&mut self, name: &str, args: &[Value], _ctx: Context<'_>) -> Option<Return> {
         match name {
-            // Constructors of the engine's script classes.
-            "Actor" | "Entity" | "String" | "Array" | "Date" | "File" | "MemBuffer" | "Object" => {
+            // The script library classes.
+            "String" | "Array" | "Date" | "File" | "MemBuffer" => {
+                let object = ClassObject::construct(name, args, self)?;
+                let id = self.objects.insert(Kind::Class(object));
+                Some(Return::constructed(Value::Native(id)))
+            }
+            // Not implemented: the placeholder object the compiler
+            // created for the `new` expression stays.
+            "Actor" | "Entity" => {
                 self.stub(&format!("new {name}()"));
-                let id = self.inert(name);
-                Some(Return::value(Value::Native(id)))
+                Some(Return::null())
             }
             _ => None,
         }

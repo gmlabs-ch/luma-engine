@@ -46,20 +46,20 @@ How the list was made. For every class with a script interface, the names tested
 ### Constructors (`new X(...)`)
 
 - WME source: src/engine_core/wme_base/BGame.cpp, src/engine_core/wme_ad/AdGame.cpp (CAdGame::ExternalCall)
-- Hierarchy and Luma: luma-adventure/src/world.rs (`call_function` returns an inert object)
-- Count: 0 done, 8 todo, 1 no-op
+- Hierarchy and Luma: luma-adventure/src/world.rs (`call_function`: the library classes become `Kind::Class` objects answered by `luma-script/src/classes/`; `Object`, `Actor` and `Entity` leave the placeholder object the compiler creates for `new`)
+- Count: 5 done, 3 todo, 1 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Object` | constructor | **todo** | Generic object, optionally with script files to attach as arguments. Luma returns an inert property bag: properties work, the attached scripts and the CBObject members do not. |
-| `String` | constructor | **todo** | `new String(text)`: string object with methods (see CSXString). Luma returns an inert object. |
-| `Array` | constructor | **todo** | `new Array(...)`: array object (see CSXArray). Luma returns an inert object. |
-| `Date` | constructor | **todo** | `new Date()`: date/time object (see CSXDate). Luma returns an inert object. |
-| `File` | constructor | **todo** | `new File(name)`: file access object (see CSXFile). Luma returns an inert object. |
-| `MemBuffer` | constructor | **todo** | `new MemBuffer(size)`: raw byte buffer (see CSXMemBuffer). Luma returns an inert object. |
+| `Object` | constructor | **todo** | Generic object, optionally with script files to attach as arguments. Luma keeps the plain object the compiler creates: properties work, the attached scripts and the CBObject members do not. |
+| `String` | constructor | **done** | `new String(text)`: string object with methods (see CSXString). `new String()` holds `[null]`, `new String(n)` an empty text of capacity n, as in WME. |
+| `Array` | constructor | **done** | `new Array(...)`: array object (see CSXArray). Empty, n unset elements, or the arguments. |
+| `Date` | constructor | **done** | `new Date()`: date/time object (see CSXDate). The current time is the host's clock, UTC in the adventure layer. |
+| `File` | constructor | **done** | `new File(name)`: file access object (see CSXFile). |
+| `MemBuffer` | constructor | **done** | `new MemBuffer(size)`: raw byte buffer (see CSXMemBuffer). |
 | `TcpClient` | constructor | **no-op** | Network client; the class is an unfinished stub in WME 1.x itself (its methods are commented out), and games cannot rely on it. |
-| `Actor` | constructor | **todo** | `new Actor()`: creates an empty 2D actor not yet in a scene. Luma returns an inert object; actors only come from `LoadActor`. |
-| `Entity` | constructor | **todo** | `new Entity()`: creates an empty entity. Luma returns an inert object; entities only come from the scene files. |
+| `Actor` | constructor | **todo** | `new Actor()`: creates an empty 2D actor not yet in a scene. Luma leaves the placeholder object; actors only come from `LoadActor`. |
+| `Entity` | constructor | **todo** | `new Entity()`: creates an empty entity. Luma leaves the placeholder object; entities only come from the scene files. |
 
 ### Global variables
 
@@ -759,64 +759,64 @@ How the list was made. For every class with a script interface, the names tested
 ### CSXString (`new String`)
 
 - WME source: src/engine_core/wme_base/SXString.cpp
-- Hierarchy and Luma: CBScriptable → CSXString; Luma: inert object
-- Count: 0 done, 10 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CSXString; Luma: Kind::Class (luma-script/src/classes/string.rs)
+- Count: 10 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Substring`, `Substr` | method | **todo** | Part of the string by (start, end) or (start, length). |
-| `ToUpperCase`, `ToLowerCase` | method | **todo** | Case conversion. |
-| `IndexOf` | method | **todo** | Position of a substring from an index. |
-| `Split` | method | **todo** | Splits on a separator and returns an array. |
-| `Type` | get | **todo** | `string`. |
-| `Length` | get | **todo** | Length of the string object. (Length of a plain string value is done; see Script values.) |
-| `Capacity` | get/set | **todo** | Allocated buffer size. |
+| `Substring`, `Substr` | method | **done** | Part of the string by (start, end) or (start, length), with WME's clamping and swapping; positions count characters. |
+| `ToUpperCase`, `ToLowerCase` | method | **done** | Case conversion (Unicode simple mapping; WME uses the C locale). |
+| `IndexOf` | method | **done** | Position of a substring from an index, -1 when absent. |
+| `Split` | method | **done** | Splits on any of the separator characters and returns an array. |
+| `Type` | get | **done** | `string`. |
+| `Length` | get | **done** | Length of the string object, in characters. |
+| `Capacity` | get/set | **done** | Allocated buffer size; cannot shrink below the text (warning logged). |
 
 ### CSXArray (`new Array`)
 
 - WME source: src/engine_core/wme_base/SXArray.cpp
-- Hierarchy and Luma: CBScriptable → CSXArray; Luma: inert object (numeric properties work as a bag, no `Length` tracking)
-- Count: 0 done, 5 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CSXArray; Luma: Kind::Class (luma-script/src/classes/array.rs)
+- Count: 5 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Push` | method | **todo** | Appends one or more values; returns the new length. |
-| `Pop` | method | **todo** | Removes and returns the last value. |
-| `Type` | get | **todo** | `array`. |
-| `Length` | get/set | **todo** | Number of elements; setting it truncates. Element access `a[n]` is a numeric property. |
+| `Push` | method | **done** | Appends one or more values; returns the new length. |
+| `Pop` | method | **done** | Removes and returns the last value, `null` when empty. |
+| `Type` | get | **done** | `array`. |
+| `Length` | get/set | **done** | Number of elements; setting it truncates. Element access `a[n]` is a numeric property (digits only, as WME's `ValidNumber`). |
 
 ### CSXDate (`new Date`)
 
 - WME source: src/engine_core/wme_base/SXDate.cpp
-- Hierarchy and Luma: CBScriptable → CSXDate; Luma: inert object
-- Count: 0 done, 15 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CSXDate; Luma: Kind::Class (luma-script/src/classes/date.rs)
+- Count: 15 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `GetYear`, `GetMonth`, `GetDate`, `GetHours`, `GetMinutes`, `GetSeconds`, `GetWeekday` | method | **todo** | Reads a field of the date (local time). |
-| `SetYear`, `SetMonth`, `SetDate`, `SetHours`, `SetMinutes`, `SetSeconds` | method | **todo** | Writes a field of the date. |
-| `SetCurrentTime` | method | **todo** | Sets the object to the current date and time. |
-| `Type` | get | **todo** | `date`. |
+| `GetYear`, `GetMonth`, `GetDate`, `GetHours`, `GetMinutes`, `GetSeconds`, `GetWeekday` | method | **done** | Reads a field of the date. |
+| `SetYear`, `SetMonth`, `SetDate`, `SetHours`, `SetMinutes`, `SetSeconds` | method | **done** | Writes a field of the date, normalised as `mktime` does. |
+| `SetCurrentTime` | method | **done** | Sets the object to the current date and time (the host's clock: UTC in the adventure layer, where WME uses local time). |
+| `Type` | get | **done** | `date`. |
 
 ### CSXFile (`new File`)
 
 - WME source: src/engine_core/wme_base/SXFile.cpp
-- Hierarchy and Luma: CBScriptable → CSXFile; Luma: inert object. Needs a policy for where scripts may read and write (saves, settings).
-- Count: 0 done, 33 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CSXFile; Luma: Kind::Class (luma-script/src/classes/file.rs). Reads come from files scripts wrote, then the game's files; writes, deletions and copies stay under the save directory.
+- Count: 33 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `SetFilename` | method | **todo** | Sets the file name. |
-| `OpenAsText`, `OpenAsBinary` | method | **todo** | Opens the file for read / write / append as text or binary. |
-| `Close` | method | **todo** | Closes the file. |
-| `SetPosition` | method | **todo** | Seeks. |
-| `Delete`, `Copy` | method | **todo** | Deletes the file / copies it to a new name. |
-| `ReadLine`, `ReadText` | method | **todo** | Reads a line / N characters of text. |
-| `WriteLine`, `WriteText` | method | **todo** | Writes text with / without a line break. |
-| `ReadBool`, `ReadByte`, `ReadShort`, `ReadInt`, `ReadLong`, `ReadFloat`, `ReadDouble`, `ReadString` | method | **todo** | Reads a binary value. |
-| `WriteBool`, `WriteByte`, `WriteShort`, `WriteInt`, `WriteLong`, `WriteFloat`, `WriteDouble`, `WriteString` | method | **todo** | Writes a binary value. |
-| `Type` | get | **todo** | `file`. |
-| `Filename`, `Position`, `Length`, `TextMode`, `AccessMode` | get | **todo** | Current file state. |
+| `SetFilename` | method | **done** | Sets the file name (and closes the file). |
+| `OpenAsText`, `OpenAsBinary` | method | **done** | Opens the file for read / write / append as text or binary. |
+| `Close` | method | **done** | Closes the file. |
+| `SetPosition` | method | **done** | Seeks. |
+| `Delete`, `Copy` | method | **done** | Deletes the file / copies it to a new name, under the save directory. |
+| `ReadLine`, `ReadText` | method | **done** | Reads a line / N characters of text (`\r` skipped). |
+| `WriteLine`, `WriteText` | method | **done** | Writes text with / without a line break (`\n`; WME on Windows wrote `\r\n`). |
+| `ReadBool`, `ReadByte`, `ReadShort`, `ReadInt`, `ReadLong`, `ReadFloat`, `ReadDouble`, `ReadString` | method | **done** | Reads a binary value, little-endian; `ReadShort` is 65536 plus the signed value, as in WME. |
+| `WriteBool`, `WriteByte`, `WriteShort`, `WriteInt`, `WriteLong`, `WriteFloat`, `WriteDouble`, `WriteString` | method | **done** | Writes a binary value. |
+| `Type` | get | **done** | `file`. |
+| `Filename`, `Position`, `Length`, `TextMode`, `AccessMode` | get | **done** | Current file state. |
 
 ### CSXDirectory (the global `Directory`)
 
@@ -837,18 +837,18 @@ How the list was made. For every class with a script interface, the names tested
 ### CSXMemBuffer (`new MemBuffer`)
 
 - WME source: src/engine_core/wme_base/SXMemBuffer.cpp
-- Hierarchy and Luma: CBScriptable → CSXMemBuffer; Luma: inert object
-- Count: 0 done, 19 todo, 3 no-op
+- Hierarchy and Luma: CBScriptable → CSXMemBuffer; Luma: Kind::Class (luma-script/src/classes/membuffer.rs)
+- Count: 19 done, 0 todo, 3 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `SetSize` | method | **todo** | Resizes the buffer. |
-| `GetBool`, `GetByte`, `GetShort`, `GetInt`, `GetLong`, `GetFloat`, `GetDouble`, `GetString` | method | **todo** | Reads a value at a byte offset. |
-| `SetBool`, `SetByte`, `SetShort`, `SetInt`, `SetLong`, `SetFloat`, `SetDouble`, `SetString` | method | **todo** | Writes a value at a byte offset. |
-| `GetPointer`, `SetPointer` | method | **no-op** | Reads / writes a raw memory address, for calling Windows DLL functions. |
-| `DEBUG_Dump` | method | **no-op** | Dumps the buffer to the log; debugging aid. |
-| `Type` | get | **todo** | `membuffer`. |
-| `Size` | get | **todo** | Buffer size in bytes. |
+| `SetSize` | method | **done** | Resizes the buffer, zero-filling growth. |
+| `GetBool`, `GetByte`, `GetShort`, `GetInt`, `GetLong`, `GetFloat`, `GetDouble`, `GetString` | method | **done** | Reads a value at a byte offset (little-endian; `GetShort` is 65536 plus the signed value, as in WME); out of bounds is a runtime error and `null`. |
+| `SetBool`, `SetByte`, `SetShort`, `SetInt`, `SetLong`, `SetFloat`, `SetDouble`, `SetString` | method | **done** | Writes a value at a byte offset; out of bounds is a runtime error and `false`. |
+| `GetPointer`, `SetPointer` | method | **no-op** | Reads / writes a raw memory address, for calling Windows DLL functions. Luma logs a runtime error and yields `null` / `false`. |
+| `DEBUG_Dump` | method | **no-op** | Dumps the buffer to a file on drive C; debugging aid. Luma yields `null`. |
+| `Type` | get | **done** | `membuffer`. |
+| `Size` | get | **done** | Buffer size in bytes. |
 
 ### CSXTcpClient (`new TcpClient`)
 
@@ -1026,7 +1026,7 @@ How the list was made. For every class with a script interface, the names tested
 | Class | done | todo | no-op | total |
 |-------|-----:|-----:|------:|------:|
 | Global functions | 16 | 4 | 1 | 21 |
-| Constructors | 0 | 8 | 1 | 9 |
+| Constructors | 5 | 3 | 1 | 9 |
 | Global variables | 4 | 1 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
@@ -1056,12 +1056,12 @@ How the list was made. For every class with a script interface, the names tested
 | CUIMarkup | 0 | 0 | 1 | 1 |
 | CBKeyboardState | 8 | 0 | 0 | 8 |
 | CSXMath | 22 | 0 | 0 | 22 |
-| CSXString | 0 | 10 | 0 | 10 |
-| CSXArray | 0 | 5 | 0 | 5 |
-| CSXDate | 0 | 15 | 0 | 15 |
-| CSXFile | 0 | 33 | 0 | 33 |
+| CSXString | 10 | 0 | 0 | 10 |
+| CSXArray | 5 | 0 | 0 | 5 |
+| CSXDate | 15 | 0 | 0 | 15 |
+| CSXFile | 33 | 0 | 0 | 33 |
 | CSXDirectory | 0 | 9 | 1 | 10 |
-| CSXMemBuffer | 0 | 19 | 3 | 22 |
+| CSXMemBuffer | 19 | 0 | 3 | 22 |
 | CSXTcpClient | 0 | 0 | 1 | 1 |
 | CSXPluginObject | 0 | 0 | 1 | 1 |
 | CPartEmitter | 0 | 79 | 0 | 79 |
@@ -1070,9 +1070,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **559** | **568** | **29** | **1156** |
+| **All** | **646** | **481** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 544 done, 559 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 631 done, 472 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1083,12 +1083,7 @@ These classes have no done member in Luma: the object does not exist for scripts
 | `CAdWaypointGroup` | A waypoint group of a scene (`Scene.GetWaypointGroup`) | 3 |
 | `CBFrame` | A frame of a sprite (delay, sound, move, sub-frames, events) | 21 |
 | `CBSubFrame` | The image part of a frame (hotspot, mirror, alpha) | 20 |
-| `CSXString` | `new String` | 10 |
-| `CSXArray` | `new Array` | 5 |
-| `CSXDate` | `new Date` | 15 |
-| `CSXFile` | `new File` | 33 |
 | `CSXDirectory` | `Directory` | 9 |
-| `CSXMemBuffer` | `new MemBuffer` | 19 |
 | `CPartEmitter` | Particle emitter | 79 |
 | `CAdObject3D` | Base of 3D objects: position, velocity, shadows, bones, ignored lights | 38 |
 | `CAdActor3D` | Legacy 3D actor (MS3D/3DS models) | 40 |
@@ -1106,7 +1101,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
 | Game services | 46 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
-| Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
+| Script library | 16 | The `Directory` object, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. (`String`, `Array`, `Date`, `File` and `MemBuffer` are done.) |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Sprites and frames | 48 | Frame and sub-frame objects (`GetFrame`, `AddFrame`, `Delay`, `MoveX`, hotspots...), runtime-built sprites, frame events. Reads on the sprite format already exist in `luma-formats`. |
@@ -1117,7 +1112,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **568** | |
+| **All** | **481** | |
 
 ## Members in Luma that WME 1.x does not define
 

@@ -3,12 +3,13 @@
 //! yet. Handles are generational, so that a handle to an object of a
 //! previous scene is simply invalid.
 
+use luma_script::classes::ClassObject;
 use luma_script::{NativeId, Properties};
 
 use crate::scene_view::EntityRef;
 
 /// What a native object is.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Kind {
     /// The `Game` object.
     Game,
@@ -49,6 +50,9 @@ pub enum Kind {
     /// method with `null`: windows, actors and other objects of later
     /// milestones.
     Inert(String),
+    /// An object of the script library (`new String`, `new Array`,
+    /// `new Date`, `new File`, `new MemBuffer`); the class answers for it.
+    Class(ClassObject),
 }
 
 /// A native object: its kind and the properties scripts set on it.

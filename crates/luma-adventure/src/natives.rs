@@ -93,6 +93,10 @@ const OBJECT_STUBS: &[&str] = &[
 impl World {
     /// A built-in property of a native, if the native defines it.
     pub(crate) fn native_get(&self, id: NativeId, name: &str) -> Option<Value> {
+        // The library objects answer in place: no copy of their contents.
+        if let Kind::Class(object) = &self.native(id)?.kind {
+            return object.get_property(name);
+        }
         let kind = self.native(id)?.kind.clone();
         match kind {
             Kind::Game => self.game_get(name),
@@ -133,12 +137,18 @@ impl World {
                 "Name" => Some(Value::from(kind)),
                 _ => None,
             },
+            Kind::Class(_) => None,
         }
     }
 
     /// Sets a built-in property; `false` when the native has no such
     /// property and it should be stored as a script property.
     pub(crate) fn native_set(&mut self, id: NativeId, name: &str, value: &Value) -> bool {
+        if matches!(self.native(id).map(|n| &n.kind), Some(Kind::Class(_))) {
+            return self
+                .with_class(id, |object, world| object.set_property(name, value, world))
+                .unwrap_or(false);
+        }
         let kind = match self.native(id) {
             Some(native) => native.kind.clone(),
             None => return false,
@@ -153,7 +163,12 @@ impl World {
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
-            Kind::Keyboard | Kind::Math | Kind::ResponseBox | Kind::Fader | Kind::Inert(_) => false,
+            Kind::Keyboard
+            | Kind::Math
+            | Kind::ResponseBox
+            | Kind::Fader
+            | Kind::Inert(_)
+            | Kind::Class(_) => false,
         }
     }
 
@@ -165,6 +180,13 @@ impl World {
         args: &[Value],
         ctx: Context<'_>,
     ) -> Option<Return> {
+        if matches!(self.native(id)?.kind, Kind::Class(_)) {
+            return self
+                .with_class(id, |object, world| {
+                    object.call_method(name, args, world, &ctx)
+                })
+                .flatten();
+        }
         let kind = self.native(id)?.kind.clone();
         let mut ctx = ctx;
         if let Some(ret) = self.holder_call(id, name, args, &mut ctx) {
@@ -196,6 +218,7 @@ impl World {
             Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
+            Kind::Class(_) => None,
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
                     let widget = self.inert("Widget");

@@ -24,7 +24,10 @@ A saved game holds:
   its threads, and the engine-wide globals; programs are named by the
   file they were loaded from;
 - the native objects and their handles, which stay the same after a
-  load, so that every reference in a script is still good;
+  load, so that every reference in a script is still good; the script
+  library objects (`new String`, `Array`, `Date`, `File`, `MemBuffer`)
+  with their contents: a file open for reading keeps its content and
+  position, one open for writing is closed, as in the original;
 - the current scene as the scripts left it (its entities, regions and
   layers, the animation and the sentence of each entity), the previous
   scene's name, a scene change asked and not done yet, and the states
