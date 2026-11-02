@@ -103,8 +103,12 @@ fn script_disassembles_a_compiled_script() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("not a compiled script"));
 
-    // Usage.
+    // One argument is a compiled script on disk, not a game.
     let out = luma(&["script", game.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+
+    // Usage.
+    let out = luma(&["script"]);
     assert_eq!(out.status.code(), Some(2));
 }
 
@@ -417,6 +421,126 @@ fn sprite_describes_frames_and_images() {
     let out = luma(&["sprite", game.to_str().unwrap(), "sprites/missing.sprite"]);
     assert_eq!(out.status.code(), Some(1));
     fs::remove_dir_all(&game).unwrap();
+}
+
+#[test]
+fn compile_produces_a_script_that_disassembles() {
+    let project = temp_dir();
+    fs::create_dir_all(project.join("scripts")).unwrap();
+    fs::write(
+        project.join("scripts/base.inc"),
+        "global Scene;\nglobal actor;\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("scripts/demo.script"),
+        "#include \"scripts\\base.inc\"\nvar count = 0;\n\nfunction bump(n)\n{\n  count = count + n;\n  return count;\n}\n\non \"LeftClick\"\n{\n  bump(2);\n  actor.Talk(\"Hello\");\n  Sleep(100);\n}\n",
+    )
+    .unwrap();
+    let source = project.join("scripts/demo.script");
+    let out = project.join("demo.compiled");
+    let result = luma(&[
+        "compile",
+        source.to_str().unwrap(),
+        "--game",
+        project.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+    ]);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&result.stderr).starts_with("Compiled "),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    // Round trip through the disassembler.
+    let result = luma(&["script", out.to_str().unwrap()]);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let text = String::from_utf8_lossy(&result.stdout);
+    assert!(
+        text.starts_with("scripts\\demo.script: version 1.2, "),
+        "{text}"
+    );
+    assert!(
+        text.contains("1 function(s), 1 event(s), 0 method(s), 0 external(s)"),
+        "{text}"
+    );
+    assert!(text.contains("function bump:\n"), "{text}");
+    assert!(text.contains("event \"LeftClick\":\n"), "{text}");
+    // The include's declarations come first, on the directive's line.
+    assert!(text.contains("  DBG_LINE 1\n"), "{text}");
+    assert!(text.contains("  DEF_GLOB_VAR Scene\n"), "{text}");
+    assert!(text.contains("  DEF_GLOB_VAR actor\n"), "{text}");
+    assert!(text.contains("  EXTERNAL_CALL Sleep\n"), "{text}");
+    assert!(text.contains("  CALL_BY_EXP\n"), "{text}");
+    assert!(text.contains("  CALL "), "{text}");
+    assert!(text.trim_end().ends_with("RET"), "{text}");
+
+    // Without -o the bytes go to standard output; without --game the
+    // source's directory is the root and the name is the file's.
+    let result = luma(&["compile", source.to_str().unwrap()]);
+    assert!(
+        !result.status.success(),
+        "the include is not under the source's directory"
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("demo.script:1:1: Error opening include file scripts\\base.inc"),
+        "{stderr}"
+    );
+    fs::write(project.join("scripts/plain.script"), "var x = 1;\n").unwrap();
+    let result = luma(&[
+        "compile",
+        project.join("scripts/plain.script").to_str().unwrap(),
+    ]);
+    assert!(result.status.success());
+    assert!(result.stdout.starts_with(&[0xDE, 0xAD, 0xC0, 0xDE]));
+    assert!(result.stdout[32..].starts_with(b"plain.script\0"));
+
+    // Errors name the file, line and column.
+    fs::write(
+        project.join("scripts/bad.script"),
+        "var x = 1;\nx = Undefined(2);\n",
+    )
+    .unwrap();
+    let result = luma(&[
+        "compile",
+        project.join("scripts/bad.script").to_str().unwrap(),
+        "--game",
+        project.to_str().unwrap(),
+    ]);
+    assert_eq!(result.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains(
+            "scripts\\bad.script:2:5: Function 'Undefined' is referenced but not defined"
+        ),
+        "{stderr}"
+    );
+    // A plugin class added with --native compiles.
+    let result = luma(&[
+        "compile",
+        project.join("scripts/bad.script").to_str().unwrap(),
+        "--game",
+        project.to_str().unwrap(),
+        "--native",
+        "Undefined",
+        "-o",
+        out.to_str().unwrap(),
+    ]);
+    assert!(result.status.success());
+    let result = luma(&["compile"]);
+    assert_eq!(result.status.code(), Some(2));
+    fs::remove_dir_all(&project).unwrap();
 }
 
 fn lithium() -> PathBuf {

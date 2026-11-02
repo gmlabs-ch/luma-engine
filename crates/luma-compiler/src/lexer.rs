@@ -280,7 +280,7 @@ impl Buffer {
             data,
             pos,
             line: 1,
-            line_start: 0,
+            line_start: pos,
         }
     }
 
