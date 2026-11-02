@@ -1020,6 +1020,7 @@ version = "0.0.1"
 dependencies = [
  "luma",
  "luma-archive",
+ "luma-compiler",
  "luma-formats",
  "luma-script",
 ]
