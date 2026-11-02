@@ -11,8 +11,9 @@
 //! template is kept in the tree and ignored by the loaders, as D3DX does.
 //! The subset is described in `docs/formats/xfile.md`.
 //!
-//! Binary and compressed files (`bin `, `tzip`, `bzip`) are recognised by
-//! their header and rejected with [`ErrorKind::UnsupportedFormat`].
+//! Binary files (`bin `) and MSZIP-compressed files (`tzip`, `bzip`) are
+//! read by `xfile_binary` into the same tree, so the loaders do
+//! not know which form a file came in.
 //!
 //! The file format is taken from the public DirectX documentation. How the
 //! loaded objects are consumed follows the MIT-licensed Wintermute Engine
@@ -21,19 +22,21 @@
 
 use std::fmt;
 
+use crate::xfile_binary;
+
 /// Length of the header: magic, version, format and float size.
 pub const HEADER_LEN: usize = 16;
 
 /// The storage format named by the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
-    /// `txt `: text, the only format read.
+    /// `txt `: text.
     Text,
     /// `bin `: binary tokens.
     Binary,
     /// `tzip`: MSZIP-compressed text.
     CompressedText,
-    /// `bzip`: MSZIP-compressed binary.
+    /// `bzip`: MSZIP-compressed binary tokens.
     CompressedBinary,
 }
 
@@ -58,7 +61,8 @@ pub struct Header {
     pub minor: u16,
     /// Storage format.
     pub format: Format,
-    /// Size of a float in bits, 32 or 64.
+    /// Size of a float in bits, 32 or 64. It only matters to the binary
+    /// forms, where it is the size of the entries of a float list.
     pub float_size: u16,
 }
 
@@ -113,11 +117,12 @@ pub struct DataObject {
     pub values: Vec<Value>,
     /// The nested objects and references, in file order.
     pub children: Vec<Child>,
-    /// 1-based line of the object's opening in the source.
+    /// 1-based line of the object's opening in the source; 0 in a binary
+    /// file, which has no lines.
     pub line: u32,
 }
 
-/// A parsed `.X` text file.
+/// A parsed `.X` file, in any of the four forms.
 #[derive(Debug, Clone, PartialEq)]
 pub struct XFile {
     /// The header.
@@ -133,7 +138,7 @@ pub struct XFile {
 pub struct Error {
     /// What went wrong.
     pub kind: ErrorKind,
-    /// 1-based line (0 for the header).
+    /// 1-based line (0 for the header and for the binary forms).
     pub line: u32,
 }
 
@@ -142,14 +147,20 @@ pub struct Error {
 pub enum ErrorKind {
     /// The file is shorter than the header or does not start with `xof `.
     BadMagic,
-    /// The header names a format this reader does not handle.
+    /// The header names a format that is not one of the four.
     UnsupportedFormat(String),
-    /// The header's version or float size is not numeric.
+    /// The header's version or float size is not numeric, or a binary
+    /// file's float size is neither 32 nor 64.
     BadHeader,
-    /// The file ends inside an object, a template or a string.
+    /// The file ends inside an object, a template, a string, a binary
+    /// record or a compressed block.
     UnexpectedEnd,
-    /// A token that cannot appear where it was found.
+    /// A token that cannot appear where it was found, or an unknown
+    /// binary token code.
     UnexpectedToken(String),
+    /// The MSZIP data of a compressed file is not laid out as expected
+    /// or does not inflate.
+    BadCompression(String),
     /// A typed loader asked an object for a value it does not have.
     MissingValue {
         /// The object's template.
@@ -176,11 +187,12 @@ impl fmt::Display for Error {
         match &self.kind {
             ErrorKind::BadMagic => write!(f, "not a DirectX .X file (no 'xof ' magic)"),
             ErrorKind::UnsupportedFormat(tag) => {
-                write!(f, "unsupported .X format '{tag}': only text files are read")
+                write!(f, "unsupported .X format '{tag}'")
             }
             ErrorKind::BadHeader => write!(f, "malformed .X header"),
             ErrorKind::UnexpectedEnd => write!(f, "unexpected end of file"),
             ErrorKind::UnexpectedToken(token) => write!(f, "unexpected token '{token}'"),
+            ErrorKind::BadCompression(message) => write!(f, "MSZIP: {message}"),
             ErrorKind::MissingValue { object, expected } => {
                 write!(
                     f,
@@ -238,32 +250,39 @@ impl Header {
 }
 
 impl XFile {
-    /// Parses a text `.X` file. A binary or compressed file is rejected
-    /// with [`ErrorKind::UnsupportedFormat`].
+    /// Parses a `.X` file in any of its four forms: text, binary, and
+    /// each of them MSZIP-compressed. The tree is the same whatever the
+    /// form; `header` says which it was.
     pub fn parse(bytes: &[u8]) -> Result<XFile> {
         let header = Header::parse(bytes)?;
-        if header.format != Format::Text {
-            return Err(Error {
-                kind: ErrorKind::UnsupportedFormat(header.format.tag().to_string()),
-                line: 0,
-            });
-        }
-        let mut lexer = Lexer {
-            src: &bytes[HEADER_LEN..],
-            pos: 0,
-            line: 1,
-        };
-        let mut templates = Vec::new();
-        let mut objects = Vec::new();
-        while let Some(token) = lexer.next_token()? {
-            match token {
-                Token::Ident(word) if word == "template" => {
-                    templates.push(lexer.template()?);
+        let body = &bytes[HEADER_LEN..];
+        let (templates, objects) = match header.format {
+            Format::Text => parse_text(body)?,
+            Format::Binary => xfile_binary::parse_body(body, header.float_size)?,
+            Format::CompressedText | Format::CompressedBinary => {
+                let data = xfile_binary::decompress_mszip(body)?;
+                // The compressed data is the data section. A writer that
+                // compressed the whole file, header included, is read too
+                // as long as that inner header is a plain one.
+                let (form, float_size, data) = match Header::parse(&data) {
+                    Ok(inner) => (inner.format, inner.float_size, &data[HEADER_LEN..]),
+                    Err(_) if header.format == Format::CompressedText => {
+                        (Format::Text, header.float_size, &data[..])
+                    }
+                    Err(_) => (Format::Binary, header.float_size, &data[..]),
+                };
+                match form {
+                    Format::Text => parse_text(data)?,
+                    Format::Binary => xfile_binary::parse_body(data, float_size)?,
+                    nested => {
+                        return Err(Error {
+                            kind: ErrorKind::UnsupportedFormat(nested.tag().to_string()),
+                            line: 0,
+                        });
+                    }
                 }
-                Token::Ident(template) => objects.push(lexer.object(template)?),
-                other => return Err(lexer.unexpected(&other)),
             }
-        }
+        };
         Ok(XFile {
             header,
             templates,
@@ -283,6 +302,27 @@ impl XFile {
             .iter()
             .filter(move |object| object.template == template)
     }
+}
+
+/// Reads the data section of a text file: the bytes after the header.
+fn parse_text(body: &[u8]) -> Result<(Vec<Template>, Vec<DataObject>)> {
+    let mut lexer = Lexer {
+        src: body,
+        pos: 0,
+        line: 1,
+    };
+    let mut templates = Vec::new();
+    let mut objects = Vec::new();
+    while let Some(token) = lexer.next_token()? {
+        match token {
+            Token::Ident(word) if word == "template" => {
+                templates.push(lexer.template()?);
+            }
+            Token::Ident(template) => objects.push(lexer.object(template)?),
+            other => return Err(lexer.unexpected(&other)),
+        }
+    }
+    Ok((templates, objects))
 }
 
 impl DataObject {
@@ -654,7 +694,9 @@ impl Lexer<'_> {
         Ok(Template { name, guid })
     }
 
-    /// Reads a data object after its template name.
+    /// Reads a data object after its template name. The object's GUID may
+    /// come before the brace (as the sample files write it) or first
+    /// inside it (as the DirectX grammar puts it).
     fn object(&mut self, template: String) -> Result<DataObject> {
         let line = self.line;
         let mut name = None;
@@ -679,6 +721,13 @@ impl Lexer<'_> {
             match self.expect_token()? {
                 Token::CloseBrace => break,
                 Token::Separator => {}
+                Token::Guid(g)
+                    if object.guid.is_none()
+                        && object.values.is_empty()
+                        && object.children.is_empty() =>
+                {
+                    object.guid = Some(g);
+                }
                 Token::Int(i) => object.values.push(Value::Int(i)),
                 Token::Float(f) => object.values.push(Value::Float(f)),
                 Token::Str(s) => object.values.push(Value::Str(s)),
@@ -690,7 +739,7 @@ impl Lexer<'_> {
                     let reference = self.reference()?;
                     object.children.push(Child::Reference(reference));
                 }
-                other @ Token::Guid(_) => return Err(self.unexpected(&other)),
+                other => return Err(self.unexpected(&other)),
             }
         }
         Ok(object)
@@ -802,15 +851,28 @@ AnimationSet walk {
     }
 
     #[test]
-    fn rejects_binary_and_compressed_files_clearly() {
-        let err = XFile::parse(b"xof 0303bin 0032\0\0\0").unwrap_err();
-        assert_eq!(err.kind, ErrorKind::UnsupportedFormat("bin ".into()));
+    fn rejects_unknown_formats_clearly() {
+        let err = XFile::parse(b"xof 0303abcd0032\0\0\0").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::UnsupportedFormat("abcd".into()));
+        assert_eq!(err.to_string(), "unsupported .X format 'abcd'");
+    }
+
+    #[test]
+    fn a_guid_may_follow_the_opening_brace() {
+        let file = XFile::parse(
+            b"xof 0303txt 0032\nFrame A { <9e415a43-7ba6-4a73-8743-b73d47e88476> 1; }",
+        )
+        .unwrap();
         assert_eq!(
-            err.to_string(),
-            "unsupported .X format 'bin ': only text files are read"
+            file.objects[0].guid.as_deref(),
+            Some("9e415a43-7ba6-4a73-8743-b73d47e88476")
         );
-        let err = XFile::parse(b"xof 0303tzip0032").unwrap_err();
-        assert_eq!(err.kind, ErrorKind::UnsupportedFormat("tzip".into()));
+        assert_eq!(file.objects[0].values, vec![Value::Int(1)]);
+        // Only first in the body, and only once.
+        let err = XFile::parse(b"xof 0303txt 0032\nFrame A { 1; <abc> }").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::UnexpectedToken("<abc>".into()));
+        let err = XFile::parse(b"xof 0303txt 0032\nFrame A <abc> { <def> }").unwrap_err();
+        assert_eq!(err.kind, ErrorKind::UnexpectedToken("<def>".into()));
     }
 
     #[test]

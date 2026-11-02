@@ -8,7 +8,7 @@
 
 use luma_script::{Engine, NativeId, Return, Value};
 
-use crate::objects::{Kind, ObjectState};
+use crate::objects::{CursorSlot, Kind, ObjectState};
 use crate::world::World;
 
 impl World {
@@ -68,14 +68,44 @@ impl World {
         true
     }
 
-    /// The cursor of an object as a sprite object (`GetCursorObject`),
-    /// created on first request; `None` without a cursor.
-    pub(crate) fn cursor_sprite_object(&mut self, owner: NativeId) -> Option<NativeId> {
-        self.object_cursor(owner)?;
-        if let Some(id) = self.objects.find(|k| *k == Kind::CursorSprite(owner)) {
+    /// The cursor in a slot of an object: its own, the game's active or
+    /// wait cursor, an item's normal or hover cursor.
+    pub fn cursor_in_slot(&self, owner: NativeId, slot: CursorSlot) -> Option<String> {
+        match slot {
+            CursorSlot::Own => self.object_cursor(owner),
+            CursorSlot::Active => self.cursors.active.clone(),
+            CursorSlot::Wait => self.cursors.noninteractive.clone(),
+            CursorSlot::ItemNormal => self.item(owner)?.def.cursor.clone(),
+            CursorSlot::ItemHover => self.item(owner)?.def.cursor_hover.clone(),
+        }
+    }
+
+    /// A cursor as a sprite object (`GetCursorObject`,
+    /// `Game.GetActiveCursorObject`, `GetWaitCursorObject`, an item's
+    /// `GetNormalCursorObject` and `GetHoverCursorObject`), created on
+    /// first request; `None` without a cursor in that slot.
+    pub(crate) fn cursor_sprite_object(
+        &mut self,
+        owner: NativeId,
+        slot: CursorSlot,
+    ) -> Option<NativeId> {
+        self.cursor_in_slot(owner, slot)?;
+        let kind = Kind::CursorSprite { owner, slot };
+        if let Some(id) = self.objects.find(|k| *k == kind) {
             return Some(id);
         }
-        Some(self.objects.insert(Kind::CursorSprite(owner)))
+        Some(self.objects.insert(kind))
+    }
+
+    /// The hover image of an item as a sprite object
+    /// (`GetHoverSpriteObject`), created on first request; `None` when
+    /// the item has none.
+    pub(crate) fn hover_sprite_object(&mut self, item: NativeId) -> Option<NativeId> {
+        self.item(item)?.def.sprite_hover.as_ref()?;
+        if let Some(id) = self.objects.find(|k| *k == Kind::HoverSprite(item)) {
+            return Some(id);
+        }
+        Some(self.objects.insert(Kind::HoverSprite(item)))
     }
 
     /// Removes the sprite objects that stand for parts of an object
@@ -87,7 +117,10 @@ impl World {
             .filter(|(_, n)| {
                 matches!(
                     n.kind,
-                    Kind::Sprite(o) | Kind::CursorSprite(o) | Kind::EntityRegion(o) if o == owner
+                    Kind::Sprite(o)
+                    | Kind::HoverSprite(o)
+                    | Kind::CursorSprite { owner: o, .. }
+                    | Kind::EntityRegion(o) if o == owner
                 )
             })
             .map(|(id, _)| id)
@@ -254,7 +287,7 @@ impl World {
             }
             "GetCursor" => Return::value(self.object_cursor(id).map_or(Value::Null, Value::from)),
             "GetCursorObject" => Return::value(
-                self.cursor_sprite_object(id)
+                self.cursor_sprite_object(id, CursorSlot::Own)
                     .map_or(Value::Null, Value::Native),
             ),
             "HasCursor" => Return::value(self.object_cursor(id).is_some()),

@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 luma-formats.workspace = true
+flate2.workspace = true
 serde = { workspace = true, optional = true }
 
 [features]

@@ -36,11 +36,14 @@ The file starts with a 16-byte header, four fields of four characters:
 | 8..12 | format: `txt ` text, `bin ` binary, `tzip` compressed text, `bzip` compressed binary | `txt ` |
 | 12..16 | float size in bits, `0032` or `0064` | `0032` |
 
-Luma reads the **text** format only. A binary or compressed file is
-recognised by its header and rejected with a clear error
-(`xfile::ErrorKind::UnsupportedFormat`); the float size of a text file is
-recorded and does not change how the numbers are read. Every sample model
-is `xof 0303txt 0032`.
+Luma reads the four formats into the same object tree (1.2 for the text
+syntax, 1.4 for the binary tokens, 1.5 for the compressed container), so
+the model loader does not know which one a file came in; `XFile::header`
+records it. The float size only matters to the binary forms, where it is
+the size of each entry of a float list; a text file's numbers are read as
+written. Any other format tag is rejected
+(`xfile::ErrorKind::UnsupportedFormat`). Every sample model is
+`xof 0303txt 0032`.
 
 ### 1.2 Text syntax
 
@@ -63,8 +66,10 @@ not tokens of the data section). The member lists are **not interpreted**:
 the text form of a data object is self-describing, so the reader does not
 need them.
 
-A **data object** is `Template [name] [<guid>] { body }`. The body is a
-sequence of:
+A **data object** is `Template [name] [<guid>] { body }`. The DirectX
+grammar puts the optional GUID first **inside** the braces (`Template
+[name] { [<guid>] body }`); the sample files write it before the opening
+brace, and Luma accepts both places. The body is a sequence of:
 
 - scalar values (numbers and strings) separated by `;` or `,`; the
   separators carry no meaning for the reader, which keeps the **flat list
@@ -90,12 +95,128 @@ asked for **[ext]**.
 
 ### 1.3 What is not read
 
-- Binary and compressed files (task 4 of [../3d-actors.md](../3d-actors.md);
-  MSZIP would use the workspace's `flate2`).
 - Template member lists, so a file whose data section disagrees with its
   own template declarations is read as written, not rejected.
 - The `[...]` open/closed restrictions on which children an object may
   have: any object may nest any other.
+- In a binary file, the type keywords of a template body (1.4) are
+  decoded and dropped with the rest of the body.
+
+### 1.4 Binary form
+
+A `bin ` file (`xof 0302bin 0032` or `0064`) follows the header with a
+stream of **16-bit little-endian tokens**, from the public DirectX
+documentation. Six tokens carry a record; the others stand alone:
+
+| Code | Token | Record |
+|------|-------|--------|
+| 1 | `TOKEN_NAME` | `DWORD count`, `count` bytes: a template or object name |
+| 2 | `TOKEN_STRING` | `DWORD count`, `count` bytes, then the terminating `TOKEN_SEMICOLON` or `TOKEN_COMMA` |
+| 3 | `TOKEN_INTEGER` | `DWORD value` |
+| 5 | `TOKEN_GUID` | `DWORD data1`, `WORD data2`, `WORD data3`, `BYTE data4[8]` |
+| 6 | `TOKEN_INTEGER_LIST` | `DWORD count`, `count` DWORDs |
+| 7 | `TOKEN_FLOAT_LIST` | `DWORD count`, `count` floats of the header's float size (32 or 64 bits) |
+| 10, 11 | `TOKEN_OBRACE`, `TOKEN_CBRACE` | |
+| 12, 13 | `TOKEN_OPAREN`, `TOKEN_CPAREN` | |
+| 14, 15 | `TOKEN_OBRACKET`, `TOKEN_CBRACKET` | |
+| 16, 17 | `TOKEN_OANGLE`, `TOKEN_CANGLE` | |
+| 18 | `TOKEN_DOT` | |
+| 19, 20 | `TOKEN_COMMA`, `TOKEN_SEMICOLON` | |
+| 31 | `TOKEN_TEMPLATE` | |
+| 40..52 | `TOKEN_WORD`, `DWORD`, `FLOAT`, `DOUBLE`, `CHAR`, `UCHAR`, `SWORD`, `SDWORD`, `VOID`, `LPSTR`, `UNICODE`, `CSTRING`, `TOKEN_ARRAY` | the type keywords of template members |
+
+Any other code is an error (`UnexpectedToken` naming the code and its
+offset); a record cut by the end of the file is `UnexpectedEnd`.
+
+The data section has the same shape as in text and is read the same way
+(`luma_3d::xfile_binary`, a private module behind `XFile::parse`):
+
+- a **template** is `TOKEN_TEMPLATE`, its name, `TOKEN_OBRACE`, the GUID,
+  the members and restrictions, `TOKEN_CBRACE`. Luma records the name and
+  the first GUID and skips the rest token by token (the records carry
+  their lengths, so no byte-level guessing is needed) to the matching
+  brace;
+- a **data object** is the template name, an optional object name, an
+  optional GUID before or right after `TOKEN_OBRACE` (the binary grammar
+  puts the class GUID after the brace), then integers (`TOKEN_INTEGER`
+  or `TOKEN_INTEGER_LIST`), floats (`TOKEN_FLOAT_LIST`), strings, nested
+  objects and references, to `TOKEN_CBRACE`. Separators are skipped. The
+  lists are flattened: an object's `values` are the same flat list as the
+  text form produces, a DWORD becoming `Value::Int` (unsigned: a binary
+  writer stores a negative `SDWORD` member as its 32-bit two's complement
+  and Luma does not know the member type) and a float `Value::Float`,
+  widened from 32 bits when the header says `0032`. A `Matrix4x4` written
+  with integral entries is therefore `Int` in a text file that writes `1`
+  and `Float` in a binary file, which the typed loaders accept alike
+  (`Values::float` takes both);
+- a **reference** is `TOKEN_OBRACE`, a name and/or a GUID,
+  `TOKEN_CBRACE`.
+
+A binary GUID is rendered in the text form, lowercase, 8-4-4-4-12 hex
+digits, so templates and references compare by the same string whatever
+the file form. Objects of a binary file have `line = 0`: errors of the
+typed loaders name the object's template without a line.
+
+What was verified: the token codes and record layouts are those of the
+public DirectX documentation, and a binary token stream of the two-bone
+quad used by the model tests reads to exactly the tree of its text twin
+(and to the same `Model`). What was not: no binary `.x` file from a real
+game was available (the local test games are 2D and the Wintermute demo
+models are text), so the reader has not met a file written by the
+DirectX SDK. The opt-in test
+`xfile_binary::tests::reads_the_local_binary_models_when_present` parses
+every binary or compressed `.x` under `testdata/local/` and skips when
+there is none; the first real file will confirm or correct this section.
+
+### 1.5 Compressed container (MSZIP)
+
+A `tzip` or `bzip` file keeps the 16-byte header in clear; the rest is
+**MSZIP**, the cabinet compression Microsoft's tools use: a sequence of
+blocks of at most 32 KiB of data, each a raw **deflate** stream preceded
+by the two-byte signature `CK`. Luma reads, after the header:
+
+| Bytes | Content |
+|-------|---------|
+| 0..4 | `DWORD`: total uncompressed size |
+| then, per block | `WORD` size, `CK`, a raw deflate stream |
+
+The decompressed data is the data section in the form the tag names
+(`tzip`: text, 1.2; `bzip`: binary tokens, 1.4), read as if it had
+followed the header directly; lines in a `tzip` file count from the
+start of the decompressed text. Should the decompressed data start with
+its own `xof ` header (a writer that compressed the whole file), that
+inner header names the form and is skipped; it must not be compressed
+itself.
+
+Inflation uses `flate2` (`Decompress::new(false)`, the raw deflate
+decoder). Each block's stream ends with its own final deflate block, so
+its compressed length does not need to be known in advance: the decoder
+reports where the stream ended and the next block starts there. The
+**history window** carries across blocks as MSZIP allows: the last 32
+KiB of output so far are fed to the decoder of the next block as a
+dictionary (as a non-final stored deflate block, since `flate2`'s Rust
+back end has no preset-dictionary call), so a writer that compressed the
+blocks as one continuous stream and one that reset its compressor on each
+block are both read.
+
+What could and could not be verified, with no compressed `.x` file at
+hand (the layout above is from the public description of MSZIP and of
+the `.X` compressed variants, and from the `tzip`/`bzip` fixtures the
+tests build with `flate2`):
+
+- the **size word** of a block is believed to be the block's
+  **uncompressed** size. Luma accepts it as that, or as the compressed
+  size with or without the signature, and also accepts **two size words**
+  before `CK` (uncompressed then compressed, the cabinet layout); a word
+  matching none of these is an error (`BadCompression`), as is a missing
+  signature or a stream that does not inflate;
+- the **total size** after the header is believed to count the
+  decompressed data, perhaps with the 16 header bytes; it is used only to
+  pre-size the output buffer (capped at 256 MiB) and never checked;
+- whether real writers carry the deflate history across blocks is
+  unknown; both cases are read;
+- trailing bytes too short to be a block are an `UnexpectedEnd`
+  (a truncated file), not padding.
 
 ## 2. The model subset
 

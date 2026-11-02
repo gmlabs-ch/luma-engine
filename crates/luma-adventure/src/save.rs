@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 12;
+pub const VERSION: u32 = 13;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -205,6 +205,8 @@ world_state! {
     name: String,
     caption: String,
     text_encoding: i32,
+    text_rtl: bool,
+    suspended_rendering: bool,
     startup_scene: Option<String>,
     mouse_lock: (i32, i32, i32, i32),
     temp_disable_save_state: bool,
@@ -744,6 +746,7 @@ impl World {
         for image in images {
             self.load_ui_image(&image);
         }
+        self.fonts.set_rtl(self.text_rtl);
         for font in fonts {
             self.load_font(&font);
         }

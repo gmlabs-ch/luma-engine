@@ -184,7 +184,15 @@ not. `StopTalk` ends it; `IsTalking` says whether one is playing.
 
 - Bitmap fonts index tiles by Latin-1 code; characters outside Latin-1
   draw as `?`.
+- Right-to-left text (`Game.TextRTL`, turned on by a string table's
+  `@right-to-left` entry or by a script) makes a TrueType font lay each
+  line's glyphs out from the last to the first, the reading order GDI
+  gives the original engine with `ETO_RTLREADING`; there is no
+  bidirectional algorithm, so a run of another direction inside a line
+  is reversed with it. Bitmap fonts ignore the flag, as in the original
+  engine, whose `CBFontBitmap` never reads it. The texts a TrueType font
+  has cached are dropped when the direction changes.
 - A TrueType font's text is cached as a rendered image per (text, width,
-  alignment); the engine keeps 30 such images per font.
+  alignment, height limit); the engine keeps 30 such images per font.
 - The `.talk` files that time talk sprites to a sound are not supported
   yet.

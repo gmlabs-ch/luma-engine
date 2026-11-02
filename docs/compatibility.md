@@ -46,8 +46,8 @@ How the list was made. For every class with a script interface, the names tested
 ### Constructors (`new X(...)`)
 
 - WME source: src/engine_core/wme_base/BGame.cpp, src/engine_core/wme_ad/AdGame.cpp (CAdGame::ExternalCall)
-- Hierarchy and Luma: luma-adventure/src/world.rs (`call_function`: the library classes become `Kind::Class` objects answered by `luma-script/src/classes/`, `Object` a `Kind::Object` native with its scripts attached; `Actor` and `Entity` leave the placeholder object the compiler creates for `new`)
-- Count: 6 done, 2 todo, 1 no-op
+- Hierarchy and Luma: luma-adventure/src/world.rs (`call_function`: the library classes become `Kind::Class` objects answered by `luma-script/src/classes/`, `Object` a `Kind::Object` native with its scripts attached, `Actor` and `Entity` objects of the game like `Game.LoadActor`'s and `Game.CreateEntity`'s)
+- Count: 8 done, 0 todo, 1 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -58,8 +58,8 @@ How the list was made. For every class with a script interface, the names tested
 | `File` | constructor | **done** | `new File(name)`: file access object (see CSXFile). |
 | `MemBuffer` | constructor | **done** | `new MemBuffer(size)`: raw byte buffer (see CSXMemBuffer). |
 | `TcpClient` | constructor | **no-op** | Network client; the class is an unfinished stub in WME 1.x itself (its methods are commented out), and games cannot rely on it. |
-| `Actor` | constructor | **todo** | `new Actor()`: creates an empty 2D actor not yet in a scene. Luma leaves the placeholder object; actors only come from `LoadActor`. |
-| `Entity` | constructor | **todo** | `new Entity()`: creates an empty entity. Luma leaves the placeholder object; entities only come from the scene files. |
+| `Actor` | constructor | **done** | `new Actor()`: an empty 2D actor (no file, no sprites). WME's belongs to no list and is never drawn or updated; Luma's is one of the game's own actors, like `Game.LoadActor`'s, so a sprite given to it shows and `Game.UnloadObject` removes it. `new Actor(file)` loads the file (a Luma extension; WME discards the argument). |
+| `Entity` | constructor | **done** | `new Entity()`: an empty entity. WME's belongs to no list and is never drawn; Luma's is one of the game's own entities, like `Game.CreateEntity`'s, kept across scenes. `new Entity(file)` loads the file as `Game.LoadEntity` (a Luma extension; WME discards the argument). |
 
 ### Global variables
 
@@ -161,7 +161,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp
 - Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`, `accessibility.rs`)
-- Count: 140 done, 6 todo, 19 no-op
+- Count: 146 done, 0 todo, 19 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -196,7 +196,7 @@ How the list was made. For every class with a script interface, the names tested
 | `SetGlobalSFXVolume`, `SetGlobalSpeechVolume`, `SetGlobalMusicVolume`, `SetGlobalMasterVolume` | method | **done** | Sets the global volume of a sound class (percent). |
 | `GetGlobalSFXVolume`, `GetGlobalSpeechVolume`, `GetGlobalMusicVolume`, `GetGlobalMasterVolume` | method | **done** | Reads the global volume of a sound class. |
 | `SetActiveCursor`, `GetActiveCursor`, `RemoveActiveCursor`, `HasActiveCursor` | method | **done** | Sets, reads, removes the cursor used for "usable" objects (the item cursor). |
-| `GetActiveCursorObject` | method | **todo** | Returns the active cursor as a sprite object. Stubbed. |
+| `GetActiveCursorObject` | method | **done** | The active cursor as a sprite object, sharing the animation the cursor shows; `null` without one. |
 | `FileExists` | method | **done** | True when a file exists in the game's virtual file system. |
 | `FadeOut`, `FadeOutAsync`, `FadeIn`, `FadeInAsync` | method | **done** | Fades the game view to / from a colour; `Async` does not wait. |
 | `SystemFadeOut`, `SystemFadeOutAsync`, `SystemFadeIn`, `SystemFadeInAsync` | method | **done** | Same, but the fade also covers system windows and keeps running while the game is frozen. |
@@ -209,7 +209,7 @@ How the list was made. For every class with a script interface, the names tested
 | `SetLoadingScreen` | method | **done** | Sets the image shown while a saved game loads (file, x, y; `null` removes it). Luma draws it over black in the frame between `LoadGame` and the load (see `docs/saving.md`). |
 | `SetSavingScreen` | method | **no-op** | Sets the image shown while saving (file, x, y). Luma keeps and saves the value, but a save completes inside the frame that asks for it, so no frame can show the image. |
 | `SetWaitCursor`, `RemoveWaitCursor`, `GetWaitCursor` | method | **done** | Sets, removes, reads the cursor shown while the game is not interactive. |
-| `GetWaitCursorObject` | method | **todo** | Returns the wait cursor as a sprite object. Stubbed. |
+| `GetWaitCursorObject` | method | **done** | The wait cursor as a sprite object; `null` without one. |
 | `ClearScriptCache` | method | **no-op** | Empties the compiled-script cache; Luma keeps no cache and accepts the call. |
 | `DisplayLoadingIcon` | method | **done** | Shows a loading icon sprite (file, x, y, persistent) over the frame: one frame, or until hidden when persistent. |
 | `HideLoadingIcon` | method | **done** | Hides the loading icon. |
@@ -245,9 +245,9 @@ How the list was made. For every class with a script interface, the names tested
 | `AcceleratedMode` | get | **done** | True when GPU accelerated; Luma reads true. |
 | `Accelerated` | get | **done** | Alias of `AcceleratedMode`. |
 | `TextEncoding` | get/set | **done** | Text encoding of the game: 0 ANSI, 1 UTF-8, set by each string table loaded (byte order mark) and by the script, clamped as WME does. The fonts still draw text as Latin-1 whatever the value (see `docs/rendering.md`). |
-| `TextRTL` | get/set | **todo** | Right-to-left text layout. Luma reads false, ignores the set. |
+| `TextRTL` | get/set | **done** | Right-to-left text, set by a string table's `@right-to-left` and by scripts, saved. TrueType fonts lay each line's glyphs out from the last (WME passes `ETO_RTLREADING` to GDI; Luma has no bidirectional algorithm, so mixed-direction runs are not reordered), bitmap fonts are unaffected as in WME, and editors mirror `Backspace`, `Delete`, `Home` and `End`, keep the caret before a typed character and set their text against the right edge. |
 | `SoundBufferSize` | get/set | **no-op** | DirectSound buffer length in seconds; the audio backend manages its buffers. |
-| `SuspendedRendering` | get/set | **todo** | Pauses drawing (used around heavy loading). Luma reads false, ignores the set. |
+| `SuspendedRendering` | get/set | **done** | While true the front-end presents no frame and the window keeps the last one, as WME's `CBSubFrame::Display` draws nothing and its loop skips the flip; the game runs on. `luma-player` honours it, headless runs ignore it. Saved. |
 | `SuppressScriptErrors` | get/set | **no-op** | Hides the script error dialog; Luma only logs errors and never shows one. |
 | `Frozen` | get | **done** | True while the game is frozen by a system-exclusive window. |
 | `Direct3DDevice`, `DirectDrawInterface` | get | **no-op** | Raw Direct3D / DirectDraw interface pointers (Windows only). |
@@ -325,7 +325,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdScene.cpp
 - Hierarchy and Luma: CBObject → CAdScene; Luma: scene (`scene_call`, `scene_get`, `scene_set`, `scene_view.rs`)
-- Count: 80 done, 1 todo, 2 no-op
+- Count: 81 done, 0 todo, 2 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -351,7 +351,7 @@ How the list was made. For every class with a script interface, the names tested
 | `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled` | method | **done** | Shows / hides / queries a mesh node of the scene's 3D geometry. |
 | `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `GetLightColor`, `GetLightPosition` | method | **done** | Controls the lights of the scene's 3D geometry, by name; `GetLightColor` packs the colour with full alpha. |
 | `SetActiveCamera` | method | **done** | Selects a camera of the 3D geometry by name (a runtime error when it does not exist). |
-| `SetViewport` | method | **todo** | Sets the scene's viewport rectangle. Stubbed. |
+| `SetViewport` | method | **done** | Sets the scene's own viewport (x, y, width, height; a width or height of 0 or less means the screen's), which comes before the game's `SCENE_VIEWPORT`; kept on the screen, saved with the scene, gone with it. |
 | `AddLayer`, `InsertLayer`, `DeleteLayer` | method | **done** | Adds, inserts or deletes a layer at runtime (the main layer cannot be deleted); handles to the other layers and nodes stay valid. |
 | `EnableFog`, `DisableFog` | method | **done** | 3D fog (colour, start, end), stored with the scene for the 3D pass, which does not draw it yet. |
 | `Type` | get | **done** | `scene`. |
@@ -520,15 +520,15 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdItem.cpp
 - Hierarchy and Luma: CAdTalkHolder → CAdItem; Luma: items (`natives_item.rs`)
-- Count: 23 done, 3 todo, 0 no-op
+- Count: 26 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `SetHoverSprite` | method | **done** | Sets the image shown while hovering the item in the inventory. |
 | `GetHoverSprite` | method | **done** | File of that image. |
-| `GetHoverSpriteObject` | method | **todo** | Hover sprite as a script object. Stubbed. |
+| `GetHoverSpriteObject` | method | **done** | The hover image as a sprite object (frames, `CurrentFrame`, `Reset`...), with the animation the inventory box shows; `null` without one. |
 | `SetNormalCursor`, `GetNormalCursor`, `SetHoverCursor`, `GetHoverCursor` | method | **done** | Sets / reads the cursor used when the item is selected (normal / over a target). |
-| `GetNormalCursorObject`, `GetHoverCursorObject` | method | **todo** | Cursor sprites as script objects. Stubbed. |
+| `GetNormalCursorObject`, `GetHoverCursorObject` | method | **done** | The item's cursors as sprite objects, sharing the animation the cursor shows; `null` without one. |
 | `Type` | get | **done** | `item`. |
 | `Name` | get/set | **done** | Item name. |
 | `DisplayAmount` | get/set | **done** | Whether the amount is drawn on the item. |
@@ -1028,15 +1028,15 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Class | done | todo | no-op | total |
 |-------|-----:|-----:|------:|------:|
 | Global functions | 20 | 0 | 1 | 21 |
-| Constructors | 6 | 2 | 1 | 9 |
+| Constructors | 8 | 0 | 1 | 9 |
 | Global variables | 5 | 0 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 69 | 3 | 0 | 72 |
-| CBGame | 140 | 6 | 19 | 165 |
+| CBGame | 146 | 0 | 19 | 165 |
 | CAdGame | 65 | 0 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
-| CAdScene | 80 | 1 | 2 | 83 |
+| CAdScene | 81 | 0 | 2 | 83 |
 | CAdLayer | 18 | 0 | 0 | 18 |
 | CBRegion | 11 | 0 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
@@ -1045,7 +1045,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdTalkHolder | 7 | 0 | 0 | 7 |
 | CAdActor | 23 | 0 | 0 | 23 |
 | CAdEntity | 20 | 0 | 0 | 20 |
-| CAdItem | 23 | 3 | 0 | 26 |
+| CAdItem | 26 | 0 | 0 | 26 |
 | CBSprite | 18 | 0 | 0 | 18 |
 | CBFrame | 21 | 0 | 0 | 21 |
 | CBSubFrame | 20 | 0 | 0 | 20 |
@@ -1072,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 54 | 8 | 5 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **1046** | **30** | **77** | **1153** |
+| **All** | **1058** | **18** | **77** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1025 done, 30 todo, 77 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1037 done, 18 todo, 77 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1092,16 +1092,12 @@ WME classes with no script interface of their own (nothing to port; scripts reac
 
 ## Groups the work falls into
 
-Counts are the todo members (no-op excluded). Groups are ordered by what a game port is most likely to need first, not by size.
+Counts are the todo members (no-op excluded). Everything outside 3D is done: the script library (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory`, `new Object`, `new Actor`, `new Entity`, the HSL colour helpers), the game services (private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`, `TextRTL`, `SuspendedRendering`, `Scene.SetViewport`, the game's and the items' cursor objects, the items' hover image objects), the 2D object model (per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories) and the rendering features (rotation, per-axis scale, blend modes, scene-only fades; see `docs/rendering.md`).
 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
-| Game services | 10 | `TextRTL`, `SuspendedRendering`, `Scene.SetViewport`, the items' hover-sprite and cursor objects (`GetHoverSpriteObject`, `GetNormalCursorObject`, `GetHoverCursorObject`) and the game's cursor objects (`GetActiveCursorObject`, `GetWaitCursorObject`). Done: private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`. |
-| Script library | 2 | `new Actor` and `new Entity`, which follow runtime entity creation. (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory`, `new Object` and the HSL colour helpers are done.) |
-| Object model (2D) | 0 | Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories (`Game.InventoryObject`). |
-| Rendering features | 0 | Done: rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades (see `docs/rendering.md`). |
 | 3D | 18 | The attachments (`CAdAttach3DX`, `AddAttachment` and its kin, `CreateParticleEmitterBone`), the textures set by script on 3D models (`SetTexture`, `SetTheoraTexture`) and the shadow image and light position of 2D objects. Done: the scene geometry, the 3D actor (`CAdObject3D`, `CAdActor3DX`), its walking, turning, animation and scripting, the scene's lights, nodes, cameras and fog, the game's shadow settings (`docs/3d-actors.md`, the `3d` feature); the drawing of the models and their shadows is the 3D pass, not a script member. |
-| **All** | **30** | |
+| **All** | **18** | |
 
 ## Members in Luma that WME 1.x does not define
 
@@ -1112,6 +1108,7 @@ These are accepted by Luma and not counted above; some come from later WME versi
 | Game | `HideCursor`, `ShowCursor` | Hide / show the mouse cursor. |
 | Game | `IsVideoPlaying`, `StopVideo` | Query / stop the running video (`StopVideo` is an alias of `StopTheora`). |
 | Game | `FocusedWindow`, `CursorHidden`, `AutoSaveOnExit`, `AutoSaveSlot`, `Platform`, `DeviceType` | Properties Luma reads that WME 1.x does not define in its script interface (some come from later WME versions or from Luma itself). |
+| `new Actor`, `new Entity` | a file argument | `new Actor(file)` and `new Entity(file)` load the file, as `Game.LoadActor` and `Game.LoadEntity` do; WME's constructors take no argument. |
 | Actor | `SetStopOnBlocked`, `GetStopOnBlocked`, `ActorIsBlocked` | Stop-on-blocked behaviour and the matching event / property. |
 | Sprite | `Filename` | The file the sprite was loaded from. |
 

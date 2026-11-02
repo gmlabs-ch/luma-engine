@@ -1,5 +1,5 @@
-//! 2D renderer built on wgpu (Metal on Apple platforms, Vulkan, DirectX 12
-//! or OpenGL ES elsewhere).
+//! 2D and 2.5D renderer built on wgpu (Metal on Apple platforms, Vulkan,
+//! DirectX 12 or OpenGL ES elsewhere).
 //!
 //! Part of [Luma Engine](https://github.com/gmlabs-ch/luma-engine).
 //!
@@ -9,9 +9,12 @@
 //! - [`Texture`]: a decoded image uploaded to the GPU.
 //! - [`DrawList`]: the textured quads of a frame, back to front, in logical
 //!   pixels, with a per-layer offset for scrolling and, per quad,
-//!   [`Attributes`]: a rotation around a pivot and a [`BlendMode`].
+//!   [`Attributes`]: a rotation around a pivot and a [`BlendMode`]; and,
+//!   between the quads, lit 3D meshes ([`MeshDraw`]) drawn in clip space
+//!   with a depth test among themselves.
 //! - [`Renderer`]: draws a list into any [`Target`], batching consecutive
-//!   quads of the same texture and blend mode.
+//!   quads of the same texture and blend mode; owns the uploaded meshes
+//!   ([`MeshHandle`]) and the depth and stencil buffer.
 //! - [`Offscreen`]: a target whose pixels can be read back (tests,
 //!   screenshots).
 //! - [`window::run`]: a winit window with a swap chain, HiDPI aware, that
@@ -32,12 +35,17 @@ pub mod renderer;
 pub mod texture;
 pub mod window;
 
-pub use draw::{Attributes, BlendMode, DrawList, Quad, Rect};
+pub use draw::{
+    Attributes, BlendMode, DrawList, Fog, IDENTITY, Light, Lights, MAX_LIGHTS, Matrix, MeshDraw,
+    MeshHandle, MeshMaterial, MeshVertex, PlacedMesh, Quad, Rect, matrix,
+};
 pub use error::{Error, Result};
 pub use gpu::Gpu;
 pub use offscreen::Offscreen;
-pub use renderer::{Renderer, Target, letterbox, rotated_corners};
-pub use texture::{TEXTURE_FORMAT, Texture};
+pub use renderer::{
+    DEPTH_FORMAT, MESH_ALPHA_REFERENCE, Renderer, Target, letterbox, rotated_corners,
+};
+pub use texture::{TEXTURE_FORMAT, Texture, mip_level};
 pub use window::{App, Flow, Frame, WindowConfig};
 
 /// Re-export of the windowing crate, for event types.

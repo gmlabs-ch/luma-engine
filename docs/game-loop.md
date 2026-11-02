@@ -67,6 +67,13 @@ and its subtitles are drawn.
 Without a window (`--headless`), the same loop runs with a fixed frame
 duration, and the sounds run on the game clock.
 
+While a script holds `Game.SuspendedRendering` true (the original
+engine's way of hiding a heavy loading sequence), the loop runs as
+above but the player presents no frame: the window keeps the last one
+shown until the script sets it back to false. The original engine draws
+no sprite and skips the flip; the headless player ignores the flag, so
+its frames are still rendered.
+
 Scripts read the loop's clocks and counters on the game object:
 `CurrentTime` is the game timer (stopped while frozen), `WindowsTime`
 the wall clock since the game started (the original engine gives the
@@ -79,7 +86,10 @@ so; headless runs read `false`), `SoundAvailable` whether an audio
 device was opened, `AcceleratedMode` (and `Accelerated`) always true
 with wgpu. `TextEncoding` is `0` (ANSI) or `1` (UTF-8): set by every
 string table loaded (a byte order mark means UTF-8, as in the original
-engine) and by the script. `Game.GetFileChecksum(file, hex)` is the
+engine) and by the script. `TextRTL` turns right-to-left text on, for
+the TrueType fonts and the editors (set by a string table's
+`@right-to-left` entry or by the script; see
+[formats/font.md](formats/font.md#notes-for-implementers)). `Game.GetFileChecksum(file, hex)` is the
 CRC-32 of a file of the game (IEEE polynomial, as the original engine's
 `crc.cpp`), as an integer or a lowercase hex string, `null` for a
 missing file. `Game.OpenDocument(target)` opens a file or an address
@@ -159,8 +169,10 @@ since the original engine applies the lock only while all four edges
 are non-zero); the original engine also moves the system cursor back
 into the rectangle, which Luma does not. `Scene.MouseX` and `Scene.MouseY`
 add the scene's scroll offset and take off the scene viewport's origin
-(`SCENE_VIEWPORT` in the game file, `Game.SetSceneViewport`; see
-[formats/game.md](formats/game.md)). The viewport also sizes the view
+(`SCENE_VIEWPORT` in the game file, `Game.SetSceneViewport`, see
+[formats/game.md](formats/game.md); a scene's own `VIEWPORT` or
+`Scene.SetViewport` comes before it, see
+[formats/scene.md](formats/scene.md)). The viewport also sizes the view
 the scroll centres on the main object, and `Scene.IsPointInViewport`
 answers for it. The scene is not clipped to it yet: a scene taller than
 its viewport draws over whatever lies below, which the games seen so far
@@ -177,8 +189,10 @@ interactive; the active object's own `CURSOR`; the `ACTIVE_CURSOR` over
 any active object; the `CURSOR`. A cursor that was not shown last frame
 restarts its animation. `Game.SetActiveCursor`, `RemoveActiveCursor`,
 `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`,
-`GetActiveCursor` and `GetWaitCursor` change and read them. The system
-cursor is hidden over the window.
+`GetActiveCursor` and `GetWaitCursor` change and read them;
+`GetActiveCursorObject` and `GetWaitCursorObject` return them as
+sprite objects (see below), `null` without one. The system cursor is
+hidden over the window.
 
 An object's own cursor comes from its `CURSOR` key, or from `SetCursor`
 on the object (entities, actors and controls; `false` when the sprite
@@ -194,7 +208,10 @@ item's `CURSOR` is drawn at the mouse, over the cursor above when the
 item's `CURSOR_COMBINED` is on, instead of it otherwise; over an entity,
 an actor or an item its `CURSOR_HOVER` is drawn instead (only over
 objects that handle the item's event when `Game.SmartItemCursor` is
-on).
+on). The item's `GetNormalCursorObject` and `GetHoverCursorObject`
+return those two cursors as sprite objects, and `GetHoverSpriteObject`
+its hover image (`SPRITE_HOVER`), the one the inventory box shows under
+the mouse, with the animation it plays there.
 
 ## Keyboard
 
@@ -202,7 +219,9 @@ A key going down updates `Game.Keyboard`, is offered to the
 [accessibility](#accessibility) shortcuts (Ctrl+Tab, Ctrl+Space, when
 their switches are on), then goes to the **focused window** when there
 is one: `Tab` moves its focus between its focusable controls, an editor
-with the focus edits its text; a key the window did not use raises
+with the focus edits its text (mirrored for right-to-left text, see
+[formats/window.md](formats/window.md#edit)); a key the window did not
+use raises
 `Keypress` on the window when its scripts handle that event, else on
 the game. Without a focused window, `Keypress` goes to the game.
 
