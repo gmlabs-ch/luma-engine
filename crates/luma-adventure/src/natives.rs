@@ -47,14 +47,10 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 
 /// Methods the engine has that later milestones implement.
 const GAME_STUBS: &[&str] = &[
-    "Screenshot",
-    "ScreenshotEx",
     "SetLoadingScreen",
     "SetSavingScreen",
     "DisplayLoadingIcon",
     "HideLoadingIcon",
-    "StoreSaveThumbnail",
-    "DeleteSaveThumbnail",
     "ShowStatusLine",
     "HideStatusLine",
     "LoadEntity",
@@ -645,6 +641,33 @@ impl World {
                 let text = arg(0).get_string(self);
                 self.log(format!("msg: {text}"));
                 self.quick_message(&text);
+                Return::null()
+            }
+            "Screenshot" => {
+                let name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                self.request_screenshot(name.as_deref());
+                Return::value(true)
+            }
+            "ScreenshotEx" => {
+                let filename = arg(0).get_string(self);
+                let (width, height) = (self.settings.width as i32, self.settings.height as i32);
+                let w = match arg(1) {
+                    Value::Null => width,
+                    v => v.get_int(self),
+                };
+                let h = match arg(2) {
+                    Value::Null => height,
+                    v => v.get_int(self),
+                };
+                self.request_screenshot_sized(&filename, w, h);
+                Return::value(true)
+            }
+            "StoreSaveThumbnail" => Return::value(self.store_save_thumbnail()),
+            "DeleteSaveThumbnail" => {
+                self.delete_save_thumbnail();
                 Return::null()
             }
             "LockMouseRect" => {

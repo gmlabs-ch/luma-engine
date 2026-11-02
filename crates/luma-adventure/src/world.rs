@@ -131,6 +131,11 @@ pub struct World {
     pub(crate) fps_frames: i32,
     /// The messages of `Game.Msg` on screen, oldest first.
     pub(crate) quick_messages: Vec<QuickMessage>,
+    /// Screenshots and thumbnails asked for, done with the next frame.
+    pub(crate) captures: Vec<crate::capture::Capture>,
+    /// The thumbnail the next saved game carries (PNG), from
+    /// `Game.StoreSaveThumbnail`.
+    pub(crate) save_thumbnail: Option<Vec<u8>>,
     /// `Game.LockMouseRect`: left, top, right, bottom; the mouse stays
     /// inside while all four are non-zero (`m_MouseLockRect`).
     pub(crate) mouse_lock: (i32, i32, i32, i32),
@@ -247,6 +252,8 @@ impl World {
             fps_time: 0,
             fps_frames: 0,
             quick_messages: Vec::new(),
+            captures: Vec::new(),
+            save_thumbnail: None,
             mouse_lock: (0, 0, 0, 0),
             temp_disable_save_state: false,
             timer: 0,

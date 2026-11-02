@@ -951,6 +951,49 @@ fn misc_script() -> Vec<u8> {
     a.build()
 }
 
+fn shots_script() -> Vec<u8> {
+    // Screenshots and the save thumbnail.
+    let mut a = Assembler::new("shots.script");
+    a.def_glob_var("result");
+    call(&mut a, "Game", "Screenshot", &[Arg::Str("shot")]);
+    store(&mut a, "shot1");
+    call(&mut a, "Game", "Screenshot", &[Arg::Str("shot")]);
+    store(&mut a, "shot2");
+    call(
+        &mut a,
+        "Game",
+        "ScreenshotEx",
+        &[Arg::Str("thumbs\\t.png"), Arg::Int(8), Arg::Int(4)],
+    );
+    store(&mut a, "shotEx");
+    call(&mut a, "Game", "StoreSaveThumbnail", &[]);
+    store(&mut a, "thumb");
+    a.emit(Instruction::Ret);
+    a.event("Store");
+    a.emit(Instruction::Scope);
+    call(&mut a, "Game", "StoreSaveThumbnail", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    a.event("Drop");
+    a.emit(Instruction::Scope);
+    call(&mut a, "Game", "DeleteSaveThumbnail", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    // on "SaveIt": result.saved = Game.SaveGame(6, "with thumb");
+    a.event("SaveIt");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(
+        &mut a,
+        "Game",
+        "SaveGame",
+        &[Arg::Int(6), Arg::Str("with thumb")],
+    );
+    store(&mut a, "saved");
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
 fn hall_init_script() -> Vec<u8> {
     // Records the state the hall's nodes arrive in, then changes it.
     let mut a = Assembler::new("scenes\\hall\\hall_init.script");
@@ -1004,7 +1047,7 @@ fn game() -> std::path::PathBuf {
     );
     pkg.add_file(
         "default.game",
-        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" RESPONSE_BOX=\"responses.def\" }"
+        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" THUMBNAIL_WIDTH=8 THUMBNAIL_HEIGHT=4 } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" RESPONSE_BOX=\"responses.def\" }"
             .to_vec(),
     );
     pkg.add_file("art\\font.png", png(128, 128, [255, 255, 255, 255]));
@@ -1145,6 +1188,7 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     pkg.add_file("settings.script", settings_script());
     pkg.add_file("services.script", services_script());
     pkg.add_file("misc.script", misc_script());
+    pkg.add_file("shots.script", shots_script());
     pkg.add_file(
         "inv2.def",
         b"INVENTORY_BOX {
@@ -3013,4 +3057,114 @@ fn quick_messages_mouse_lock_reset_and_inventory_box_reload() {
             .scene_states()
             .contains_key("scenes\\hall.scene")
     );
+}
+
+#[test]
+fn screenshots_and_save_thumbnails_come_from_the_next_frame() {
+    use luma_adventure::capture::Capture;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    assert!(!runtime.world.wants_frame());
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "shots.script")
+    );
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "shot1"), Value::Bool(true));
+    assert_eq!(result(&runtime, "shot2"), Value::Bool(true));
+    assert_eq!(result(&runtime, "shotEx"), Value::Bool(true));
+    assert_eq!(result(&runtime, "thumb"), Value::Bool(true));
+    assert!(runtime.world.wants_frame());
+    let captures = runtime.world.captures();
+    assert_eq!(captures.len(), 4);
+    assert_eq!(
+        captures[0],
+        Capture::Screenshot {
+            path: dir.join("shot000.bmp"),
+            size: None
+        }
+    );
+    assert_eq!(
+        captures[1],
+        Capture::Screenshot {
+            path: dir.join("shot001.bmp"),
+            size: None
+        }
+    );
+    assert_eq!(
+        captures[2],
+        Capture::Screenshot {
+            path: dir.join("thumbs/t.png"),
+            size: Some((8, 4))
+        }
+    );
+    assert_eq!(captures[3], Capture::Thumbnail);
+    assert!(runtime.world.save_thumbnail().is_none());
+
+    // The front-end renders a frame and hands it over.
+    let frame = Image {
+        width: 32,
+        height: 32,
+        pixels: [200u8, 10, 10, 255].repeat(32 * 32),
+        has_alpha_channel: true,
+    };
+    runtime.world.deliver_frame(&frame);
+    let log = runtime.world.take_log();
+    assert!(!runtime.world.wants_frame());
+    assert_eq!(
+        log.iter()
+            .filter(|l| l.starts_with("Screenshot written"))
+            .count(),
+        3,
+        "{log:?}"
+    );
+    let key = luma_formats::DEFAULT_COLOR_KEY;
+    let shot =
+        luma_formats::image::decode(&std::fs::read(dir.join("shot000.bmp")).unwrap(), key).unwrap();
+    assert_eq!((shot.width, shot.height), (32, 32));
+    let p = shot.pixel(3, 3).unwrap();
+    assert_eq!((p.r, p.g, p.b), (200, 10, 10));
+    assert!(dir.join("shot001.bmp").is_file());
+    let small = luma_formats::image::decode(
+        &std::fs::read(dir.join("thumbs").join("t.png")).unwrap(),
+        key,
+    )
+    .unwrap();
+    assert_eq!((small.width, small.height), (8, 4));
+    assert!(runtime.world.save_thumbnail().is_some());
+
+    // The next save carries the thumbnail, and only that one.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "SaveIt", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "saved"), Value::Bool(true));
+    let header = luma_adventure::read_save_header(&dir.join("saves").join("save006.dsv")).unwrap();
+    let thumb = luma_formats::image::decode(header.thumbnail.as_deref().unwrap(), key).unwrap();
+    assert_eq!((thumb.width, thumb.height), (8, 4));
+    let p = thumb.pixel(0, 0).unwrap();
+    assert_eq!((p.r, p.g, p.b), (200, 10, 10));
+    assert!(runtime.world.save_thumbnail().is_none());
+
+    // A thumbnail stored then deleted is not in the next save.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Store", false);
+    runtime.tick(16);
+    assert_eq!(runtime.world.captures(), [Capture::Thumbnail]);
+    runtime.world.deliver_frame(&frame);
+    assert!(runtime.world.save_thumbnail().is_some());
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Drop", false);
+    runtime.tick(16);
+    assert!(runtime.world.save_thumbnail().is_none());
+    runtime.save_game(7, "no thumb", false).unwrap();
+    let header = luma_adventure::read_save_header(&dir.join("saves").join("save007.dsv")).unwrap();
+    assert_eq!(header.thumbnail, None);
 }

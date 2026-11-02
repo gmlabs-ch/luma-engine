@@ -116,6 +116,38 @@ file); `Game.EmptySaveSlot(slot)` deletes the file;
 in the save directory (the original engine keeps it in the registry),
 `-1` before any save.
 
+## Thumbnails
+
+`Game.StoreSaveThumbnail()` keeps a small picture of the screen for the
+next saved game, and `DeleteSaveThumbnail()` drops it; a game calls the
+first before opening its save menu, so that the menu is not in the
+picture. The size comes from `THUMBNAIL_WIDTH` and `THUMBNAIL_HEIGHT`
+of `default.game`; a game that sets none gets no thumbnail, as in the
+original engine. The picture goes into the header of the next save
+file only (`BPersistMgr::InitSave` destroys the cached one once used),
+as a PNG, where `read_save_header` returns it.
+
+The world does not draw by itself, so the picture is taken from the
+**next frame the front-end renders**: the call records the request,
+`World::wants_frame` tells the front-end to render that frame where it
+can be read back, and `World::deliver_frame` receives the pixels
+(`luma-player` renders the frame once more into an offscreen texture
+when a request is pending). The original engine reads the screen at
+the call instead, and takes a fresh picture at save time when none was
+stored; Luma cannot, so a save without `StoreSaveThumbnail` before it
+carries no thumbnail. A headless run renders nothing and fulfils no
+request.
+
+`Game.Screenshot(name)` and `Game.ScreenshotEx(file, width, height)`
+work the same way, writing the frame to a file: `Screenshot` to
+`<name>000.bmp` with the first free number (the game's name when no
+name is given), `ScreenshotEx` to the file named, scaled to the size
+given (the screen's when zero). A relative path is under the game's
+directory, the original engine's working directory; a `.png` name
+gives a PNG, any other a 24-bit BMP as the original engine writes.
+Both return `true` once the request is recorded; a file that cannot be
+written is logged when the frame comes.
+
 ## Private settings
 
 `Game.RegWriteNumber(key, value)`, `RegWriteString(key, value)`,
@@ -161,8 +193,7 @@ of The White Chamber is a few kilobytes). The header is read alone by
 `GetSaveSlotDescription`, without decompressing the body. Because
 `postcard` is positional, the fields of the state are versioned by the
 layout version: a change of the state's shape bumps `VERSION`, and
-older files are then refused rather than misread. Thumbnails
-(`Game.StoreSaveThumbnail`) are not stored yet.
+older files are then refused rather than misread.
 
 ## Checking a game
 
@@ -183,8 +214,7 @@ button, a slot, "Save" again, type a name and click "OK".
 
 ## Not yet
 
-- Thumbnails in the save file (`StoreSaveThumbnail`,
-  `DeleteSaveThumbnail`, the `savegame:` images).
+- The `savegame:` images (a saved game's thumbnail shown by a window).
 - The saving and loading screens (`SetSavingScreen`,
   `SetLoadingScreen`, `DisplayLoadingIcon`).
 - `Game.AutoSaveOnExit` and `AutoSaveSlot`.

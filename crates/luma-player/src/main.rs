@@ -1142,6 +1142,27 @@ impl App for GamePlayer {
             return Flow::Exit;
         }
         self.runtime.world.upload(frame.renderer);
+        if self.runtime.world.wants_frame() {
+            // A script asked for a screenshot or a save thumbnail: the
+            // frame is rendered once more where it can be read back.
+            let (width, height) = {
+                let settings = self.runtime.world.settings();
+                (settings.width, settings.height)
+            };
+            let target = Offscreen::new(frame.renderer.gpu(), width, height);
+            let image = {
+                let mut shot = DrawList::new(width as f32, height as f32);
+                self.runtime.draw(&mut shot, Some(frame.renderer.white()));
+                frame
+                    .renderer
+                    .render(target.target(), BLACK, &shot)
+                    .and_then(|()| target.read(frame.renderer.gpu()))
+            };
+            match image {
+                Ok(image) => self.runtime.world.deliver_frame(&image),
+                Err(err) => eprintln!("cannot capture the frame: {err}"),
+            }
+        }
         let settings = self.runtime.world.settings();
         list.width = settings.width as f32;
         list.height = settings.height as f32;

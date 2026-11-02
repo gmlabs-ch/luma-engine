@@ -46,6 +46,7 @@ AD_GAME {
 | | `CURSOR`, `ACTIVE_CURSOR`, `NONINTERACTIVE_CURSOR` | The mouse cursor sprites: normal, over an interactive object, while the game is not interactive. |
 | | `SUBTITLES`, `SUBTITLES_SPEED`, `VIDEO_SUBTITLES` | Whether speech and videos are subtitled, and how long a subtitle stays per character (default 70 ms). |
 | | `PERSONAL_SAVEGAMES`, `LOCAL_SAVE_DIR` | Where saved games go. |
+| | `THUMBNAIL_WIDTH`, `THUMBNAIL_HEIGHT` | The size of the picture `Game.StoreSaveThumbnail` keeps for the next saved game; none when absent (see [../saving.md](../saving.md#thumbnails)). |
 | | `PROPERTY { NAME VALUE }` | Script properties of the game object. |
 | `AD_GAME` | `RESPONSE_BOX`, `INVENTORY_BOX`, `ITEMS` | The dialogue, inventory and item definition files. |
 | | `SCENE_VIEWPORT { x, y, width, height }` | The part of the screen the scene is drawn in and scrolled for (`Game.SetSceneViewport` changes it); the whole screen when absent. A scene smaller than the viewport sits lower or further right by the difference, as the original engine's scroll clamp gives a negative offset (OpenQuest's 320x170 title in a 320x189 viewport starts 19 pixels down). |

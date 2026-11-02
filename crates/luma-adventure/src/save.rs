@@ -320,11 +320,13 @@ pub fn save_game(
     world.log(format!("Saving game '{}'...", path.display()));
     let game = world.game_id;
     engine.apply_event(world, game, "BeforeSave", true);
+    // The thumbnail `StoreSaveThumbnail` kept goes into this file and no
+    // other (`BPersistMgr::InitSave` destroys the cached one once used).
     let header = SaveHeader {
         game: world.game_file.name.clone(),
         description: description.to_string(),
         timestamp: now(),
-        thumbnail: None,
+        thumbnail: world.save_thumbnail.take(),
     };
     let snapshot = engine.snapshot();
     let sounds = world.sounds_state();

@@ -39,6 +39,11 @@ pub struct GameFile {
     pub personal_savegames: bool,
     /// `LOCAL_SAVE_DIR`: where saved games go.
     pub local_save_dir: Option<String>,
+    /// `THUMBNAIL_WIDTH`: width of the thumbnail stored in saved games;
+    /// `0` (the default) for none.
+    pub thumbnail_width: i32,
+    /// `THUMBNAIL_HEIGHT`: see `thumbnail_width`.
+    pub thumbnail_height: i32,
     /// `PROPERTY` blocks: script properties of the game object.
     pub properties: Vec<Property>,
     /// `AD_GAME`'s `RESPONSE_BOX`: the dialogue choices definition.
@@ -76,6 +81,8 @@ impl Default for GameFile {
             video_subtitles: false,
             personal_savegames: false,
             local_save_dir: None,
+            thumbnail_width: 0,
+            thumbnail_height: 0,
             properties: Vec::new(),
             response_box: None,
             inventory_box: None,
@@ -124,6 +131,12 @@ impl GameFile {
                     game.personal_savegames = node.as_bool().unwrap_or(false);
                 }
                 "LOCAL_SAVE_DIR" => game.local_save_dir = text(node),
+                "THUMBNAIL_WIDTH" => {
+                    game.thumbnail_width = node.as_int().unwrap_or(0) as i32;
+                }
+                "THUMBNAIL_HEIGHT" => {
+                    game.thumbnail_height = node.as_int().unwrap_or(0) as i32;
+                }
                 "PROPERTY" => game.properties.extend(Property::from_node(node)?),
                 _ => {}
             }
@@ -173,6 +186,8 @@ GAME {
   VIDEO_SUBTITLES=TRUE
   SUBTITLES_SPEED=100
   STRING_TABLE="string.tab"
+  THUMBNAIL_WIDTH=200
+  THUMBNAIL_HEIGHT=150
   PROPERTY { NAME="Difficulty" VALUE="2" }
 }
 AD_GAME {
@@ -204,6 +219,7 @@ AD_GAME {
         assert!(game.subtitles && game.video_subtitles);
         assert_eq!(game.subtitles_speed, 100);
         assert!(!game.personal_savegames);
+        assert_eq!((game.thumbnail_width, game.thumbnail_height), (200, 150));
         assert_eq!(game.properties.len(), 1);
         assert_eq!(game.properties[0].name, "Difficulty");
         assert_eq!(

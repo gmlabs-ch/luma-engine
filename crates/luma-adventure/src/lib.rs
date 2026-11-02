@@ -36,10 +36,13 @@
 //!   back (`Game.SaveGame`, `Game.LoadGame`).
 //! - [`registry`]: the private settings a game keeps between runs
 //!   (`Game.RegReadNumber`, `RegWriteString`...).
+//! - [`capture`]: screenshots and save thumbnails, captured from the
+//!   frame the front-end renders next.
 
 #![forbid(unsafe_code)]
 
 pub mod actor;
+pub mod capture;
 mod error;
 pub mod fader;
 pub mod input;
