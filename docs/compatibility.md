@@ -325,7 +325,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdScene.cpp
 - Hierarchy and Luma: CBObject → CAdScene; Luma: scene (`scene_call`, `scene_get`, `scene_set`, `scene_view.rs`)
-- Count: 46 done, 35 todo, 2 no-op
+- Count: 47 done, 34 todo, 2 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -338,7 +338,7 @@ How the list was made. For every class with a script interface, the names tested
 | `SkipTo` | method | **done** | Jumps the view to a position or object. |
 | `ScrollTo`, `ScrollToAsync` | method | **done** | Scrolls the view to a position or object, waiting or not. |
 | `GetLayer` | method | **done** | Layer by index or name. |
-| `GetWaypointGroup` | method | **todo** | Waypoint group by index. Stubbed (every group is used). |
+| `GetWaypointGroup` | method | **done** | Waypoint group by index, as an object. |
 | `GetNode` | method | **done** | Any node (entity or region) by name. |
 | `GetFreeNode` | method | **done** | Free (layer-less) entity by index or name. |
 | `GetRegionAt` | method | **done** | Region under a point (optionally including decorations). |
@@ -394,11 +394,11 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BRegion.cpp
 - Hierarchy and Luma: CBObject → CBRegion → CAdRegion; Luma: regions (`region_call`)
-- Count: 7 done, 4 todo, 0 no-op
+- Count: 11 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `AddPoint`, `InsertPoint`, `SetPoint`, `RemovePoint` | method | **todo** | Edits the region's polygon. Stubbed. |
+| `AddPoint`, `InsertPoint`, `SetPoint`, `RemovePoint` | method | **done** | Edits the region's polygon; an index outside it answers false. |
 | `GetPoint` | method | **done** | Returns a polygon point as `{X, Y}`. |
 | `Type` | get | **done** | `ad region` (or `region`). |
 | `Name` | get/set | **done** | Region name. |
@@ -423,13 +423,13 @@ How the list was made. For every class with a script interface, the names tested
 ### CAdWaypointGroup
 
 - WME source: src/engine_core/wme_ad/AdWaypointGroup.cpp
-- Hierarchy and Luma: CBObject → CAdWaypointGroup; Luma: not exposed (all groups always active)
-- Count: 0 done, 3 todo, 0 no-op
+- Hierarchy and Luma: CBObject → CAdWaypointGroup; Luma: waypoint groups (`natives_region.rs`)
+- Count: 3 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Type` | get | **todo** | `waypoint-group`. |
-| `Active` | get/set | **todo** | Enables or disables the group for path finding. |
+| `Type` | get | **done** | `waypoint-group`. |
+| `Active` | get/set | **done** | Enables or disables the group for path finding. |
 
 ### CAdObject (entities, actors, items: adventure objects)
 
@@ -501,20 +501,20 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdEntity.cpp
 - Hierarchy and Luma: CAdTalkHolder → CAdEntity; Luma: entities (`entity_call`)
-- Count: 11 done, 9 todo, 0 no-op
+- Count: 14 done, 6 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `StopSound` | method | **done** | Stops the entity's sound. |
 | `PlayTheora` | method | **todo** | Plays an Ogg Theora video inside the entity's rectangle (file, looping, ...). |
 | `StopTheora`, `IsTheoraPlaying`, `PauseTheora`, `ResumeTheora`, `IsTheoraPaused` | method | **todo** | Controls the entity-bound video. |
-| `CreateRegion` | method | **todo** | Creates the entity's own clickable region. Stubbed. |
-| `DeleteRegion` | method | **todo** | Deletes that region. Stubbed. |
+| `CreateRegion` | method | **done** | Creates the entity's own clickable region (empty until points are added) and returns it. |
+| `DeleteRegion` | method | **done** | Deletes that region. |
 | `Type` | get | **done** | `entity`. |
 | `Item` | get/set | **done** | Item the entity represents. |
 | `Subtype` | get | **done** | `normal` or `sound`. |
 | `WalkToX`, `WalkToY`, `WalkToDirection` | get/set | **done** | Where actors stand when walking to the entity, and which way they face. |
-| `Region` | get | **todo** | The entity's region object. Luma reads null. |
+| `Region` | get | **done** | The entity's region object (a `CBRegion`: name, points, `Active`). |
 
 ### CAdItem (inventory item)
 
@@ -1034,15 +1034,15 @@ How the list was made. For every class with a script interface, the names tested
 | CBGame | 90 | 58 | 17 | 165 |
 | CAdGame | 56 | 9 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
-| CAdScene | 46 | 35 | 2 | 83 |
+| CAdScene | 47 | 34 | 2 | 83 |
 | CAdLayer | 13 | 5 | 0 | 18 |
-| CBRegion | 7 | 4 | 0 | 11 |
+| CBRegion | 11 | 0 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
-| CAdWaypointGroup | 0 | 3 | 0 | 3 |
+| CAdWaypointGroup | 3 | 0 | 0 | 3 |
 | CAdObject | 33 | 8 | 0 | 41 |
 | CAdTalkHolder | 7 | 0 | 0 | 7 |
 | CAdActor | 23 | 0 | 0 | 23 |
-| CAdEntity | 11 | 9 | 0 | 20 |
+| CAdEntity | 14 | 6 | 0 | 20 |
 | CAdItem | 23 | 3 | 0 | 26 |
 | CBSprite | 13 | 5 | 0 | 18 |
 | CBFrame | 0 | 21 | 0 | 21 |
@@ -1070,9 +1070,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **576** | **551** | **29** | **1156** |
+| **All** | **587** | **540** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 561 done, 542 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 572 done, 531 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1080,7 +1080,6 @@ These classes have no done member in Luma: the object does not exist for scripts
 
 | Class | What it is | Members still todo |
 |-------|-----------|-------------------:|
-| `CAdWaypointGroup` | A waypoint group of a scene (`Scene.GetWaypointGroup`) | 3 |
 | `CBFrame` | A frame of a sprite (delay, sound, move, sub-frames, events) | 21 |
 | `CBSubFrame` | The image part of a frame (hotspot, mirror, alpha) | 20 |
 | `CSXString` | `new String` | 10 |
@@ -1107,7 +1106,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 |-------|-----:|----------------|
 | Game services | 46 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
 | Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
-| Object model (2D) | 30 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), `StickToRegion`, attachments, per-object inventories. Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items. |
+| Object model (2D) | 19 | Runtime creation of scene content (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`), `StickToRegion`, attachments, per-object inventories. Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Sprites and frames | 48 | Frame and sub-frame objects (`GetFrame`, `AddFrame`, `Delay`, `MoveX`, hotspots...), runtime-built sprites, frame events. Reads on the sprite format already exist in `luma-formats`. |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
@@ -1117,7 +1116,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **551** | |
+| **All** | **540** | |
 
 ## Members in Luma that WME 1.x does not define
 

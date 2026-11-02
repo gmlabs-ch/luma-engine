@@ -46,6 +46,7 @@ mod natives;
 mod natives_actor;
 mod natives_item;
 mod natives_object;
+mod natives_region;
 mod natives_sound;
 mod natives_ui;
 pub mod objects;

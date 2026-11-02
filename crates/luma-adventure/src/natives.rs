@@ -15,6 +15,7 @@ use luma_formats::Rgba;
 use luma_formats::scene::Direction;
 use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 
+use crate::natives_region::RegionRef;
 use crate::objects::Kind;
 use crate::scene_view::{AnimState, EntityRef, LoadedSprite, frame_height, key};
 use crate::talk::TalkSkipButton;
@@ -79,8 +80,6 @@ const OBJECT_STUBS: &[&str] = &[
     "DeleteParticleEmitter",
     "AddAttachment",
     "RemoveAttachment",
-    "CreateRegion",
-    "DeleteRegion",
 ];
 
 impl World {
@@ -119,7 +118,11 @@ impl World {
             Kind::Scene => self.scene_get(name),
             Kind::Layer(index) => self.layer_get(index, name),
             Kind::Entity(r) => self.entity_get(r, name),
-            Kind::Region { layer, index } => self.region_get(layer, index, name),
+            Kind::Region { layer, index } => {
+                self.region_get(RegionRef::Node { layer, index }, name)
+            }
+            Kind::EntityRegion(owner) => self.region_get(RegionRef::Entity(owner), name),
+            Kind::WaypointGroup(index) => self.waypoint_group_get(index, name),
             Kind::Sprite(owner) => self.sprite_get(owner, name),
             Kind::CursorSprite(owner) => self.cursor_sprite_get(owner, name),
             Kind::Actor => self.actor_get(id, name),
@@ -148,7 +151,11 @@ impl World {
             Kind::Scene => self.scene_set(name, value),
             Kind::Layer(index) => self.layer_set(index, name, value),
             Kind::Entity(r) => self.entity_set(r, name, value),
-            Kind::Region { layer, index } => self.region_set(layer, index, name, value),
+            Kind::Region { layer, index } => {
+                self.region_set(RegionRef::Node { layer, index }, name, value)
+            }
+            Kind::EntityRegion(owner) => self.region_set(RegionRef::Entity(owner), name, value),
+            Kind::WaypointGroup(index) => self.waypoint_group_set(index, name, value),
             Kind::Sprite(owner) => self.sprite_set(owner, name, value),
             Kind::CursorSprite(owner) => self.cursor_sprite_set(owner, name, value),
             Kind::Actor => self.actor_set(id, name, value),
@@ -195,7 +202,11 @@ impl World {
             Kind::Scene => self.scene_call(name, args, ctx),
             Kind::Layer(index) => self.layer_call(index, name, args),
             Kind::Entity(r) => self.entity_call(id, r, name, args),
-            Kind::Region { layer, index } => self.region_call(layer, index, name, args),
+            Kind::Region { layer, index } => {
+                self.region_call(RegionRef::Node { layer, index }, name, args)
+            }
+            Kind::EntityRegion(owner) => self.region_call(RegionRef::Entity(owner), name, args),
+            Kind::WaypointGroup(_) => None,
             Kind::Sprite(owner) => self.sprite_call(owner, name),
             Kind::CursorSprite(owner) => self.cursor_sprite_call(owner, name),
             Kind::Actor => self.actor_call(id, name, args, ctx),
@@ -973,7 +984,13 @@ impl World {
                 let (vx, vy, vw, vh) = self.viewport();
                 Return::value(x >= vx && y >= vy && x < vx + vw && y < vy + vh)
             }
-            "GetWaypointGroup" | "LoadEntity" | "CreateEntity" | "AddLayer" | "InsertLayer" => {
+            "GetWaypointGroup" => {
+                let index = usize::try_from(arg(0).get_int(self)).ok();
+                Return::value(native_or_null(
+                    index.and_then(|i| self.waypoint_group_object(i)),
+                ))
+            }
+            "LoadEntity" | "CreateEntity" | "AddLayer" | "InsertLayer" => {
                 self.stub(&format!("Scene.{name}"));
                 Return::null()
             }
@@ -1139,7 +1156,7 @@ impl World {
             "WalkToX" => Value::Int(e.walk_to_x),
             "WalkToY" => Value::Int(e.walk_to_y),
             "WalkToDirection" => Value::Int(e.walk_to_dir.map_or(8, |d| i32::from(d.code()))),
-            "Region" => Value::Null,
+            "Region" => native_or_null(self.node_id(r).and_then(|id| self.entity_region_id(id))),
             _ => return None,
         })
     }
@@ -1335,6 +1352,8 @@ impl World {
                 return Some(self.inventory_call(name, args));
             }
             "GetAttachment" => Return::null(),
+            "CreateRegion" => Return::value(native_or_null(self.create_entity_region(id))),
+            "DeleteRegion" => Return::value(self.delete_entity_region(id)),
             _ if OBJECT_STUBS.contains(&name) => {
                 self.stub(&format!("Entity.{name}"));
                 Return::null()
@@ -1367,110 +1386,6 @@ impl World {
         } else {
             Return::null()
         }
-    }
-
-    // ----------------------------------------------------------------
-    // Regions
-    // ----------------------------------------------------------------
-
-    fn region_get(&self, layer: usize, index: usize, name: &str) -> Option<Value> {
-        let region = self.scene()?.region(layer, index)?;
-        Some(match name {
-            "Type" => Value::from("ad region"),
-            "Name" => Value::from(region.name.clone()),
-            "Caption" => Value::from(region.caption.clone()),
-            "Active" => Value::Bool(region.active),
-            "Blocked" => Value::Bool(region.blocked),
-            "Decoration" => Value::Bool(region.decoration),
-            "Scale" => Value::Float(f64::from(region.zoom.unwrap_or(0.0))),
-            "AlphaColor" => Value::Int(color_int(region.tint)),
-            "NumPoints" => Value::Int(region.points.len() as i32),
-            "X" => Value::Int(region.bounds().map_or(0, |b| b.left)),
-            "Y" => Value::Int(region.bounds().map_or(0, |b| b.top)),
-            "Ready" => Value::Bool(true),
-            _ => return None,
-        })
-    }
-
-    fn region_set(&mut self, layer: usize, index: usize, name: &str, value: &Value) -> bool {
-        let (text, int, flag, float) = (
-            value.get_string(self),
-            value.get_int(self),
-            value.get_bool(self),
-            value.get_float(self),
-        );
-        let caption = self.expand(&text);
-        let Some(region) = self.scene_mut().and_then(|v| v.region_mut(layer, index)) else {
-            return false;
-        };
-        match name {
-            "Name" => region.name = text,
-            "Caption" => region.caption = caption,
-            "Active" => region.active = flag,
-            "Blocked" => region.blocked = flag,
-            "Decoration" => region.decoration = flag,
-            "Scale" => {
-                region.zoom = if float == 0.0 {
-                    None
-                } else {
-                    Some(float as f32)
-                }
-            }
-            "AlphaColor" => region.tint = color_of(int),
-            _ => return false,
-        }
-        true
-    }
-
-    fn region_call(
-        &mut self,
-        layer: usize,
-        index: usize,
-        name: &str,
-        args: &[Value],
-    ) -> Option<Return> {
-        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
-        Some(match name {
-            "GetPoint" => {
-                let i = usize::try_from(arg(0).get_int(self)).ok();
-                let point = self
-                    .scene()
-                    .and_then(|v| v.region(layer, index))
-                    .and_then(|r| i.and_then(|i| r.points.get(i)))
-                    .copied();
-                match point {
-                    Some(p) => {
-                        let mut object = Value::object();
-                        object.set_property("X", Value::Int(p.x), self);
-                        object.set_property("Y", Value::Int(p.y), self);
-                        Return::value(object)
-                    }
-                    None => Return::null(),
-                }
-            }
-            "SkipTo" => {
-                let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
-                if let Some(region) = self.scene_mut().and_then(|v| v.region_mut(layer, index)) {
-                    if let Some(b) = region.bounds() {
-                        let (dx, dy) = (x - b.left, y - b.top);
-                        for p in &mut region.points {
-                            p.x += dx;
-                            p.y += dy;
-                        }
-                    }
-                }
-                Return::null()
-            }
-            "AddPoint" | "InsertPoint" | "SetPoint" | "RemovePoint" => {
-                self.stub(&format!("Region.{name}"));
-                Return::value(false)
-            }
-            _ if OBJECT_STUBS.contains(&name) => {
-                self.stub(&format!("Region.{name}"));
-                Return::null()
-            }
-            _ => return None,
-        })
     }
 
     // ----------------------------------------------------------------

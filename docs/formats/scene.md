@@ -235,6 +235,18 @@ joined to the first. A region in a layer carries the extra keys marked
 | `TEMPLATE` | string | | Another region file loaded first. |
 | `EDITOR_SELECTED`, `EDITOR_SELECTED_POINT`, `EDITOR_PROPERTY` | | | Editor state, ignored. |
 
+Scripts edit a polygon at run time with `AddPoint(x, y)`,
+`InsertPoint(index, x, y)`, `SetPoint(index, x, y)` and
+`RemovePoint(index)` (an index outside the polygon answers `false`),
+read it with `NumPoints` and `GetPoint(index)` (an object with `X` and
+`Y`), and move it with `SkipTo(x, y)`. An entity's own `REGION` is a
+region object too, reached through the entity's `Region` property;
+`CreateRegion()` gives an entity without one an empty region to fill
+and returns it, `DeleteRegion()` takes it away. A region created this
+way is the entity's clickable area from then on, whatever its `Active`
+(the engine registers an entity's region whenever the entity reacts to
+the mouse).
+
 ### Point in region
 
 A point is inside a region when it is inside the polygon's bounding
@@ -259,6 +271,13 @@ straight line when nothing blocks the way; otherwise the engine looks for
 a path from the actor to the target through waypoints that see each other
 (a straight line between them crosses no blocked region and leaves no
 walkable one).
+
+`Scene.GetWaypointGroup(index)` returns a group as an object (`Type`
+`waypoint-group`, `Name`) whose `Active` a script may switch off to
+take its points out of path finding, as the original engine's
+`CAdWaypointGroup::m_Active` does; the flag is not a file key and
+starts on. It is not part of the scene's persistent state (nor is it
+in the original engine), but a saved game keeps it.
 
 ## `PROPERTY`
 

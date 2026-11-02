@@ -1032,9 +1032,11 @@ fn entity_mimic_scale(scene: &Scene, entity: &Entity) -> f32 {
 /// floor the actors walk on.
 pub fn scene_obstacles(scene: &Scene) -> (Vec<Vec<Point>>, Vec<Point>) {
     let mut blockers = Vec::new();
+    // A group a script switched off (`WaypointGroup.Active`) is left out.
     let mut waypoints: Vec<Point> = scene
         .waypoint_groups
         .iter()
+        .filter(|g| g.active)
         .flat_map(|g| g.points.iter().copied())
         .collect();
     let entities = scene

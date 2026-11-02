@@ -77,9 +77,12 @@ impl World {
         let owned: Vec<NativeId> = self
             .objects
             .iter()
-            .filter(
-                |(_, n)| matches!(n.kind, Kind::Sprite(o) | Kind::CursorSprite(o) if o == owner),
-            )
+            .filter(|(_, n)| {
+                matches!(
+                    n.kind,
+                    Kind::Sprite(o) | Kind::CursorSprite(o) | Kind::EntityRegion(o) if o == owner
+                )
+            })
             .map(|(id, _)| id)
             .collect();
         for id in owned {

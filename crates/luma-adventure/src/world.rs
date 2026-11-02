@@ -467,6 +467,16 @@ impl World {
             Some(Kind::Math) => "math".to_string(),
             Some(Kind::ResponseBox) => "response box".to_string(),
             Some(Kind::Sprite(_) | Kind::CursorSprite(_)) => "sprite".to_string(),
+            Some(Kind::EntityRegion(owner)) => self
+                .region_ref(crate::natives_region::RegionRef::Entity(*owner))
+                .map(|r| r.name.clone())
+                .unwrap_or_default(),
+            Some(Kind::WaypointGroup(i)) => self
+                .scene
+                .as_ref()
+                .and_then(|s| s.scene.waypoint_groups.get(*i))
+                .map(|g| g.name.clone())
+                .unwrap_or_default(),
             Some(Kind::Fader) => "fader".to_string(),
             Some(Kind::Actor) => self
                 .actor(id)
@@ -836,7 +846,10 @@ impl World {
                     Kind::Entity(r) if !matches!(r, crate::scene_view::EntityRef::Ui(_))
                 );
                 scene_entity
-                    || matches!(n.kind, Kind::Layer(_) | Kind::Region { .. })
+                    || matches!(
+                        n.kind,
+                        Kind::Layer(_) | Kind::Region { .. } | Kind::WaypointGroup(_)
+                    )
                     || scene_actors.contains(id)
             })
             .map(|(id, _)| id)
@@ -846,7 +859,11 @@ impl World {
             .objects
             .iter()
             .filter(|(_, n)| {
-                matches!(n.kind, Kind::Sprite(o) | Kind::CursorSprite(o) if gone.contains(&o))
+                matches!(
+                    n.kind,
+                    Kind::Sprite(o) | Kind::CursorSprite(o) | Kind::EntityRegion(o)
+                        if gone.contains(&o)
+                )
             })
             .map(|(id, _)| id)
             .collect();
@@ -959,6 +976,7 @@ impl World {
                 };
                 let id = self.objects.insert(kind);
                 self.load_entity_sound(id);
+                self.register_entity_region(id);
                 for script in scripts {
                     self.attach(engine, id, &script);
                 }
@@ -973,6 +991,7 @@ impl World {
                 .objects
                 .insert(Kind::Entity(crate::scene_view::EntityRef::Free(i)));
             self.load_entity_sound(id);
+            self.register_entity_region(id);
             let scripts = self.scene().unwrap().scene.free_entities[i].scripts.clone();
             for script in scripts {
                 self.attach(engine, id, &script);
@@ -1545,7 +1564,8 @@ impl Natives for World {
             Some(Kind::Scene) => "scene".to_string(),
             Some(Kind::Layer(_)) => "layer".to_string(),
             Some(Kind::Entity(_)) => "entity".to_string(),
-            Some(Kind::Region { .. }) => "region".to_string(),
+            Some(Kind::Region { .. } | Kind::EntityRegion(_)) => "region".to_string(),
+            Some(Kind::WaypointGroup(_)) => "waypoint-group".to_string(),
             Some(Kind::Sprite(_) | Kind::CursorSprite(_)) => "sprite".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
             Some(Kind::Fader) => "fader".to_string(),

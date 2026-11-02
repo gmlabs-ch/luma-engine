@@ -43,6 +43,11 @@ pub enum Kind {
     Sprite(NativeId),
     /// The cursor of an object as a sprite object (`GetCursorObject`).
     CursorSprite(NativeId),
+    /// The clickable region of an entity (`Entity.Region`,
+    /// `CreateRegion`), by the entity's handle.
+    EntityRegion(NativeId),
+    /// A waypoint group of the current scene (`Scene.GetWaypointGroup`).
+    WaypointGroup(usize),
     /// An actor (`Game.LoadActor`, `Scene.LoadActor`); its state lives in
     /// the world's actor list.
     Actor,

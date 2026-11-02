@@ -960,6 +960,7 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     REGION { NAME=\"exit\" POINT {0,0} POINT {8,0} POINT {8,8} POINT {0,8} }
     ENTITY { NAME=\"fixed\" X=10 Y=10 SPRITE=\"art\\prop.sprite\" SAVE_STATE=FALSE }
   }
+  WAYPOINTS { NAME=\"wp\" POINT {16,16} POINT {24,24} }
 }"
         .to_vec(),
     );
@@ -3139,5 +3140,248 @@ fn talk_sprite_sets_forced_talk_anims_and_sprite_objects() {
         ),
         Value::Bool(true)
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn regions_are_edited_entities_get_regions_and_waypoint_groups_switch_off() {
+    use luma_adventure::EntityRef;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+
+    // The floor region's polygon is edited point by point; an index
+    // outside the polygon is refused.
+    let floor = runtime.world.region_id(0, 1).unwrap();
+    let points = |runtime: &Runtime| {
+        runtime
+            .world
+            .scene()
+            .unwrap()
+            .region(0, 1)
+            .unwrap()
+            .points
+            .clone()
+    };
+    let point = |runtime: &mut Runtime, i: i32| {
+        let p = call_native(runtime, floor, "GetPoint", &[Value::Int(i)]);
+        (
+            p.get_property("X", &()).unwrap_or(Value::Null),
+            p.get_property("Y", &()).unwrap_or(Value::Null),
+        )
+    };
+    assert_eq!(point(&mut runtime, 0), (Value::Int(0), Value::Int(16)));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            floor,
+            "AddPoint",
+            &[Value::Int(10), Value::Int(40)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            floor,
+            "InsertPoint",
+            &[Value::Int(0), Value::Int(1), Value::Int(1)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            floor,
+            "SetPoint",
+            &[Value::Int(0), Value::Int(2), Value::Int(3)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            floor,
+            "SetPoint",
+            &[Value::Int(9), Value::Int(2), Value::Int(3)]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        runtime.world.get_property(floor, "NumPoints"),
+        Some(Value::Int(6))
+    );
+    assert_eq!(point(&mut runtime, 0), (Value::Int(2), Value::Int(3)));
+    assert_eq!(
+        call_native(&mut runtime, floor, "RemovePoint", &[Value::Int(0)]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(&mut runtime, floor, "RemovePoint", &[Value::Int(9)]),
+        Value::Bool(false)
+    );
+    assert_eq!(points(&runtime).len(), 5);
+    assert_eq!(
+        points(&runtime)[4],
+        luma_formats::scene::Point { x: 10, y: 40 }
+    );
+
+    // An entity without a region gets one with `CreateRegion`, empty
+    // until points are added; the region is then its clickable area.
+    let lamp_ref = EntityRef::Node { layer: 0, index: 2 };
+    let lamp = runtime.world.node_id(lamp_ref).unwrap();
+    {
+        let e = runtime
+            .world
+            .scene_mut()
+            .unwrap()
+            .entity_mut(lamp_ref)
+            .unwrap();
+        e.active = true;
+        e.interactive = true;
+    }
+    assert_eq!(
+        runtime.world.get_property(lamp, "Region"),
+        Some(Value::Null)
+    );
+    assert_eq!(
+        call_native(&mut runtime, lamp, "DeleteRegion", &[]),
+        Value::Bool(false)
+    );
+    let region = call_native(&mut runtime, lamp, "CreateRegion", &[])
+        .as_native()
+        .expect("a region object");
+    assert_eq!(
+        runtime.world.get_property(lamp, "Region"),
+        Some(Value::Native(region))
+    );
+    assert_eq!(
+        call_native(&mut runtime, lamp, "CreateRegion", &[]),
+        Value::Native(region),
+        "an entity keeps the region it has"
+    );
+    assert_eq!(
+        runtime.world.get_property(region, "Type"),
+        Some(Value::from("region"))
+    );
+    assert_eq!(
+        runtime.world.get_property(region, "NumPoints"),
+        Some(Value::Int(0))
+    );
+    assert_eq!(
+        runtime.world.get_property(region, "Blocked"),
+        None,
+        "a plain region has no scene-region members"
+    );
+    for (x, y) in [(20, 20), (26, 20), (26, 26), (20, 26)] {
+        call_native(
+            &mut runtime,
+            region,
+            "AddPoint",
+            &[Value::Int(x), Value::Int(y)],
+        );
+    }
+    runtime
+        .world
+        .set_property(region, "Name", &Value::from("hot"));
+    assert_eq!(
+        runtime.world.get_property(region, "Name"),
+        Some(Value::from("hot"))
+    );
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(23, 23);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(lamp));
+    assert_eq!(
+        call_native(&mut runtime, lamp, "DeleteRegion", &[]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        runtime.world.get_property(lamp, "Region"),
+        Some(Value::Null)
+    );
+    assert!(!runtime.world.objects().contains(region));
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), None);
+
+    // A region from the file is a region object from the start, and the
+    // edits are part of a saved game.
+    runtime.change_scene("scenes\\small.scene").unwrap();
+    let spot = runtime.world.find_node("spot").unwrap();
+    let spot_region = runtime
+        .world
+        .get_property(spot, "Region")
+        .and_then(|v| v.as_native())
+        .expect("the file's region");
+    assert_eq!(
+        runtime.world.get_property(spot_region, "NumPoints"),
+        Some(Value::Int(4))
+    );
+    call_native(
+        &mut runtime,
+        spot_region,
+        "AddPoint",
+        &[Value::Int(8), Value::Int(14)],
+    );
+    runtime.save_game(12, "regions", false).unwrap();
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(12).unwrap();
+    assert_eq!(
+        loaded.world.get_property(spot_region, "NumPoints"),
+        Some(Value::Int(5))
+    );
+
+    // Waypoint groups are objects: switching one off takes its points
+    // out of path finding; the handle dies with the scene.
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    let scene = runtime.world.scene_id();
+    assert_eq!(
+        runtime.world.get_property(scene, "NumWaypointGroups"),
+        Some(Value::Int(1))
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "GetWaypointGroup", &[Value::Int(1)]),
+        Value::Null
+    );
+    let group = call_native(&mut runtime, scene, "GetWaypointGroup", &[Value::Int(0)])
+        .as_native()
+        .expect("a waypoint group object");
+    assert_eq!(
+        runtime.world.get_property(group, "Type"),
+        Some(Value::from("waypoint-group"))
+    );
+    assert_eq!(
+        runtime.world.get_property(group, "Name"),
+        Some(Value::from("wp"))
+    );
+    assert_eq!(
+        runtime.world.get_property(group, "Active"),
+        Some(Value::Bool(true))
+    );
+    let waypoints = |runtime: &Runtime| {
+        luma_adventure::actor::scene_obstacles(&runtime.world.scene().unwrap().scene)
+            .1
+            .len()
+    };
+    assert_eq!(waypoints(&runtime), 2);
+    runtime
+        .world
+        .set_property(group, "Active", &Value::Bool(false));
+    assert_eq!(
+        runtime.world.get_property(group, "Active"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(waypoints(&runtime), 0);
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    assert!(!runtime.world.objects().contains(group));
     std::fs::remove_dir_all(&dir).unwrap();
 }

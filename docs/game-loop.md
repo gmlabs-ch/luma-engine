@@ -177,9 +177,9 @@ Nothing else comes back: positions, script variables and the scripts
 themselves start over from the file, and a scene's init script runs on
 every visit, so it may override what was restored. A remembered sprite
 that cannot be loaded is logged and the entity keeps the file's. The
-states are part of a saved game (see [saving.md](saving.md)). The
-original engine also remembers whether each waypoint group is active;
-Luma uses every group, so this is not kept yet.
+states are part of a saved game (see [saving.md](saving.md)). Whether
+a waypoint group is active (`WaypointGroup.Active`) is not remembered
+between visits, in either engine.
 
 ## Dialogue responses
 

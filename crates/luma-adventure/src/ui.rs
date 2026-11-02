@@ -1559,6 +1559,7 @@ impl World {
             container: id,
         });
         let entity = self.objects.insert(Kind::Entity(EntityRef::Ui(index)));
+        self.register_entity_region(entity);
         for script in scripts {
             self.attach(engine, entity, &script);
         }
