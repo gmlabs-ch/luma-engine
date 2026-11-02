@@ -10,7 +10,10 @@ Luma Engine plays point-and-click adventure games made with
 natively on today's machines, and aims to become a solid foundation for new
 narrative games.
 
-> **Status: pre-alpha.** Nothing is playable yet. Follow the milestones below.
+> **Status: alpha.** The two test games play from start to finish through the
+> headless player and every member of the Wintermute 1.x scripting interface
+> is implemented; a complete playthrough with a window and sound is the next
+> milestone. Follow the milestones below.
 
 ## Why
 
