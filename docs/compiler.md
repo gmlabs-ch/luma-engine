@@ -1,10 +1,13 @@
-# The script compiler (draft specification)
+# The script compiler
 
 This document specifies the compiler that turns Wintermute Engine script
 sources (`*.script`, `*.dcs`, with `*.inc` includes) into the compiled form
 described in [formats/script.md](formats/script.md), precisely enough to
 write a compiler that produces **byte-for-byte the same output** as the
-original one. It is a draft: nothing in this repository implements it yet.
+original one. The `luma-compiler` crate (`luma_compiler::Compiler`) and
+the `luma compile` command implement it; see
+[Implementation](#implementation-in-luma) at the end for the crate's shape,
+its few deliberate deviations, and how it is tested.
 
 The instruction names are those of `docs/formats/script.md` (`DEF_VAR`,
 `PUSH_INT`, ...); the Rust names in `luma_script::Opcode` and
@@ -43,21 +46,27 @@ Every statement below carries an evidence mark:
   The port drives the original Bison tables, so what it accepts, how it
   groups operators and which lines it records are the original's by
   construction; this mark is mostly used for grammar facts.
-- **[V]** also verified: the same port reproduced all 276 compiled scripts of The White Chamber 1.7 DE for which
-  the source pack has the matching `.script` text, byte for byte (the 276
-  scripts include 599 `#include` expansions, 578 events, 47 functions and
-  methods, 108 `switch`, 96 `while`, 2 `for`, 454 `if`, 1393 `break`). The
-  source pack is a local test asset (see `CLAUDE.md`, game data rule), so
-  tests in the repository cannot use it; they must build expected output
-  with `luma_script::asm::Assembler` or by hand.
+- **[V]** also verified: the same port reproduced all 276 compiled scripts
+  of The White Chamber 1.7 DE for which the source pack has the matching
+  `.script` text, byte for byte (the 276 scripts include 599 `#include`
+  expansions, 578 events, 47 functions and methods, 108 `switch`, 96
+  `while`, 2 `for`, 454 `if`, 1393 `break`), and so does `luma-compiler`
+  (288 of 288 when the 12 scripts of `language.dcp` are counted too). The
+  source pack is a local test asset (see `CLAUDE.md`, game data rule): the
+  comparison is an opt-in test that skips when it is absent
+  (`crates/luma-compiler/tests/white_chamber.rs`), and the tests that
+  always run derive their expected listings from this document.
 - **[D]** derived by reading the sources, not exercised by that corpus
   (constructs absent from it: `continue`, `new`, float literals, `*`, `%`,
   `===`/`!==`, `const`, `external`, string escapes, `/* */` comments,
   `#region`, bytes above 0x7F, `for` with several updates, initialised
   multi-name declarations, a `break` or `continue` after a nested loop or
   `switch`, `case` bodies using `continue`, assignments inside expressions).
-  Implement these from this text and test them against hand-assembled
-  expectations.
+  `luma-compiler` implements these from this text; its tests check them
+  against listings derived here, and their output was also compared with
+  the port's on small snippets (identical, see
+  [Implementation](#implementation-in-luma)), which settles what the
+  original's *source* does but not what a shipped binary might differ in.
 
 The White Chamber ships its scripts compiled by this compiler with version
 `0x0102` throughout (288 scripts), as does OpenQuest (64 scripts); both use
@@ -183,8 +192,11 @@ start (it is a lexer rule, so it works mid-statement or mid-function too):
 #include "scripts\base.inc"
 ```
 
-- Anything else after `#include` (no quote, name on the next line) is
-  "Include filename expected" [S].
+- Anything else than blanks and a quoted name after `#include` is "Include
+  filename expected" [S]; a newline right after the word is not an error in
+  the original (its scanner has no rule for it there, so it is dropped
+  without being counted, and the name is read from the next line), a
+  corner the Luma compiler reports as an error instead.
 - The name is the text between the quotes, **verbatim** (backslashes are not
   escapes), and is passed as is to the host's file loader. It is not
   resolved relative to the including file: the host resolves it like any
@@ -307,8 +319,9 @@ Points that differ from what one would assume:
   `break` without the semicolon is a reference to a variable named `break`
   (an "undefined variable" error unless declared).
 - Casts: `( var ) x` is parsed (type word `var`, `global` or `const` between
-  parentheses) and produces **no code** at all. It is meaningless and
-  included for completeness [S][P].
+  parentheses) and produces **no code** at all, not even for `x` (see the
+  expression table). It is meaningless and included for completeness
+  [S][P].
 - Dead productions: `x++`, `x--` (never lexed), `this[...]` (never lexed),
   hence `PUSH_VAR_THIS` is never emitted by this compiler [S].
 
@@ -449,9 +462,10 @@ publishes (`CBGame::PublishNatives`, `CAdGame::PublishNatives`) [S]:
 
 Everything else a script uses (`Scene`, `Keyboard`, `actor`, ...) must be
 declared by the script itself (the games `global`-declare them in an include
-such as `base.inc`). A Luma compiler should take this list as a parameter,
-defaulting to the one above; calling any other name that no script
-declares is a compile error in the original.
+such as `base.inc`). The list is a parameter of the Luma compiler
+(`luma_compiler::Natives`; `Natives::wme()` is the list above, `luma
+compile --native <name>` adds a plugin class); calling any other name that
+no script declares is a compile error, as in the original.
 
 ## Output layout
 
@@ -788,7 +802,7 @@ every node the instructions are emitted with `ln(e)` unless noted.
 | `null` | `PUSH_NULL` |
 | `-x` | `PUSH_INT 0`, `exp(x)`, `SUB`  (there are no negative literals) |
 | `!x` | `exp(x)`, `NOT` |
-| `(var) x` | `exp(x)` only (the cast emits nothing) [D] |
+| `(var) x` | **nothing at all**: the generator has no case for a cast, so neither the cast nor its operand produces code (`var a = (var) 5;` is `DEF_VAR a; POP_VAR a`, and the pop finds an empty stack at run time) [D, confirmed on the port] |
 | variable `v` | `PUSH_VAR sym(v)` |
 | `o.m` (read) | `PUSH_VAR_REF sym(o)`, `PUSH_STRING "m"`, `PUSH_BY_EXP` |
 | `o[x]` (read) | `PUSH_VAR_REF sym(o)`, `exp(x)`, `PUSH_BY_EXP` |
@@ -957,14 +971,26 @@ Two ways to reproduce this exactly:
    The port used to validate this document is that.
 2. Write a recursive-descent parser and emulate the fetch timing with the
    table below. The table is derived mechanically from the same Bison
-   tables, but this route was not implemented or run [S]; prefer route 1
-   or check route 2 against route 1 on the corpus.
+   tables. **This is the route `luma-compiler` takes** (no Bison tables in
+   the repository): its parser fetches the next token only where the
+   automaton does and reads the scanner's counter when it builds a node;
+   `crates/luma-compiler/src/parser.rs` names the production and the case
+   at each node. Checked against route 1 on the whole corpus (288 of 288)
+   and on snippets of the [D] constructs with blanks turned into newlines
+   at random, so that every production meets a line change [V].
 
 **Lateness of the productions that create line-bearing nodes** (from the
 `yypact`/`yydefact` tables [S]; "late" means the reduction state needs the
 lookahead, so the lookahead is fetched; "early" means it reduces without
 fetching, so the line is the last token's unless an earlier reduction in the
-same chain already fetched):
+same chain already fetched). The rule behind the table: a production is
+late when the state it is reduced in can still shift something (an
+operator after an expression, `else` after an `if`, `(` after `new C` or
+after an lvalue, another statement after a `case` body), and early when
+that state has nothing but the reduction; Bison also removes the shifts
+that operator precedence resolves in favour of the reduction, which is why
+`%`, the tightest operator, is early while `*` and `/` (which can still
+shift a `%`) are late.
 
 | Node | Rules | Line recorded |
 |------|-------|---------------|
@@ -1134,42 +1160,73 @@ generations of games, needs only this one specification.
 5. **Constructs not in the corpus** are marked [D]: `continue`, `new`,
    floats, `*`, `%`, `===`/`!==`, `const`, `external` and its table,
    initialised multi-name declarations (their line), the `JMP 0` case.
-   Compiled scripts of other games containing them would settle them.
+   `luma-compiler` agrees with the port of the original's source on all
+   of them; compiled scripts of other games containing them would settle
+   whether the shipped binary does too.
 6. **Scanner corner cases.** Embedded NUL bytes, a lone `\r`, bytes in
    identifiers, and the 20th include level (an array overrun in the
    original) were not exercised.
-7. **Empty `for` initializer.** Crashes the original; this document does
-   not define behaviour (rejecting it with an error is reasonable).
+7. **Empty `for` initializer.** Crashes the original; `luma-compiler`
+   rejects it with an error.
 8. **Behaviour of the engine for the data the compiler writes** (for
    example how `DEF_GLOB_VAR x = e;` initialises an existing global) is the
    virtual machine's concern and is documented with it.
 
-## Correction to `formats/script.md`
+## Implementation in Luma
 
-For the maintainer of the format document, observations from this study:
+The crate `crates/luma-compiler` (a core crate; it depends on
+`luma-script` for the opcode numbers and the header constants, and on
+nothing else) follows the pipeline above, one module per phase:
 
-- "the compiler places the handler bodies after [the top-level code] and
-  jumps over them (`JMP` to the final `RET`)": more precisely there is one
-  `RET`, after everything; every function, method and event body is
-  immediately preceded by a `JMP` over itself; top-level statements come
-  first.
-- The function, event, method and externals tables are in **reverse source
-  order**, which matters for the "first match" and "last match" lookup
-  rules described there (events are searched from the end, so the first
-  handler in the source wins).
-- Strings are not deduplicated or tabulated; only symbols are.
+| Module | Phase | Original source it is written against |
+|--------|-------|---------------------------------------|
+| `lexer.rs` | tokens, `#include` expansion, the frozen line counter | `lang.l`, `main.c` |
+| `parser.rs` | recursive descent to a syntax tree with recorded lines | `lang.y`, `tree.c`, `parse.output` (for the lateness) |
+| `symbols.rs` | the weed checks and the two symbol passes | `weed.c`, `symbol.c` |
+| `codegen.rs` | code generation, back-patching, the tables | `opcode.c` |
 
-## Suggested implementation plan
+Its public surface: `Compiler::new(natives).compile(source, name,
+&mut includes)` returns the file's bytes or the first `Error`; `Natives`
+is the list of [Natives](#natives) (`Natives::wme()` by default, plus
+`.function(name)` for plugin classes); `Includes` is the include loader
+(any `FnMut(&[u8]) -> Option<Vec<u8>>`, or `GameDirs`, which resolves a
+name with `\` or `/` against one or more directories without regard to
+case, like the engine's file manager). `luma compile <source> [-o out]
+[--game dir] [--native name]...` wraps it: the `--game` directory (or
+the source's own directory) is the include root, and the name written in
+the header is the source's path relative to it with backslashes.
 
-1. A scanner with the include stack and the frozen line counter, producing
-   tokens with the two lines (token line, and the counter after it).
-2. The Bison-1.24-equivalent parser (tables or a hand parser with the
-   lateness table), with a semantic action per rule building a small AST
-   whose nodes carry the recorded line.
-3. Weed and the two symbol passes, parameterised by the natives list.
-4. The generator exactly as above, with a `Vec<u8>` and back-patch lists.
-5. The writer: header, tables in the order above, patched offsets.
-6. Tests: hand-assembled expectations with `Assembler` for each construct
-   (the table above is the checklist); one test per [D] item; and, locally
-   and skipping when absent, a comparison against the compiled scripts of a
-   local game whose sources are available (`testdata/local/`).
+**Errors** name the file, line and column where the offending token is:
+`scripts\base.inc:3:8: Duplicate declaration of variable 'G'`. Those are
+real positions in the file the token comes from (an include is named as
+written in its directive), unlike the line the original reports, which is
+its frozen counter. The messages are the original's where it has one
+([Diagnostics](#diagnostics)); syntax errors add what was expected and
+found.
+
+**Deliberate deviations**, all in cases where the original has no
+output:
+
+- an empty `for` initializer list is an error ("for loop without
+  initializer"), where the original crashes;
+- a call inside the method expression of `o[e](...)` or inside the member
+  of an assignment target `a[e] = v` is resolved like any other call,
+  where the original leaves it unresolved and crashes;
+- an integer constant beyond `i32` saturates (open question 1);
+- `#include` followed by a newline before the name is "Include filename
+  expected" (the original's scanner skips the newline without counting
+  it, then reads the name).
+
+**Tests.** `src/tests.rs` compiles a snippet per construct and compares
+the listing (with jump targets as instruction indexes) with what this
+document derives, including the complete and worked examples above, the
+`JMP 0` cases, every table and the error positions; the lexer and parser
+have their own tests for the token rules, the precedence levels and the
+grammar's exclusions. `tests/white_chamber.rs` is the oracle: with the
+White Chamber source pack unpacked under
+`testdata/local/white-chamber/source/` (git-ignored) and the game's
+packages under `testdata/local/white-chamber/unpacked/`, it compiles every
+source script with `Natives::wme()`, the include root being the `data`
+directory with `language` as a fallback, and compares it with the shipped
+script; a difference is reported with the first differing offset and the
+instructions around it in both. It skips when the data is absent.

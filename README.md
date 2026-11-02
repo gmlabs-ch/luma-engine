@@ -51,9 +51,9 @@ Luma Engine reads the same game data with a new engine built for today:
 | `luma-render` | 2D/2.5D renderer on wgpu | `luma-formats`, `wgpu`, `winit` |
 | `luma-audio` | Music, sound effects and voice | `kira` (Symphonia for decoding, `cpal` with the `device` feature) |
 | `luma-video` | Ogg Theora videos decoded to frames | `ogg`, `oxideav-theora`, `oxideav-core` |
-| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six core crates, `fontdue`, `serde`, `postcard`, `flate2` |
+| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six run-time core crates, `fontdue`, `serde`, `postcard`, `flate2` |
 | `luma-lumen` | Lumen, the scenario format for games made for Luma: parser, checker, text runner | nothing |
-| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen` |
+| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six run-time core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen` |
 | `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script`, `luma-compiler`, `luma` (feature `lumen`) |
 | `luma-player` | The desktop player | `luma` (features `adventure`, `audio-device`) |
 
