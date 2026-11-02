@@ -344,6 +344,42 @@ impl SceneGeometry {
         height_at(&self.walkplanes, pos, tolerance)
     }
 
+    /// Whether the straight segment `p1..p2` is free (`DirectPathExists`):
+    /// it is not when it pierces a triangle of any walk plane, enabled or
+    /// not, or of an **enabled** block. "Pierces" is the original's pair
+    /// of tests: the segment crosses the triangle's plane
+    /// ([`math::pick_get_intersect`], so a segment that only touches the
+    /// plane at one end counts) and the line through it meets the
+    /// triangle in one direction or the other ([`math::intersect_triangle`]
+    /// from `p1` along `p1 - p2`, then from `p2` along `p2 - p1`). A
+    /// segment that runs inside a plane never crosses it, so paths between
+    /// points lifted over one floor only meet blocks; a zero-length
+    /// segment is always free.
+    pub fn direct_path_exists(&self, p1: Vec3, p2: Vec3) -> bool {
+        let pierced = |nodes: &[MeshNode], enabled_only: bool| {
+            nodes
+                .iter()
+                .filter(|node| node.active || !enabled_only)
+                .flat_map(|node| node.mesh.triangles())
+                .any(|tri| segment_pierces(p1, p2, tri).is_some())
+        };
+        !(pierced(&self.walkplanes, false) || pierced(&self.blocks, true))
+    }
+
+    /// Where the segment `p1..p2` first pierces an enabled block
+    /// (`GetBlockIntersection`): the blocks in file order, their triangles
+    /// in face order, the first pierced one wins, whichever end of the
+    /// segment it is nearer to. `None` when no enabled block is pierced
+    /// (the original returns the origin, which the path finder treats as
+    /// "none").
+    pub fn block_intersection(&self, p1: Vec3, p2: Vec3) -> Option<Vec3> {
+        self.blocks
+            .iter()
+            .filter(|block| block.active)
+            .flat_map(|block| block.mesh.triangles())
+            .find_map(|tri| segment_pierces(p1, p2, tri))
+    }
+
     /// The point of the walk planes under a scene pixel (`Convert2Dto3D`):
     /// the pick ray of the projection is tested against every walk plane
     /// triangle, enabled or not, and the hit nearest to the camera wins.
@@ -492,6 +528,50 @@ impl SceneGeometry {
             .iter_mut()
             .find(|l| l.name.eq_ignore_ascii_case(name))
     }
+
+    /// Switches every light of this name on or off (`EnableLight`),
+    /// ignoring ASCII case. Returns whether a light matched. The original
+    /// re-registers all lights with the device afterwards
+    /// (`CreateLights`); here the renderer reads the flags when it draws.
+    pub fn set_light_enabled(&mut self, name: &str, enabled: bool) -> bool {
+        let mut found = false;
+        for light in self.lights.iter_mut() {
+            if light.name.eq_ignore_ascii_case(name) {
+                light.active = enabled;
+                found = true;
+            }
+        }
+        found
+    }
+
+    /// Whether the first light of this name is on (`IsLightEnabled`);
+    /// `false` for an unknown name.
+    pub fn is_light_enabled(&self, name: &str) -> bool {
+        self.light(name).is_some_and(|light| light.active)
+    }
+
+    /// Sets the diffuse colour of every light of this name
+    /// (`SetLightColor`), ignoring ASCII case. Returns whether a light
+    /// matched.
+    pub fn set_light_color(&mut self, name: &str, color: Rgb) -> bool {
+        let mut found = false;
+        for light in self.lights.iter_mut() {
+            if light.name.eq_ignore_ascii_case(name) {
+                light.color = color;
+                found = true;
+            }
+        }
+        found
+    }
+}
+
+/// Where the segment `p1..p2` pierces a triangle, as the original tests
+/// it in `DirectPathExists` and `GetBlockIntersection`; see
+/// [`SceneGeometry::direct_path_exists`].
+fn segment_pierces(p1: Vec3, p2: Vec3, [v0, v1, v2]: [Vec3; 3]) -> Option<Vec3> {
+    math::pick_get_intersect(p1, p2, v0, v1, v2)?;
+    math::intersect_triangle(p1, p1 - p2, v0, v1, v2)
+        .or_else(|| math::intersect_triangle(p2, p2 - p1, v0, v1, v2))
 }
 
 /// `GetHeightAt` over a list of walk planes; see
@@ -533,6 +613,57 @@ mod tests {
             ],
             &[[0, 1, 2], [0, 2, 3]],
         )
+    }
+
+    /// A closed box of twelve triangles, faces in the order bottom, top,
+    /// `-z`, `+z`, `-x`, `+x` (the order matters to
+    /// `block_intersection`).
+    pub(crate) fn box_mesh(name: &str, lo: Vec3, hi: Vec3) -> Vec<u8> {
+        let v = [
+            Vec3::new(lo.x, lo.y, lo.z),
+            Vec3::new(hi.x, lo.y, lo.z),
+            Vec3::new(hi.x, lo.y, hi.z),
+            Vec3::new(lo.x, lo.y, hi.z),
+            Vec3::new(lo.x, hi.y, lo.z),
+            Vec3::new(hi.x, hi.y, lo.z),
+            Vec3::new(hi.x, hi.y, hi.z),
+            Vec3::new(lo.x, hi.y, hi.z),
+        ];
+        Builder::mesh(
+            name,
+            &v,
+            &[
+                [0, 1, 2],
+                [0, 2, 3],
+                [4, 6, 5],
+                [4, 7, 6],
+                [0, 4, 5],
+                [0, 5, 1],
+                [3, 6, 7],
+                [3, 2, 6],
+                [0, 7, 4],
+                [0, 3, 7],
+                [1, 5, 6],
+                [1, 6, 2],
+            ],
+        )
+    }
+
+    /// A floor with a wall across its middle: the block `blk_wall` spans
+    /// `x` 40..60, `z` 20..80, 30 high.
+    pub(crate) fn wall_scene() -> SceneGeometry {
+        let bytes = Builder::file(
+            &[
+                floor("walk_01", 0.0),
+                box_mesh(
+                    "blk_wall",
+                    Vec3::new(40.0, 0.0, 20.0),
+                    Vec3::new(60.0, 30.0, 80.0),
+                ),
+            ],
+            &[],
+        );
+        SceneGeometry::load_3ds(&bytes, &NodePatterns::standard()).unwrap()
     }
 
     fn cube(name: &str, lo: Vec3, hi: Vec3) -> Vec<u8> {
@@ -769,6 +900,65 @@ mod tests {
         g.light_mut("omni01").unwrap().active = false;
         assert!(!g.light("Omni01").unwrap().active);
         assert!(g.light("none").is_none());
+    }
+
+    #[test]
+    fn direct_paths_are_stopped_by_enabled_blocks() {
+        let mut g = wall_scene();
+        let s = Vec3::new(10.0, 10.0, 50.0);
+        let t = Vec3::new(90.0, 10.0, 50.0);
+        let a = Vec3::new(30.0, 10.0, 10.0);
+        assert!(!g.direct_path_exists(s, t));
+        assert!(!g.direct_path_exists(t, s));
+        assert!(g.direct_path_exists(s, a));
+        assert!(g.direct_path_exists(s, s));
+        // Ending inside the wall still pierces its near face.
+        assert!(!g.direct_path_exists(s, Vec3::new(50.0, 10.0, 50.0)));
+        // Over the wall.
+        assert!(g.direct_path_exists(Vec3::new(10.0, 40.0, 50.0), Vec3::new(90.0, 40.0, 50.0)));
+        // The first pierced face in face order wins, from either end: the
+        // -x face is listed before the +x face.
+        assert_eq!(
+            g.block_intersection(s, t),
+            Some(Vec3::new(40.0, 10.0, 50.0))
+        );
+        assert_eq!(
+            g.block_intersection(t, s),
+            Some(Vec3::new(40.0, 10.0, 50.0))
+        );
+        assert_eq!(g.block_intersection(s, a), None);
+        g.set_node_enabled("blk_wall", false);
+        assert!(g.direct_path_exists(s, t));
+        assert_eq!(g.block_intersection(s, t), None);
+    }
+
+    #[test]
+    fn walk_planes_stop_segments_that_pierce_them_whether_enabled_or_not() {
+        let mut g = wall_scene();
+        let above = Vec3::new(20.0, 10.0, 10.0);
+        let below = Vec3::new(20.0, -10.0, 10.0);
+        assert!(!g.direct_path_exists(above, below));
+        assert!(!g.direct_path_exists(below, above));
+        // Touching the floor at one end counts as piercing it.
+        assert!(!g.direct_path_exists(above, Vec3::new(20.0, 0.0, 10.0)));
+        // Running inside the floor's plane does not.
+        assert!(g.direct_path_exists(Vec3::new(20.0, 0.0, 10.0), Vec3::new(30.0, 0.0, 10.0)));
+        g.set_node_enabled("walk_01", false);
+        assert!(!g.direct_path_exists(above, below));
+    }
+
+    #[test]
+    fn lights_are_switched_by_name() {
+        let mut g = demo();
+        assert!(g.is_light_enabled("OMNI01"));
+        assert!(g.set_light_enabled("omni01", false));
+        assert!(!g.is_light_enabled("Omni01"));
+        assert!(!g.set_light_enabled("none", true));
+        assert!(!g.is_light_enabled("none"));
+        let red = Rgb { r: 255, g: 0, b: 0 };
+        assert!(g.set_light_color("spot01", red));
+        assert_eq!(g.light("Spot01").unwrap().color, red);
+        assert!(!g.set_light_color("none", red));
     }
 
     #[test]

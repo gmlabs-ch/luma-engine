@@ -905,6 +905,9 @@ debug rendering and the shadow-receiver pass skip inactive planes.
 
 ### 9.2 Triangle tests
 
+**As implemented** by `math::intersect_triangle`, `math::pick_get_intersect`,
+`SceneGeometry::direct_path_exists` and `SceneGeometry::block_intersection`.
+
 - `IntersectTriangle(origin, direction, v0, v1, v2)` is Moeller-Trumbore
   **without** the `t >= 0` check and **single-sided**: `det < 0.0001` fails,
   i.e. the triangle is hit only when the ray direction opposes the triangle's
@@ -913,15 +916,28 @@ debug rendering and the shadow-receiver pass skip inactive planes.
   intersection), not barycentric coordinates.
 - `PickGetIntersect(a, b, v0, v1, v2)`: does the segment `a..b` cross the
   **plane** of the triangle (`0 <= t <= 1`, not parallel)? It does not test
-  containment.
-- `DirectPathExists(p1, p2)`: false if, for any walk plane triangle (active
-  or not) or **active** block triangle, the segment crosses the plane **and**
-  `IntersectTriangle(p1, p1 - p2)` or `IntersectTriangle(p2, p2 - p1)` hits
-  the triangle: that is, if the segment pierces the triangle in either
-  direction. Free segments between floor-height points do not pierce planes,
-  so walk planes mostly matter through picking and height, and blocks
-  through piercing. Staying inside a walk plane's outline is **not**
-  checked: it is the author's waypoints that keep paths on the floor.
+  containment. The closed range means a segment that only **touches** the
+  plane at one end crosses it.
+- `DirectPathExists(p1, p2)` (`direct_path_exists`): false if, for any walk
+  plane triangle (active or not) or **active** block triangle, the segment
+  crosses the plane **and** `IntersectTriangle(p1, p1 - p2)` or
+  `IntersectTriangle(p2, p2 - p1)` hits the triangle: that is, if the
+  segment pierces the triangle in either direction (the two single-sided
+  tests together make the test two-sided, so the winding of a block does
+  not matter). A segment running inside a plane never crosses it, so the
+  paths between points lifted over one floor only meet blocks; a segment
+  that ends **on** a walk plane coming from above does pierce it (the
+  touch counts) and is blocked, which is why path points are lifted; a
+  zero-length segment is always free. Staying inside a walk plane's
+  outline is **not** checked: it is the author's waypoints that keep paths
+  on the floor.
+- `GetBlockIntersection(p1, p2)` (`block_intersection`): the same test
+  over the **active blocks only**, returning the piercing point of the
+  first pierced triangle in file order (blocks in order, faces in order),
+  not the one nearest to `p1`: for a segment through a box both side
+  faces are pierced and the one listed first wins, from either end. With
+  no hit the original returns the origin, which its only caller then
+  treats as "no hit" (9.3); Luma returns `None`.
 
 ### 9.3 Path finder
 
@@ -953,12 +969,23 @@ busy, and the actor asks again next frame).
 ### 9.4 Other geometry services
 
 - `Convert2Dto3D`, `Convert2Dto3DTolerant`, `Convert3Dto2D`: section 4.
-- `EnableLights`: section 3.4. `SetLightColor`, `EnableLight`: change the
-  light and re-register all lights.
-- `EnableNode`/`IsNodeEnabled`: by mesh name over blocks, planes and
-  generics.
-- `DropWaypoints`: re-lifts every waypoint (at load and when
-  `WaypointsHeight` changes).
+- `EnableLights`: section 3.4 (the renderer's, task 11). `SetLightColor`,
+  `EnableLight`, `IsLightEnabled`: **as implemented** by
+  `SceneGeometry::set_light_color`, `set_light_enabled` (every light of
+  that name, case-insensitive) and `is_light_enabled` (the first); the
+  original re-registers all lights with the device after a change, Luma's
+  renderer reads the flags when it draws.
+- `EnableNode`/`IsNodeEnabled`: **as implemented** by
+  `SceneGeometry::set_node_enabled` (every node of that name over blocks,
+  planes and generics) and `is_node_enabled` (the first match, blocks
+  first).
+- `DropWaypoints`: **as implemented** by `SceneGeometry::drop_waypoints`,
+  re-lifts every waypoint of every group (at load and when
+  `WaypointsHeight` changes, `set_waypoint_height`). Waypoint groups
+  (`CAdWaypointGroup3D`, `WaypointGroup`): the loader puts all waypoint
+  meshes into one group; a group has an `active` flag that the path
+  finder honours and that nothing in the original changes (no script
+  method, not saved).
 - `Render(showGeometry)`: the debug overlay (wireframes in the colours
   above and the waypoint marker sprite `wpt.sprite`); it also stores the
   matrices and scroll of the frame for the conversions.
