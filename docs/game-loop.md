@@ -33,8 +33,11 @@ in this order (`Runtime::tick`):
    next frame).
 
 The frame is then drawn: the scene with the actors, the windows marked
-`IN_GAME`, the other windows, the sentences, the cursor, and the fader's
-colour over everything.
+`IN_GAME`, the other windows, the sentences, the cursor, the fader's
+colour over everything, and last the messages of `Game.Msg`: short
+texts in the system font from 20 pixels down the left edge, each for
+three seconds of the game timer, five at most (the oldest goes), as the
+original engine's `QuickMessage`; nothing shows without a system font.
 
 While a window is **system exclusive** (see
 [formats/window.md](formats/window.md)) the game is frozen: the timer
@@ -105,7 +108,12 @@ scene get no mouse event: only the active object does, a control of the
 window or its shield.
 
 `Game.MouseX` and `Game.MouseY` are the mouse in game pixels
-(writable, as is `Game.SetMousePos`); `Scene.MouseX` and `Scene.MouseY`
+(writable, as is `Game.SetMousePos`). `Game.LockMouseRect(left, top,
+right, bottom)` keeps the position the game sees inside a rectangle
+(the edges are put in order; a rectangle with a zero edge unlocks,
+since the original engine applies the lock only while all four edges
+are non-zero); the original engine also moves the system cursor back
+into the rectangle, which Luma does not. `Scene.MouseX` and `Scene.MouseY`
 add the scene's scroll offset and take off the scene viewport's origin
 (`SCENE_VIEWPORT` in the game file, `Game.SetSceneViewport`; see
 [formats/game.md](formats/game.md)). The viewport also sizes the view
@@ -182,7 +190,13 @@ default) the engine keeps:
 
 Nothing else comes back: positions, script variables and the scripts
 themselves start over from the file, and a scene's init script runs on
-every visit, so it may override what was restored. A remembered sprite
+every visit, so it may override what was restored. `Game.Reset`
+(`CAdGame::ResetContent`) forgets every remembered scene, along with the
+inventory, the dialogue branches and the "once" responses, loads the
+items file again, and sets the non-native script globals back to
+`null`; the scene the player is in stays, and is not remembered when
+left. The flag that skips that one save travels with a saved game, as
+in the original engine. A remembered sprite
 that cannot be loaded is logged and the entity keeps the file's. The
 states are part of a saved game (see [saving.md](saving.md)). The
 original engine also remembers whether each waypoint group is active;

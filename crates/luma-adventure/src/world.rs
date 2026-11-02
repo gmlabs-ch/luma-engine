@@ -32,6 +32,23 @@ use crate::video::VideoPlayer;
 use luma_audio::Audio;
 use luma_formats::font::TextAlign;
 
+/// A short on-screen message (`Game.Msg`, `CBGame::QuickMessage`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuickMessage {
+    /// The text shown.
+    pub text: String,
+    /// When it was posted, on the game timer.
+    pub start: u64,
+    /// Its height in the system font, over the screen's width.
+    pub height: i32,
+}
+
+/// How long a quick message stays (`QUICK_MSG_DURATION`).
+pub const QUICK_MSG_MS: u64 = 3000;
+
+/// How many quick messages show at once (`MAX_QUICK_MSG`).
+pub const MAX_QUICK_MSGS: usize = 5;
+
 /// The game as scripts see it. Implements the script engine's [`Host`].
 pub struct World {
     pub(crate) vfs: Vfs,
@@ -112,6 +129,14 @@ pub struct World {
     pub(crate) fps: i32,
     pub(crate) fps_time: u64,
     pub(crate) fps_frames: i32,
+    /// The messages of `Game.Msg` on screen, oldest first.
+    pub(crate) quick_messages: Vec<QuickMessage>,
+    /// `Game.LockMouseRect`: left, top, right, bottom; the mouse stays
+    /// inside while all four are non-zero (`m_MouseLockRect`).
+    pub(crate) mouse_lock: (i32, i32, i32, i32),
+    /// `Game.Reset` was called: the scene left next is not remembered
+    /// (`m_TempDisableSaveState`).
+    pub(crate) temp_disable_save_state: bool,
     pub(crate) timer: u64,
     pub(crate) clock: u64,
     log: Vec<String>,
@@ -221,6 +246,9 @@ impl World {
             fps: 0,
             fps_time: 0,
             fps_frames: 0,
+            quick_messages: Vec::new(),
+            mouse_lock: (0, 0, 0, 0),
+            temp_disable_save_state: false,
             timer: 0,
             clock: 0,
             log: Vec::new(),
@@ -403,6 +431,108 @@ impl World {
     /// Frames drawn in the last whole second (`Game.FPS`).
     pub fn fps(&self) -> i32 {
         self.fps
+    }
+
+    /// Posts a short message drawn over the frame for three seconds
+    /// (`Game.Msg`, `CBGame::QuickMessage`); the oldest goes when five
+    /// are showing. Nothing shows without a system font, as in the
+    /// original engine.
+    pub fn quick_message(&mut self, text: &str) {
+        if self.quick_messages.len() >= MAX_QUICK_MSGS {
+            self.quick_messages.remove(0);
+        }
+        let width = self.settings.width as i32;
+        let height = self
+            .system_font
+            .clone()
+            .and_then(|path| self.fonts.get_mut(&path))
+            .map_or(0, |font| font.text_height(text, width));
+        self.quick_messages.push(QuickMessage {
+            text: text.to_string(),
+            start: self.timer,
+            height,
+        });
+    }
+
+    /// The quick messages on screen, oldest first.
+    pub fn quick_messages(&self) -> &[QuickMessage] {
+        &self.quick_messages
+    }
+
+    /// Drops the quick messages past their time and lays out the rest
+    /// (`DisplayQuickMsg`'s update half).
+    pub(crate) fn update_quick_messages(&mut self) {
+        let timer = self.timer;
+        self.quick_messages
+            .retain(|m| timer.saturating_sub(m.start) < QUICK_MSG_MS);
+        let width = self.settings.width as i32;
+        if let Some(font) = self
+            .system_font
+            .clone()
+            .and_then(|p| self.fonts.get_mut(&p))
+        {
+            for message in &self.quick_messages {
+                font.prepare(&message.text, width, TextAlign::Left, -1);
+            }
+        }
+    }
+
+    /// Draws the quick messages from `y` 20 down, in the system font,
+    /// over everything else (`DisplayQuickMsg`).
+    fn draw_quick_messages<'a>(&'a self, list: &mut luma_render::DrawList<'a>) {
+        let Some(font) = self.system_font.as_ref().and_then(|p| self.fonts.get(p)) else {
+            return;
+        };
+        let width = self.settings.width as i32;
+        let mut y = 20;
+        for message in &self.quick_messages {
+            font.draw(list, &message.text, 0, y, width, TextAlign::Left, -1);
+            y += message.height;
+        }
+    }
+
+    /// Confines the mouse to a rectangle (`Game.LockMouseRect`): the
+    /// edges are put in order, and a rectangle with a zero edge unlocks,
+    /// since the original engine applies the lock only while all four
+    /// are non-zero. The lock clamps the position the game sees; the
+    /// system cursor is not moved.
+    pub fn lock_mouse_rect(&mut self, left: i32, top: i32, right: i32, bottom: i32) {
+        let (left, right) = if right < left {
+            (right, left)
+        } else {
+            (left, right)
+        };
+        let (top, bottom) = if bottom < top {
+            (bottom, top)
+        } else {
+            (top, bottom)
+        };
+        self.mouse_lock = (left, top, right, bottom);
+    }
+
+    /// The mouse lock rectangle, if one applies.
+    pub fn mouse_lock(&self) -> Option<(i32, i32, i32, i32)> {
+        let (l, t, r, b) = self.mouse_lock;
+        (l != 0 && t != 0 && r != 0 && b != 0).then_some((l, t, r, b))
+    }
+
+    /// Puts the game back to its start (`Game.Reset`,
+    /// `CAdGame::ResetContent`): the dialogue branches, the inventory,
+    /// the remembered scene states and the "once" responses are
+    /// cleared, the items file is loaded again, the scene left next is
+    /// not remembered, and the script globals that are not natives go
+    /// back to `null`. The current scene stays, as in the original
+    /// engine.
+    pub fn reset_content(&mut self, engine: &mut Engine) {
+        self.responses.branches.clear();
+        self.inventory.taken.clear();
+        self.selected_item = None;
+        self.scene_states.clear();
+        self.responses.used_branch.clear();
+        self.responses.used_game.clear();
+        self.load_items(engine);
+        self.temp_disable_save_state = true;
+        engine.clear_globals(false);
     }
 
     /// Tells the world whether it runs in a window (`Game.WindowedMode`).
@@ -886,6 +1016,7 @@ impl World {
         if let Some(white) = white {
             self.draw_fade(list, white);
         }
+        self.draw_quick_messages(list);
     }
 
     /// Uploads the textures of the scene, of the actors, of the cursors
@@ -913,7 +1044,10 @@ impl World {
             engine.apply_event(self, scene_id, "SceneShutdown", true);
             self.prev_scene_name = name;
             self.prev_scene_filename = filename;
-            self.save_scene_state();
+            if !self.temp_disable_save_state {
+                self.save_scene_state();
+            }
+            self.temp_disable_save_state = false;
         }
         // Objects of the old scene, and the scripts attached to them.
         let scene_actors: Vec<NativeId> = self
@@ -1845,6 +1979,7 @@ impl Runtime {
         self.world.update_ui(&mut self.engine);
         self.world.update_inventory(&mut self.engine);
         self.world.prepare_inventory_texts();
+        self.world.update_quick_messages();
         self.world.update_cursor();
         self.world.update_item_cursor(&self.engine);
         self.world.apply_pending_events(&mut self.engine);

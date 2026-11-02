@@ -914,6 +914,43 @@ fn services_script() -> Vec<u8> {
     a.build()
 }
 
+fn misc_script() -> Vec<u8> {
+    // Game.Msg("Hello there"); Game.LockMouseRect(4, 4, 20, 20);
+    let mut a = Assembler::new("misc.script");
+    a.def_glob_var("result");
+    call(&mut a, "Game", "Msg", &[Arg::Str("Hello there")]);
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "LockMouseRect",
+        &[Arg::Int(20), Arg::Int(20), Arg::Int(4), Arg::Int(4)],
+    );
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::Ret);
+    // on "Unlock": Game.LockMouseRect();
+    a.event("Unlock");
+    a.emit(Instruction::Scope);
+    call(&mut a, "Game", "LockMouseRect", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    // on "DoReset": Game.Reset();
+    a.event("DoReset");
+    a.emit(Instruction::Scope);
+    call(&mut a, "Game", "Reset", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    // on "NewBox": result.box = Game.LoadInventoryBox("inv2.def");
+    // result.noBox = Game.LoadInventoryBox("nope.def");
+    a.event("NewBox");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(&mut a, "Game", "LoadInventoryBox", &[Arg::Str("inv2.def")]);
+    store(&mut a, "box");
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
 fn hall_init_script() -> Vec<u8> {
     // Records the state the hall's nodes arrive in, then changes it.
     let mut a = Assembler::new("scenes\\hall\\hall_init.script");
@@ -1107,6 +1144,16 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     pkg.add_file("save.script", save_script());
     pkg.add_file("settings.script", settings_script());
     pkg.add_file("services.script", services_script());
+    pkg.add_file("misc.script", misc_script());
+    pkg.add_file(
+        "inv2.def",
+        b"INVENTORY_BOX {
+  ITEM_WIDTH=12 ITEM_HEIGHT=12 SPACING=0
+  AREA { 0, 0, 24, 12 }
+  WINDOW { X=0 Y=0 WIDTH=24 HEIGHT=12 }
+}"
+        .to_vec(),
+    );
     pkg.add_file(
         "art\\prop.sprite",
         b"SPRITE { LOOPING=FALSE FRAME { DELAY=100 IMAGE=\"art\\red.png\" } FRAME { DELAY=100 IMAGE=\"art\\green.png\" } }".to_vec(),
@@ -2868,5 +2915,102 @@ fn system_properties_checksums_and_run_script() {
     assert_eq!(
         runtime.world.get_property(game, "WindowedMode"),
         Some(Value::Bool(true))
+    );
+}
+
+#[test]
+fn quick_messages_mouse_lock_reset_and_inventory_box_reload() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "misc.script")
+    );
+    runtime.tick(16);
+
+    // Msg: on screen for three seconds of the game timer.
+    let messages = runtime.world.quick_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].text, "Hello there");
+    assert_eq!(
+        messages[0].height, 16,
+        "two lines of the system font on a 32-pixel screen"
+    );
+    for _ in 0..200 {
+        runtime.tick(16);
+    }
+    assert!(runtime.world.quick_messages().is_empty());
+
+    // LockMouseRect: the edges were given in the wrong order.
+    assert_eq!(runtime.world.mouse_lock(), Some((4, 4, 20, 20)));
+    runtime.mouse_move(0, 0);
+    assert_eq!((runtime.world.mouse().x, runtime.world.mouse().y), (4, 4));
+    runtime.mouse_move(30, 10);
+    assert_eq!((runtime.world.mouse().x, runtime.world.mouse().y), (20, 10));
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Unlock", false);
+    runtime.tick(16);
+    assert_eq!(runtime.world.mouse_lock(), None);
+    runtime.mouse_move(0, 0);
+    assert_eq!((runtime.world.mouse().x, runtime.world.mouse().y), (0, 0));
+
+    // LoadInventoryBox replaces the box and its window.
+    let old_window = runtime.world.inventory().window.unwrap();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "NewBox", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "box"), Value::Bool(true));
+    let inventory = runtime.world.inventory();
+    assert_eq!(inventory.def.as_ref().unwrap().item_width, 12);
+    assert_ne!(inventory.window, Some(old_window));
+    assert!(!runtime.world.objects().contains(old_window));
+
+    // Reset: the inventory, the remembered scenes, the globals go; the
+    // scene left next is not remembered.
+    assert!(runtime.world.take_item("key", None));
+    runtime.engine.set_global("flag", Value::Int(5));
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.tick(16);
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    assert!(
+        runtime
+            .world
+            .scene_states()
+            .contains_key("scenes\\hall.scene")
+    );
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.tick(16);
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "DoReset", false);
+    runtime.tick(16);
+    assert!(runtime.world.inventory().taken.is_empty());
+    assert_eq!(runtime.world.inventory().items.len(), 2, "items reloaded");
+    assert!(runtime.world.scene_states().is_empty());
+    assert_eq!(runtime.engine.global("flag"), Some(&Value::Null));
+    assert!(runtime.engine.global("Game").unwrap().is_native());
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Hall");
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    assert!(
+        runtime.world.scene_states().is_empty(),
+        "the hall was not noted"
+    );
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    assert!(
+        runtime
+            .world
+            .scene_states()
+            .contains_key("scenes\\hall.scene")
     );
 }

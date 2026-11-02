@@ -47,7 +47,6 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 
 /// Methods the engine has that later milestones implement.
 const GAME_STUBS: &[&str] = &[
-    "LockMouseRect",
     "Screenshot",
     "ScreenshotEx",
     "SetLoadingScreen",
@@ -58,10 +57,8 @@ const GAME_STUBS: &[&str] = &[
     "DeleteSaveThumbnail",
     "ShowStatusLine",
     "HideStatusLine",
-    "LoadInventoryBox",
     "LoadEntity",
     "CreateEntity",
-    "Reset",
     "AccOutputText",
     "DumpTextureStats",
     "EnableScriptProfiling",
@@ -647,7 +644,26 @@ impl World {
             "Msg" => {
                 let text = arg(0).get_string(self);
                 self.log(format!("msg: {text}"));
+                self.quick_message(&text);
                 Return::null()
+            }
+            "LockMouseRect" => {
+                let (l, t, r, b) = (
+                    arg(0).get_int(self),
+                    arg(1).get_int(self),
+                    arg(2).get_int(self),
+                    arg(3).get_int(self),
+                );
+                self.lock_mouse_rect(l, t, r, b);
+                Return::null()
+            }
+            "Reset" => {
+                self.reset_content(ctx.engine);
+                Return::null()
+            }
+            "LoadInventoryBox" => {
+                let path = arg(0).get_string(self);
+                Return::value(self.load_inventory_box_from(ctx.engine, &path))
             }
             "LOG" => {
                 let text = arg(0).get_string(self);

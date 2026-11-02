@@ -223,21 +223,38 @@ impl World {
     /// Loads the inventory box (`INVENTORY_BOX` of `default.game`): its
     /// window, whose buttons the box listens to.
     pub(crate) fn load_inventory_box(&mut self, engine: &mut Engine) {
-        let Some(path) = self.game_file().inventory_box.clone() else {
-            return;
-        };
-        let bytes = match self.vfs.read(&path) {
+        if let Some(path) = self.game_file().inventory_box.clone() {
+            self.load_inventory_box_from(engine, &path);
+        }
+    }
+
+    /// Loads an inventory box definition in place of the current one
+    /// (`Game.LoadInventoryBox`): the old box's window goes first, as the
+    /// original engine unregisters it. Returns whether the file loaded;
+    /// when it does not, the game has no inventory box.
+    pub fn load_inventory_box_from(&mut self, engine: &mut Engine, path: &str) -> bool {
+        for id in [
+            self.inventory.window.take(),
+            self.inventory.close_button.take(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            self.unload_object(engine, id);
+        }
+        self.inventory.def = None;
+        let bytes = match self.vfs.read(path) {
             Ok(bytes) => bytes,
             Err(err) => {
                 self.log(format!("Error opening inventory box '{path}': {err}"));
-                return;
+                return false;
             }
         };
         let mut def = match InventoryBoxDef::parse(&bytes) {
             Ok(def) => def,
             Err(err) => {
                 self.log(format!("Error parsing inventory box '{path}': {err}"));
-                return;
+                return false;
             }
         };
         if let Some(window_def) = def.window.take() {
@@ -257,6 +274,7 @@ impl World {
         }
         self.inventory.visible = def.always_visible;
         self.inventory.def = Some(def);
+        true
     }
 
     /// Puts an item in the inventory (`TakeItem`): again if it was

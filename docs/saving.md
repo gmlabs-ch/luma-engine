@@ -43,8 +43,9 @@ A saved game holds:
 - the fader, the cursors chosen, the mouse and the keyboard state;
 - the game's own settings a script may change: name, caption,
   subtitles, talk and video skip buttons, `Interactive`, the main
-  object, `TextEncoding`, `StartupScene`; the game timer and the wall
-  clock; the random generator.
+  object, `TextEncoding`, `StartupScene`, the mouse lock rectangle
+  and whether `Game.Reset` asked not to remember the scene left next;
+  the game timer and the wall clock; the random generator.
 
 What a saved game does **not** hold, and what happens to it:
 
@@ -149,7 +150,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `3` today |
+| 4 | layout version, little-endian; `4` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
