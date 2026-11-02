@@ -161,7 +161,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp
 - Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`)
-- Count: 90 done, 58 todo, 17 no-op
+- Count: 94 done, 54 todo, 17 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -188,8 +188,8 @@ How the list was made. For every class with a script interface, the names tested
 | `PlayVideo` | method | **todo** | Deprecated AVI player (DirectShow). Luma aliases it to `PlayTheora`; AVI files cannot play. |
 | `PlayTheora` | method | **done** | Plays an Ogg Theora video full-frame (file, type, x, y, freeze music, drop frames, subtitles). |
 | `QuitGame` | method | **done** | Ends the game. |
-| `RegWriteNumber`, `RegWriteString` | method | **todo** | Stores a value in the game's private settings (the `PrivateSettings` section of `wme.ini` in WME). Logged and ignored. |
-| `RegReadNumber`, `RegReadString` | method | **todo** | Reads a stored private setting, with a default. Luma returns the type's zero value, never the stored one. |
+| `RegWriteNumber`, `RegWriteString` | method | **done** | Stores a value in the game's private settings: the `PrivateSettings` section of `wme.ini` in WME, of `settings.ini` in the save directory in Luma (see `docs/saving.md`). |
+| `RegReadNumber`, `RegReadString` | method | **done** | Reads a stored private setting, with a default; the number is the leading integer of the stored text, as `GetPrivateProfileInt` reads it. |
 | `SaveGame` | method | **done** | Saves to a slot (slot, description, quick save); the script resumes after loading. |
 | `LoadGame` | method | **done** | Loads a slot at the start of the next frame. |
 | `IsSaveSlotUsed`, `GetSaveSlotDescription`, `EmptySaveSlot` | method | **done** | Inspects / clears a save slot. |
@@ -1031,7 +1031,7 @@ How the list was made. For every class with a script interface, the names tested
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 45 | 27 | 0 | 72 |
-| CBGame | 90 | 58 | 17 | 165 |
+| CBGame | 94 | 54 | 17 | 165 |
 | CAdGame | 56 | 9 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
 | CAdScene | 46 | 35 | 2 | 83 |
@@ -1070,9 +1070,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **559** | **568** | **29** | **1156** |
+| **All** | **563** | **564** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 544 done, 559 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 548 done, 555 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1105,7 +1105,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
-| Game services | 46 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
+| Game services | 42 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
 | Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
@@ -1117,7 +1117,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **568** | |
+| **All** | **564** | |
 
 ## Members in Luma that WME 1.x does not define
 

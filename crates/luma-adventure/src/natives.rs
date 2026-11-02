@@ -48,8 +48,6 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 /// Methods the engine has that later milestones implement.
 const GAME_STUBS: &[&str] = &[
     "LockMouseRect",
-    "RegWriteNumber",
-    "RegWriteString",
     "Screenshot",
     "ScreenshotEx",
     "OpenDocument",
@@ -688,13 +686,28 @@ impl World {
                 self.stub(&format!("Game.{name}"));
                 Return::null()
             }
+            "RegWriteNumber" | "RegWriteString" => {
+                let key = arg(0).get_string(self);
+                let value = match name {
+                    "RegWriteNumber" => arg(1).get_int(self).to_string(),
+                    _ => arg(1).get_string(self),
+                };
+                self.write_setting(&key, &value);
+                Return::null()
+            }
             "RegReadString" => {
-                self.stub(&format!("Game.{name}"));
-                Return::value("")
+                let key = arg(0).get_string(self);
+                let default = arg(1).get_string(self);
+                Return::value(self.read_setting(&key).unwrap_or(default))
             }
             "RegReadNumber" => {
-                self.stub(&format!("Game.{name}"));
-                Return::value(0)
+                // `GetPrivateProfileInt`: the leading integer of the value.
+                let key = arg(0).get_string(self);
+                let default = arg(1).get_int(self);
+                Return::value(
+                    self.read_setting(&key)
+                        .map_or(default, |v| luma_script::atoi(&v)),
+                )
             }
             "AddResponse" | "AddResponseOnce" | "AddResponseOnceGame" => {
                 let kind = match name {

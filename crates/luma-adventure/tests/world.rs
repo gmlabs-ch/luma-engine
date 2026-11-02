@@ -792,6 +792,64 @@ fn save_script() -> Vec<u8> {
     a.build()
 }
 
+fn settings_script() -> Vec<u8> {
+    // Game.RegWriteNumber("Volume", 80); Game.RegWriteString("Lang", "fr");
+    // then reads them back, with defaults for a missing key.
+    let mut a = Assembler::new("settings.script");
+    a.def_glob_var("result");
+    call(
+        &mut a,
+        "Game",
+        "RegReadNumber",
+        &[Arg::Str("Volume"), Arg::Int(100)],
+    );
+    store(&mut a, "volumeBefore");
+    call(
+        &mut a,
+        "Game",
+        "RegWriteNumber",
+        &[Arg::Str("Volume"), Arg::Int(80)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "RegWriteString",
+        &[Arg::Str("Lang"), Arg::Str("fr")],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "RegReadNumber",
+        &[Arg::Str("volume"), Arg::Int(100)],
+    );
+    store(&mut a, "volume");
+    call(
+        &mut a,
+        "Game",
+        "RegReadString",
+        &[Arg::Str("Lang"), Arg::Str("en")],
+    );
+    store(&mut a, "lang");
+    call(
+        &mut a,
+        "Game",
+        "RegReadString",
+        &[Arg::Str("Missing"), Arg::Str("none")],
+    );
+    store(&mut a, "missing");
+    call(
+        &mut a,
+        "Game",
+        "RegReadNumber",
+        &[Arg::Str("Lang"), Arg::Int(7)],
+    );
+    store(&mut a, "langAsNumber");
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
 fn hall_init_script() -> Vec<u8> {
     // Records the state the hall's nodes arrive in, then changes it.
     let mut a = Assembler::new("scenes\\hall\\hall_init.script");
@@ -983,6 +1041,7 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     );
     pkg.add_file("walk.script", walk_script());
     pkg.add_file("save.script", save_script());
+    pkg.add_file("settings.script", settings_script());
     pkg.add_file(
         "art\\prop.sprite",
         b"SPRITE { LOOPING=FALSE FRAME { DELAY=100 IMAGE=\"art\\red.png\" } FRAME { DELAY=100 IMAGE=\"art\\green.png\" } }".to_vec(),
@@ -2644,4 +2703,36 @@ fn load_items_reloads_the_items_as_the_original_engine_does() {
     let rock = runtime.world.create_item(&mut runtime.engine, Some("rock"));
     assert_eq!(runtime.world.item_by_name("rock"), Some(rock));
     assert_eq!(names(&runtime), ["key", "rock"]);
+}
+
+#[test]
+fn private_settings_persist_in_the_save_directory() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "settings.script")
+    );
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "volumeBefore"), Value::Int(100));
+    assert_eq!(result(&runtime, "volume"), Value::Int(80));
+    assert_eq!(result(&runtime, "lang"), Value::from("fr"));
+    assert_eq!(result(&runtime, "missing"), Value::from("none"));
+    assert_eq!(result(&runtime, "langAsNumber"), Value::Int(0));
+    let ini = std::fs::read_to_string(dir.join("saves").join("settings.ini")).unwrap();
+    assert_eq!(ini, "[PrivateSettings]\nVolume=80\nLang=fr\n");
+
+    // A second run of the game reads the values back.
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    assert_eq!(runtime.world.read_setting("volume").as_deref(), Some("80"));
+    assert_eq!(runtime.world.read_setting("Lang").as_deref(), Some("fr"));
+    assert_eq!(runtime.world.read_setting("Missing"), None);
 }

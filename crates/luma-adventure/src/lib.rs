@@ -34,6 +34,8 @@
 //! - [`Runtime`]: a script engine and a world, driven once per frame.
 //! - [`save`]: saved games, the whole engine written to a slot and read
 //!   back (`Game.SaveGame`, `Game.LoadGame`).
+//! - [`registry`]: the private settings a game keeps between runs
+//!   (`Game.RegReadNumber`, `RegWriteString`...).
 
 #![forbid(unsafe_code)]
 
@@ -49,6 +51,7 @@ mod natives_sound;
 mod natives_ui;
 pub mod objects;
 pub mod path;
+pub mod registry;
 pub mod responses;
 pub mod save;
 pub mod scene_state;

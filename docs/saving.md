@@ -114,6 +114,31 @@ file); `Game.EmptySaveSlot(slot)` deletes the file;
 in the save directory (the original engine keeps it in the registry),
 `-1` before any save.
 
+## Private settings
+
+`Game.RegWriteNumber(key, value)`, `RegWriteString(key, value)`,
+`RegReadNumber(key, default)` and `RegReadString(key, default)` keep
+values between runs of the game: its options, the language picked, a
+"seen the intro" flag. The original engine stores them in the
+`PrivateSettings` section of its `wme.ini`, or in the Windows registry
+under the game's key. Luma stores them in `settings.ini` in the save
+directory (the one of `Game.SaveDirectory`), in a `[PrivateSettings]`
+section, one `key=value` per line:
+
+```ini
+[PrivateSettings]
+Volume=80
+Lang=fr
+```
+
+Keys compare without case, as Windows reads them. A read of a key never
+written returns the default; `RegReadNumber` takes the leading integer
+of the stored text (`GetPrivateProfileInt`), `0` when there is none. A
+value is written to the file at once; a file that cannot be written is
+logged and the value is lost, as the original engine reports nothing
+to the script either. The section name is the original engine's, so a
+game's values can be copied from its `wme.ini` by hand.
+
 ## File format
 
 The format is Luma's own: the original engine's `.dsv` files serialize
