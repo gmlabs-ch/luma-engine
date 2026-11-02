@@ -422,7 +422,13 @@ they are shown in, updated every frame, and they stay when the scene
 changes, reset like the game's actors (their sentence and `PlayAnim`
 end, their scripts' waits are cut). `Game.UnloadObject` removes one.
 Luma keeps them in a view of their own (`World::game_view`), named by
-`EntityRef::Game`, with their sprites.
+`EntityRef::Game`, with their sprites. `new Entity()` makes one too, and
+`new Actor()` an empty actor of the game (the original engine's
+`CAdGame::ExternalCall`); the original engine's objects belong to no
+list and are never drawn, Luma's are the game's own, so a sprite given
+to them shows. `new Entity(file)` and `new Actor(file)` load the file,
+as `Game.LoadEntity` and `Game.LoadActor` do: a Luma extension, the
+original constructors take no argument.
 
 `AddAttachment(file, preDisplay, x, y)` on an actor or an entity loads an
 entity file as an attachment of the object (`CAdObject::m_AttachmentsPre`,

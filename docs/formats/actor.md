@@ -227,3 +227,6 @@ default), and likewise vertically.
 - A scene's `LoadActor` objects are removed with the scene; the game's
   keep their position and direction, are `Reset` on every scene change,
   and forget which regions they stood in.
+- `new Actor()` makes an empty actor of the game, without a file or
+  sprites (nothing is drawn until a script gives it one); `new
+  Actor(file)` loads the file as `Game.LoadActor` does.

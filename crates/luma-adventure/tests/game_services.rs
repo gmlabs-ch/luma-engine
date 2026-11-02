@@ -4,7 +4,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use luma_adventure::{Audio, Kind, Runtime};
+use luma_adventure::{Audio, EntityRef, Kind, Runtime};
 use luma_archive::{PackageBuilder, Vfs};
 use luma_compiler::{Compiler, Natives};
 use luma_formats::Image;
@@ -65,6 +65,30 @@ result.coinHoverCursor = coin.GetHoverCursorObject();
 var coinNormal = coin.GetNormalCursorObject();
 result.coinNormalCursor = coinNormal.Filename;
 
+// `new Actor()` and `new Entity()`: empty objects of the game, or
+// loaded from a file.
+global a = new Actor();
+result.actorType = a.Type;
+result.actorValid = Game.ValidObject(a);
+a.X = 12;
+a.Y = 34;
+result.actorX = a.X;
+global e = new Entity();
+result.entityType = e.Type;
+result.entityValid = Game.ValidObject(e);
+result.entitySpriteSet = e.SetSprite("art\red.png");
+result.entitySprite = e.GetSprite();
+e.X = 5;
+global f = new Entity("art\free.entity");
+result.fileEntityName = f.Name;
+result.fileEntityX = f.X;
+global m = new Actor("actors\mo.actor");
+result.fileActorName = m.Name;
+var missing = new Entity("nowhere.entity");
+result.missingType = missing.Type;
+Game.UnloadObject(a);
+result.actorGone = Game.ValidObject(a);
+
 // Right-to-left text: a flag scripts and string tables set.
 result.rtlBefore = Game.TextRTL;
 Game.TextRTL = true;
@@ -80,6 +104,9 @@ Game.ChangeScene("scenes\room.scene");
 on "Check"
 {
   result.checked = true;
+  result.entityKept = Game.ValidObject(e);
+  result.fileEntityKept = Game.ValidObject(f);
+  result.fileActorKept = Game.ValidObject(m);
   result.suspendedBefore = Game.SuspendedRendering;
   Game.SuspendedRendering = true;
   result.suspendedAfter = Game.SuspendedRendering;
@@ -123,6 +150,14 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("scenes\\room.scene", SCENE.to_vec());
     pkg.add_file("items.items", ITEMS.to_vec());
     pkg.add_file("rtl.tab", b"@right-to-left\r\nGREET\tShalom\r\n".to_vec());
+    pkg.add_file(
+        "art\\free.entity",
+        b"ENTITY { NAME=\"free\" SPRITE=\"art\\green.png\" X=3 Y=4 }".to_vec(),
+    );
+    pkg.add_file(
+        "actors\\mo.actor",
+        b"ACTOR { NAME=\"mo\" X=10 Y=24 STAND { SPRITESET { LEFT=\"art\\green.png\" } } }".to_vec(),
+    );
     pkg.add_file(
         "edit.window",
         b"WINDOW { NAME=\"w\" X=0 Y=0 WIDTH=60 HEIGHT=40 EDIT { NAME=\"name\" X=1 Y=1 WIDTH=50 HEIGHT=10 } }".to_vec(),
@@ -359,5 +394,73 @@ fn right_to_left_text_is_a_flag_the_fonts_and_editors_follow() {
     // after the caret, Home went to the end, Delete took the one before
     // it, and "d" went in before the caret.
     assert_eq!(runtime.world.control(edit).unwrap().text, "bd");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn new_actor_and_new_entity_make_objects_of_the_game() {
+    let (dir, mut runtime, log) = start();
+    let text = |key: &str| result(&runtime, key).get_string(&());
+    assert_eq!(text("actorType"), "actor");
+    assert_eq!(result(&runtime, "actorValid"), Value::Bool(true));
+    assert_eq!(result(&runtime, "actorX"), Value::Int(12));
+    assert_eq!(text("entityType"), "entity");
+    assert_eq!(result(&runtime, "entityValid"), Value::Bool(true));
+    assert_eq!(result(&runtime, "entitySpriteSet"), Value::Bool(true));
+    assert_eq!(text("entitySprite"), "art\\red.png");
+    // A file argument loads the file (a Luma extension); one that does
+    // not load leaves an empty object.
+    assert_eq!(text("fileEntityName"), "free");
+    assert_eq!(result(&runtime, "fileEntityX"), Value::Int(3));
+    assert_eq!(text("fileActorName"), "mo");
+    assert_eq!(text("missingType"), "entity");
+    assert!(
+        log.iter().any(|l| l.contains("nowhere.entity")),
+        "the failed load is logged: {log:?}"
+    );
+    assert_eq!(result(&runtime, "actorGone"), Value::Bool(false));
+    // The objects are the game's: they outlive the scene change and
+    // live among the game's own entities and actors.
+    let game = runtime.world.game_id();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Check", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "entityKept"), Value::Bool(true));
+    assert_eq!(result(&runtime, "fileEntityKept"), Value::Bool(true));
+    assert_eq!(result(&runtime, "fileActorKept"), Value::Bool(true));
+    let game_entities = runtime
+        .world
+        .objects()
+        .iter()
+        .filter(|(_, n)| matches!(n.kind, Kind::Entity(EntityRef::Game(_))))
+        .count();
+    assert_eq!(game_entities, 3, "e, f and the one that did not load");
+    let actors = runtime
+        .world
+        .objects()
+        .iter()
+        .filter(|(_, n)| n.kind == Kind::Actor)
+        .count();
+    assert_eq!(actors, 1, "m; a was unloaded");
+    // The game runs on and draws with them (the empty actor has nothing
+    // to show), and a saved game keeps them.
+    for _ in 0..3 {
+        runtime.tick(16);
+        let mut list = luma_render::DrawList::new(64.0, 48.0);
+        runtime.draw(&mut list, None);
+    }
+    let slot = runtime.save_game(1, "with objects", false).unwrap();
+    assert!(slot.exists());
+    runtime.load_game(1).unwrap();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "fileActorKept"), Value::Bool(true));
+    let actors = runtime
+        .world
+        .objects()
+        .iter()
+        .filter(|(_, n)| n.kind == Kind::Actor)
+        .count();
+    assert_eq!(actors, 1);
     std::fs::remove_dir_all(&dir).ok();
 }

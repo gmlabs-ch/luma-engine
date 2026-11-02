@@ -46,8 +46,8 @@ How the list was made. For every class with a script interface, the names tested
 ### Constructors (`new X(...)`)
 
 - WME source: src/engine_core/wme_base/BGame.cpp, src/engine_core/wme_ad/AdGame.cpp (CAdGame::ExternalCall)
-- Hierarchy and Luma: luma-adventure/src/world.rs (`call_function`: the library classes become `Kind::Class` objects answered by `luma-script/src/classes/`, `Object` a `Kind::Object` native with its scripts attached; `Actor` and `Entity` leave the placeholder object the compiler creates for `new`)
-- Count: 6 done, 2 todo, 1 no-op
+- Hierarchy and Luma: luma-adventure/src/world.rs (`call_function`: the library classes become `Kind::Class` objects answered by `luma-script/src/classes/`, `Object` a `Kind::Object` native with its scripts attached, `Actor` and `Entity` objects of the game like `Game.LoadActor`'s and `Game.CreateEntity`'s)
+- Count: 8 done, 0 todo, 1 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -58,8 +58,8 @@ How the list was made. For every class with a script interface, the names tested
 | `File` | constructor | **done** | `new File(name)`: file access object (see CSXFile). |
 | `MemBuffer` | constructor | **done** | `new MemBuffer(size)`: raw byte buffer (see CSXMemBuffer). |
 | `TcpClient` | constructor | **no-op** | Network client; the class is an unfinished stub in WME 1.x itself (its methods are commented out), and games cannot rely on it. |
-| `Actor` | constructor | **todo** | `new Actor()`: creates an empty 2D actor not yet in a scene. Luma leaves the placeholder object; actors only come from `LoadActor`. |
-| `Entity` | constructor | **todo** | `new Entity()`: creates an empty entity. Luma leaves the placeholder object; entities only come from the scene files. |
+| `Actor` | constructor | **done** | `new Actor()`: an empty 2D actor (no file, no sprites). WME's belongs to no list and is never drawn or updated; Luma's is one of the game's own actors, like `Game.LoadActor`'s, so a sprite given to it shows and `Game.UnloadObject` removes it. `new Actor(file)` loads the file (a Luma extension; WME discards the argument). |
+| `Entity` | constructor | **done** | `new Entity()`: an empty entity. WME's belongs to no list and is never drawn; Luma's is one of the game's own entities, like `Game.CreateEntity`'s, kept across scenes. `new Entity(file)` loads the file as `Game.LoadEntity` (a Luma extension; WME discards the argument). |
 
 ### Global variables
 
@@ -1028,7 +1028,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Class | done | todo | no-op | total |
 |-------|-----:|-----:|------:|------:|
 | Global functions | 20 | 0 | 1 | 21 |
-| Constructors | 6 | 2 | 1 | 9 |
+| Constructors | 8 | 0 | 1 | 9 |
 | Global variables | 5 | 0 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
@@ -1072,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **930** | **191** | **32** | **1153** |
+| **All** | **932** | **189** | **32** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 909 done, 191 todo, 32 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 911 done, 189 todo, 32 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1095,16 +1095,12 @@ WME classes with no script interface of their own (nothing to port; scripts reac
 
 ## Groups the work falls into
 
-Counts are the todo members (no-op excluded). Groups are ordered by what a game port is most likely to need first, not by size.
+Counts are the todo members (no-op excluded). Everything outside 3D is done: the script library (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory`, `new Object`, `new Actor`, `new Entity`, the HSL colour helpers), the game services (private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`, `TextRTL`, `SuspendedRendering`, `Scene.SetViewport`, the game's and the items' cursor objects, the items' hover image objects), the 2D object model (per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories) and the rendering features (rotation, per-axis scale, blend modes, scene-only fades; see `docs/rendering.md`).
 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
-| Game services | 0 | Done: `TextRTL`, `SuspendedRendering`, `Scene.SetViewport`, private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`, the game's and the items' cursor objects and the items' hover image objects. |
-| Script library | 2 | `new Actor` and `new Entity`, which follow runtime entity creation. (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory`, `new Object` and the HSL colour helpers are done.) |
-| Object model (2D) | 0 | Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories (`Game.InventoryObject`). |
-| Rendering features | 0 | Done: rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades (see `docs/rendering.md`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **191** | |
+| **All** | **189** | |
 
 ## Members in Luma that WME 1.x does not define
 
@@ -1115,6 +1111,7 @@ These are accepted by Luma and not counted above; some come from later WME versi
 | Game | `HideCursor`, `ShowCursor` | Hide / show the mouse cursor. |
 | Game | `IsVideoPlaying`, `StopVideo` | Query / stop the running video (`StopVideo` is an alias of `StopTheora`). |
 | Game | `FocusedWindow`, `CursorHidden`, `AutoSaveOnExit`, `AutoSaveSlot`, `Platform`, `DeviceType` | Properties Luma reads that WME 1.x does not define in its script interface (some come from later WME versions or from Luma itself). |
+| `new Actor`, `new Entity` | a file argument | `new Actor(file)` and `new Entity(file)` load the file, as `Game.LoadActor` and `Game.LoadEntity` do; WME's constructors take no argument. |
 | Actor | `SetStopOnBlocked`, `GetStopOnBlocked`, `ActorIsBlocked` | Stop-on-blocked behaviour and the matching event / property. |
 | Sprite | `Filename` | The file the sprite was loaded from. |
 

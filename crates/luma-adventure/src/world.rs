@@ -26,7 +26,7 @@ use crate::inventory::Inventory;
 use crate::objects::{Kind, Native, Objects};
 use crate::path::Floor;
 use crate::scene_state::SceneState;
-use crate::scene_view::{Camera, Drawable, Overlays, SceneView};
+use crate::scene_view::{Camera, Drawable, Overlays, SceneView, SpriteBank};
 use crate::settings::GameSettings;
 use crate::sound::Sounds;
 use crate::talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
@@ -1082,6 +1082,16 @@ impl World {
             self.attach(engine, id, &script);
         }
         Some(id)
+    }
+
+    /// An empty actor of the game (`new Actor()`): no file, no sprites,
+    /// in no scene, kept across scene changes like `Game.LoadActor`'s.
+    pub fn new_actor(&mut self) -> NativeId {
+        let actor =
+            Actor::from_definition(luma_formats::Actor::default(), "", false, SpriteBank::new());
+        let id = self.objects.insert(Kind::Actor);
+        self.actors.push((id, actor));
+        id
     }
 
     /// Removes an object scripts created (`Game.UnloadObject`): an actor,
@@ -2817,11 +2827,31 @@ impl Host for World {
                 }
                 Some(Return::constructed(Value::Native(id)))
             }
-            // Not implemented: the placeholder object the compiler
-            // created for the `new` expression stays.
+            // `new Actor()` and `new Entity()` (`CAdGame::ExternalCall`):
+            // an empty actor or entity. WME's object belongs to no list
+            // and is never drawn or updated; Luma makes it one of the
+            // game's own, so that a sprite given to it shows and
+            // `Game.UnloadObject` removes it. A file argument, which WME
+            // discards, loads the file as `Game.LoadActor` and
+            // `Game.LoadEntity` do; a file that does not load leaves an
+            // empty object, logged.
             "Actor" | "Entity" => {
-                self.stub(&format!("new {name}()"));
-                Some(Return::null())
+                let path = match args.first() {
+                    Some(Value::Null) | None => None,
+                    Some(v) => Some(v.get_string(self)),
+                };
+                let id = if name == "Actor" {
+                    match path.and_then(|p| self.load_actor(ctx.engine, &p, false)) {
+                        Some(id) => id,
+                        None => self.new_actor(),
+                    }
+                } else {
+                    match path.and_then(|p| self.load_game_entity(ctx.engine, &p)) {
+                        Some(id) => id,
+                        None => self.create_game_entity(ctx.engine, None),
+                    }
+                };
+                Some(Return::constructed(Value::Native(id)))
             }
             _ => None,
         }

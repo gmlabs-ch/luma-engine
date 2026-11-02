@@ -84,10 +84,13 @@ the value of the expression. A constructor answers with
 yields `null`. `new Object(...)` is a constructor of the host too: the
 adventure layer makes a bare native object (`CSXObject`) and attaches
 the scripts named by the arguments to it (`new Object("a.script",
-"b.script")`), so that its methods and events are theirs; a host without
-objects of its own leaves it to the engine, which keeps the placeholder
-as the object. A constructor nobody knows is an undefined function: an
-error is logged and the placeholder stays.
+"b.script")`), so that its methods and events are theirs, and
+`new Actor()` and `new Entity()` make an empty actor or entity of the
+game (from a file when one is given, a Luma extension; see
+[formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments));
+a host without objects of its own leaves them to the engine, which
+keeps the placeholder as the object. A constructor nobody knows is an
+undefined function: an error is logged and the placeholder stays.
 
 Script functions (`CALL`) are ordinary jumps with a return address; the
 callee opens a scope, fixes the argument count with `CORRECT_STACK`
