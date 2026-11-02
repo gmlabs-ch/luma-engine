@@ -99,6 +99,19 @@ pub struct World {
     pub(crate) quit: bool,
     pub(crate) name: String,
     pub(crate) caption: String,
+    /// `Game.TextEncoding`: 0 for ANSI, 1 for UTF-8; set by the string
+    /// table loaded (a byte order mark means UTF-8) and by scripts.
+    pub(crate) text_encoding: i32,
+    /// `Game.StartupScene`, from `STARTUP_SCENE` of the game file.
+    pub(crate) startup_scene: Option<String>,
+    /// Whether the front-end runs the game in a window
+    /// (`Game.WindowedMode`); false without a window.
+    pub(crate) windowed: bool,
+    /// Frames drawn in the last whole second (`Game.FPS`), and the
+    /// counters behind it (`m_Fps`, `m_FpsTime`, `m_FramesRendered`).
+    pub(crate) fps: i32,
+    pub(crate) fps_time: u64,
+    pub(crate) fps_frames: i32,
     pub(crate) timer: u64,
     pub(crate) clock: u64,
     log: Vec<String>,
@@ -140,6 +153,7 @@ impl World {
         let scene_id = objects.insert(Kind::Scene);
         let fader_id = objects.insert(Kind::Fader);
         let personal_savegames = game_file.personal_savegames;
+        let startup_scene = game_file.startup_scene.clone();
         let scene_viewport = game_file.scene_viewport.map(|[x, y, w, h]| (x, y, w, h));
         let mut world = World {
             vfs,
@@ -201,6 +215,12 @@ impl World {
             interactive: true,
             main_object: None,
             quit: false,
+            text_encoding: 0,
+            startup_scene,
+            windowed: false,
+            fps: 0,
+            fps_time: 0,
+            fps_frames: 0,
             timer: 0,
             clock: 0,
             log: Vec::new(),
@@ -364,12 +384,78 @@ impl World {
         self.timer
     }
 
-    /// Advances the clocks by `dt` milliseconds.
+    /// Advances the clocks by `dt` milliseconds, and counts the frame
+    /// for `Game.FPS`: the frames of each whole second (`InitLoop`).
     pub fn advance_time(&mut self, dt: u64) {
         if !self.ui.frozen {
             self.timer += dt;
         }
         self.clock += dt;
+        self.fps_time += dt;
+        self.fps_frames += 1;
+        if self.fps_time > 1000 {
+            self.fps = self.fps_frames;
+            self.fps_frames = 0;
+            self.fps_time = 0;
+        }
+    }
+
+    /// Frames drawn in the last whole second (`Game.FPS`).
+    pub fn fps(&self) -> i32 {
+        self.fps
+    }
+
+    /// Tells the world whether it runs in a window (`Game.WindowedMode`).
+    pub fn set_windowed(&mut self, windowed: bool) {
+        self.windowed = windowed;
+    }
+
+    /// The scene a start loads (`Game.StartupScene`).
+    pub fn startup_scene(&self) -> Option<&str> {
+        self.startup_scene.as_deref()
+    }
+
+    /// Opens a file or an address with the system's default application
+    /// (`Game.OpenDocument`, `ShellExecute("open")`): `open` on macOS,
+    /// `xdg-open` elsewhere, `start` on Windows. Whether it was launched.
+    pub fn open_document(&mut self, target: &str) -> bool {
+        use std::process::{Command, Stdio};
+        if target.trim().is_empty() {
+            return false;
+        }
+        let mut command = if cfg!(target_os = "macos") {
+            let mut c = Command::new("open");
+            c.arg(target);
+            c
+        } else if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "start", "", target]);
+            c
+        } else {
+            let mut c = Command::new("xdg-open");
+            c.arg(target);
+            c
+        };
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        match command.spawn() {
+            Ok(_) => true,
+            Err(err) => {
+                self.log(format!("cannot open document '{target}': {err}"));
+                false
+            }
+        }
+    }
+
+    /// The CRC-32 of a file of the game (`Game.GetFileChecksum`), `None`
+    /// when there is no such file.
+    pub fn file_checksum(&self, path: &str) -> Option<u32> {
+        self.vfs
+            .read(path)
+            .ok()
+            .map(|bytes| crc32fast::hash(&bytes))
     }
 
     /// The log lines written since the last call.
@@ -389,12 +475,23 @@ impl World {
         }
     }
 
+    /// Writes a log line the first time it comes up (the original engine
+    /// repeats some warnings at every call).
+    pub(crate) fn log_once(&mut self, message: &str) {
+        if self.stubs.insert(message.to_string()) {
+            self.log.push(message.to_string());
+        }
+    }
+
     /// Loads a string table (`Game.LoadStringTable`).
     pub fn load_string_table(&mut self, path: &str, clear_old: bool) -> bool {
         match self.vfs.read(path) {
             Ok(bytes) => {
                 let count = self.strings.load(&bytes, clear_old);
                 self.log(format!("string table '{path}': {count} strings"));
+                // A byte order mark switches the game to UTF-8 text
+                // (`CBStringTable::LoadFile`); any other table back to ANSI.
+                self.text_encoding = i32::from(self.strings.utf8);
                 true
             }
             Err(err) => {
@@ -1651,7 +1748,7 @@ impl Runtime {
     /// run on the first tick. The startup scene, if the game names one,
     /// is scheduled first.
     pub fn start(&mut self) {
-        if let Some(scene) = self.world.game_file.startup_scene.clone() {
+        if let Some(scene) = self.world.startup_scene.clone() {
             self.world.schedule_scene(&scene, true);
         }
         self.world.load_items(&mut self.engine);

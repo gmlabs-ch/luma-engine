@@ -50,7 +50,6 @@ const GAME_STUBS: &[&str] = &[
     "LockMouseRect",
     "Screenshot",
     "ScreenshotEx",
-    "OpenDocument",
     "SetLoadingScreen",
     "SetSavingScreen",
     "DisplayLoadingIcon",
@@ -329,7 +328,8 @@ impl World {
             "Name" => Value::from(self.name.clone()),
             "Caption" => Value::from(self.caption.clone()),
             "CurrentTime" => Value::Int(self.timer() as i32),
-            "WindowsTime" => Value::Int(self.timer() as i32),
+            // `timeGetTime`: a clock that runs while the game is frozen.
+            "WindowsTime" => Value::Int(self.clock as i32),
             "MainObject" => native_or_null(self.main_object),
             "MouseX" => Value::Int(self.mouse.x),
             "MouseY" => Value::Int(self.mouse.y),
@@ -357,18 +357,23 @@ impl World {
             "VideoSkipButton" => Value::Int(self.video_skip_button.code()),
             "Frozen" => Value::Bool(self.is_frozen()),
             "FocusedWindow" => native_or_null(self.focused_window()),
+            "WindowedMode" => Value::Bool(self.windowed),
+            "SoundAvailable" => Value::Bool(self.sounds.audio.device().is_some()),
             "DebugMode"
-            | "SoundAvailable"
-            | "WindowedMode"
             | "TextRTL"
             | "SuspendedRendering"
             | "SuppressScriptErrors"
             | "AutorunDisabled"
             | "AutoSaveOnExit"
             | "CursorHidden" => Value::Bool(false),
-            "AcceleratedMode" => Value::Bool(true),
-            "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => Value::Int(100),
-            "FPS" | "TextEncoding" | "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
+            "AcceleratedMode" | "Accelerated" => Value::Bool(true),
+            "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => {
+                return Some(self.volume_property(name));
+            }
+            "FPS" => Value::Int(self.fps),
+            "TextEncoding" => Value::Int(self.text_encoding),
+            "StartupScene" => self.startup_scene.clone().map_or(Value::Null, Value::from),
+            "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
             "SaveDirectory" => Value::from(self.save_directory().to_string_lossy().into_owned()),
             "MostRecentSaveSlot" => Value::Int(self.most_recent_save_slot()),
             "TalkSkipButton" => Value::Int(self.talk_skip_button.code()),
@@ -410,6 +415,20 @@ impl World {
             "VideoSubtitles" => self.video_subtitles = value.get_bool(self),
             "VideoSkipButton" => {
                 self.video_skip_button = TalkSkipButton::from_code(value.get_int(self));
+            }
+            "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => {
+                let percent = value.get_int(self);
+                self.set_volume_property(name, percent);
+            }
+            "TextEncoding" => {
+                // `NUM_TEXT_ENCODINGS` is 2: ANSI and UTF-8.
+                self.text_encoding = value.get_int(self).clamp(0, 1);
+            }
+            "StartupScene" => {
+                self.startup_scene = match value {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
             }
             _ => return false,
         }
@@ -634,6 +653,33 @@ impl World {
                 let text = arg(0).get_string(self);
                 self.log(format!("sc: {text}"));
                 Return::null()
+            }
+            "Caption" => {
+                // `CBObject::GetCaption(n)`: the game has one caption; the
+                // original engine refreshes the window title here too.
+                Return::value(self.caption.clone())
+            }
+            "RunScript" => {
+                self.log(
+                    "**Warning** The 'RunScript' method is now obsolete. Use 'AttachScript' instead (same syntax)"
+                        .to_string(),
+                );
+                let path = arg(0).get_string(self);
+                let game = self.game_id;
+                Return::value(self.attach(ctx.engine, game, &path))
+            }
+            "GetFileChecksum" => {
+                let path = arg(0).get_string(self);
+                let as_hex = arg(1).get_bool(self);
+                Return::value(match self.file_checksum(&path) {
+                    Some(crc) if as_hex => Value::from(format!("{crc:x}")),
+                    Some(crc) => Value::Int(crc as i32),
+                    None => Value::Null,
+                })
+            }
+            "OpenDocument" => {
+                let target = arg(0).get_string(self);
+                Return::value(self.open_document(&target))
             }
             "FileExists" => Return::value(self.vfs().exists(&arg(0).get_string(self))),
             "ClearScriptCache" => Return::null(),

@@ -967,6 +967,8 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
     let frame_limit = std::env::var("LUMA_PLAYER_FRAMES")
         .ok()
         .and_then(|v| v.parse().ok());
+    let mut runtime = runtime;
+    runtime.world.set_windowed(true);
     let player = GamePlayer {
         runtime,
         frame_limit,

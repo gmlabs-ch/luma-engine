@@ -49,6 +49,26 @@ and its subtitles are drawn.
 Without a window (`--headless`), the same loop runs with a fixed frame
 duration, and the sounds run on the game clock.
 
+Scripts read the loop's clocks and counters on the game object:
+`CurrentTime` is the game timer (stopped while frozen), `WindowsTime`
+the wall clock since the game started (the original engine gives the
+system's `timeGetTime`; both only make sense as differences), `FPS` the
+number of frames of the last whole second, counted as the original
+engine does (`m_FramesRendered` moved to `m_Fps` when `m_FpsTime`
+passes 1000 ms, so the value is `0` during the first second).
+`WindowedMode` is whether a front-end opened a window (the player says
+so; headless runs read `false`), `SoundAvailable` whether an audio
+device was opened, `AcceleratedMode` (and `Accelerated`) always true
+with wgpu. `TextEncoding` is `0` (ANSI) or `1` (UTF-8): set by every
+string table loaded (a byte order mark means UTF-8, as in the original
+engine) and by the script. `Game.GetFileChecksum(file, hex)` is the
+CRC-32 of a file of the game (IEEE polynomial, as the original engine's
+`crc.cpp`), as an integer or a lowercase hex string, `null` for a
+missing file. `Game.OpenDocument(target)` opens a file or an address
+with the system (`open` on macOS, `xdg-open` elsewhere, `start` on
+Windows); the original engine also minimizes a fullscreen window
+first, which Luma does not do.
+
 ## The active object
 
 While drawing, the engine notes where each object that reacts to the

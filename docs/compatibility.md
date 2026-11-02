@@ -161,14 +161,14 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp
 - Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`)
-- Count: 94 done, 54 todo, 17 no-op
+- Count: 114 done, 34 todo, 17 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `LOG` | method | **done** | Writes to the log (same as the global `LOG`). |
-| `Caption` | method | **todo** | Inherited CBObject.Caption plus refreshes the window title. Not handled on `Game` in Luma (the `Caption` property exists). |
+| `Caption` | method | **done** | Returns the caption (CBObject.Caption; the game has one). WME also refreshes the window title; Luma's player sets the title once at start. |
 | `Msg` | method | **todo** | Shows a short on-screen debug message. Luma only writes it to the log. |
-| `RunScript` | method | **todo** | Obsolete alias of `AttachScript` on the game (logs a warning). |
+| `RunScript` | method | **done** | Obsolete alias of `AttachScript` on the game (logs a warning). |
 | `LoadStringTable` | method | **done** | Loads a string table, optionally keeping the old strings. |
 | `ValidObject` | method | **done** | True when a handle still refers to a live object. |
 | `Reset` | method | **todo** | Resets all game content (scene, objects, scripts, inventory) to the startup state. Stubbed. |
@@ -204,7 +204,7 @@ How the list was made. For every class with a script interface, the names tested
 | `Screenshot`, `ScreenshotEx` | method | **todo** | Saves the screen to an image file (ScreenshotEx: with size and format). Stubbed. |
 | `CreateWindow` | method | **done** | Creates an empty window at runtime. |
 | `DeleteWindow` | method | **done** | Destroys a window created by `CreateWindow` or `LoadWindow`. |
-| `OpenDocument` | method | **todo** | Opens a file or URL with the system's default application. Stubbed. |
+| `OpenDocument` | method | **done** | Opens a file or URL with the system's default application (`open`, `xdg-open`, `start`). WME also minimizes a fullscreen window first. |
 | `DEBUG_DumpClassRegistry` | method | **no-op** | Writes the class registry to the log; debugging aid. |
 | `SetLoadingScreen` | method | **todo** | Sets the image shown while a scene loads (file, x, y). Stubbed. |
 | `SetSavingScreen` | method | **todo** | Sets the image shown while saving (file, x, y). Stubbed. |
@@ -217,34 +217,34 @@ How the list was made. For every class with a script interface, the names tested
 | `AccOutputText` | method | **todo** | Speaks text through the accessibility text-to-speech. Stubbed. |
 | `IsShadowTypeSupported` | method | **todo** | True when the renderer supports a 3D shadow type. |
 | `StoreSaveThumbnail`, `DeleteSaveThumbnail` | method | **todo** | Captures / discards the screenshot stored in the next save file. Stubbed. |
-| `GetFileChecksum` | method | **todo** | CRC-32 of a file in the virtual file system, as integer or hex string. |
+| `GetFileChecksum` | method | **done** | CRC-32 of a file in the virtual file system, as integer or hex string; `null` for a missing file. |
 | `EnableScriptProfiling`, `DisableScriptProfiling` | method | **no-op** | Turns the script profiler on / off; Luma has no profiler and accepts the calls. |
 | `Type` | get | **done** | `game`. |
 | `Name` | get/set | **done** | Game name. |
 | `Hwnd` | get | **no-op** | Windows window handle (HWND); meaningless outside Windows. |
 | `CurrentTime` | get | **done** | Game timer in milliseconds (stops while frozen). |
-| `WindowsTime` | get | **todo** | Real-time clock in milliseconds (timeGetTime). Luma returns the game timer, which stops while frozen. |
-| `WindowedMode` | get | **todo** | True when running windowed. Luma always reads false. |
+| `WindowsTime` | get | **done** | Real-time clock in milliseconds (timeGetTime). Luma returns the wall clock since the game started, which runs while frozen. |
+| `WindowedMode` | get | **done** | True when running windowed: the front-end says so (`World::set_windowed`); the player does, headless runs read false. |
 | `MouseX`, `MouseY` | get/set | **done** | Mouse position in game coordinates. |
 | `MainObject` | get/set | **done** | The object the player controls and the camera follows. |
 | `ActiveObject` | get | **done** | The object under the mouse. |
 | `ScreenWidth`, `ScreenHeight` | get | **done** | Game resolution. |
 | `Interactive` | get/set | **done** | Whether the player can interact (false in cutscenes). |
 | `DebugMode` | get | **no-op** | True in debug mode (`-debug`); Luma has none and reads false. |
-| `SoundAvailable` | get | **todo** | True when a sound device is present. Luma always reads false. |
-| `SFXVolume`, `SpeechVolume`, `MusicVolume`, `MasterVolume` | get/set | **todo** | Global volumes (percent), the property form of the `SetGlobal...Volume` methods. Luma reads 100 and ignores the set. |
+| `SoundAvailable` | get | **done** | True when a sound device is present (an audio device was opened). |
+| `SFXVolume`, `SpeechVolume`, `MusicVolume`, `MasterVolume` | get/set | **done** | Global volumes (percent), the property form of the `SetGlobal...Volume` methods. WME logs an "obsolete" warning at every access; Luma once, on write. |
 | `Keyboard` | get | **done** | The keyboard state object. |
 | `Subtitles` | get/set | **done** | Show subtitles for speech. |
 | `SubtitlesSpeed` | get/set | **done** | Subtitle reading speed (characters per second basis). |
 | `VideoSubtitles` | get/set | **done** | Show subtitles during videos. |
-| `FPS` | get | **todo** | Current frame rate. Luma reads 0. |
+| `FPS` | get | **done** | Frames of the last whole second, counted as WME does (0 during the first second). |
 | `Shadows` | get/set | **todo** | Enables real-time 3D shadows (3D renderer). |
 | `SimpleShadows` | get/set | **todo** | Enables simple blob shadows for 3D objects. |
 | `SupportsRealTimeShadows` | get | **todo** | True when the renderer can draw 3D real-time shadows. |
 | `MaxShadowType` | get/set | **todo** | Highest shadow quality allowed (none, simple, flat, stencil). |
 | `AcceleratedMode` | get | **done** | True when GPU accelerated; Luma reads true. |
-| `Accelerated` | get | **todo** | Alias of `AcceleratedMode`. |
-| `TextEncoding` | get/set | **todo** | Text encoding of the game (ANSI code page / UTF-8). Luma reads 0 and draws UTF-8 tables as Latin-1. |
+| `Accelerated` | get | **done** | Alias of `AcceleratedMode`. |
+| `TextEncoding` | get/set | **done** | Text encoding of the game: 0 ANSI, 1 UTF-8, set by each string table loaded (byte order mark) and by the script, clamped as WME does. The fonts still draw text as Latin-1 whatever the value (see `docs/rendering.md`). |
 | `TextRTL` | get/set | **todo** | Right-to-left text layout. Luma reads false, ignores the set. |
 | `SoundBufferSize` | get/set | **no-op** | DirectSound buffer length in seconds; the audio backend manages its buffers. |
 | `SuspendedRendering` | get/set | **todo** | Pauses drawing (used around heavy loading). Luma reads false, ignores the set. |
@@ -264,7 +264,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdGame.cpp
 - Hierarchy and Luma: CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `responses.rs`, `inventory.rs`)
-- Count: 56 done, 9 todo, 0 no-op
+- Count: 58 done, 7 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -307,7 +307,7 @@ How the list was made. For every class with a script interface, the names tested
 | `TalkSkipButton` | get/set | **done** | Mouse button that skips speech. |
 | `VideoSkipButton` | get/set | **done** | Mouse button that skips videos. |
 | `ChangingScene` | get | **done** | True while a scene change is pending. |
-| `StartupScene` | get/set | **todo** | Scene loaded at startup (from `default.game`). |
+| `StartupScene` | get/set | **done** | Scene loaded at startup (from `default.game`); `null` when none, settable, saved with the game. |
 
 ### Window hook defined in CAdGame (`CAdGame::WindowScriptMethodHook`)
 
@@ -1031,8 +1031,8 @@ How the list was made. For every class with a script interface, the names tested
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 45 | 27 | 0 | 72 |
-| CBGame | 94 | 54 | 17 | 165 |
-| CAdGame | 56 | 9 | 0 | 65 |
+| CBGame | 114 | 34 | 17 | 165 |
+| CAdGame | 58 | 7 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
 | CAdScene | 46 | 35 | 2 | 83 |
 | CAdLayer | 13 | 5 | 0 | 18 |
@@ -1070,9 +1070,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **563** | **564** | **29** | **1156** |
+| **All** | **585** | **542** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 548 done, 555 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 570 done, 533 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1105,7 +1105,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
-| Game services | 42 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
+| Game services | 20 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
 | Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
@@ -1117,7 +1117,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **564** | |
+| **All** | **542** | |
 
 ## Members in Luma that WME 1.x does not define
 

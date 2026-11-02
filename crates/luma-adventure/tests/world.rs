@@ -850,6 +850,70 @@ fn settings_script() -> Vec<u8> {
     a.build()
 }
 
+fn services_script() -> Vec<u8> {
+    // The game's system properties and services.
+    let mut a = Assembler::new("services.script");
+    a.def_glob_var("result");
+    get(&mut a, "Game", "FPS");
+    store(&mut a, "fps");
+    get(&mut a, "Game", "WindowsTime");
+    store(&mut a, "windowsTime");
+    get(&mut a, "Game", "CurrentTime");
+    store(&mut a, "currentTime");
+    get(&mut a, "Game", "SoundAvailable");
+    store(&mut a, "soundAvailable");
+    get(&mut a, "Game", "WindowedMode");
+    store(&mut a, "windowed");
+    get(&mut a, "Game", "Accelerated");
+    store(&mut a, "accelerated");
+    // Game.SFXVolume = 40; Game.MasterVolume = 70;
+    a.push_int(40);
+    set(&mut a, "Game", "SFXVolume");
+    a.push_int(70);
+    set(&mut a, "Game", "MasterVolume");
+    get(&mut a, "Game", "SFXVolume");
+    store(&mut a, "sfx");
+    get(&mut a, "Game", "MasterVolume");
+    store(&mut a, "master");
+    call(&mut a, "Game", "GetGlobalSFXVolume", &[]);
+    store(&mut a, "sfxMethod");
+    get(&mut a, "Game", "TextEncoding");
+    store(&mut a, "encoding");
+    a.push_int(5);
+    set(&mut a, "Game", "TextEncoding");
+    get(&mut a, "Game", "TextEncoding");
+    store(&mut a, "encodingClamped");
+    get(&mut a, "Game", "StartupScene");
+    store(&mut a, "startupBefore");
+    a.push_string("scenes\\hall.scene");
+    set(&mut a, "Game", "StartupScene");
+    get(&mut a, "Game", "StartupScene");
+    store(&mut a, "startup");
+    a.push_string("Hi");
+    set(&mut a, "Game", "Caption");
+    call(&mut a, "Game", "Caption", &[Arg::Int(0)]);
+    store(&mut a, "caption");
+    call(&mut a, "Game", "GetFileChecksum", &[Arg::Str("string.tab")]);
+    store(&mut a, "crc");
+    call(
+        &mut a,
+        "Game",
+        "GetFileChecksum",
+        &[Arg::Str("string.tab"), Arg::Int(1)],
+    );
+    store(&mut a, "crcHex");
+    call(&mut a, "Game", "GetFileChecksum", &[Arg::Str("nope.tab")]);
+    store(&mut a, "crcMissing");
+    call(&mut a, "Game", "OpenDocument", &[Arg::Str("")]);
+    store(&mut a, "openedNothing");
+    call(&mut a, "Game", "RunScript", &[Arg::Str("settings.script")]);
+    store(&mut a, "ran");
+    call(&mut a, "Game", "RunScript", &[Arg::Str("nope.script")]);
+    store(&mut a, "ranMissing");
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
 fn hall_init_script() -> Vec<u8> {
     // Records the state the hall's nodes arrive in, then changes it.
     let mut a = Assembler::new("scenes\\hall\\hall_init.script");
@@ -1042,6 +1106,7 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     pkg.add_file("walk.script", walk_script());
     pkg.add_file("save.script", save_script());
     pkg.add_file("settings.script", settings_script());
+    pkg.add_file("services.script", services_script());
     pkg.add_file(
         "art\\prop.sprite",
         b"SPRITE { LOOPING=FALSE FRAME { DELAY=100 IMAGE=\"art\\red.png\" } FRAME { DELAY=100 IMAGE=\"art\\green.png\" } }".to_vec(),
@@ -2735,4 +2800,73 @@ fn private_settings_persist_in_the_save_directory() {
     assert_eq!(runtime.world.read_setting("volume").as_deref(), Some("80"));
     assert_eq!(runtime.world.read_setting("Lang").as_deref(), Some("fr"));
     assert_eq!(runtime.world.read_setting("Missing"), None);
+}
+
+#[test]
+fn system_properties_checksums_and_run_script() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    // 70 frames of 16 ms: the first whole second counted 63 frames.
+    for _ in 0..70 {
+        runtime.tick(16);
+    }
+    assert_eq!(runtime.world.fps(), 63);
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "services.script")
+    );
+    let log = runtime.tick(16);
+    assert_eq!(result(&runtime, "fps"), Value::Int(63));
+    assert_eq!(result(&runtime, "windowsTime"), Value::Int(71 * 16));
+    assert_eq!(result(&runtime, "currentTime"), Value::Int(71 * 16));
+    assert_eq!(result(&runtime, "soundAvailable"), Value::Bool(false));
+    assert_eq!(result(&runtime, "windowed"), Value::Bool(false));
+    assert_eq!(result(&runtime, "accelerated"), Value::Bool(true));
+    assert_eq!(result(&runtime, "sfx"), Value::Int(40));
+    assert_eq!(result(&runtime, "sfxMethod"), Value::Int(40));
+    assert_eq!(result(&runtime, "master"), Value::Int(70));
+    assert_eq!(runtime.world.audio().volume(luma_audio::SoundType::Sfx), 40);
+    assert_eq!(
+        log.iter()
+            .filter(|l| l.contains("SFXVolume attribute is obsolete"))
+            .count(),
+        1,
+        "{log:?}"
+    );
+    assert_eq!(result(&runtime, "encoding"), Value::Int(0));
+    assert_eq!(result(&runtime, "encodingClamped"), Value::Int(1));
+    assert_eq!(result(&runtime, "startupBefore"), Value::Null);
+    assert_eq!(
+        result(&runtime, "startup"),
+        Value::from("scenes\\hall.scene")
+    );
+    assert_eq!(runtime.world.startup_scene(), Some("scenes\\hall.scene"));
+    assert_eq!(result(&runtime, "caption"), Value::from("Hi"));
+    let crc = crc32fast::hash(b"GREET\tHello\r\n");
+    assert_eq!(result(&runtime, "crc"), Value::Int(crc as i32));
+    assert_eq!(result(&runtime, "crcHex"), Value::from(format!("{crc:x}")));
+    assert_eq!(result(&runtime, "crcMissing"), Value::Null);
+    assert_eq!(result(&runtime, "openedNothing"), Value::Bool(false));
+    assert_eq!(result(&runtime, "ran"), Value::Bool(true));
+    assert_eq!(result(&runtime, "ranMissing"), Value::Bool(false));
+    assert!(
+        log.iter()
+            .any(|l| l.contains("'RunScript' method is now obsolete")),
+        "{log:?}"
+    );
+    // The script RunScript attached ran on the game.
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "lang"), Value::from("fr"));
+
+    // A UTF-8 string table switches the encoding; the windowed flag is
+    // the front-end's to set.
+    runtime.world.set_windowed(true);
+    assert_eq!(
+        runtime.world.get_property(game, "WindowedMode"),
+        Some(Value::Bool(true))
+    );
 }
