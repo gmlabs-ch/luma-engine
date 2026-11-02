@@ -23,7 +23,10 @@ in this order (`Runtime::tick`):
 4. the scripts run (`Engine::tick`);
 5. the scene's entities and the game's own (see
    [formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments))
-   animate and talk; the actors walk, turn, talk;
+   animate and talk; the actors walk, turn, talk; a sprite frame that
+   becomes current plays its `SOUND`, stops the sprite's earlier frame
+   sounds when marked `KILL_SOUND`, raises `FrameChanged` on the sprite
+   object and its `APPLY_EVENT`s on the object showing the sprite;
 6. the view scrolls towards the main object; the objects' sounds follow
    them;
 7. the object under the mouse is found and becomes the **active
@@ -35,8 +38,13 @@ in this order (`Runtime::tick`):
    next frame).
 
 The frame is then drawn: the scene with the actors, the windows marked
-`IN_GAME`, the other windows, the sentences, the cursor, and the fader's
-colour over everything.
+`IN_GAME`, the other windows, the sentences, the cursor, the fader's
+colour over everything, the loading icon (see
+[saving.md](saving.md#loading-and-saving-screens-loading-icon)), and
+last the messages of `Game.Msg`: short
+texts in the system font from 20 pixels down the left edge, each for
+three seconds of the game timer, five at most (the oldest goes), as the
+original engine's `QuickMessage`; nothing shows without a system font.
 
 While a window is **system exclusive** (see
 [formats/window.md](formats/window.md)) the game is frozen: the timer
@@ -50,6 +58,26 @@ and its subtitles are drawn.
 
 Without a window (`--headless`), the same loop runs with a fixed frame
 duration, and the sounds run on the game clock.
+
+Scripts read the loop's clocks and counters on the game object:
+`CurrentTime` is the game timer (stopped while frozen), `WindowsTime`
+the wall clock since the game started (the original engine gives the
+system's `timeGetTime`; both only make sense as differences), `FPS` the
+number of frames of the last whole second, counted as the original
+engine does (`m_FramesRendered` moved to `m_Fps` when `m_FpsTime`
+passes 1000 ms, so the value is `0` during the first second).
+`WindowedMode` is whether a front-end opened a window (the player says
+so; headless runs read `false`), `SoundAvailable` whether an audio
+device was opened, `AcceleratedMode` (and `Accelerated`) always true
+with wgpu. `TextEncoding` is `0` (ANSI) or `1` (UTF-8): set by every
+string table loaded (a byte order mark means UTF-8, as in the original
+engine) and by the script. `Game.GetFileChecksum(file, hex)` is the
+CRC-32 of a file of the game (IEEE polynomial, as the original engine's
+`crc.cpp`), as an integer or a lowercase hex string, `null` for a
+missing file. `Game.OpenDocument(target)` opens a file or an address
+with the system (`open` on macOS, `xdg-open` elsewhere, `start` on
+Windows); the original engine also minimizes a fullscreen window
+first, which Luma does not do.
 
 ## The active object
 
@@ -91,7 +119,12 @@ scene get no mouse event: only the active object does, a control of the
 window or its shield.
 
 `Game.MouseX` and `Game.MouseY` are the mouse in game pixels
-(writable, as is `Game.SetMousePos`); `Scene.MouseX` and `Scene.MouseY`
+(writable, as is `Game.SetMousePos`). `Game.LockMouseRect(left, top,
+right, bottom)` keeps the position the game sees inside a rectangle
+(the edges are put in order; a rectangle with a zero edge unlocks,
+since the original engine applies the lock only while all four edges
+are non-zero); the original engine also moves the system cursor back
+into the rectangle, which Luma does not. `Scene.MouseX` and `Scene.MouseY`
 add the scene's scroll offset and take off the scene viewport's origin
 (`SCENE_VIEWPORT` in the game file, `Game.SetSceneViewport`; see
 [formats/game.md](formats/game.md)). The viewport also sizes the view
@@ -177,7 +210,13 @@ default) the engine keeps:
 
 Nothing else comes back: positions, script variables and the scripts
 themselves start over from the file, and a scene's init script runs on
-every visit, so it may override what was restored. A remembered sprite
+every visit, so it may override what was restored. `Game.Reset`
+(`CAdGame::ResetContent`) forgets every remembered scene, along with the
+inventory, the dialogue branches and the "once" responses, loads the
+items file again, and sets the non-native script globals back to
+`null`; the scene the player is in stays, and is not remembered when
+left. The flag that skips that one save travels with a saved game, as
+in the original engine. A remembered sprite
 that cannot be loaded is logged and the entity keeps the file's. The
 states are part of a saved game (see [saving.md](saving.md)). Whether
 a waypoint group is active (`WaypointGroup.Active`) is not remembered

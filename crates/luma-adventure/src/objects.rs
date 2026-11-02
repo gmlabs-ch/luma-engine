@@ -9,12 +9,13 @@
 
 use std::collections::BTreeMap;
 
+use luma_script::classes::ClassObject;
 use luma_script::{NativeId, Properties};
 
 use crate::scene_view::EntityRef;
 
 /// What a native object is.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Kind {
     /// The `Game` object.
     Game,
@@ -48,6 +49,25 @@ pub enum Kind {
     EntityRegion(NativeId),
     /// A waypoint group of the current scene (`Scene.GetWaypointGroup`).
     WaypointGroup(usize),
+    /// A frame of a sprite object (`Sprite.GetFrame`, `AddFrame`), by
+    /// position; the position follows the frame when others are added or
+    /// deleted before it.
+    Frame {
+        /// The sprite object.
+        sprite: NativeId,
+        /// The frame's position in the sprite.
+        index: usize,
+    },
+    /// A sub-frame of a frame of a sprite object (`Frame.GetSubframe`),
+    /// by position.
+    SubFrame {
+        /// The sprite object.
+        sprite: NativeId,
+        /// The frame's position in the sprite.
+        frame: usize,
+        /// The sub-frame's position in the frame.
+        index: usize,
+    },
     /// An actor (`Game.LoadActor`, `Scene.LoadActor`); its state lives in
     /// the world's actor list.
     Actor,
@@ -63,6 +83,9 @@ pub enum Kind {
     /// method with `null`: windows, actors and other objects of later
     /// milestones.
     Inert(String),
+    /// An object of the script library (`new String`, `new Array`,
+    /// `new Date`, `new File`, `new MemBuffer`); the class answers for it.
+    Class(ClassObject),
 }
 
 /// What the engine's base object classes keep on an object beyond its

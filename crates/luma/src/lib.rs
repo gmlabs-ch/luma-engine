@@ -19,7 +19,11 @@
 //!   adventure game as Wintermute Engine runs it, with actors, scenes,
 //!   speech, inventory, pathfinding and saved games;
 //! - `lumen` (off by default): [`lumen`], the Lumen scenario format for
-//!   games made for Luma, with its parser, checker and text runner.
+//!   games made for Luma, with its parser, checker and text runner;
+//! - `3d` (off by default): [`three_d`], 3D characters on painted
+//!   backgrounds: the scene geometry, the camera mapping and the maths
+//!   conventions of Wintermute's 3D actors (the feature is named `3d`;
+//!   the module takes an identifier-safe name).
 //!
 //! Two more features configure the core: `audio-device` plays the sounds
 //! on the default output device (without it they run silently, on the
@@ -38,6 +42,8 @@ pub use luma_render as render;
 pub use luma_script as script;
 pub use luma_video as video;
 
+#[cfg(feature = "3d")]
+pub use luma_3d as three_d;
 #[cfg(feature = "adventure")]
 pub use luma_adventure as adventure;
 #[cfg(feature = "lumen")]
@@ -75,5 +81,11 @@ mod tests {
     #[test]
     fn the_lumen_module_is_reachable_with_its_feature() {
         assert_eq!(crate::lumen::EXTENSION, "lumen");
+    }
+
+    #[cfg(feature = "3d")]
+    #[test]
+    fn the_3d_module_is_reachable_with_its_feature() {
+        assert_eq!(crate::three_d::GEOMETRY_EXTENSION, "3ds");
     }
 }

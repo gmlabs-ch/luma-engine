@@ -1,0 +1,16 @@
+[package]
+name = "luma-compiler"
+description = "Compiler from Wintermute script sources to the bytecode luma-script runs, byte for byte as the original."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+luma-script.workspace = true
+
+[lints]
+workspace = true

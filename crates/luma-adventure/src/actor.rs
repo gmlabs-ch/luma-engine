@@ -44,6 +44,14 @@ pub enum ActorState {
 pub enum ActorEvent {
     /// An event on the actor itself (`ActorIsBlocked`).
     OnActor(&'static str),
+    /// A frame of the actor's sprite became current: its sound plays and
+    /// its `APPLY_EVENT`s are raised on the actor.
+    FrameShown {
+        /// The sprite's path.
+        sprite: String,
+        /// The frame's index.
+        frame: usize,
+    },
     /// An event on a region of the main layer (`ActorEntry`,
     /// `ActorLeave`).
     OnRegion {
@@ -87,8 +95,7 @@ pub struct Actor {
     /// The state to return to when the current one ends.
     pub next_state: ActorState,
     /// The actor's sprites and textures; loaded again after a saved
-    /// game.
-    #[serde(skip)]
+    /// game, except the sprites scripts edited.
     pub bank: SpriteBank,
     /// Whether the last walk stopped on a block (`ActorIsBlocked`).
     pub actor_is_blocked: bool,
@@ -764,6 +771,10 @@ impl Actor {
         if !already_moved {
             if let Some(path) = self.current_sprite.clone() {
                 if let Some((true, move_x, move_y)) = self.step(&path, ctx.timer) {
+                    events.push(ActorEvent::FrameShown {
+                        frame: self.frame_of(&path),
+                        sprite: path,
+                    });
                     self.x += move_x;
                     self.y += move_y;
                     self.after_move(ctx.floor.scene, events);
@@ -850,6 +861,10 @@ impl Actor {
         let Some((true, move_x, move_y)) = self.step(&path, ctx.timer) else {
             return;
         };
+        events.push(ActorEvent::FrameShown {
+            frame: self.frame_of(&path),
+            sprite: path,
+        });
         let mut max_step = move_x.abs().max(move_y.abs()).max(1);
         while self.pf_count > 0 && max_step >= 0 {
             self.pf_x += self.pf_step_x;
@@ -1200,6 +1215,13 @@ mod tests {
         assert_eq!(actor.dir, Direction::Up);
         assert_eq!(actor.state, ActorState::Ready);
         assert!(actor.ready);
+        // Every frame shown is reported for its sound and events.
+        let frames_shown = events
+            .iter()
+            .filter(|e| matches!(e, ActorEvent::FrameShown { .. }))
+            .count();
+        assert!(frames_shown >= 20, "{frames_shown}");
+        events.retain(|e| !matches!(e, ActorEvent::FrameShown { .. }));
         assert_eq!(
             events,
             vec![ActorEvent::OnRegion {

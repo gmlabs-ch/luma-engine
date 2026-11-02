@@ -17,14 +17,14 @@ use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 
 use crate::natives_region::RegionRef;
 use crate::objects::Kind;
-use crate::scene_view::{AnimState, EntityRef, LoadedSprite, frame_height, key};
+use crate::scene_view::{EntityRef, frame_height, key};
 use crate::talk::TalkSkipButton;
 use crate::video::VideoPlayback;
 use crate::world::World;
 use luma_formats::font::TextAlign;
 
 /// `AlphaColor`: the engine's `0xAARRGGBB` integer.
-fn color_int(c: Rgba) -> i32 {
+pub(crate) fn color_int(c: Rgba) -> i32 {
     rgba(
         i32::from(c.r),
         i32::from(c.g),
@@ -33,7 +33,7 @@ fn color_int(c: Rgba) -> i32 {
     )
 }
 
-fn color_of(v: i32) -> Rgba {
+pub(crate) fn color_of(v: i32) -> Rgba {
     Rgba {
         r: ((v >> 16) & 0xff) as u8,
         g: ((v >> 8) & 0xff) as u8,
@@ -48,22 +48,8 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 
 /// Methods the engine has that later milestones implement.
 const GAME_STUBS: &[&str] = &[
-    "LockMouseRect",
-    "RegWriteNumber",
-    "RegWriteString",
-    "Screenshot",
-    "ScreenshotEx",
-    "OpenDocument",
-    "SetLoadingScreen",
-    "SetSavingScreen",
-    "DisplayLoadingIcon",
-    "HideLoadingIcon",
-    "StoreSaveThumbnail",
-    "DeleteSaveThumbnail",
     "ShowStatusLine",
     "HideStatusLine",
-    "LoadInventoryBox",
-    "Reset",
     "AccOutputText",
     "DumpTextureStats",
     "EnableScriptProfiling",
@@ -80,6 +66,10 @@ const OBJECT_STUBS: &[&str] = &[
 impl World {
     /// A built-in property of a native, if the native defines it.
     pub(crate) fn native_get(&self, id: NativeId, name: &str) -> Option<Value> {
+        // The library objects answer in place: no copy of their contents.
+        if let Kind::Class(object) = &self.native(id)?.kind {
+            return object.get_property(name);
+        }
         let kind = self.native(id)?.kind.clone();
         if let Some(value) = self.object_get(id, name) {
             return Some(value);
@@ -118,8 +108,10 @@ impl World {
             }
             Kind::EntityRegion(owner) => self.region_get(RegionRef::Entity(owner), name),
             Kind::WaypointGroup(index) => self.waypoint_group_get(index, name),
-            Kind::Sprite(owner) => self.sprite_get(owner, name),
             Kind::CursorSprite(owner) => self.cursor_sprite_get(owner, name),
+            Kind::Sprite(owner) => self.sprite_get(id, owner, name),
+            Kind::Frame { .. } => self.frame_get(id, name),
+            Kind::SubFrame { .. } => self.subframe_get(id, name),
             Kind::Actor => self.actor_get(id, name),
             Kind::Control => self.control_get(id, name),
             Kind::Item => self.item_get(id, name),
@@ -128,12 +120,18 @@ impl World {
                 "Name" => Some(Value::from(kind)),
                 _ => None,
             },
+            Kind::Class(_) => None,
         }
     }
 
     /// Sets a built-in property; `false` when the native has no such
     /// property and it should be stored as a script property.
     pub(crate) fn native_set(&mut self, id: NativeId, name: &str, value: &Value) -> bool {
+        if matches!(self.native(id).map(|n| &n.kind), Some(Kind::Class(_))) {
+            return self
+                .with_class(id, |object, world| object.set_property(name, value, world))
+                .unwrap_or(false);
+        }
         let kind = match self.native(id) {
             Some(native) => native.kind.clone(),
             None => return false,
@@ -151,12 +149,19 @@ impl World {
             }
             Kind::EntityRegion(owner) => self.region_set(RegionRef::Entity(owner), name, value),
             Kind::WaypointGroup(index) => self.waypoint_group_set(index, name, value),
-            Kind::Sprite(owner) => self.sprite_set(owner, name, value),
             Kind::CursorSprite(owner) => self.cursor_sprite_set(owner, name, value),
+            Kind::Sprite(owner) => self.sprite_set(id, owner, name, value),
+            Kind::Frame { .. } => self.frame_set(id, name, value),
+            Kind::SubFrame { .. } => self.subframe_set(id, name, value),
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
-            Kind::Keyboard | Kind::Math | Kind::ResponseBox | Kind::Fader | Kind::Inert(_) => false,
+            Kind::Keyboard
+            | Kind::Math
+            | Kind::ResponseBox
+            | Kind::Fader
+            | Kind::Inert(_)
+            | Kind::Class(_) => false,
         }
     }
 
@@ -168,6 +173,13 @@ impl World {
         args: &[Value],
         ctx: Context<'_>,
     ) -> Option<Return> {
+        if matches!(self.native(id)?.kind, Kind::Class(_)) {
+            return self
+                .with_class(id, |object, world| {
+                    object.call_method(name, args, world, &ctx)
+                })
+                .flatten();
+        }
         let kind = self.native(id)?.kind.clone();
         let mut ctx = ctx;
         if let Some(ret) = self.holder_call(id, name, args, &mut ctx) {
@@ -202,11 +214,14 @@ impl World {
             }
             Kind::EntityRegion(owner) => self.region_call(RegionRef::Entity(owner), name, args),
             Kind::WaypointGroup(_) => None,
-            Kind::Sprite(owner) => self.sprite_call(owner, name),
             Kind::CursorSprite(owner) => self.cursor_sprite_call(owner, name),
+            Kind::Sprite(owner) => self.sprite_call(id, owner, name, args, &ctx),
+            Kind::Frame { .. } => self.frame_call(id, name, args, &ctx),
+            Kind::SubFrame { .. } => self.subframe_call(id, name, args),
             Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
+            Kind::Class(_) => None,
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
                     let widget = self.inert("Widget");
@@ -351,7 +366,8 @@ impl World {
             "Name" => Value::from(self.name.clone()),
             "Caption" => Value::from(self.caption.clone()),
             "CurrentTime" => Value::Int(self.timer() as i32),
-            "WindowsTime" => Value::Int(self.timer() as i32),
+            // `timeGetTime`: a clock that runs while the game is frozen.
+            "WindowsTime" => Value::Int(self.clock as i32),
             "MainObject" => native_or_null(self.main_object),
             "MouseX" => Value::Int(self.mouse.x),
             "MouseY" => Value::Int(self.mouse.y),
@@ -379,18 +395,23 @@ impl World {
             "VideoSkipButton" => Value::Int(self.video_skip_button.code()),
             "Frozen" => Value::Bool(self.is_frozen()),
             "FocusedWindow" => native_or_null(self.focused_window()),
+            "WindowedMode" => Value::Bool(self.windowed),
+            "SoundAvailable" => Value::Bool(self.sounds.audio.device().is_some()),
             "DebugMode"
-            | "SoundAvailable"
-            | "WindowedMode"
             | "TextRTL"
             | "SuspendedRendering"
             | "SuppressScriptErrors"
             | "AutorunDisabled"
             | "AutoSaveOnExit"
             | "CursorHidden" => Value::Bool(false),
-            "AcceleratedMode" => Value::Bool(true),
-            "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => Value::Int(100),
-            "FPS" | "TextEncoding" | "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
+            "AcceleratedMode" | "Accelerated" => Value::Bool(true),
+            "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => {
+                return Some(self.volume_property(name));
+            }
+            "FPS" => Value::Int(self.fps),
+            "TextEncoding" => Value::Int(self.text_encoding),
+            "StartupScene" => self.startup_scene.clone().map_or(Value::Null, Value::from),
+            "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
             "SaveDirectory" => Value::from(self.save_directory().to_string_lossy().into_owned()),
             "MostRecentSaveSlot" => Value::Int(self.most_recent_save_slot()),
             "TalkSkipButton" => Value::Int(self.talk_skip_button.code()),
@@ -432,6 +453,20 @@ impl World {
             "VideoSubtitles" => self.video_subtitles = value.get_bool(self),
             "VideoSkipButton" => {
                 self.video_skip_button = TalkSkipButton::from_code(value.get_int(self));
+            }
+            "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => {
+                let percent = value.get_int(self);
+                self.set_volume_property(name, percent);
+            }
+            "TextEncoding" => {
+                // `NUM_TEXT_ENCODINGS` is 2: ANSI and UTF-8.
+                self.text_encoding = value.get_int(self).clamp(0, 1);
+            }
+            "StartupScene" => {
+                self.startup_scene = match value {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
             }
             _ => return false,
         }
@@ -663,12 +698,109 @@ impl World {
             "Msg" => {
                 let text = arg(0).get_string(self);
                 self.log(format!("msg: {text}"));
+                self.quick_message(&text);
                 Return::null()
+            }
+            "Screenshot" => {
+                let name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                self.request_screenshot(name.as_deref());
+                Return::value(true)
+            }
+            "ScreenshotEx" => {
+                let filename = arg(0).get_string(self);
+                let (width, height) = (self.settings.width as i32, self.settings.height as i32);
+                let w = match arg(1) {
+                    Value::Null => width,
+                    v => v.get_int(self),
+                };
+                let h = match arg(2) {
+                    Value::Null => height,
+                    v => v.get_int(self),
+                };
+                self.request_screenshot_sized(&filename, w, h);
+                Return::value(true)
+            }
+            "SetLoadingScreen" | "SetSavingScreen" => {
+                let path = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let (x, y) = (arg(1).get_int(self), arg(2).get_int(self));
+                if name == "SetLoadingScreen" {
+                    self.set_loading_screen(path.as_deref(), x, y);
+                } else {
+                    self.set_saving_screen(path.as_deref(), x, y);
+                }
+                Return::null()
+            }
+            "DisplayLoadingIcon" => {
+                let path = arg(0).get_string(self);
+                let (x, y) = (arg(1).get_int(self), arg(2).get_int(self));
+                let persistent = arg(3).get_bool(self);
+                self.display_loading_icon(&path, x, y, persistent);
+                Return::null()
+            }
+            "HideLoadingIcon" => {
+                self.hide_loading_icon();
+                Return::null()
+            }
+            "StoreSaveThumbnail" => Return::value(self.store_save_thumbnail()),
+            "DeleteSaveThumbnail" => {
+                self.delete_save_thumbnail();
+                Return::null()
+            }
+            "LockMouseRect" => {
+                let (l, t, r, b) = (
+                    arg(0).get_int(self),
+                    arg(1).get_int(self),
+                    arg(2).get_int(self),
+                    arg(3).get_int(self),
+                );
+                self.lock_mouse_rect(l, t, r, b);
+                Return::null()
+            }
+            "Reset" => {
+                self.reset_content(ctx.engine);
+                Return::null()
+            }
+            "LoadInventoryBox" => {
+                let path = arg(0).get_string(self);
+                Return::value(self.load_inventory_box_from(ctx.engine, &path))
             }
             "LOG" => {
                 let text = arg(0).get_string(self);
                 self.log(format!("sc: {text}"));
                 Return::null()
+            }
+            "Caption" => {
+                // `CBObject::GetCaption(n)`: the game has one caption; the
+                // original engine refreshes the window title here too.
+                Return::value(self.caption.clone())
+            }
+            "RunScript" => {
+                self.log(
+                    "**Warning** The 'RunScript' method is now obsolete. Use 'AttachScript' instead (same syntax)"
+                        .to_string(),
+                );
+                let path = arg(0).get_string(self);
+                let game = self.game_id;
+                Return::value(self.attach(ctx.engine, game, &path))
+            }
+            "GetFileChecksum" => {
+                let path = arg(0).get_string(self);
+                let as_hex = arg(1).get_bool(self);
+                Return::value(match self.file_checksum(&path) {
+                    Some(crc) if as_hex => Value::from(format!("{crc:x}")),
+                    Some(crc) => Value::Int(crc as i32),
+                    None => Value::Null,
+                })
+            }
+            "OpenDocument" => {
+                let target = arg(0).get_string(self);
+                Return::value(self.open_document(&target))
             }
             "FileExists" => Return::value(self.vfs().exists(&arg(0).get_string(self))),
             "ClearScriptCache" => Return::null(),
@@ -721,13 +853,28 @@ impl World {
                 self.stub(&format!("Game.{name}"));
                 Return::null()
             }
+            "RegWriteNumber" | "RegWriteString" => {
+                let key = arg(0).get_string(self);
+                let value = match name {
+                    "RegWriteNumber" => arg(1).get_int(self).to_string(),
+                    _ => arg(1).get_string(self),
+                };
+                self.write_setting(&key, &value);
+                Return::null()
+            }
             "RegReadString" => {
-                self.stub(&format!("Game.{name}"));
-                Return::value("")
+                let key = arg(0).get_string(self);
+                let default = arg(1).get_string(self);
+                Return::value(self.read_setting(&key).unwrap_or(default))
             }
             "RegReadNumber" => {
-                self.stub(&format!("Game.{name}"));
-                Return::value(0)
+                // `GetPrivateProfileInt`: the leading integer of the value.
+                let key = arg(0).get_string(self);
+                let default = arg(1).get_int(self);
+                Return::value(
+                    self.read_setting(&key)
+                        .map_or(default, |v| luma_script::atoi(&v)),
+                )
             }
             "AddResponse" | "AddResponseOnce" | "AddResponseOnceGame" => {
                 let kind = match name {
@@ -1484,113 +1631,6 @@ impl World {
     // Sprites
     // ----------------------------------------------------------------
 
-    /// The sprite an object's sprite object stands for, with its
-    /// animation: an entity's in the scene (or the window bank for a
-    /// container's), an actor's in its own bank, an item's in the UI
-    /// bank.
-    fn sprite_parts(
-        &self,
-        owner: NativeId,
-    ) -> Option<(String, Option<&LoadedSprite>, Option<&AnimState>)> {
-        let path = self.own_sprite_path(owner)?;
-        Some(match &self.native(owner)?.kind {
-            Kind::Entity(EntityRef::Ui(i)) => (
-                path.clone(),
-                self.ui.bank.sprite(&path),
-                self.ui_entities.get(*i).and_then(|e| e.anim.as_ref()),
-            ),
-            Kind::Entity(r) => {
-                let view = self.view_of(*r)?;
-                (path.clone(), view.sprite(&path), view.anim(*r))
-            }
-            Kind::Actor => {
-                let actor = self.actor(owner)?;
-                (
-                    path.clone(),
-                    actor.bank.sprite(&path),
-                    actor.anim_state(&path),
-                )
-            }
-            Kind::Item => {
-                let item = self.item(owner)?;
-                (
-                    path.clone(),
-                    self.ui.bank.sprite(&path),
-                    item.anim.as_ref().filter(|a| a.sprite == key(&path)),
-                )
-            }
-            _ => return None,
-        })
-    }
-
-    /// The animation state behind an object's sprite object, mutable.
-    fn sprite_anim_mut(&mut self, owner: NativeId) -> Option<&mut AnimState> {
-        let path = self.own_sprite_path(owner)?;
-        match self.native(owner)?.kind.clone() {
-            Kind::Entity(EntityRef::Ui(i)) => {
-                let entity = self.ui_entities.get_mut(i)?;
-                let anim = entity.anim.get_or_insert_with(|| AnimState::new(&path));
-                if anim.sprite != key(&path) {
-                    *anim = AnimState::new(&path);
-                }
-                Some(anim)
-            }
-            Kind::Entity(r) => self.view_of_mut(r)?.anim_mut(r),
-            Kind::Actor => Some(self.actor_mut(owner)?.anim(&path)),
-            Kind::Item => {
-                let item = self.item_mut(owner)?;
-                let anim = item.anim.get_or_insert_with(|| AnimState::new(&path));
-                if anim.sprite != key(&path) {
-                    *anim = AnimState::new(&path);
-                }
-                Some(anim)
-            }
-            _ => None,
-        }
-    }
-
-    fn sprite_get(&self, owner: NativeId, name: &str) -> Option<Value> {
-        let (path, loaded, anim) = self.sprite_parts(owner)?;
-        let frames = loaded.map_or(0, |l| l.sprite.frames.len());
-        Some(match name {
-            "Type" => Value::from("sprite"),
-            "Filename" => Value::from(path),
-            "NumFrames" => Value::Int(frames as i32),
-            "CurrentFrame" => Value::Int(if frames == 0 {
-                -1
-            } else {
-                anim.map_or(0, |a| a.current_frame.min(frames - 1) as i32)
-            }),
-            "PixelPerfect" => Value::Bool(loaded.is_some_and(|l| l.sprite.precise)),
-            "Looping" => Value::Bool(
-                anim.and_then(|a| a.looping)
-                    .unwrap_or_else(|| loaded.is_some_and(|l| l.sprite.looping)),
-            ),
-            "Owner" => Value::Native(owner),
-            "Finished" => Value::Bool(anim.is_some_and(|a| a.finished)),
-            "Paused" => Value::Bool(anim.is_some_and(|a| a.paused)),
-            _ => return None,
-        })
-    }
-
-    fn sprite_set(&mut self, owner: NativeId, name: &str, value: &Value) -> bool {
-        let (int, flag) = (value.get_int(self), value.get_bool(self));
-        let Some(anim) = self.sprite_anim_mut(owner) else {
-            return false;
-        };
-        match name {
-            "CurrentFrame" => {
-                anim.current_frame = int.max(0) as usize;
-                anim.last_frame_time = 0;
-                anim.finished = false;
-            }
-            "Looping" => anim.looping = Some(flag),
-            "PixelPerfect" => {}
-            _ => return false,
-        }
-        true
-    }
-
     /// The cursor of an object as a sprite object (`GetCursorObject`):
     /// the cursor sprite with its animation, as the cursor shows it.
     fn cursor_sprite_get(&self, owner: NativeId, name: &str) -> Option<Value> {
@@ -1656,40 +1696,6 @@ impl World {
             _ => return None,
         })
     }
-
-    fn sprite_call(&mut self, owner: NativeId, name: &str) -> Option<Return> {
-        let kind = self.native(owner)?.kind.clone();
-        Some(match name {
-            "Reset" => {
-                match kind {
-                    // An entity's `Reset` ends a `PlayAnim` too.
-                    Kind::Entity(r) if !matches!(r, EntityRef::Ui(_)) => {
-                        if let Some(view) = self.view_of_mut(r) {
-                            view.reset_anim(r);
-                        }
-                    }
-                    _ => {
-                        if let Some(anim) = self.sprite_anim_mut(owner) {
-                            anim.reset();
-                        }
-                    }
-                }
-                Return::null()
-            }
-            "Pause" | "Play" => {
-                let paused = name == "Pause";
-                if let Some(anim) = self.sprite_anim_mut(owner) {
-                    anim.paused = paused;
-                }
-                Return::null()
-            }
-            "GetFrame" | "DeleteFrame" | "AddFrame" | "InsertFrame" => {
-                self.stub(&format!("Sprite.{name}"));
-                Return::null()
-            }
-            _ => return None,
-        })
-    }
 }
 
 /// The `Math` object's methods (`SXMath`): every one takes floats and
@@ -1738,7 +1744,7 @@ impl World {
     }
 
     /// Restarts the animation of an entity's sprite (`SetSprite`, `Reset`).
-    fn reset_entity_anim(&mut self, r: EntityRef) {
+    pub(crate) fn reset_entity_anim(&mut self, r: EntityRef) {
         match r {
             EntityRef::Ui(i) => {
                 if let Some(entity) = self.ui_entities.get_mut(i) {
@@ -1750,6 +1756,10 @@ impl World {
                     view.reset_anim(r);
                 }
             }
+        }
+        // `CBSprite::Reset` stops the sprite's frame sounds.
+        if let Some(owner) = self.node_id(r) {
+            self.kill_frame_sounds(owner);
         }
     }
 }

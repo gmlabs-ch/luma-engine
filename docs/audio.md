@@ -76,6 +76,15 @@ loads, with `SOUND_START_TIME` and `SOUND_VOLUME`, and a script plays it
 with `PlaySound()`. The sounds of a scene's objects go with the scene;
 the game's and its actors' stay.
 
+A sprite frame's `SOUND` (see [formats/sprite.md](formats/sprite.md))
+plays when the frame becomes current, as a sound of its own beside the
+object's `PlaySound` one (`CBFrame::OneTimeDisplay`): at full volume,
+panned with the object's position when it pans its sounds, once. A
+frame marked `KILL_SOUND` stops the sprite's earlier frame sounds when
+it becomes current, and `Reset` stops them too (`CBSprite::
+KillAllSounds`). Frame sounds that ended are forgotten each frame; they
+are not kept in saved games.
+
 ## Music
 
 Five channels (`Game.PlayMusicChannel(channel, file, looping,

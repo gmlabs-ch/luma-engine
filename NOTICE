@@ -52,6 +52,17 @@ no code copied):
   crates/luma-script/src/script.rs
   crates/luma-script/src/engine.rs
   crates/luma-script/src/snapshot.rs
+  docs/compiler.md
+  crates/luma-compiler/src/lexer.rs
+  crates/luma-compiler/src/parser.rs
+  crates/luma-compiler/src/symbols.rs
+  crates/luma-compiler/src/codegen.rs
+  crates/luma-script/src/classes/mod.rs
+  crates/luma-script/src/classes/string.rs
+  crates/luma-script/src/classes/array.rs
+  crates/luma-script/src/classes/date.rs
+  crates/luma-script/src/classes/file.rs
+  crates/luma-script/src/classes/membuffer.rs
   crates/luma-adventure/src/world.rs
   crates/luma-adventure/src/natives.rs
   crates/luma-adventure/src/natives_actor.rs
@@ -62,6 +73,7 @@ no code copied):
   crates/luma-adventure/src/talk.rs
   crates/luma-adventure/src/sound.rs
   crates/luma-adventure/src/natives_sound.rs
+  crates/luma-adventure/src/natives_sprite.rs
   crates/luma-adventure/src/input.rs
   crates/luma-adventure/src/fader.rs
   crates/luma-adventure/src/ui.rs
@@ -75,11 +87,20 @@ no code copied):
   crates/luma-adventure/src/video.rs
   crates/luma-adventure/src/scene_state.rs
   crates/luma-adventure/src/save.rs
+  crates/luma-adventure/src/registry.rs
+  crates/luma-adventure/src/capture.rs
   crates/luma-audio/src/audio.rs
   crates/luma-adventure/src/objects.rs
   crates/luma-adventure/src/natives_object.rs
   crates/luma-adventure/src/natives_region.rs
   crates/luma-adventure/src/scene_edit.rs
+  docs/3d-actors.md
+  docs/formats/geometry.md
+  crates/luma-3d/src/math.rs
+  crates/luma-3d/src/three_ds.rs
+  crates/luma-3d/src/node_patterns.rs
+  crates/luma-3d/src/scene_geometry.rs
+  crates/luma-3d/src/camera.rs
 
 -------------------------------------------------------------------------------
 Dependencies under the Mozilla Public License 2.0

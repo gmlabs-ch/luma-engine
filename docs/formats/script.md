@@ -14,7 +14,11 @@ with them) are documented with the virtual machine itself; this document
 describes the file layout and the instruction encoding.
 
 Implemented by the `luma-script` crate (`luma_script::Program`), and shown
-by `luma script <game> <file>`.
+by `luma script <game> <file>` (or `luma script <file>` for a file on
+disk). The `luma-compiler` crate and `luma compile` produce these files
+from script sources, byte for byte as the original compiler did; how the
+compiler lays out the code and the tables is specified in
+[../compiler.md](../compiler.md).
 
 ## Layout
 
@@ -51,8 +55,13 @@ count × { index: u32, name: string }
 ```
 
 Each entry stores the symbol's index explicitly; indexes are below
-`count`. Symbols are variable, function and method names referenced by
-instructions. In practice the entries are in index order, but a reader
+`count`. Symbols are the names referenced by instructions: variables
+(`DEF_VAR`, `PUSH_VAR`, `POP_VAR`, `PUSH_VAR_REF`, `PUSH_THIS`) and the
+functions called with `EXTERNAL_CALL`. Script function, method, event and
+member names are not symbols (they are in their own tables or inline as
+`PUSH_STRING` operands), and strings are never tabulated or deduplicated:
+each `PUSH_STRING` carries its text. The compiler numbers symbols in order
+of first use, so in practice the entries are in index order, but a reader
 should place each entry at its index.
 
 ### Function, event and method tables
@@ -64,14 +73,19 @@ count: u32
 count × { position: u32, name: string }
 ```
 
-`position` is the offset of the first instruction of the body.
+`position` is the offset of the first instruction of the body (its
+`SCOPE`). The compiler writes the entries of these three tables, and of
+the externals table, in **reverse source order** (it prepends each new
+entry to a list and writes the list from its head), so positions decrease
+along a table; this matters for the lookup rules below.
 
 - **Functions** (`function name() { ... }`) are called by `CALL` with the
   position resolved by the compiler, so the table is only needed by
   tools and debuggers. Lookup by name is case-sensitive, first match.
 - **Events** (`on "LeftClick" { ... }`) are the handlers the engine
   invokes with `ApplyEvent`. Lookup is **case-insensitive**, and the
-  **last** matching entry wins.
+  **last** matching entry wins: with the table reversed, that is the
+  **first** handler of that name in the source.
 - **Methods** (`method name() { ... }`) are callable from other scripts
   through the owning object (`obj.name()`). Lookup is case-sensitive,
   first match.
@@ -182,13 +196,23 @@ stops that script.
   parameter into a local. Built-in functions (`Sleep`, `Random`, ...) use
   the same argument layout with `EXTERNAL_CALL`. A call always leaves a
   result on the stack; statements that ignore it emit `POP_EMPTY`.
-- **Entry points.** The top-level code runs from the code offset and ends
-  with `RET`; the compiler places the handler bodies after it and jumps
-  over them (`JMP` to the final `RET`), so a listing shows the handlers
-  between the last top-level statement and the end.
+- **Entry points.** The top-level code runs from the code offset; the
+  compiler places it first whatever its position in the source, then
+  every function and method body, then every event handler body, each
+  immediately preceded by a `JMP` over itself, and one final `RET` after
+  everything. So the top-level code falls through the jumps to that single
+  `RET`, and a listing shows the bodies between the last top-level
+  statement and the end. A body ends with `PUSH_NULL; RET` (functions and
+  methods) or `RET_EVENT` (events) in case it does not return itself.
 - **`this`.** A method call pushes the object onto the `this` stack
   (`PUSH_THIS` or `PUSH_THIS_FROM_STACK`) for the duration of the call and
   pops it with `POP_THIS` afterwards.
+- **`new`.** `new Class(args)` is `CREATE_OBJECT`, `PUSH_THIS_FROM_STACK`,
+  the arguments and their count, `EXTERNAL_CALL Class` (or `CALL` for a
+  script function used as a constructor), `POP_THIS` and `POP_EMPTY`: the
+  constructor fills the placeholder object through `this`, its own result
+  is discarded and the object stays on the stack. `new Object()` goes
+  through the same sequence, with nothing to add to the placeholder.
 - **Includes.** `#include` is resolved by the compiler, so a compiled
   script contains everything its includes declared: a game whose scripts
   all include the same file of `global` declarations repeats those
