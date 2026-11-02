@@ -856,6 +856,17 @@ impl Engine {
                 };
                 Return::value(rgba(r, g, b, a))
             }
+            "MakeHSL" => {
+                // The components are bytes in the original (`BYTE InH`):
+                // an integer argument is truncated to one.
+                let h = arg(0).get_int(host) as u8;
+                let s = arg(1).get_int(host) as u8;
+                let l = arg(2).get_int(host) as u8;
+                Return::value(hsl_to_rgb(h, s, l))
+            }
+            "GetHValue" => Return::value(i32::from(rgb_to_hsl(arg(0).get_int(host)).0)),
+            "GetSValue" => Return::value(i32::from(rgb_to_hsl(arg(0).get_int(host)).1)),
+            "GetLValue" => Return::value(i32::from(rgb_to_hsl(arg(0).get_int(host)).2)),
             "GetRValue" => Return::value((arg(0).get_int(host) >> 16) & 0xff),
             "GetGValue" => Return::value((arg(0).get_int(host) >> 8) & 0xff),
             "GetBValue" => Return::value(arg(0).get_int(host) & 0xff),
@@ -1259,4 +1270,115 @@ impl Engine {
 /// The engine's colour encoding: `0xAARRGGBB`.
 pub fn rgba(r: i32, g: i32, b: i32, a: i32) -> i32 {
     ((a & 0xff) << 24) | ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff)
+}
+
+/// Hue, saturation and lightness of a colour integer, each scaled to
+/// 0..=255 (`CBUtils::RGBtoHSL`): the usual HSL formulas in single
+/// precision, each result truncated to a byte as the original does, and
+/// a grey having a hue and a saturation of 0. The alpha channel is
+/// ignored.
+pub fn rgb_to_hsl(color: i32) -> (u8, u8, u8) {
+    let r = ((color >> 16) & 0xff) as f32 / 255.0;
+    let g = ((color >> 8) & 0xff) as f32 / 255.0;
+    let b = (color & 0xff) as f32 / 255.0;
+    let min = r.min(g).min(b);
+    let max = r.max(g).max(b);
+    let delta = max - min;
+    let l = (max + min) / 2.0;
+    let (mut h, s) = if delta == 0.0 {
+        (0.0, 0.0)
+    } else {
+        let s = if l < 0.5 {
+            delta / (max + min)
+        } else {
+            delta / (2.0 - max - min)
+        };
+        let dr = (((max - r) / 6.0) + (delta / 2.0)) / delta;
+        let dg = (((max - g) / 6.0) + (delta / 2.0)) / delta;
+        let db = (((max - b) / 6.0) + (delta / 2.0)) / delta;
+        let h = if r == max {
+            db - dg
+        } else if g == max {
+            (1.0 / 3.0) + dr - db
+        } else {
+            (2.0 / 3.0) + dg - dr
+        };
+        (h, s)
+    };
+    if h < 0.0 {
+        h += 1.0;
+    }
+    if h > 1.0 {
+        h -= 1.0;
+    }
+    ((h * 255.0) as u8, (s * 255.0) as u8, (l * 255.0) as u8)
+}
+
+/// The colour integer of a hue, a saturation and a lightness, each in
+/// 0..=255 (`CBUtils::HSLtoRGB`): opaque, the channels truncated to
+/// bytes as the original does.
+pub fn hsl_to_rgb(h: u8, s: u8, l: u8) -> i32 {
+    let h = f32::from(h) / 255.0;
+    let s = f32::from(s) / 255.0;
+    let l = f32::from(l) / 255.0;
+    let (r, g, b) = if s == 0.0 {
+        let v = (l * 255.0) as u8;
+        (v, v, v)
+    } else {
+        let v2 = if l < 0.5 {
+            l * (1.0 + s)
+        } else {
+            (l + s) - (s * l)
+        };
+        let v1 = 2.0 * l - v2;
+        (
+            (255.0 * hue_to_channel(v1, v2, h + (1.0 / 3.0))) as u8,
+            (255.0 * hue_to_channel(v1, v2, h)) as u8,
+            (255.0 * hue_to_channel(v1, v2, h - (1.0 / 3.0))) as u8,
+        )
+    };
+    rgba(i32::from(r), i32::from(g), i32::from(b), 255)
+}
+
+/// One channel of an HSL colour (`CBUtils::Hue2RGB`).
+fn hue_to_channel(v1: f32, v2: f32, mut hue: f32) -> f32 {
+    if hue < 0.0 {
+        hue += 1.0;
+    }
+    if hue > 1.0 {
+        hue -= 1.0;
+    }
+    if 6.0 * hue < 1.0 {
+        v1 + (v2 - v1) * 6.0 * hue
+    } else if 2.0 * hue < 1.0 {
+        v2
+    } else if 3.0 * hue < 2.0 {
+        v1 + (v2 - v1) * ((2.0 / 3.0) - hue) * 6.0
+    } else {
+        v1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hsl_round_trips_within_a_few_steps() {
+        assert_eq!(hsl_to_rgb(0, 0, 255), rgba(255, 255, 255, 255));
+        assert_eq!(hsl_to_rgb(0, 0, 0), rgba(0, 0, 0, 255));
+        assert_eq!(rgb_to_hsl(rgba(128, 128, 128, 0)), (0, 0, 128));
+        assert_eq!(rgb_to_hsl(rgba(255, 0, 0, 255)), (0, 255, 127));
+        assert_eq!(rgb_to_hsl(rgba(0, 0, 255, 255)), (170, 255, 127));
+        for (h, s, l) in [(0, 255, 128), (42, 200, 60), (170, 255, 64), (230, 30, 200)] {
+            let color = hsl_to_rgb(h, s, l);
+            assert_eq!((color >> 24) & 0xff, 255, "opaque");
+            let (h2, s2, l2) = rgb_to_hsl(color);
+            let close = |a: u8, b: u8| i32::from(a).abs_diff(i32::from(b)) <= 4;
+            assert!(
+                close(h, h2) && close(s, s2) && close(l, l2),
+                "{h},{s},{l} -> {h2},{s2},{l2}"
+            );
+        }
+    }
 }

@@ -38,6 +38,24 @@ const VK_DELETE: i32 = 46;
 /// How long a `Press()` asked by a script shows the button pressed.
 const ONE_TIME_PRESS_MS: u64 = 100;
 
+/// One of the images a control shows, each a sprite of its own with
+/// its own animation (`m_Image`, `m_ImageInactive`, `m_ImageHover`...).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ImageSlot {
+    /// The background image every control has (`IMAGE`).
+    Image,
+    /// A window's image while it is not focused (`IMAGE_INACTIVE`).
+    Inactive,
+    /// A button's image under the mouse (`IMAGE_HOVER`).
+    Hover,
+    /// A button's image while pressed (`IMAGE_PRESS`).
+    Press,
+    /// A button's image while disabled (`IMAGE_DISABLE`).
+    Disable,
+    /// A button's image while focused (`IMAGE_FOCUS`).
+    Focus,
+}
+
 /// How a window relates to the rest of the game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum WindowMode {
@@ -91,6 +109,8 @@ pub struct WindowState {
     pub image_inactive: Option<String>,
     /// See `back_inactive`.
     pub font_inactive: Option<String>,
+    /// The animation of the inactive image.
+    pub anim_inactive: Option<AnimState>,
     /// The controls, in drawing order.
     pub widgets: Vec<NativeId>,
     /// The control holding the keyboard focus.
@@ -123,6 +143,7 @@ impl Default for WindowState {
             back_inactive: None,
             image_inactive: None,
             font_inactive: None,
+            anim_inactive: None,
             widgets: Vec::new(),
             focused_widget: None,
             shield: None,
@@ -163,6 +184,14 @@ pub struct ButtonState {
     pub image_disable: Option<String>,
     /// See `image_hover`.
     pub image_focus: Option<String>,
+    /// Animations of the state images, each advancing while shown.
+    pub anim_hover: Option<AnimState>,
+    /// See `anim_hover`.
+    pub anim_press: Option<AnimState>,
+    /// See `anim_hover`.
+    pub anim_disable: Option<AnimState>,
+    /// See `anim_hover`.
+    pub anim_focus: Option<AnimState>,
     /// Fonts of the states.
     pub font_hover: Option<String>,
     /// See `font_hover`.
@@ -268,6 +297,9 @@ pub struct UiEntity {
     pub anim: Option<AnimState>,
     /// The control showing it.
     pub container: NativeId,
+    /// Whether its scripts pause with the game (`Freezable`); off for a
+    /// container's entity unless a script turns it on.
+    pub freezable: bool,
 }
 
 /// A control: a window, a button, a static text or an editor
@@ -431,6 +463,70 @@ impl Control {
         }
     }
 
+    /// The image file in a slot, when the control has that slot and an
+    /// image in it.
+    pub fn image_in(&self, slot: ImageSlot) -> Option<&str> {
+        match slot {
+            ImageSlot::Image => self.image.as_deref(),
+            ImageSlot::Inactive => self.window()?.image_inactive.as_deref(),
+            ImageSlot::Hover => self.button()?.image_hover.as_deref(),
+            ImageSlot::Press => self.button()?.image_press.as_deref(),
+            ImageSlot::Disable => self.button()?.image_disable.as_deref(),
+            ImageSlot::Focus => self.button()?.image_focus.as_deref(),
+        }
+    }
+
+    /// The animation of the image in a slot, if the control has the
+    /// slot and the image has been shown.
+    pub fn anim_in(&self, slot: ImageSlot) -> Option<&AnimState> {
+        match slot {
+            ImageSlot::Image => self.anim.as_ref(),
+            ImageSlot::Inactive => self.window()?.anim_inactive.as_ref(),
+            ImageSlot::Hover => self.button()?.anim_hover.as_ref(),
+            ImageSlot::Press => self.button()?.anim_press.as_ref(),
+            ImageSlot::Disable => self.button()?.anim_disable.as_ref(),
+            ImageSlot::Focus => self.button()?.anim_focus.as_ref(),
+        }
+    }
+
+    /// The place of the animation of a slot's image, for creating or
+    /// replacing it; `None` when the control has no such slot.
+    pub fn anim_slot_mut(&mut self, slot: ImageSlot) -> Option<&mut Option<AnimState>> {
+        match slot {
+            ImageSlot::Image => Some(&mut self.anim),
+            ImageSlot::Inactive => Some(&mut self.window_mut()?.anim_inactive),
+            ImageSlot::Hover => Some(&mut self.button_mut()?.anim_hover),
+            ImageSlot::Press => Some(&mut self.button_mut()?.anim_press),
+            ImageSlot::Disable => Some(&mut self.button_mut()?.anim_disable),
+            ImageSlot::Focus => Some(&mut self.button_mut()?.anim_focus),
+        }
+    }
+
+    /// The frame shown of a slot's image: its animation's, else the
+    /// first.
+    fn frame_in(&self, slot: ImageSlot) -> usize {
+        self.anim_in(slot).map_or(0, |a| a.current_frame)
+    }
+
+    /// The image a button shows now: the slot of its state, when that
+    /// state has an image, else the plain image (`CUIButton::Display`).
+    fn button_image_slot(&self, focused: bool) -> Option<ImageSlot> {
+        let b = self.button()?;
+        let slot = if self.disabled {
+            Some(ImageSlot::Disable)
+        } else if self.pressed() {
+            Some(ImageSlot::Press)
+        } else if b.hover {
+            Some(ImageSlot::Hover)
+        } else if self.can_focus && focused {
+            Some(ImageSlot::Focus)
+        } else {
+            None
+        };
+        slot.filter(|s| self.image_in(*s).is_some())
+            .or_else(|| self.image.as_ref().map(|_| ImageSlot::Image))
+    }
+
     /// Sets the text; `|` becomes a line break (`SetText`).
     pub fn set_text(&mut self, text: &str) {
         self.text = luma_formats::window::control_text(text);
@@ -465,6 +561,22 @@ pub struct Ui {
     pub frozen: bool,
     freeze_level: u32,
     orig_interactive: bool,
+    /// Mode changes asked by property writes, applied with the engine at
+    /// the next window update.
+    pending_modes: Vec<(NativeId, PendingMode)>,
+    /// `Freezable` writes on entity containers, applied to the entity's
+    /// scripts with the engine at the next window update or freeze.
+    pub(crate) pending_freezable: Vec<(NativeId, bool)>,
+}
+
+/// A window mode change waiting for the script engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum PendingMode {
+    /// `SystemExclusive = true`.
+    SystemExclusive,
+    /// `Exclusive = false` or `SystemExclusive = false` on a
+    /// system-exclusive window.
+    CloseAndShow,
 }
 
 /// A rectangle contains a point.
@@ -817,6 +929,10 @@ impl World {
             image_press: self.load_control_image(&def.image_press),
             image_disable: self.load_control_image(&def.image_disable),
             image_focus: self.load_control_image(&def.image_focus),
+            anim_hover: None,
+            anim_press: None,
+            anim_disable: None,
+            anim_focus: None,
             font_hover: self.load_control_font(&def.font_hover),
             font_press: self.load_control_font(&def.font_press),
             font_disable: self.load_control_font(&def.font_disable),
@@ -1077,6 +1193,17 @@ impl World {
         }
         let mut all = self.descendants(id);
         all.push(id);
+        let sprites: Vec<NativeId> = self
+            .objects
+            .iter()
+            .filter(|(_, n)| {
+                matches!(n.kind, Kind::ControlImage { control, .. } if all.contains(&control))
+            })
+            .map(|(id, _)| id)
+            .collect();
+        for sprite in sprites {
+            self.drop_sprite_object(sprite);
+        }
         for control in &all {
             for script in engine.scripts_of(*control) {
                 engine.finish(script, true);
@@ -1268,6 +1395,7 @@ impl World {
             return true;
         }
         let pause_music = window.pause_music;
+        self.access.clear_active();
         self.make_freezable(engine, id, false);
         if let Some(control) = self.control_mut(id) {
             if let Some(window) = control.window_mut() {
@@ -1291,6 +1419,15 @@ impl World {
         };
         if mode == WindowMode::SystemExclusive {
             self.unfreeze(engine);
+        }
+        self.close_window_state(id)
+    }
+
+    /// The part of [`World::close_window`] that needs no engine: the
+    /// window is hidden, normal again and ready.
+    pub(crate) fn close_window_state(&mut self, id: NativeId) -> bool {
+        if self.control(id).and_then(Control::window).is_none() {
+            return false;
         }
         if let Some(control) = self.control_mut(id) {
             if let Some(window) = control.window_mut() {
@@ -1330,6 +1467,7 @@ impl World {
     /// the sounds too (the music when asked), the timer stops and the
     /// game is interactive. Nested freezes count.
     pub fn freeze(&mut self, engine: &mut Engine, including_music: bool) {
+        self.apply_pending_freezable(engine);
         if self.ui.freeze_level == 0 {
             engine.pause_all(self);
             self.sounds.audio.pause_all(including_music);
@@ -1352,6 +1490,62 @@ impl World {
             self.interactive = self.ui.orig_interactive;
             engine.resume_all();
             self.sounds.audio.resume_all();
+        }
+    }
+
+    /// Switches a window's mode from a property write (`Exclusive`,
+    /// `SystemExclusive` set): `true` opens it modally, `false` closes it
+    /// and leaves it visible (`CUIWindow::ScSetProperty`). The parts that
+    /// freeze or unfreeze the game need the script engine, which a
+    /// property write does not have, so they run at the start of the
+    /// frame's window update; the rest happens at once.
+    pub(crate) fn set_window_mode(&mut self, id: NativeId, system: bool, on: bool) {
+        let Some(mode) = self.control(id).and_then(Control::window).map(|w| w.mode) else {
+            return;
+        };
+        match (on, system) {
+            (true, false) => {
+                self.go_exclusive(id);
+            }
+            (true, true) => self
+                .ui
+                .pending_modes
+                .push((id, PendingMode::SystemExclusive)),
+            (false, _) if mode == WindowMode::SystemExclusive => {
+                self.ui.pending_modes.push((id, PendingMode::CloseAndShow));
+            }
+            (false, _) => {
+                self.close_window_state(id);
+                if let Some(control) = self.control_mut(id) {
+                    control.visible = true;
+                }
+            }
+        }
+    }
+
+    /// Applies the `Freezable` writes waiting for the engine.
+    fn apply_pending_freezable(&mut self, engine: &mut Engine) {
+        for (container, freezable) in std::mem::take(&mut self.ui.pending_freezable) {
+            if let Some(entity) = self.container_entity(container) {
+                self.make_entity_freezable(engine, entity, freezable);
+            }
+        }
+    }
+
+    fn apply_pending_window_modes(&mut self, engine: &mut Engine) {
+        self.apply_pending_freezable(engine);
+        for (id, pending) in std::mem::take(&mut self.ui.pending_modes) {
+            match pending {
+                PendingMode::SystemExclusive => {
+                    self.go_system_exclusive(engine, id);
+                }
+                PendingMode::CloseAndShow => {
+                    self.close_window(engine, id);
+                    if let Some(control) = self.control_mut(id) {
+                        control.visible = true;
+                    }
+                }
+            }
         }
     }
 
@@ -1422,6 +1616,7 @@ impl World {
     /// buttons note the mouse and fire their presses, the texts are
     /// measured and prepared for drawing.
     pub(crate) fn update_ui(&mut self, engine: &mut Engine) {
+        self.apply_pending_window_modes(engine);
         self.layout_responses();
         // Did we lose the focused window? Focus the topmost one.
         let focused_ok = self
@@ -1489,7 +1684,18 @@ impl World {
         if !focused_ok {
             self.move_focus(id, true);
         }
-        self.step_control_anim(id);
+        let inactive_shown = !self.is_focused(id)
+            && self
+                .control(id)
+                .is_some_and(|c| c.image_in(ImageSlot::Inactive).is_some());
+        self.step_control_image(
+            id,
+            if inactive_shown {
+                ImageSlot::Inactive
+            } else {
+                ImageSlot::Image
+            },
+        );
         self.prepare_title(id);
         for widget in self.widgets_of(id) {
             let Some(c) = self.control(widget) else {
@@ -1557,11 +1763,14 @@ impl World {
             filename: path.to_string(),
             anim: None,
             container: id,
+            freezable: false,
         });
         let entity = self.objects.insert(Kind::Entity(EntityRef::Ui(index)));
+        self.register_entity_region(entity);
         for script in scripts {
             self.attach(engine, entity, &script);
         }
+        self.make_entity_freezable(engine, entity, false);
         if let Some(control) = self.control_mut(id) {
             control.kind = ControlKind::EntityContainer(Some(index));
         }
@@ -1604,29 +1813,72 @@ impl World {
         }
     }
 
-    /// Advances the animation of a control's image; a frame that becomes
-    /// current plays its sound and raises its events on the control.
-    fn step_control_anim(&mut self, id: NativeId) {
+    /// Advances the animation of the image in a slot of a control, as
+    /// the engine does for the sprite it draws (`CBSprite::Display`): a
+    /// frame that becomes current plays its sound, raises `FrameChanged`
+    /// on the slot's sprite object and the frame's events on the control.
+    fn step_control_image(&mut self, id: NativeId, slot: ImageSlot) {
         let timer = self.timer();
         let Some(control) = self.ui.controls.get_mut(&id) else {
             return;
         };
-        let Some(path) = control.image.clone() else {
-            control.anim = None;
+        let Some(path) = control.image_in(slot).map(str::to_string) else {
+            if let Some(anim) = control.anim_slot_mut(slot) {
+                *anim = None;
+            }
             return;
         };
         let Some(loaded) = self.ui.bank.sprite(&path) else {
             return;
         };
-        let anim = control.anim.get_or_insert_with(|| AnimState::new(&path));
+        let Some(anim) = control.anim_slot_mut(slot) else {
+            return;
+        };
+        let anim = anim.get_or_insert_with(|| AnimState::new(&path));
         if anim.sprite != crate::scene_view::key(&path) {
             *anim = AnimState::new(&path);
         }
         if anim.step(&loaded.sprite, timer) {
             if let Some(frame) = loaded.sprite.frames.get(anim.current_frame).cloned() {
-                self.frame_shown(id, &frame);
+                self.frame_shown_in(id, slot, &frame);
             }
         }
+    }
+
+    /// Marks the scripts of a container's entity as freezable or not
+    /// (`CAdEntity::MakeFreezable`): the engine turns it off when the
+    /// container loads its entity, a script may turn it back on through
+    /// `Freezable`.
+    pub(crate) fn make_entity_freezable(
+        &mut self,
+        engine: &mut Engine,
+        entity: NativeId,
+        freezable: bool,
+    ) {
+        if let Some(Kind::Entity(EntityRef::Ui(index))) = self.objects.get(entity).map(|n| &n.kind)
+        {
+            if let Some(e) = self.ui_entities.get_mut(*index) {
+                e.freezable = freezable;
+            }
+        }
+        for script in engine.scripts_of(entity) {
+            if let Some(script) = engine.script_mut(script) {
+                script.set_freezable(freezable);
+            }
+        }
+    }
+
+    /// The sprite object of the image in a slot of a control
+    /// (`GetImageObject`, `GetInactiveImageObject`, `GetHoverImageObject`
+    /// and the others), created on first request; `None` when the slot
+    /// has no image, as the engine answers `null` then.
+    pub fn control_image_object(&mut self, control: NativeId, slot: ImageSlot) -> Option<NativeId> {
+        self.control(control)?.image_in(slot)?;
+        let kind = Kind::ControlImage { control, slot };
+        if let Some(id) = self.objects.find(|k| *k == kind) {
+            return Some(id);
+        }
+        Some(self.objects.insert(kind))
     }
 
     /// The font a control draws its text with: its own, else the system
@@ -1718,7 +1970,10 @@ impl World {
         if fire {
             self.press_button(engine, id);
         }
-        self.step_control_anim(id);
+        let focused = self.is_focused(id);
+        if let Some(slot) = self.control(id).and_then(|c| c.button_image_slot(focused)) {
+            self.step_control_image(id, slot);
+        }
         let (text, font, width, align) = {
             let Some(control) = self.control(id) else {
                 return;
@@ -1788,7 +2043,7 @@ impl World {
     }
 
     fn update_static(&mut self, id: NativeId) {
-        self.step_control_anim(id);
+        self.step_control_image(id, ImageSlot::Image);
         let Some(control) = self.control(id) else {
             return;
         };
@@ -1817,7 +2072,7 @@ impl World {
     }
 
     fn update_edit(&mut self, id: NativeId) {
-        self.step_control_anim(id);
+        self.step_control_image(id, ImageSlot::Image);
         let clock = self.clock;
         let focused = self.is_focused(id);
         let Some(control) = self.control(id) else {
@@ -2070,6 +2325,7 @@ impl World {
     /// do.
     pub fn edit_key(&mut self, id: NativeId, code: i32, text: Option<char>) -> bool {
         let (shift, control_down) = (self.keyboard.shift, self.keyboard.control);
+        let mut typed: Option<char> = None;
         let Some(control) = self.control_mut(id) else {
             return false;
         };
@@ -2169,6 +2425,7 @@ impl World {
                         end += ch.len_utf8();
                     }
                     start = end;
+                    typed = Some(ch);
                 }
                 None => handled = false,
             },
@@ -2182,6 +2439,10 @@ impl World {
             if let Some(parent) = parent {
                 self.queue_event(parent, name);
             }
+        }
+        // The key typed is read out (`CUIEdit::HandleKeypress`).
+        if let Some(ch) = typed {
+            self.access_speak(&ch.to_string(), crate::accessibility::SpeechKind::Keypress);
         }
         handled
     }
@@ -2240,17 +2501,16 @@ impl World {
         } else {
             control.back.as_ref()
         };
-        let image = if !focused && window.image_inactive.is_some() {
-            window.image_inactive.as_deref()
+        let slot = if !focused && window.image_inactive.is_some() {
+            ImageSlot::Inactive
         } else {
-            control.image.as_deref()
+            ImageSlot::Image
         };
         if let Some(back) = back {
             self.draw_tiled(list, back, x, y, control.width, control.height, tint);
         }
-        if let Some(image) = image {
-            let frame = control.anim.as_ref().map_or(0, |a| a.current_frame);
-            self.draw_ui_image(list, image, frame, x, y, tint);
+        if let Some(image) = control.image_in(slot) {
+            self.draw_ui_image(list, image, control.frame_in(slot), x, y, tint);
         }
         if let (Some(rect), false) = (window.title_rect, control.text.is_empty()) {
             if let Some(font) = self.window_font(id).and_then(|f| self.fonts.get(&f)) {
@@ -2300,6 +2560,16 @@ impl World {
         };
         if !control.visible || !entity.def.active {
             return;
+        }
+        // A video the entity plays takes its sprite's place.
+        if let Some(owner) = index.and_then(|i| self.node_id(EntityRef::Ui(i))) {
+            if self.entity_videos.contains_key(&owner) {
+                let (x, y) = (ox + control.x + entity.def.x, oy + control.y + entity.def.y);
+                if let Some(quad) = self.ui_video_quad(owner, x, y, tint) {
+                    list.push(quad);
+                }
+                return;
+            }
         }
         let Some(loaded) = entity
             .def
@@ -2351,19 +2621,21 @@ impl World {
             return;
         }
         let pressed = control.pressed();
-        let (state_back, state_image) = if control.disabled {
-            (b.back_disable.as_ref(), b.image_disable.as_deref())
+        let focused = self.is_focused(id);
+        let state_back = if control.disabled {
+            b.back_disable.as_ref()
         } else if pressed {
-            (b.back_press.as_ref(), b.image_press.as_deref())
+            b.back_press.as_ref()
         } else if b.hover {
-            (b.back_hover.as_ref(), b.image_hover.as_deref())
-        } else if control.can_focus && self.is_focused(id) {
-            (b.back_focus.as_ref(), b.image_focus.as_deref())
+            b.back_hover.as_ref()
+        } else if control.can_focus && focused {
+            b.back_focus.as_ref()
         } else {
-            (None, None)
+            None
         };
         let back = state_back.or(control.back.as_ref());
-        let image = state_image.or(control.image.as_deref());
+        let slot = control.button_image_slot(focused);
+        let image = slot.and_then(|s| control.image_in(s));
         let (x, y) = (control.x + ox, control.y + oy);
         let (mut ix, mut iy) = (x, y);
         if let (Some(path), true) = (image, b.center_image) {
@@ -2376,12 +2648,8 @@ impl World {
             self.draw_tiled(list, back, x, y, control.width, control.height, tint);
         }
         let shift = i32::from(pressed && back.is_some());
-        if let Some(path) = image {
-            let frame = if Some(path) == control.image.as_deref() {
-                control.anim.as_ref().map_or(0, |a| a.current_frame)
-            } else {
-                0
-            };
+        if let (Some(path), Some(slot)) = (image, slot) {
+            let frame = control.frame_in(slot);
             self.draw_ui_image(list, path, frame, ix + shift, iy + shift, tint);
         }
         if !control.text.is_empty() {

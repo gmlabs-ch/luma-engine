@@ -1,15 +1,18 @@
 //! The script library classes: `String`, `Array`, `Date`, `File` and
-//! `MemBuffer`, the objects a script creates with `new`.
+//! `MemBuffer`, the objects a script creates with `new`, and the global
+//! `Directory` object.
 //!
 //! Written with reference to `SXString.cpp`, `SXArray.cpp`, `SXDate.cpp`,
-//! `SXFile.cpp` and `SXMemBuffer.cpp` of Wintermute Engine 1.x (MIT
-//! License, Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
+//! `SXFile.cpp`, `SXMemBuffer.cpp` and `SXDirectory.cpp` of Wintermute
+//! Engine 1.x (MIT License, Copyright (c) 2003-2013 Jan Nedoma); see
+//! `NOTICE`.
 //!
 //! The classes are plain data with the engine's semantics: the host owns
 //! the objects (a [`ClassObject`] per native handle), creates them from
 //! its constructor function (`new String(...)` reaches
-//! [`ClassObject::construct`] through `Host::call_function`) and
-//! forwards property reads, writes, method calls and conversions to
+//! [`ClassObject::construct`] through `Host::call_function`; the host
+//! makes the one `Directory` object itself and publishes it as a global)
+//! and forwards property reads, writes, method calls and conversions to
 //! them. What the classes need from the embedding program, files, the
 //! clock and new handles, goes through the [`ClassHost`] trait.
 //!
@@ -28,12 +31,14 @@ use crate::value::{NativeId, Natives, Value};
 
 mod array;
 mod date;
+mod directory;
 mod file;
 mod membuffer;
 mod string;
 
 pub use array::ArrayObject;
 pub use date::DateObject;
+pub use directory::{DirEntry, DirectoryObject, PATH_SEPARATOR, TEMP_DIRECTORY, mask_matches};
 pub use file::{FileObject, Mode};
 pub use membuffer::MemBuffer;
 pub use string::StringObject;
@@ -50,6 +55,36 @@ pub trait ClassHost: Natives {
     /// name is not acceptable (an absolute path, a parent directory).
     /// [`relative_path`] does the checking for a host.
     fn writable_path(&mut self, name: &str) -> Option<PathBuf>;
+
+    /// The game's writable directory itself, the one [`writable_path`]
+    /// resolves under (`Directory.CurrentDirectory`, the root of
+    /// `Directory.TempDirectory`).
+    ///
+    /// [`writable_path`]: ClassHost::writable_path
+    fn writable_root(&self) -> PathBuf;
+
+    /// A directory a script may create, delete or list, by the name it
+    /// gives: the writable directory itself for an empty name, else
+    /// [`writable_path`]. A host that accepts other spellings of its root
+    /// overrides this.
+    ///
+    /// [`writable_path`]: ClassHost::writable_path
+    fn writable_dir(&mut self, name: &str) -> Option<PathBuf> {
+        if name.trim_matches(['\\', '/', ' ']).is_empty() || name == "." {
+            Some(self.writable_root())
+        } else {
+            self.writable_path(name)
+        }
+    }
+
+    /// The game's own entries of a directory (`Directory.GetFiles`,
+    /// `GetDirectories`): the files and sub-directories of the packages
+    /// and loose files under `dir`, the directory of the game for an
+    /// empty name. Listed after what the writable directory holds. The
+    /// default knows no game files.
+    fn game_entries(&mut self, _dir: &str) -> Vec<DirEntry> {
+        Vec::new()
+    }
 
     /// The wall clock for `new Date()` and `Date.SetCurrentTime`: seconds
     /// since 1970-01-01 00:00:00 **in the local time zone**, that is the
@@ -90,15 +125,24 @@ pub enum ClassObject {
     File(FileObject),
     /// `new MemBuffer(...)`.
     MemBuffer(MemBuffer),
+    /// The global `Directory` object; one per game.
+    Directory(DirectoryObject),
 }
 
 impl ClassObject {
-    /// The constructor names (`new Name(...)`).
+    /// The constructor names (`new Name(...)`); `Directory` is not one,
+    /// the host makes the single object with [`ClassObject::directory`].
     pub const NAMES: [&'static str; 5] = ["String", "Array", "Date", "File", "MemBuffer"];
 
     /// Whether `name` is one of the library classes.
     pub fn is_class(name: &str) -> bool {
         ClassObject::NAMES.contains(&name)
+    }
+
+    /// The `Directory` object, for the host to publish as the global of
+    /// that name.
+    pub fn directory() -> ClassObject {
+        ClassObject::Directory(DirectoryObject)
     }
 
     /// Creates an object (`new Name(args)`); `None` when `name` is not a
@@ -119,8 +163,8 @@ impl ClassObject {
         })
     }
 
-    /// The `Type` property: `string`, `array`, `date`, `file` or
-    /// `membuffer`. Also the class name natives compare by.
+    /// The `Type` property: `string`, `array`, `date`, `file`,
+    /// `membuffer` or `directory`. Also the class name natives compare by.
     pub fn type_name(&self) -> &'static str {
         match self {
             ClassObject::String(_) => "string",
@@ -128,13 +172,15 @@ impl ClassObject {
             ClassObject::Date(_) => "date",
             ClassObject::File(_) => "file",
             ClassObject::MemBuffer(_) => "membuffer",
+            ClassObject::Directory(_) => "directory",
         }
     }
 
     /// The string form (`ScToString`): the text of a string, the elements
     /// of an array joined by commas, a date as C's `asctime` prints it,
-    /// a file's name, `[membuffer object]`. The integer, float and
-    /// boolean forms are the base class's: `0`, `0.0` and `false`.
+    /// a file's name, `[membuffer object]`, `[native object]` for the
+    /// directory. The integer, float and boolean forms are the base
+    /// class's: `0`, `0.0` and `false`.
     pub fn to_string(&self, natives: &dyn Natives) -> String {
         match self {
             ClassObject::String(s) => s.text().to_string(),
@@ -142,6 +188,7 @@ impl ClassObject {
             ClassObject::Date(d) => d.to_string(),
             ClassObject::File(f) => f.to_string(),
             ClassObject::MemBuffer(_) => "[membuffer object]".to_string(),
+            ClassObject::Directory(_) => "[native object]".to_string(),
         }
     }
 
@@ -162,16 +209,18 @@ impl ClassObject {
 
     /// A built-in property (`ScGetProperty`). `None` means the class
     /// knows no such property and the host looks among the properties
-    /// scripts set on the object, as the base class does for files and
-    /// memory buffers; strings, arrays and dates answer every name (an
-    /// unknown one reads `null`).
-    pub fn get_property(&self, name: &str) -> Option<Value> {
+    /// scripts set on the object, as the base class does for files,
+    /// memory buffers and the directory; strings, arrays and dates answer
+    /// every name (an unknown one reads `null`). The host answers the
+    /// directory's paths.
+    pub fn get_property<H: ClassHost + ?Sized>(&self, name: &str, host: &H) -> Option<Value> {
         match self {
             ClassObject::String(s) => Some(s.get_property(name)),
             ClassObject::Array(a) => Some(a.get_property(name)),
             ClassObject::Date(d) => Some(d.get_property(name)),
             ClassObject::File(f) => f.get_property(name),
             ClassObject::MemBuffer(m) => m.get_property(name),
+            ClassObject::Directory(d) => d.get_property(name, host),
         }
     }
 
@@ -190,6 +239,7 @@ impl ClassObject {
                 true
             }
             ClassObject::Date(_) => true,
+            ClassObject::Directory(d) => d.set_property(name),
             ClassObject::File(_) | ClassObject::MemBuffer(_) => false,
         }
     }
@@ -218,6 +268,7 @@ impl ClassObject {
             ClassObject::Date(d) => d.call_method(name, args, host),
             ClassObject::File(f) => f.call_method(name, args, host, ctx),
             ClassObject::MemBuffer(m) => m.call_method(name, args, host, ctx),
+            ClassObject::Directory(d) => d.call_method(name, args, host),
         }
     }
 }

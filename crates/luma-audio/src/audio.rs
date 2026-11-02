@@ -3,18 +3,21 @@
 //! there (continuous integration, headless runs, the `device` feature
 //! off).
 //!
-//! The volume rules follow the original engine (`BSoundMgr.cpp`,
-//! `BSoundBuffer.cpp` and `BSound.cpp` of WME Lite, MIT License,
-//! Copyright (c) 2011 Jan Nedoma); see `NOTICE`.
+//! The volume rules and the echo and reverb effects follow the original
+//! engine (`BSoundMgr.cpp`, `BSoundBuffer.cpp` and `BSound.cpp` of WME
+//! Lite, MIT License, Copyright (c) 2011 Jan Nedoma); see `NOTICE`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use kira::backend::mock::{MockBackend, MockBackendSettings};
+use kira::effect::delay::{DelayBuilder, DelayHandle};
+use kira::effect::reverb::{ReverbBuilder, ReverbHandle};
 use kira::sound::PlaybackState;
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
-use kira::track::MainTrackBuilder;
-use kira::{AudioManager, AudioManagerSettings, Capacities, Decibels, Panning, Tween};
+use kira::track::{MainTrackBuilder, TrackBuilder, TrackHandle};
+use kira::{AudioManager, AudioManagerSettings, Capacities, Decibels, Mix, Panning, Tween};
 
 use crate::clip::Clip;
 use crate::error::{Error, Result};
@@ -33,6 +36,111 @@ pub enum SoundType {
 /// A sound loaded into the audio system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SoundId(pub u64);
+
+/// An effect on a sound, with the parameters of the DirectSound effects
+/// the engine applied (`CBSoundBuffer::ApplyFX`), mapped onto Kira's
+/// delay and reverb (see `docs/audio.md`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SoundEffect {
+    /// `SoundFXEcho`.
+    Echo {
+        /// Wet/dry mix in percent (0-100).
+        wet_dry_mix: f32,
+        /// Feedback in percent (0-100).
+        feedback: f32,
+        /// Left delay in milliseconds (1-2000).
+        left_delay_ms: f32,
+        /// Right delay in milliseconds (1-2000).
+        right_delay_ms: f32,
+    },
+    /// `SoundFXReverb`.
+    Reverb {
+        /// Input gain in decibels (-96-0).
+        in_gain_db: f32,
+        /// Reverb mix in decibels (-96-0).
+        reverb_mix_db: f32,
+        /// Reverb time in milliseconds (0.001-3000).
+        reverb_time_ms: f32,
+        /// High-frequency reverb time ratio (0.001-0.999).
+        high_freq_rt_ratio: f32,
+    },
+}
+
+/// The Kira parameters of an effect: the track's volume and the effect
+/// settings.
+struct EffectParams {
+    track_db: Decibels,
+    delay: Option<(Duration, Decibels, Mix)>,
+    reverb: Option<(f64, f64, Mix)>,
+}
+
+impl SoundEffect {
+    /// The engine's parameters as Kira's. The echo's two delays become
+    /// one, their mean, since Kira's delay has one line; the reverb's
+    /// time becomes the feedback of a comb filter of 35 ms (Freeverb's
+    /// tuning) that decays by 60 dB in that time, and its high-frequency
+    /// ratio the damping.
+    fn params(self) -> EffectParams {
+        match self {
+            SoundEffect::Echo {
+                wet_dry_mix,
+                feedback,
+                left_delay_ms,
+                right_delay_ms,
+            } => {
+                let delay_ms = ((left_delay_ms + right_delay_ms) / 2.0).clamp(1.0, 2000.0);
+                let feedback = decibels((feedback / 100.0).clamp(0.0, 1.0));
+                let mix = Mix((wet_dry_mix / 100.0).clamp(0.0, 1.0));
+                EffectParams {
+                    track_db: Decibels::IDENTITY,
+                    delay: Some((Duration::from_secs_f32(delay_ms / 1000.0), feedback, mix)),
+                    reverb: None,
+                }
+            }
+            SoundEffect::Reverb {
+                in_gain_db,
+                reverb_mix_db,
+                reverb_time_ms,
+                high_freq_rt_ratio,
+            } => {
+                let seconds = (reverb_time_ms / 1000.0).clamp(0.000_001, 3.0);
+                let feedback = 10f32.powf(-3.0 * 0.035 / seconds).clamp(0.0, 0.98);
+                let damping = (1.0 - high_freq_rt_ratio).clamp(0.0, 1.0);
+                let wet = 10f32.powf(reverb_mix_db.clamp(-96.0, 0.0) / 20.0);
+                let mix = Mix(wet / (1.0 + wet));
+                EffectParams {
+                    track_db: Decibels(in_gain_db.clamp(-96.0, 0.0)),
+                    delay: None,
+                    reverb: Some((f64::from(feedback), f64::from(damping), mix)),
+                }
+            }
+        }
+    }
+
+    /// Whether two effects are of the same kind, so that one can turn
+    /// into the other without restarting the sound.
+    fn same_kind(self, other: SoundEffect) -> bool {
+        matches!(
+            (self, other),
+            (SoundEffect::Echo { .. }, SoundEffect::Echo { .. })
+                | (SoundEffect::Reverb { .. }, SoundEffect::Reverb { .. })
+        )
+    }
+}
+
+/// The handles of a sound's effect, to change its parameters.
+enum EffectHandle {
+    Delay(DelayHandle),
+    Reverb(ReverbHandle),
+}
+
+/// The track a sound with an effect plays on, with the effect.
+struct EffectTrack {
+    track: TrackHandle,
+    handle: EffectHandle,
+    /// The delay time the track was built with (Kira cannot change it).
+    delay: Option<Duration>,
+}
 
 /// The gain of a volume in percent, as the engine attenuates it: the
 /// cube of the remaining fraction, in hundredths of a decibel, turned
@@ -67,6 +175,10 @@ struct Voice {
     clip: Arc<Clip>,
     kind: SoundType,
     handle: Option<StaticSoundHandle>,
+    /// The effect asked for the sound.
+    effect: Option<SoundEffect>,
+    /// The track with the effect, while the sound plays with one.
+    track: Option<EffectTrack>,
     looping: bool,
     loop_start_ms: u64,
     /// Where the next play starts.
@@ -217,12 +329,125 @@ impl Audio {
         }
     }
 
-    fn play_data(&mut self, data: StaticSoundData) -> Option<StaticSoundHandle> {
+    fn play_data(
+        &mut self,
+        data: StaticSoundData,
+        track: Option<&mut EffectTrack>,
+    ) -> Option<StaticSoundHandle> {
+        if let Some(track) = track {
+            return track.track.play(data).ok();
+        }
         match &mut self.manager {
             #[cfg(feature = "device")]
             Manager::Device(manager, _) => manager.play(data).ok(),
             Manager::Mock(manager) => manager.play(data).ok(),
         }
+    }
+
+    /// A track carrying an effect, for a sound to play on.
+    fn effect_track(&mut self, effect: SoundEffect) -> Option<EffectTrack> {
+        let params = effect.params();
+        let mut builder = TrackBuilder::new().volume(params.track_db);
+        let mut delay_time = None;
+        let handle = if let Some((delay, feedback, mix)) = params.delay {
+            delay_time = Some(delay);
+            EffectHandle::Delay(
+                builder.add_effect(
+                    DelayBuilder::new()
+                        .delay_time(delay)
+                        .feedback(feedback)
+                        .mix(mix),
+                ),
+            )
+        } else if let Some((feedback, damping, mix)) = params.reverb {
+            EffectHandle::Reverb(
+                builder.add_effect(
+                    ReverbBuilder::new()
+                        .feedback(feedback)
+                        .damping(damping)
+                        .mix(mix),
+                ),
+            )
+        } else {
+            return None;
+        };
+        let track = match &mut self.manager {
+            #[cfg(feature = "device")]
+            Manager::Device(manager, _) => manager.add_sub_track(builder).ok()?,
+            Manager::Mock(manager) => manager.add_sub_track(builder).ok()?,
+        };
+        Some(EffectTrack {
+            track,
+            handle,
+            delay: delay_time,
+        })
+    }
+
+    /// Applies an effect to a sound, or removes it with `None`
+    /// (`CBSound::ApplyFX`): a sound playing with an effect of the same
+    /// kind takes the new parameters in place; otherwise it starts
+    /// again where it was, on a track with the effect, keeping its
+    /// paused state, as the engine pauses and resumes it around the
+    /// change.
+    pub fn set_effect(&mut self, id: SoundId, effect: Option<SoundEffect>) -> bool {
+        let Some(voice) = self.voices.get_mut(&id) else {
+            return false;
+        };
+        let previous = voice.effect;
+        voice.effect = effect;
+        let live = voice
+            .handle
+            .as_ref()
+            .is_some_and(|h| h.state() != PlaybackState::Stopped);
+        if !live || previous == effect {
+            return true;
+        }
+        if let (Some(previous), Some(effect), Some(track)) =
+            (previous, effect, voice.track.as_mut())
+        {
+            if previous.same_kind(effect) {
+                let params = effect.params();
+                let same_delay = params.delay.is_none_or(|(d, _, _)| Some(d) == track.delay);
+                if same_delay {
+                    track.track.set_volume(params.track_db, Tween::default());
+                    match (&mut track.handle, params.delay, params.reverb) {
+                        (EffectHandle::Delay(h), Some((_, feedback, mix)), _) => {
+                            h.set_feedback(feedback, Tween::default());
+                            h.set_mix(mix, Tween::default());
+                        }
+                        (EffectHandle::Reverb(h), _, Some((feedback, damping, mix))) => {
+                            h.set_feedback(feedback, Tween::default());
+                            h.set_damping(damping, Tween::default());
+                            h.set_mix(mix, Tween::default());
+                        }
+                        _ => {}
+                    }
+                    return true;
+                }
+            }
+        }
+        // Another kind of effect: the sound starts again where it was.
+        let position = self.position_ms(id);
+        let paused = self.is_paused(id);
+        let looping = self.is_looping(id);
+        let Some(voice) = self.voices.get_mut(&id) else {
+            return false;
+        };
+        if let Some(mut handle) = voice.handle.take() {
+            handle.stop(Tween::default());
+        }
+        voice.track = None;
+        voice.start_ms = position;
+        self.play(id, looping);
+        if paused {
+            self.pause(id);
+        }
+        true
+    }
+
+    /// The effect applied to a sound.
+    pub fn effect(&self, id: SoundId) -> Option<SoundEffect> {
+        self.voices.get(&id).and_then(|v| v.effect)
     }
 
     /// Loads a decoded sound (`CBSoundMgr::AddSound`), stopped, with its
@@ -236,6 +461,8 @@ impl Audio {
                 clip,
                 kind,
                 handle: None,
+                effect: None,
+                track: None,
                 looping: false,
                 loop_start_ms: 0,
                 start_ms: 0,
@@ -318,9 +545,12 @@ impl Audio {
             .panning(Panning(voice.pan))
             .start_position(start as f64 / 1000.0)
             .loop_region(loop_region(looping, voice.loop_start_ms));
-        let handle = self.play_data(data);
+        let effect = voice.effect;
+        let mut track = effect.and_then(|e| self.effect_track(e));
+        let handle = self.play_data(data, track.as_mut());
         if let Some(voice) = self.voices.get_mut(&id) {
             voice.handle = handle;
+            voice.track = track;
             return voice.handle.is_some();
         }
         false
@@ -334,6 +564,7 @@ impl Audio {
         if let Some(mut handle) = voice.handle.take() {
             handle.stop(Tween::default());
         }
+        voice.track = None;
         voice.freeze_paused = false;
         voice.start_ms = 0;
         true
@@ -599,6 +830,73 @@ mod tests {
         assert_eq!(decibels(1.0), Decibels::IDENTITY);
         assert_eq!(decibels(0.0), Decibels::SILENCE);
         assert!((decibels(0.5).0 + 6.02).abs() < 0.01);
+    }
+
+    #[test]
+    fn effects_play_on_their_own_tracks() {
+        let mut audio = Audio::null();
+        let clip = Arc::new(Clip::silence(1000, 500));
+        let id = audio.add(clip, SoundType::Sfx, 100);
+        let echo = SoundEffect::Echo {
+            wet_dry_mix: 50.0,
+            feedback: 50.0,
+            left_delay_ms: 300.0,
+            right_delay_ms: 400.0,
+        };
+        assert!(audio.set_effect(id, Some(echo)));
+        assert_eq!(audio.effect(id), Some(echo));
+        assert!(audio.play(id, false));
+        audio.tick(100);
+        assert!(audio.is_playing(id));
+        assert!(audio.voices[&id].track.is_some());
+        let at = audio.position_ms(id);
+        assert!((95..=105).contains(&at), "{at}");
+        // The same kind of effect changes in place.
+        let louder = SoundEffect::Echo {
+            wet_dry_mix: 80.0,
+            feedback: 20.0,
+            left_delay_ms: 300.0,
+            right_delay_ms: 400.0,
+        };
+        assert!(audio.set_effect(id, Some(louder)));
+        audio.tick(50);
+        let at = audio.position_ms(id);
+        assert!((145..=155).contains(&at), "{at}");
+        // Another kind restarts the sound where it was, on a new track.
+        let reverb = SoundEffect::Reverb {
+            in_gain_db: -6.0,
+            reverb_mix_db: -3.0,
+            reverb_time_ms: 1000.0,
+            high_freq_rt_ratio: 0.5,
+        };
+        assert!(audio.set_effect(id, Some(reverb)));
+        assert!(audio.is_playing(id));
+        audio.tick(50);
+        let at = audio.position_ms(id);
+        assert!((190..=210).contains(&at), "{at}");
+        // Paused sounds stay paused through the change; removing the
+        // effect plays on the main track.
+        assert!(audio.pause(id));
+        audio.tick(10);
+        assert!(audio.set_effect(id, None));
+        audio.tick(10);
+        assert!(audio.is_paused(id));
+        assert!(audio.voices[&id].track.is_none());
+        assert!(audio.resume(id));
+        audio.tick(50);
+        assert!(audio.is_playing(id));
+        // The parameter mapping.
+        let params = echo.params();
+        let (delay, feedback, mix) = params.delay.unwrap();
+        assert_eq!(delay, Duration::from_secs_f32(0.35));
+        assert!((feedback.0 + 6.02).abs() < 0.01);
+        assert_eq!(mix, Mix(0.5));
+        let params = reverb.params();
+        let (feedback, damping, mix) = params.reverb.unwrap();
+        assert!((feedback - 0.785).abs() < 0.01, "{feedback}");
+        assert!((damping - 0.5).abs() < 1e-6);
+        assert!((mix.0 - 0.414).abs() < 0.01, "{}", mix.0);
+        assert_eq!(params.track_db, Decibels(-6.0));
     }
 
     #[test]

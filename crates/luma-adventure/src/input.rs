@@ -28,6 +28,8 @@ pub struct Mouse {
     pub left_down: bool,
     /// The last left click: wall clock and position, for double clicks.
     pub last_left_click: Option<(u64, i32, i32)>,
+    /// The last right click, for double clicks.
+    pub last_right_click: Option<(u64, i32, i32)>,
 }
 
 /// The keyboard as scripts see it (`Game.Keyboard`).
@@ -68,6 +70,8 @@ pub(crate) enum HitBank {
     Scene,
     Actor(NativeId),
     Ui,
+    /// The bank of the game's own entities and attachments.
+    Game,
 }
 
 /// The area of a drawn sub-frame, as the engine registers it
@@ -163,23 +167,52 @@ impl PixelArea {
     }
 
     /// The centre of the sub-frame as drawn, in layer coordinates, or
-    /// `None` when its size is unknown or empty.
+    /// `None` when its size is unknown or empty: the centre of
+    /// [`PixelArea::bounds`], which `World::hit_point` takes.
+    #[cfg(test)]
     pub fn center(&self, mask: Option<&Mask>) -> Option<(i32, i32)> {
+        let (x, y, w, h) = self.bounds(mask)?;
+        Some((x + w / 2, y + h / 2))
+    }
+
+    /// The bounding box of the sub-frame as drawn, in layer coordinates
+    /// (`x`, `y`, `width`, `height`): its rectangle, or the box around
+    /// the four corners once turned, whose centre is the turned centre;
+    /// `None` when its size is unknown or empty.
+    pub fn bounds(&self, mask: Option<&Mask>) -> Option<(i32, i32, i32, i32)> {
         let (dx, dy, dw, dh) = self.rect(mask);
         if dw <= 0 || dh <= 0 {
             return None;
         }
-        let (cx, cy) = (dx as f32 + dw as f32 / 2.0, dy as f32 + dh as f32 / 2.0);
         if self.rotation == 0.0 {
-            return Some((cx as i32, cy as i32));
+            return Some((dx, dy, dw, dh));
         }
+        let (l, t, r, b) = (dx as f32, dy as f32, (dx + dw) as f32, (dy + dh) as f32);
+        let corners = [(l, t), (r, t), (l, b), (r, b)].map(|(x, y)| self.rotate(x, y));
+        let min_x = corners.iter().map(|c| c.0).fold(f32::INFINITY, f32::min);
+        let max_x = corners
+            .iter()
+            .map(|c| c.0)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let min_y = corners.iter().map(|c| c.1).fold(f32::INFINITY, f32::min);
+        let max_y = corners
+            .iter()
+            .map(|c| c.1)
+            .fold(f32::NEG_INFINITY, f32::max);
+        Some((
+            min_x.floor() as i32,
+            min_y.floor() as i32,
+            (max_x - min_x).ceil() as i32,
+            (max_y - min_y).ceil() as i32,
+        ))
+    }
+
+    /// A point of the layer turned by the rotation around the pivot.
+    fn rotate(&self, x: f32, y: f32) -> (f32, f32) {
         let (sin, cos) = self.rotation.to_radians().sin_cos();
         let (px, py) = self.pivot;
-        let (ox, oy) = (cx - px, cy - py);
-        Some((
-            (px + ox * cos - oy * sin) as i32,
-            (py + ox * sin + oy * cos) as i32,
-        ))
+        let (ox, oy) = (x - px, y - py);
+        (px + ox * cos - oy * sin, py + ox * sin + oy * cos)
     }
 }
 
@@ -262,6 +295,20 @@ impl Cursors {
     /// The frame of a cursor sprite's animation.
     pub fn frame_of(&self, path: &str) -> usize {
         self.anims.get(&key(path)).map_or(0, |a| a.current_frame)
+    }
+
+    /// The animation state of a cursor sprite, once it was shown or
+    /// restarted.
+    pub fn anim(&self, path: &str) -> Option<&AnimState> {
+        self.anims.get(&key(path))
+    }
+
+    /// The animation state of a cursor sprite, mutable, created at its
+    /// first frame.
+    pub(crate) fn anim_mut(&mut self, path: &str) -> &mut AnimState {
+        self.anims
+            .entry(key(path))
+            .or_insert_with(|| AnimState::new(path))
     }
 
     /// The frame the shown cursor is at.
@@ -384,19 +431,6 @@ impl World {
         }
     }
 
-    /// The cursor of an object (`CURSOR` of entities and actors).
-    fn object_cursor(&self, id: NativeId) -> Option<String> {
-        match self.objects.get(id).map(|n| &n.kind) {
-            Some(Kind::Actor) => self.actor(id).and_then(|a| a.def.cursor.clone()),
-            Some(Kind::Entity(r)) => self
-                .scene()
-                .and_then(|v| v.entity(*r))
-                .and_then(|e| e.cursor.clone()),
-            Some(Kind::Control) => self.control(id).and_then(|c| c.cursor.clone()),
-            _ => None,
-        }
-    }
-
     /// The cursor to show (`CBGame::ShowCursor`): the non-interactive one
     /// while the game is not interactive, else the active object's own,
     /// else the active cursor over an object, else the default.
@@ -500,19 +534,10 @@ impl World {
             return;
         };
         let camera = self.camera();
-        let actor_ids = self.actor_ids();
-        let positions: Vec<(i32, i32)> = actor_ids
-            .iter()
-            .filter_map(|id| self.actor(*id))
-            .filter(|a| a.def.active)
-            .map(|a| (a.x, a.y))
-            .collect();
-        let active_actors: Vec<NativeId> = actor_ids
-            .iter()
-            .copied()
-            .filter(|id| self.actor(*id).is_some_and(|a| a.def.active))
-            .collect();
-        for item in view.draw_order(&positions) {
+        let free_objects = self.free_objects();
+        let positions: Vec<crate::scene_view::FreeObject> =
+            free_objects.iter().map(|(_, o)| *o).collect();
+        for item in view.draw_order(&positions, |i| self.free_entity_stick(i)) {
             let layer = &view.scene.layers[item.layer()];
             let (ox, oy) = camera.layer_offset(&view.scene, layer);
             let layer_offset = (ox as i32, oy as i32);
@@ -530,11 +555,58 @@ impl World {
                     }
                 }
                 DrawItem::Other { index, .. } => {
-                    if let Some(id) = active_actors.get(index) {
-                        self.actor_hits(*id, layer_offset, hits);
+                    let Some((id, _)) = free_objects.get(index) else {
+                        continue;
+                    };
+                    match self.objects.get(*id).map(|n| n.kind.clone()) {
+                        Some(Kind::Actor) => self.actor_hits(*id, layer_offset, hits),
+                        Some(Kind::Entity(r)) => self.entity_hits(*id, r, layer_offset, hits),
+                        _ => {}
                     }
                 }
             }
+        }
+    }
+
+    /// The hit areas of an object's attachments, registered as the
+    /// object itself (`m_RegisterAlias`), around its position with its
+    /// scale and rotation.
+    fn attachment_hits(
+        &self,
+        owner: NativeId,
+        x: i32,
+        y: i32,
+        transform: Transform,
+        layer_offset: (i32, i32),
+        hits: &mut Vec<HitArea>,
+    ) {
+        let Some(state) = self.object_state(owner) else {
+            return;
+        };
+        for attachment in &state.attachments {
+            let Some(Kind::Entity(r)) = self.objects.get(attachment.id).map(|n| &n.kind) else {
+                continue;
+            };
+            let view = &self.game_view;
+            let Some(entity) = view.entity(*r).filter(|e| e.active) else {
+                continue;
+            };
+            let Some(loaded) = view.shown_sprite(*r).and_then(|p| view.sprite(&p)) else {
+                continue;
+            };
+            World::sprite_hits_with(
+                owner,
+                HitBank::Game,
+                &loaded.sprite,
+                view.frame_of(*r),
+                (
+                    x + (entity.x as f32 * transform.scale_x / 100.0) as i32,
+                    y + (entity.y as f32 * transform.scale_y / 100.0) as i32,
+                ),
+                transform,
+                layer_offset,
+                hits,
+            );
         }
     }
 
@@ -620,7 +692,16 @@ impl World {
         layer_offset: (i32, i32),
         hits: &mut Vec<HitArea>,
     ) {
-        let Some(view) = &self.scene else { return };
+        // A game-level entity lives in the game's view and is scaled by
+        // the scene it is shown in.
+        let (view, bank) = match r {
+            EntityRef::Game(_) => (&self.game_view, HitBank::Game),
+            _ => match &self.scene {
+                Some(view) => (view, HitBank::Scene),
+                None => return,
+            },
+        };
+        let levels = self.scene.as_ref().map_or(&view.scene, |v| &v.scene);
         let Some(entity) = view.entity(r) else { return };
         if !entity.active || !entity.interactive {
             return;
@@ -628,6 +709,8 @@ impl World {
         if entity.ignore_items && self.selected_item.is_some() {
             return;
         }
+        let transform = Transform::of_entity(levels, entity);
+        self.attachment_hits(id, entity.x, entity.y, transform, layer_offset, hits);
         // The region's points are scene coordinates, registered with the
         // offset of the layer the entity is drawn in (`CAdEntity::Display`
         // hands `Game->m_OffsetX/Y` to the active rectangle), so a scene
@@ -648,11 +731,11 @@ impl World {
         };
         World::sprite_hits_with(
             id,
-            HitBank::Scene,
+            bank,
             &loaded.sprite,
             view.frame_of(r),
             (entity.x, entity.y),
-            Transform::of_entity(&view.scene, entity),
+            transform,
             layer_offset,
             hits,
         );
@@ -664,6 +747,14 @@ impl World {
         if !actor.def.interactive || (actor.def.ignore_items && self.selected_item.is_some()) {
             return;
         }
+        self.attachment_hits(
+            id,
+            actor.x,
+            actor.y,
+            actor.transform(&view.scene),
+            layer_offset,
+            hits,
+        );
         let Some(path) = actor.current_sprite() else {
             return;
         };
@@ -689,6 +780,15 @@ impl World {
     /// as a wandering character; the centre of a sprite may fall on a
     /// transparent pixel, which nothing here checks.
     pub fn hit_point(&mut self, id: NativeId) -> Option<(i32, i32)> {
+        let (x, y, w, h) = self.hit_rect(id)?;
+        Some((x + w / 2, y + h / 2))
+    }
+
+    /// The rectangle on screen of the last hit area drawn for an object
+    /// (`x`, `y`, `width`, `height`): the bounding box of its region, its
+    /// sprite's frame or its own rectangle; `None` when the object is
+    /// not on screen.
+    pub fn hit_rect(&mut self, id: NativeId) -> Option<(i32, i32, i32, i32)> {
         let hits = std::mem::take(&mut self.hits);
         let mut found = None;
         for hit in hits.iter().rev() {
@@ -716,22 +816,19 @@ impl World {
                     color_key,
                     area,
                 } => {
-                    // The size may come from the image, as in `object_at`.
+                    // The size may come from the image, as in `object_at`;
+                    // a turned sprite gives the box around it.
                     let mask = self.hit_mask(*bank, image, *color_key);
-                    let Some((cx, cy)) = area.center(mask.as_ref()) else {
+                    let Some(bounds) = area.bounds(mask.as_ref()) else {
                         continue;
                     };
-                    found = Some((cx - hit.layer_offset.0, cy - hit.layer_offset.1));
-                    break;
+                    bounds
                 }
             };
             if w <= 0 || h <= 0 {
                 continue;
             }
-            found = Some((
-                x + w / 2 - hit.layer_offset.0,
-                y + h / 2 - hit.layer_offset.1,
-            ));
+            found = Some((x - hit.layer_offset.0, y - hit.layer_offset.1, w, h));
             break;
         }
         self.hits = hits;
@@ -749,6 +846,11 @@ impl World {
                 .actor_and_vfs(actor)
                 .and_then(|(vfs, a)| a.bank.mask(vfs, image, color_key).cloned()),
             HitBank::Ui => self.ui.bank.mask(&self.vfs, image, color_key).cloned(),
+            HitBank::Game => self
+                .game_view
+                .bank
+                .mask(&self.vfs, image, color_key)
+                .cloned(),
         }
     }
 
@@ -808,6 +910,7 @@ impl World {
         }
         self.active_object = object;
         if let Some(entered) = object {
+            self.speak_caption_of(entered);
             self.queue_event(entered, "MouseEntry".to_string());
         }
     }

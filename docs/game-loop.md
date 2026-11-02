@@ -21,12 +21,14 @@ in this order (`Runtime::tick`):
    when asked;
 3. speech sounds that ended end their sentences; the fader advances;
 4. the scripts run (`Engine::tick`);
-5. the scene's entities animate and talk; the actors walk, turn, talk;
-   a sprite frame that becomes current plays its `SOUND`, stops the
-   sprite's earlier frame sounds when marked `KILL_SOUND`, raises
-   `FrameChanged` on the sprite object and its `APPLY_EVENT`s on the
-   object showing the sprite; the particle emitters of the entities and
-   actors follow their owner and emit (see [particles.md](particles.md));
+5. the scene's entities and the game's own (see
+   [formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments))
+   animate and talk; the actors walk, turn, talk; a sprite frame that
+   becomes current plays its `SOUND`, stops the sprite's earlier frame
+   sounds when marked `KILL_SOUND`, raises `FrameChanged` on the sprite
+   object and its `APPLY_EVENT`s on the object showing the sprite; the
+   particle emitters of the entities and actors follow their owner and
+   emit (see [particles.md](particles.md));
 6. the view scrolls towards the main object; the objects' sounds follow
    them;
 7. the object under the mouse is found and becomes the **active
@@ -103,6 +105,10 @@ transform instead, deliberately.
 
 While the game is not interactive there is no active object, so a
 click skips the sentences and nothing else (per `TALK_SKIP_BUTTON`).
+The exception is an object whose `NonIntMouseEvents` is on
+(`CBObject::m_NonIntMouseEvents`): the windows, their controls and the
+entities of entity containers start with it on, so that a menu works
+while the actors talk; any object may have it set by a script.
 
 ## Mouse events
 
@@ -114,6 +120,26 @@ mouse is over it. A game script that handles `LeftClick` is therefore in
 charge of forwarding it (The White Chamber's dispatches to the active
 object or the scene itself, and its scenes walk the actor to
 `Scene.MouseX`, `Scene.MouseY`).
+
+`RightDoubleClick`, `MiddleClick` and `MiddleRelease` follow the same
+path but stop at the active object: the engine's adventure layer only
+forwards the left-button events and the right click to the scene
+(`CAdGame` against `CBGame`). A right double click replaces the second
+`RightClick`, as the system's double-click message did; a middle click
+or a right double click does nothing while the game is not interactive
+(a right click then skips the sentence, as before).
+
+The wheel raises `MouseWheelUp` or `MouseWheelDown` on the **focused
+window** when its scripts handle that event, else on the game
+(`CBGame::HandleMouseWheel`); a notch of the wheel is one event, in
+either direction. The headless player turns it with `--wheel up` or
+`--wheel down`.
+
+Closing the game's window raises `QuitGame` on the game when a game
+script handles it, and the window stays open: the script confirms and
+calls `Game.QuitGame()` itself (nothing is raised while the game is
+frozen). Without a handler, the window closes and the game ends
+(`CBGame::OnWindowClose`).
 
 While the game is frozen by a system-exclusive window, the game and the
 scene get no mouse event: only the active object does, a control of the
@@ -148,6 +174,15 @@ restarts its animation. `Game.SetActiveCursor`, `RemoveActiveCursor`,
 `GetActiveCursor` and `GetWaitCursor` change and read them. The system
 cursor is hidden over the window.
 
+An object's own cursor comes from its `CURSOR` key, or from `SetCursor`
+on the object (entities, actors and controls; `false` when the sprite
+does not load, and the old cursor stays). `RemoveCursor` takes it off,
+`HasCursor` and `GetCursor` read it, and `GetCursorObject` returns it as
+a sprite object (frames, `CurrentFrame`, `Looping`, `Reset`, `Pause`,
+`Play`), sharing the animation the cursor shows. Scripts find the
+entity under the mouse change cursor from the next frame on, as in the
+original engine.
+
 While an inventory item is selected and the game is interactive, the
 item's `CURSOR` is drawn at the mouse, over the cursor above when the
 item's `CURSOR_COMBINED` is on, instead of it otherwise; over an entity,
@@ -157,12 +192,13 @@ on).
 
 ## Keyboard
 
-A key going down updates `Game.Keyboard`, then goes to the **focused
-window** when there is one: `Tab` moves its focus between its focusable
-controls, an editor with the focus edits its text; a key the window
-did not use raises `Keypress` on the window when its scripts handle
-that event, else on the game. Without a focused window, `Keypress`
-goes to the game.
+A key going down updates `Game.Keyboard`, is offered to the
+[accessibility](#accessibility) shortcuts (Ctrl+Tab, Ctrl+Space, when
+their switches are on), then goes to the **focused window** when there
+is one: `Tab` moves its focus between its focusable controls, an editor
+with the focus edits its text; a key the window did not use raises
+`Keypress` on the window when its scripts handle that event, else on
+the game. Without a focused window, `Keypress` goes to the game.
 
 | Property | Value |
 |----------|-------|
@@ -218,9 +254,9 @@ items file again, and sets the non-native script globals back to
 left. The flag that skips that one save travels with a saved game, as
 in the original engine. A remembered sprite
 that cannot be loaded is logged and the entity keeps the file's. The
-states are part of a saved game (see [saving.md](saving.md)). The
-original engine also remembers whether each waypoint group is active;
-Luma uses every group, so this is not kept yet.
+states are part of a saved game (see [saving.md](saving.md)). Whether
+a waypoint group is active (`WaypointGroup.Active`) is not remembered
+between visits, in either engine.
 
 ## Dialogue responses
 
@@ -252,9 +288,66 @@ exclusive window is up, the windows and their controls take the mouse
 even when `Game.Interactive` is off, so a choice can be picked during
 the actors' lines; the scene's objects do not.
 
+## Accessibility
+
+The original engine's settings dialog has an accessibility tab with
+seven switches, kept in the `Accessibility` section of its registry
+(`CBAccessMgr`). Luma reads the same keys from the `[Accessibility]`
+section of `settings.ini` in the save directory (see
+[saving.md](saving.md#accessibility-settings)) when the game starts,
+and a front-end can set them through `World::accessibility_mut`.
+Scripts read them as `Game.AccTTSEnabled`, `AccTTSTalk`,
+`AccTTSCaptions`, `AccTTSKeypress`, `AccKeyboardEnabled`,
+`AccKeyboardCursorSkip` and `AccKeyboardPause`, read only, as in the
+original. A game whose `default.game` says `ALLOW_ACCESSIBILITY_TAB =
+FALSE` keeps speech, keyboard play and the pause off whatever the file
+says, as the original forces them off.
+
+**Text-to-speech** (`TTSEnabled`, off by default) reads out, through a
+speech backend:
+
+- the caption of the object the mouse comes over (`TTSCaptions`): its
+  `AccCaption` when a script set one, else a control's text, else its
+  caption, expanded through the string table;
+- a sentence said without a speech file (`TTSTalk`): the text of
+  `Talk` when no sound was found for it;
+- each key typed in an editor (`TTSKeypress`);
+- whatever a script gives to `Game.AccOutputText(text, type)`, `type`
+  being 0 for a caption, 1 for speech, 2 for a key.
+
+A text interrupts what is being said, unless the last text spoken was
+a sentence: nothing cuts a sentence short, and what follows it waits
+for its end, as the original purges the voice queue before speaking
+except after speech. Skipping the sentences (a click while the
+game is not interactive) stops the speech. The backend is the `Speech`
+trait of `luma_adventure::accessibility`: on macOS the system's `say`
+command, spawned without blocking the game loop and killed when a text
+must interrupt it; elsewhere there is none and the text-to-speech is
+unavailable, as the original's SAPI voice is without a voice installed.
+Tests use a recording backend.
+
+**Keyboard play** (`KeyboardEnabled`, off by default): Ctrl+Tab picks
+the next clickable object and Ctrl+Shift+Tab the previous one, cycling
+through the buttons and editors of the focused window (into its child
+windows, disabled ones skipped), else the response buttons while the
+dialogue waits for a pick, else the scene's active, interactive
+entities in layer order (a close-up layer hides what is below it) and
+its active, interactive actors. While Ctrl is held, the object picked
+is framed in red, four pixels wide, over the windows; with
+`KeyboardCursorSkip` (on by default) the mouse cursor jumps to the
+centre of its area the frame it is picked, so that the next click goes
+to it and `MouseEntry` and the caption follow. A window going exclusive
+forgets the pick. Two differences from the original: the cursor jumps
+whether or not Ctrl is still held (the original repositions only while
+it is), and objects standing in a region node are not listed through
+the region.
+
+**Pause** (`KeyboardPause`, off by default): Ctrl+Space pauses the game
+under a shield window covering the screen, system-exclusive so that
+every script but the window's stops, with "Game paused. Press
+Ctrl+Space to resume." (`/SYSENG0040/`) in the system font at the
+bottom centre; Ctrl+Space again closes it.
+
 ## Not yet
 
-- Each object's own inventory (`Game.InventoryObject`): one inventory
-  serves every object.
-- The mouse wheel, which the engine gives to the focused window.
 - Transitions other than the fade.

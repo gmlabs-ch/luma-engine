@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use luma_audio::{Audio, Clip, SoundId, SoundType};
+use luma_audio::{Audio, Clip, SoundEffect, SoundId, SoundType};
 use luma_script::NativeId;
 
 use crate::objects::Kind;
@@ -31,9 +31,67 @@ pub struct ObjectSound {
     pub event: Option<String>,
 }
 
+/// The effect an object applies to its sounds (`m_SFXType` and
+/// `m_SFXParam1..4`), with the engine's parameters; see
+/// [`luma_audio::SoundEffect`] for what they become.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum SfxEffect {
+    /// `SoundFXEcho(wetDryMix, feedback, leftDelay, rightDelay)`.
+    Echo {
+        /// Wet/dry mix in percent.
+        wet_dry_mix: f32,
+        /// Feedback in percent.
+        feedback: f32,
+        /// Left delay in milliseconds.
+        left_delay_ms: f32,
+        /// Right delay in milliseconds.
+        right_delay_ms: f32,
+    },
+    /// `SoundFXReverb(inGain, reverbMix, reverbTime, highFreqRTRatio)`.
+    Reverb {
+        /// Input gain in decibels.
+        in_gain_db: f32,
+        /// Reverb mix in decibels.
+        reverb_mix_db: f32,
+        /// Reverb time in milliseconds.
+        reverb_time_ms: f32,
+        /// High-frequency reverb time ratio.
+        high_freq_rt_ratio: f32,
+    },
+}
+
+impl From<SfxEffect> for SoundEffect {
+    fn from(effect: SfxEffect) -> SoundEffect {
+        match effect {
+            SfxEffect::Echo {
+                wet_dry_mix,
+                feedback,
+                left_delay_ms,
+                right_delay_ms,
+            } => SoundEffect::Echo {
+                wet_dry_mix,
+                feedback,
+                left_delay_ms,
+                right_delay_ms,
+            },
+            SfxEffect::Reverb {
+                in_gain_db,
+                reverb_mix_db,
+                reverb_time_ms,
+                high_freq_rt_ratio,
+            } => SoundEffect::Reverb {
+                in_gain_db,
+                reverb_mix_db,
+                reverb_time_ms,
+                high_freq_rt_ratio,
+            },
+        }
+    }
+}
+
 /// The sound state of an object: its sound, where the next one starts,
-/// and its volume.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// its volume and its effect.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjectSfx {
     /// The loaded sound, if any.
     pub sound: Option<ObjectSound>,
@@ -41,6 +99,8 @@ pub struct ObjectSfx {
     pub start_ms: u64,
     /// The object's sound volume in percent (`m_SFXVolume`).
     pub volume: i32,
+    /// The effect applied to the object's sounds (`m_SFXType`).
+    pub effect: Option<SfxEffect>,
 }
 
 impl Default for ObjectSfx {
@@ -49,6 +109,7 @@ impl Default for ObjectSfx {
             sound: None,
             start_ms: 0,
             volume: 100,
+            effect: None,
         }
     }
 }
@@ -265,6 +326,10 @@ impl World {
                 if state.start_ms != 0 {
                     self.sounds.audio.set_position_ms(id, state.start_ms);
                 }
+                // `ApplyFX` before the sound plays.
+                self.sounds
+                    .audio
+                    .set_effect(id, state.effect.map(SoundEffect::from));
                 let sound = ObjectSound {
                     id,
                     filename: path,
@@ -281,6 +346,23 @@ impl World {
                 }
                 true
             }
+        }
+    }
+
+    /// Sets the effect of an object's sounds (`SoundFXEcho`,
+    /// `SoundFXReverb`, `SoundFXNone`): kept for the sounds the object
+    /// plays next, and applied to the one it has now, as the engine
+    /// re-applies it every frame (`UpdateOneSound`).
+    pub fn set_sfx_effect(&mut self, owner: NativeId, effect: Option<SfxEffect>) {
+        if !self.can_own_sound(owner) {
+            return;
+        }
+        let state = self.sounds.objects.entry(owner).or_default();
+        state.effect = effect;
+        if let Some(sound) = state.sound.as_ref().map(|s| s.id) {
+            self.sounds
+                .audio
+                .set_effect(sound, effect.map(SoundEffect::from));
         }
     }
 
@@ -408,8 +490,7 @@ impl World {
                 .filter(|a| a.def.active && a.def.sound_panning)
                 .map(|a| a.x),
             Some(Kind::Entity(r)) => self
-                .scene()
-                .and_then(|v| v.entity(r))
+                .entity_def(r)
                 .filter(|e| e.active && e.sound_panning)
                 .map(|e| e.x),
             _ => None,
@@ -725,10 +806,12 @@ impl World {
                 }
             }
         }
-        if let Some(view) = self.scene.as_mut() {
+        let audio = &self.sounds.audio;
+        let views = self.scene.iter_mut().chain([&mut self.game_view]);
+        for view in views {
             for sentence in view.sentences_mut() {
                 if let Some(id) = sentence.sound {
-                    if !self.sounds.audio.is_playing(id) && !self.sounds.audio.is_paused(id) {
+                    if !audio.is_playing(id) && !audio.is_paused(id) {
                         sentence.finish();
                         finished.push(id);
                         sentence.sound = None;
@@ -752,7 +835,8 @@ impl World {
                 }
             }
         }
-        if let Some(view) = self.scene.as_mut() {
+        let views = self.scene.iter_mut().chain([&mut self.game_view]);
+        for view in views {
             for sentence in view.sentences_mut() {
                 if sentence.duration == 0 {
                     stopped.extend(sentence.sound.take());

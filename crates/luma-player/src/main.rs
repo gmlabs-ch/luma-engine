@@ -13,7 +13,9 @@ use luma::archive::Vfs;
 use luma::formats::Rgba;
 use luma::formats::font::TextAlign;
 use luma::render::winit::dpi::PhysicalSize;
-use luma::render::winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
+use luma::render::winit::event::{
+    ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
+};
 use luma::render::winit::keyboard::{Key, ModifiersState, NamedKey};
 use luma::render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig, letterbox};
 
@@ -51,6 +53,8 @@ OPTIONS:
     --right-click-at <x>,<y>
                           In headless mode, move the mouse there and right-click (a verb menu
                           centred on the mouse is then clicked with --click-at at the same point)
+    --wheel <up|down>     In headless mode, turn the mouse wheel a notch (MouseWheelUp or
+                          MouseWheelDown on the focused window, else on the game)
     --key <code>          In headless mode, press a key (a Windows virtual key code, e.g. 27 for
                           Escape)
     --hold-key <code>[:<frames>]
@@ -78,8 +82,8 @@ OPTIONS:
                           saved ones
     --help                Show this message
 
---click, --click-at, --click-on, --right-click-at, --drag, --key, --hold-key, --type
-and --wait are steps: they run in the order given, --after frames apart, starting one
+--click, --click-at, --click-on, --right-click-at, --drag, --wheel, --key, --hold-key,
+--type and --wait are steps: they run in the order given, --after frames apart, starting one
 frame after the scene is up, once its scripts have placed the actor, as
 for a player who acts when the scene shows.
 
@@ -110,6 +114,8 @@ enum Step {
     RightClickAt(i32, i32),
     /// Press and release a key.
     Key(i32),
+    /// Turn the wheel a notch: `1` up, `-1` down.
+    Wheel(i32),
     /// Hold a key down for that many frames (`--after` when `None`).
     HoldKey(i32, Option<u64>),
     /// Run that many frames.
@@ -260,6 +266,15 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .parse()
                     .map_err(|_| format!("--key expects a key code, got `{v}`"))?;
                 steps.push(Step::Key(code));
+            }
+            "--wheel" => {
+                let v = value(&mut i)?;
+                let delta = match v.as_str() {
+                    "up" => 1,
+                    "down" => -1,
+                    _ => return Err(format!("--wheel expects up or down, got `{v}`")),
+                };
+                steps.push(Step::Wheel(delta));
             }
             "--hold-key" => {
                 let v = value(&mut i)?;
@@ -505,6 +520,11 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                         println!("[{tick}] key {code} pressed");
                         runtime.key_down(*code, None, false, false, false);
                         runtime.key_up(*code);
+                        continue;
+                    }
+                    Step::Wheel(delta) => {
+                        println!("[{tick}] wheel {}", if *delta > 0 { "up" } else { "down" });
+                        runtime.mouse_wheel(*delta);
                         continue;
                     }
                     Step::HoldKey(code, frames) => {
@@ -1087,8 +1107,19 @@ impl App for GamePlayer {
                 (MouseButton::Left, ElementState::Released) => self.runtime.mouse_left_up(),
                 (MouseButton::Right, ElementState::Pressed) => self.runtime.mouse_right_down(),
                 (MouseButton::Right, ElementState::Released) => self.runtime.mouse_right_up(),
+                (MouseButton::Middle, ElementState::Pressed) => self.runtime.mouse_middle_down(),
+                (MouseButton::Middle, ElementState::Released) => self.runtime.mouse_middle_up(),
                 _ => {}
             },
+            WindowEvent::MouseWheel { delta, .. } => {
+                let steps = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => *y,
+                    MouseScrollDelta::PixelDelta(p) => (p.y / 40.0) as f32,
+                };
+                if steps != 0.0 {
+                    self.runtime.mouse_wheel(if steps > 0.0 { 1 } else { -1 });
+                }
+            }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput {
                 event:
@@ -1125,6 +1156,16 @@ impl App for GamePlayer {
             _ => {}
         }
         Flow::Continue
+    }
+
+    fn close_requested(&mut self) -> Flow {
+        // A game script handling `QuitGame` decides; the window stays
+        // open while it runs.
+        if self.runtime.window_close() {
+            Flow::Continue
+        } else {
+            Flow::Exit
+        }
     }
 
     fn draw<'a>(&'a mut self, frame: &Frame<'a>, list: &mut DrawList<'a>) -> Flow {

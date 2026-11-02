@@ -257,7 +257,10 @@ set's resolved frames into a list of local matrices indexed like
 every frame (`local * parent combined`); `Model::sample(set, ms)` chains
 the three. `Transform::blend(other, t)` is the blend of
 `CXFrameNode::UpdateMatrices` between the two slots of a transition
-(linear for scale and position, `slerp` for the rotation).
+(linear for scale and position, `slerp` for the rotation). The channels,
+transitions, events and the CPU skinning that drive these at run time are
+`luma_3d::animation`, specified in [../3d-actors.md](../3d-actors.md),
+section 7.
 
 Timing (`CXAnimationSet`), all in the original's single precision with
 truncation to integers:

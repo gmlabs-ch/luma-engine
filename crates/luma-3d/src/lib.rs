@@ -26,7 +26,10 @@
 //!   meshes with their materials and skin weights, the animation sets and
 //!   a sampler that poses the frames at a time;
 //! - [`actor3d`]: the `.act3d` actor definition (model paths, speeds,
-//!   shadow, animation properties) and the `.anim` sidecar.
+//!   shadow, animation properties) and the `.anim` sidecar;
+//! - [`animation`]: the model at run time: the ten animation channels
+//!   with their transitions and events, the posed frames and the meshes
+//!   skinned on the CPU.
 //!
 //! The behaviour follows `docs/3d-actors.md`, which is the specification;
 //! `docs/formats/geometry.md`, `docs/formats/xfile.md` and
@@ -35,6 +38,7 @@
 //! `3d` feature.
 
 pub mod actor3d;
+pub mod animation;
 pub mod camera;
 pub mod math;
 pub mod model;
@@ -45,6 +49,7 @@ pub mod three_ds;
 pub mod xfile;
 
 pub use actor3d::{Actor3dDef, AnimationDef, ShadowType};
+pub use animation::{ActiveAnimation, AnimatedModel, BoundingBox, SkinnedMesh};
 pub use camera::{CameraSettings, Projection, Ray, ViewSetup, Viewport};
 pub use math::{Mat4, Plane, Quat, Vec3};
 pub use model::{Animation, AnimationSet, Bone, Frame, Material, Mesh, Model, Transform};

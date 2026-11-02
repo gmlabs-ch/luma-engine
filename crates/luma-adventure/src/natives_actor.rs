@@ -12,20 +12,6 @@ use luma_script::{Context, Effect, NativeId, Return, Value, rgba};
 use crate::objects::Kind;
 use crate::world::World;
 
-/// Methods of later milestones that actors accept and log once.
-const ACTOR_STUBS: &[&str] = &[
-    "ForceTalkAnim",
-    "AddTalkSprite",
-    "RemoveTalkSprite",
-    "SetTalkSprite",
-    "SetCursor",
-    "RemoveCursor",
-    "StickToRegion",
-    "AddAttachment",
-    "RemoveAttachment",
-    "SetCaption",
-];
-
 fn color_int(c: luma_formats::Rgba) -> i32 {
     rgba(
         i32::from(c.r),
@@ -65,7 +51,6 @@ impl World {
             "TurnLeftAnimName" => Value::from(actor.turn_left_anim.clone()),
             "TurnRightAnimName" => Value::from(actor.turn_right_anim.clone()),
             "Active" => Value::Bool(actor.def.active),
-            "Movable" => Value::Bool(true),
             "Registrable" | "Interactive" => Value::Bool(actor.def.interactive),
             "Zoomable" | "Scalable" => Value::Bool(actor.def.scalable),
             "Rotatable" => Value::Bool(actor.def.rotatable),
@@ -92,17 +77,13 @@ impl World {
             "Colorable" => Value::Bool(actor.def.colorable),
             "SoundPanning" => Value::Bool(actor.def.sound_panning),
             "SaveState" => Value::Bool(true),
-            "NonIntMouseEvents" => Value::Bool(false),
-            "AccCaption" => Value::Null,
             "IgnoreItems" => Value::Bool(actor.def.ignore_items),
-            "SceneIndependent" => Value::Bool(false),
             "SubtitlesWidth" => Value::Int(actor.subtitles.width),
             "SubtitlesPosX" => Value::Int(actor.subtitles.x),
             "SubtitlesPosY" => Value::Int(actor.subtitles.y),
             "SubtitlesPosRelative" => Value::Bool(actor.subtitles.relative),
             "SubtitlesPosXCenter" => Value::Bool(actor.subtitles.x_center),
-            "NumItems" => Value::Int(self.inventory.taken.len() as i32),
-            "NumAttachments" => Value::Int(0),
+            "NumItems" => Value::Int(self.taken_items_of(id).len() as i32),
             "ParticleEmitter" => self.emitter_of(id).map_or(Value::Null, Value::Native),
             "Item" => Value::Null,
             _ => return None,
@@ -163,7 +144,7 @@ impl World {
             "SubtitlesPosY" => actor.subtitles.y = int,
             "SubtitlesPosRelative" => actor.subtitles.relative = flag,
             "SubtitlesPosXCenter" => actor.subtitles.x_center = flag,
-            "Movable" | "SaveState" | "NonIntMouseEvents" | "AccCaption" | "SceneIndependent" => {}
+            "SaveState" => {}
             _ => return false,
         }
         true
@@ -294,14 +275,23 @@ impl World {
                     .map_or(Value::Null, Value::from),
             ),
             "GetSpriteObject" => {
-                self.stub("Actor.GetSpriteObject");
-                Return::null()
+                Return::value(self.sprite_object(id).map_or(Value::Null, Value::Native))
             }
-            "Caption" => Return::value(
-                self.actor(id)
-                    .map(|a| a.def.caption.clone())
-                    .unwrap_or_default(),
-            ),
+            "AddTalkSprite" | "SetTalkSprite" | "RemoveTalkSprite" => {
+                // In Wintermute 1.x an actor's talk sprites are sprite sets
+                // of its own (`CAdActor::m_TalkSprites`), which hide the
+                // list these methods edit (`CAdTalkHolder::m_TalkSprites`),
+                // so the call loads the file and changes nothing else.
+                let path = arg(0).get_string(self);
+                let ok = name == "RemoveTalkSprite"
+                    || self
+                        .actor_and_vfs(id)
+                        .is_some_and(|(vfs, actor)| actor.bank.add_sprite(vfs, &path));
+                if !ok {
+                    self.log(format!("{name} method failed for file '{path}'"));
+                }
+                Return::value(ok)
+            }
             "MergeAnims" => {
                 let path = arg(0).get_string(self);
                 let ok = self
@@ -351,16 +341,10 @@ impl World {
                     .map_or(Value::Null, Value::from),
             ),
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
-                return Some(self.inventory_call(name, args));
+                return Some(self.inventory_call(id, name, args));
             }
-            "HasCursor" => Return::value(false),
-            "GetCursor" | "GetCursorObject" | "GetAttachment" => Return::null(),
             "CreateParticleEmitter" | "DeleteParticleEmitter" => {
                 self.emitter_owner_call(id, name, args)
-            }
-            _ if ACTOR_STUBS.contains(&name) => {
-                self.stub(&format!("Actor.{name}"));
-                Return::null()
             }
             _ => return None,
         })
