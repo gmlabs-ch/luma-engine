@@ -70,6 +70,7 @@ no code copied):
   crates/luma-adventure/src/natives_sound.rs
   crates/luma-adventure/src/natives_sprite.rs
   crates/luma-adventure/src/input.rs
+  crates/luma-render/src/renderer.rs
   crates/luma-adventure/src/fader.rs
   crates/luma-adventure/src/ui.rs
   crates/luma-adventure/src/natives_ui.rs

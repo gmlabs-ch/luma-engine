@@ -1,4 +1,8 @@
 //! The quad renderer: turns a [`DrawList`] into GPU work.
+//!
+//! The rotation of a quad around its pivot and the blend factors of each
+//! mode follow `BRenderD3D.cpp` of Wintermute Engine 1.x (MIT License,
+//! Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
