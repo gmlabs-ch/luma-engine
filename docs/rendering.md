@@ -7,8 +7,9 @@ Wintermute format; the formats are in [docs/formats](formats/README.md).
 ## Goals
 
 - Draw what a 2D Wintermute game draws: textured quads (sprite
-  sub-frames) in a fixed order, with alpha blending, tinting, mirroring,
-  scaling and scrolling layers. Nothing else is needed for milestone 2.
+  sub-frames) in a fixed order, with alpha, additive and subtractive
+  blending, tinting, mirroring, scaling per axis, rotation and scrolling
+  layers. Nothing else is needed for milestone 2.
 - Run on Metal first (macOS, iOS), and on Vulkan, DirectX 12, OpenGL ES and
   WebGPU through [wgpu](https://wgpu.rs) without platform code.
 - Be testable without a window: every test renders into a texture and
@@ -22,8 +23,8 @@ Wintermute format; the formats are in [docs/formats](formats/README.md).
 |------|------|
 | `Gpu` | Instance, adapter, device and queue. `Gpu::headless()` for tools and tests, `Gpu::with_surface()` for a window. |
 | `Texture` | A decoded `luma_formats::Image` uploaded as `Rgba8Unorm`. One texture per image; no atlas yet. |
-| `DrawList` | The quads of one frame, back to front, in *logical* pixels, with a logical size and a scroll offset applied to the quads pushed after `set_offset`. |
-| `Renderer` | Owns the pipeline, the sampler, the vertex and index buffers and a bind group per texture; renders a `DrawList` into a `Target`. |
+| `DrawList` | The quads of one frame, back to front, in *logical* pixels, with a logical size and a scroll offset applied to the quads pushed after `set_offset`; each quad has `Attributes` (rotation around a pivot, blend mode), the default ones unless pushed with `push_with`. |
+| `Renderer` | Owns the pipelines (one per target format and blend mode), the sampler, the vertex and index buffers and a bind group per texture; renders a `DrawList` into a `Target`. |
 | `Target` | Any texture view with its format and size: the window's swap chain texture or an `Offscreen`. |
 | `Offscreen` | A render target whose pixels can be read back as an `Image`. |
 | `window::run` | A winit window with a swap chain; calls an `App` for events and for the draw list of every frame. |
@@ -35,10 +36,12 @@ Wintermute format; the formats are in [docs/formats](formats/README.md).
    go where the scene's drawing rules put them (see
    [scene.md](formats/scene.md#drawing)).
 2. `Renderer::render` builds four vertices per quad (position, texture
-   coordinates, colour), uploads them, and records one render pass that
-   clears the target and draws the quads with `ALPHA_BLENDING`
-   (`src_alpha, one_minus_src_alpha`), in list order. Consecutive quads
-   with the same texture are one draw call.
+   coordinates, colour), turned around the pivot when the quad's
+   attributes rotate it, uploads them, and records one render pass that
+   clears the target and draws the quads in list order with the pipeline
+   of each quad's blend mode (see [Transforms](#transforms)).
+   Consecutive quads with the same texture and blend mode are one draw
+   call.
 3. The window presents the swap chain texture; an `Offscreen` can be
    read back.
 
@@ -61,6 +64,40 @@ quad pushed after it (a layer scrolled by `s` pixels uses an offset of
 `-s`): the renderer does not know about layers or cameras, the scene code
 computes each layer's parallax offset (see [scene.md](formats/scene.md#camera)).
 
+## Transforms
+
+A sprite's sub-frame is placed with its hotspot at the owner's position
+and scaled around it, by a separate factor on each axis when the object
+has a `ScaleX` or `ScaleY` (`CAdObject::GetScale`); the adventure layer
+computes the destination rectangle, with the engine's integer
+truncation, and the renderer draws it as it is.
+
+Rotation is a per-quad attribute: an angle in degrees and a pivot in
+logical pixels. The renderer turns the four corners of the destination
+rectangle around the pivot before projecting them, exactly as
+`CBRenderD3D::TransformVertices` does (`x' = px + dx cos θ - dy sin θ`,
+`y' = py + dx sin θ + dy cos θ`), so a positive angle turns clockwise on
+a screen whose `y` grows downwards. The pivot of a sprite is where its
+hotspot is, the object's position (`CBSubFrame::Draw` passes the hotspot
+as the centre to `DisplayTransform`); the draw list's offset moves the
+pivot with the quad. Mirroring stays in the texture coordinates, so a
+mirrored sprite turns the same way. `rotated_corners` is public so that
+the adventure layer can hit-test with the same corners.
+
+Blend modes are pipeline states, the factors `CBRenderD3D::
+SetSpriteBlendMode` sets for the colour channels:
+
+| Mode (`BlendMode`) | Source factor | Destination factor | Effect |
+|--------------------|---------------|--------------------|--------|
+| `Normal` (0) | `src_alpha` | `one_minus_src_alpha` | Alpha blending. |
+| `Additive` (1) | `src_alpha` | `one` | Adds the sprite to what is under it (glows, light). |
+| `Subtractive` (2) | `zero` | `one_minus_src_color` | Keeps `1 - src` of what is under it (shadows, smoke). |
+
+Direct3D 8 used the same factors for the alpha channel, which the screen
+ignores; Luma keeps the target's alpha covered in the additive and
+subtractive modes (`one, one` and `zero, one`), so that a screenshot of a
+glow or a shadow is not transparent there.
+
 ## Colour
 
 Textures are `Rgba8Unorm` and the surface uses a non-sRGB format when
@@ -81,7 +118,5 @@ row and column when scaled, which the original engine does as well.
 - Texture atlases: one texture per image is enough for the games of the
   era and keeps streaming simple; an atlas can come when draw-call counts
   matter.
-- Rotation (`ROTATABLE` entities) and 3D actors.
-- Mouse hit testing from pixels (`PRECISE` sprites): the adventure layer
-  will do it on the CPU from the decoded alpha channel.
+- 3D actors.
 - Render-to-texture effects, lighting, particles.

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use luma_formats::Rgba;
 use wgpu::util::DeviceExt;
 
-use crate::draw::{DrawList, Quad};
+use crate::draw::{Attributes, BlendMode, DrawList, Quad};
 use crate::error::{Error, Result};
 use crate::gpu::Gpu;
 use crate::texture::Texture;
@@ -39,16 +39,19 @@ pub struct Target<'a> {
     pub height: u32,
 }
 
-/// Draws textured quads with alpha blending into any target.
+/// Draws textured quads into any target, blended as their attributes
+/// say.
 ///
-/// Quads are batched: consecutive quads with the same texture become one
-/// draw call, so sort them by texture when the order does not matter.
+/// Quads are batched: consecutive quads with the same texture and blend
+/// mode become one draw call, so sort them by texture when the order
+/// does not matter.
 #[derive(Debug)]
 pub struct Renderer {
     gpu: Gpu,
     shader: wgpu::ShaderModule,
     pipeline_layout: wgpu::PipelineLayout,
-    pipelines: RefCell<HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>>,
+    /// One pipeline per target format and blend mode.
+    pipelines: RefCell<HashMap<(wgpu::TextureFormat, BlendMode), wgpu::RenderPipeline>>,
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     globals: wgpu::Buffer,
@@ -209,7 +212,10 @@ impl Renderer {
         for quad in list.quads() {
             self.ensure_bind_group(quad.texture);
         }
-        self.ensure_pipeline(target.format);
+        self.ensure_pipeline(target.format, BlendMode::Normal);
+        for attributes in list.attributes() {
+            self.ensure_pipeline(target.format, attributes.blend);
+        }
         let pipelines = self.pipelines.borrow();
         let bind_groups = self.bind_groups.borrow();
 
@@ -242,17 +248,28 @@ impl Renderer {
                 multiview_mask: None,
             });
             pass.set_viewport(x, y, w, h, 0.0, 1.0);
-            pass.set_pipeline(&pipelines[&target.format]);
+            pass.set_pipeline(&pipelines[&(target.format, BlendMode::Normal)]);
             pass.set_bind_group(0, &self.globals_group, &[]);
             pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             pass.set_index_buffer(index_buffer.0.slice(..), wgpu::IndexFormat::Uint32);
             let mut first = 0;
             let quads = list.quads();
+            let attributes = list.attributes();
+            let blend_of = |i: usize| attributes.get(i).map_or(BlendMode::Normal, |a| a.blend);
+            let mut blend = BlendMode::Normal;
             while first < quads.len() {
                 let texture = quads[first].texture;
+                let batch_blend = blend_of(first);
                 let mut last = first + 1;
-                while last < quads.len() && quads[last].texture.id == texture.id {
+                while last < quads.len()
+                    && quads[last].texture.id == texture.id
+                    && blend_of(last) == batch_blend
+                {
                     last += 1;
+                }
+                if batch_blend != blend {
+                    blend = batch_blend;
+                    pass.set_pipeline(&pipelines[&(target.format, blend)]);
                 }
                 let group = &bind_groups[&texture.id];
                 pass.set_bind_group(1, group, &[]);
@@ -313,8 +330,8 @@ impl Renderer {
         self.bind_groups.borrow_mut().insert(id, group);
     }
 
-    fn ensure_pipeline(&self, format: wgpu::TextureFormat) {
-        if self.pipelines.borrow().contains_key(&format) {
+    fn ensure_pipeline(&self, format: wgpu::TextureFormat, blend: BlendMode) {
+        if self.pipelines.borrow().contains_key(&(format, blend)) {
             return;
         }
         let pipeline = self
@@ -348,14 +365,43 @@ impl Renderer {
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        blend: Some(blend_state(blend)),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
                 multiview_mask: None,
                 cache: None,
             });
-        self.pipelines.borrow_mut().insert(format, pipeline);
+        self.pipelines
+            .borrow_mut()
+            .insert((format, blend), pipeline);
+    }
+}
+
+/// The blend factors of a mode, as `CBRenderD3D::SetSpriteBlendMode` sets
+/// them for the colour channels: normal is `src_alpha,
+/// one_minus_src_alpha`; additive adds the source weighted by its alpha
+/// to the destination; subtractive keeps `1 - src` of the destination.
+/// Direct3D 8 applied the same factors to the alpha channel, which the
+/// screen ignores; Luma keeps the target's alpha covered instead, so that
+/// a screenshot of an additive or subtractive sprite is not transparent
+/// there.
+fn blend_state(blend: BlendMode) -> wgpu::BlendState {
+    let component = |src: wgpu::BlendFactor, dst: wgpu::BlendFactor| wgpu::BlendComponent {
+        src_factor: src,
+        dst_factor: dst,
+        operation: wgpu::BlendOperation::Add,
+    };
+    match blend {
+        BlendMode::Normal => wgpu::BlendState::ALPHA_BLENDING,
+        BlendMode::Additive => wgpu::BlendState {
+            color: component(wgpu::BlendFactor::SrcAlpha, wgpu::BlendFactor::One),
+            alpha: component(wgpu::BlendFactor::One, wgpu::BlendFactor::One),
+        },
+        BlendMode::Subtractive => wgpu::BlendState {
+            color: component(wgpu::BlendFactor::Zero, wgpu::BlendFactor::OneMinusSrc),
+            alpha: component(wgpu::BlendFactor::Zero, wgpu::BlendFactor::One),
+        },
     }
 }
 
@@ -377,13 +423,32 @@ fn index_buffer(device: &wgpu::Device, quads: usize) -> (wgpu::Buffer, u32) {
 /// Four vertices per quad: top-left, top-right, bottom-right, bottom-left.
 fn build_vertices(list: &DrawList<'_>) -> Vec<Vertex> {
     let mut vertices = Vec::with_capacity(list.quads().len() * 4);
-    for quad in list.quads() {
-        vertices.extend_from_slice(&quad_vertices(quad));
+    let attributes = list.attributes();
+    for (i, quad) in list.quads().iter().enumerate() {
+        let attrs = attributes.get(i).copied().unwrap_or_default();
+        vertices.extend_from_slice(&quad_vertices(quad, &attrs));
     }
     vertices
 }
 
-fn quad_vertices(quad: &Quad<'_>) -> [Vertex; 4] {
+/// The corners of a quad turned by its attributes' rotation around the
+/// pivot, as `CBRenderD3D::TransformVertices` does: the angle is in
+/// degrees, positive clockwise on a screen whose `y` grows downwards.
+pub fn rotated_corners(dst: crate::draw::Rect, attrs: &Attributes) -> [(f32, f32); 4] {
+    let (x0, y0, x1, y1) = (dst.x, dst.y, dst.x + dst.w, dst.y + dst.h);
+    let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+    if !attrs.is_rotated() {
+        return corners;
+    }
+    let (sin, cos) = attrs.rotation.to_radians().sin_cos();
+    let (px, py) = attrs.pivot;
+    corners.map(|(x, y)| {
+        let (dx, dy) = (x - px, y - py);
+        (px + dx * cos - dy * sin, py + dx * sin + dy * cos)
+    })
+}
+
+fn quad_vertices(quad: &Quad<'_>, attrs: &Attributes) -> [Vertex; 4] {
     let (tw, th) = (quad.texture.width as f32, quad.texture.height as f32);
     let (mut u0, mut v0, mut u1, mut v1) = match quad.src {
         Some(src) => (
@@ -406,26 +471,25 @@ fn quad_vertices(quad: &Quad<'_>) -> [Vertex; 4] {
         f32::from(quad.tint.b) / 255.0,
         f32::from(quad.tint.a) / 255.0,
     ];
-    let d = quad.dst;
-    let (x0, y0, x1, y1) = (d.x, d.y, d.x + d.w, d.y + d.h);
+    let [tl, tr, br, bl] = rotated_corners(quad.dst, attrs);
     [
         Vertex {
-            position: [x0, y0],
+            position: [tl.0, tl.1],
             uv: [u0, v0],
             color,
         },
         Vertex {
-            position: [x1, y0],
+            position: [tr.0, tr.1],
             uv: [u1, v0],
             color,
         },
         Vertex {
-            position: [x1, y1],
+            position: [br.0, br.1],
             uv: [u1, v1],
             color,
         },
         Vertex {
-            position: [x0, y1],
+            position: [bl.0, bl.1],
             uv: [u0, v1],
             color,
         },

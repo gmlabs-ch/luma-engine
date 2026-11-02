@@ -8,9 +8,10 @@
 //! - [`Gpu`]: the device and its queue, with or without a window.
 //! - [`Texture`]: a decoded image uploaded to the GPU.
 //! - [`DrawList`]: the textured quads of a frame, back to front, in logical
-//!   pixels, with a per-layer offset for scrolling.
-//! - [`Renderer`]: draws a list into any [`Target`] with alpha blending,
-//!   batching consecutive quads of the same texture.
+//!   pixels, with a per-layer offset for scrolling and, per quad,
+//!   [`Attributes`]: a rotation around a pivot and a [`BlendMode`].
+//! - [`Renderer`]: draws a list into any [`Target`], batching consecutive
+//!   quads of the same texture and blend mode.
 //! - [`Offscreen`]: a target whose pixels can be read back (tests,
 //!   screenshots).
 //! - [`window::run`]: a winit window with a swap chain, HiDPI aware, that
@@ -31,11 +32,11 @@ pub mod renderer;
 pub mod texture;
 pub mod window;
 
-pub use draw::{DrawList, Quad, Rect};
+pub use draw::{Attributes, BlendMode, DrawList, Quad, Rect};
 pub use error::{Error, Result};
 pub use gpu::Gpu;
 pub use offscreen::Offscreen;
-pub use renderer::{Renderer, Target, letterbox};
+pub use renderer::{Renderer, Target, letterbox, rotated_corners};
 pub use texture::{TEXTURE_FORMAT, Texture};
 pub use window::{App, Flow, Frame, WindowConfig};
 
