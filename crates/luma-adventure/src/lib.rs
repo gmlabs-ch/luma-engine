@@ -40,9 +40,12 @@
 //!   (`Game.RegReadNumber`, `RegWriteString`...).
 //! - [`capture`]: screenshots and save thumbnails, captured from the
 //!   frame the front-end renders next.
+//! - [`accessibility`]: text-to-speech of captions, speech and typed
+//!   keys, and keyboard-only play (`Game.Acc*`, `AccCaption`).
 
 #![forbid(unsafe_code)]
 
+pub mod accessibility;
 pub mod actor;
 pub mod capture;
 mod error;
@@ -52,7 +55,9 @@ pub mod inventory;
 mod natives;
 mod natives_actor;
 mod natives_item;
+mod natives_object;
 mod natives_particles;
+mod natives_region;
 mod natives_sound;
 mod natives_sprite;
 mod natives_ui;
@@ -62,6 +67,7 @@ pub mod path;
 pub mod registry;
 pub mod responses;
 pub mod save;
+mod scene_edit;
 pub mod scene_state;
 pub mod scene_view;
 pub mod settings;
@@ -72,30 +78,33 @@ pub mod ui;
 pub mod video;
 pub mod world;
 
+pub use accessibility::{
+    Accessibility, CommandSpeech, RecordingSpeech, Speech, SpeechKind, SpeechRecord,
+};
 pub use actor::{Actor, ActorEvent, ActorState, WalkContext};
 pub use error::{Error, Result};
 pub use fader::{Fader, SCENE_FADE_MS};
 pub use input::{Cursors, Keyboard, Mouse};
 pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;
-pub use objects::{Kind, Native, Objects};
+pub use objects::{Attachment, Kind, Native, ObjectInventory, ObjectState, Objects};
 pub use particles::Emitter;
 pub use path::Floor;
 pub use responses::{Response, ResponseKind, Responses};
 pub use save::{SAVE_EXTENSION, SaveHeader, read_save_header};
 pub use scene_state::{NodeState, SceneState, state_key};
 pub use scene_view::{
-    AnimState, Camera, DrawItem, Drawable, EntityRef, EntityTalk, LoadedSprite, Mask, Overlays,
-    SceneView, SpriteBank, Transform, draw_object, drawn_subframes, frame_height, is_drawn, place,
-    place_transformed,
+    AnimState, AttachedDraws, Camera, DrawItem, Drawable, EntityRef, EntityTalk, FreeObject,
+    LoadedSprite, Mask, Overlays, SceneView, SpriteBank, Transform, draw_object, drawn_subframes,
+    frame_height, is_drawn, place, place_transformed,
 };
 pub use settings::{GameSettings, SETTINGS_FILE};
-pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, Sounds};
+pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, SfxEffect, Sounds};
 pub use talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
 pub use text::{BitmapFont, Font, FontBank, TrueTypeFont};
 pub use ui::{
-    ButtonListener, ButtonState, Control, ControlKind, EditState, StaticState, Ui, WindowMode,
-    WindowState,
+    ButtonListener, ButtonState, Control, ControlKind, EditState, ImageSlot, StaticState, Ui,
+    WindowMode, WindowState,
 };
 pub use video::{Subtitle, Subtitler, VideoPlayback, VideoPlayer, parse_subtitles};
 pub use world::{LoadingIcon, QuickMessage, Runtime, ScreenImage, World};

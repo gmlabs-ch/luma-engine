@@ -1001,6 +1001,7 @@ dependencies = [
  "fontdue",
  "luma-archive",
  "luma-audio",
+ "luma-compiler",
  "luma-formats",
  "luma-render",
  "luma-script",

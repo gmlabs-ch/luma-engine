@@ -17,7 +17,7 @@ behave as their authors saw them.
 | `Script` | One execution: instruction pointer, value stack, `this` stack, scopes, call stack, state. A thread is a `Script` too. |
 | `Engine` | Loads programs, keeps the scripts and the engine-wide globals, runs a tick. |
 | `Host` | What the embedding program provides: files, time, logging, native objects and their methods, global functions, and a hook after each native call. |
-| `ClassHost` | What the script library classes (`new String`, `Array`, `Date`, `File`, `MemBuffer`) need from the program: files to read and a place to write, the clock, new handles. |
+| `ClassHost` | What the script library classes (`new String`, `Array`, `Date`, `File`, `MemBuffer`, the global `Directory`) need from the program: files to read, a place to write and its listing, the clock, new handles. |
 
 ## Values and variables
 
@@ -68,7 +68,10 @@ error there.
 `EXTERNAL_CALL name` is a global function: the host is asked first, then
 the engine's built-ins (`Sleep`, `WaitFor`, `Random`, `ToString`, `ToInt`,
 `ToFloat`, `ToBool`, `LOG`, `Debug`, `SetScriptTimeSlice`, `MakeRGBA`,
-`GetRValue` and the like), otherwise a runtime error and `null`. A
+`GetRValue`, `MakeHSL`, `GetHValue` and the like), otherwise a runtime
+error and `null`. The HSL helpers take and give components in 0..=255
+and compute in single precision with each result truncated to a byte,
+as the original does, so `GetHValue(MakeRGB(0, 255, 0))` is 84, not 85. A
 function listed in the script's externals table (a Windows DLL import) is
 logged as unsupported and yields `null`.
 
@@ -78,9 +81,13 @@ a placeholder object is made `this`, the constructor fills it, and the
 call's own result is dropped, so that the object stays on the stack as
 the value of the expression. A constructor answers with
 `Return::constructed`, which writes the object into the `this` slot and
-yields `null`; `new Object()` is answered by the engine with nothing to
-add, the placeholder being the object. A constructor nobody knows is an
-undefined function: an error is logged and the placeholder stays.
+yields `null`. `new Object(...)` is a constructor of the host too: the
+adventure layer makes a bare native object (`CSXObject`) and attaches
+the scripts named by the arguments to it (`new Object("a.script",
+"b.script")`), so that its methods and events are theirs; a host without
+objects of its own leaves it to the engine, which keeps the placeholder
+as the object. A constructor nobody knows is an undefined function: an
+error is logged and the placeholder stays.
 
 Script functions (`CALL`) are ordinary jumps with a return address; the
 callee opens a scope, fixes the argument count with `CORRECT_STACK`
@@ -149,33 +156,48 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 
 | Object | Properties | Methods |
 |--------|------------|---------|
-| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `ActiveObject`, `MouseX`, `MouseY`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`, `SubtitlesSpeed`, `TalkSkipButton`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadItems`, `CreateItem`, `DeleteItem`, `LoadActor`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
-| `Scene` | `Name`, `Width`, `Height`, `NumLayers`, `MainLayer`, `OffsetX`, `OffsetY`, `MouseX`, `MouseY`, `NumFreeNodes`, `AutoScroll`, `ScrollPixelsX`, `ScrollSpeedX`... | `GetNode`, `GetLayer`, `GetFreeNode`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `SkipTo`, `ScrollTo`, `ScrollToAsync`, `IsScrolling`, `IsPointInViewport`, `FadeOut`, `FadeIn` (and their `Async` forms, over the scene viewport only), `GetFadeColor`, `LoadActor`, `UnloadObject` |
-| Layers | `Name`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active` | `GetNode` |
-| Entities | `Name`, `Caption`, `X`, `Y`, `Height`, `Active`, `Interactive`, `Scalable`, `Scale`, `ScaleX`, `ScaleY`, `RelativeScale`, `Rotatable`, `Rotate`, `RelativeRotate`, `BlendMode`, `AlphaColor`, `Colorable`, `Item`, `Subtype`, `WalkToX`, `WalkToY`, `WalkToDirection`, `SaveState`, `IgnoreItems`... | `SkipTo`, `SetSprite`, `GetSprite`, `GetSpriteObject`, `Reset`, `Caption`, `PlayAnim`, `PlayAnimAsync` (a sprite shown in place of the entity's: one that does not loop gives the entity its own back at its end, a looping one plays on, moving the entity by its frames' `MOVE`; `PlayAnim` waits for the end, `Reset` or a sentence cuts it: talking is the entity's state then, and it is ready when the sentence ends) |
+| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `ActiveObject`, `MouseX`, `MouseY`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`, `SubtitlesSpeed`, `TalkSkipButton`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadItems`, `CreateItem`, `DeleteItem`, `LoadActor`, `CreateEntity`, `LoadEntity` (entities of the game, kept across scenes; see [formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments)), `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
+| `Scene` | `Name`, `Width`, `Height`, `NumLayers`, `MainLayer`, `OffsetX`, `OffsetY`, `MouseX`, `MouseY`, `NumFreeNodes`, `AutoScroll`, `ScrollPixelsX`, `ScrollSpeedX`... | `GetNode`, `GetLayer`, `GetFreeNode`, `GetWaypointGroup`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `SkipTo`, `ScrollTo`, `ScrollToAsync`, `IsScrolling`, `IsPointInViewport`, `FadeOut`, `FadeIn` (and their `Async` forms, over the scene viewport only), `GetFadeColor`, `LoadActor`, `UnloadObject`, `CreateEntity`, `LoadEntity`, `AddLayer`, `InsertLayer`, `DeleteLayer` (see [formats/scene.md](formats/scene.md#scenes-changed-by-scripts)) |
+| Layers | `Name`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active` | `GetNode`, `AddEntity`, `AddRegion`, `InsertEntity`, `InsertRegion`, `DeleteNode` |
+| Entities | `Name`, `Caption`, `X`, `Y`, `Height`, `Active`, `Interactive`, `Scalable`, `Scale`, `ScaleX`, `ScaleY`, `RelativeScale`, `Rotatable`, `Rotate`, `RelativeRotate`, `BlendMode`, `AlphaColor`, `Colorable`, `Item`, `Subtype`, `WalkToX`, `WalkToY`, `WalkToDirection`, `SaveState`, `IgnoreItems`, `Region`... | `SkipTo`, `SetSprite`, `GetSprite`, `GetSpriteObject`, `Reset`, `Caption`, `CreateRegion`, `DeleteRegion`, `StickToRegion` (actors too), `PlayAnim`, `PlayAnimAsync` (a sprite shown in place of the entity's: one that does not loop gives the entity its own back at its end, a looping one plays on, moving the entity by its frames' `MOVE`; `PlayAnim` waits for the end, `Reset` or a sentence cuts it: talking is the entity's state then, and it is ready when the sentence ends), `PlayTheora`, `StopTheora`, `PauseTheora`, `ResumeTheora`, `IsTheoraPlaying`, `IsTheoraPaused` (a video in the entity's place, see [docs/video.md](video.md#entityplaytheora)) |
 | Actors (`Game.LoadActor`, `Scene.LoadActor`) | The entities' properties, plus `Direction`, `Ready`, `ActorIsBlocked`, `TalkAnimName`, `IdleAnimName`, `WalkAnimName`, `TurnLeftAnimName`, `TurnRightAnimName` | `GoTo`, `GoToAsync`, `GoToObject`, `GoToObjectAsync`, `TurnTo`, `TurnToAsync`, `IsWalking`, `SkipTo`, `Reset`, `PlayAnim`, `PlayAnimAsync`, `SetSprite`, `GetSprite`, `HasAnim`, `MergeAnims`, `UnloadAnim`, `SetStopOnBlocked`, `GetStopOnBlocked` |
-| Actors and entities, speech | `SubtitlesWidth`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosRelative`, `SubtitlesPosXCenter` | `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`, `SetFont`, `GetFont` |
-| `Game`, actors and entities, sound | `SoundPanning` | `LoadSound`, `PlaySound`, `PlaySoundEvent`, `StopSound`, `PauseSound`, `ResumeSound`, `IsSoundPlaying`, `SetSoundPosition`, `GetSoundPosition`, `SetSoundVolume`, `GetSoundVolume` |
+| Actors and entities, speech | `SubtitlesWidth`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosRelative`, `SubtitlesPosXCenter` | `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`, `SetFont`, `GetFont`, `ForceTalkAnim`, `AddTalkSprite`, `RemoveTalkSprite`, `SetTalkSprite` (see [formats/font.md](formats/font.md#speech)); `GetSpriteObject` on entities, actors (the sprite `SetSprite` gave) and items (their image) |
+| `Game`, actors and entities, sound | `SoundPanning` | `LoadSound`, `PlaySound`, `PlaySoundEvent`, `StopSound`, `PauseSound`, `ResumeSound`, `IsSoundPlaying`, `SetSoundPosition`, `GetSoundPosition`, `SetSoundVolume`, `GetSoundVolume`, `SoundFXEcho`, `SoundFXReverb`, `SoundFXNone` (see [docs/audio.md](audio.md#sound-effects)) |
 | `Game`, input and fades | `Keyboard.KeyCode`, `Key`, `Printable`, `IsShift`, `IsAlt`, `IsControl` | `Keyboard.IsKeyDown`, `SetMousePos`, `FadeOut`, `FadeIn` (and their `Async` and `System` forms), `GetFadeColor`, `SetActiveCursor`, `RemoveActiveCursor`, `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`, `GetActiveCursor`, `GetWaitCursor`, `HideCursor`, `ShowCursor` |
 | `Math` (a global) | `PI` | `Abs`, `Acos`, `Asin`, `Atan`, `Atan2`, `Ceil`, `Cos`, `Cosh`, `Exp`, `Floor`, `Log`, `Log10`, `Pow`, `Sin`, `Sinh`, `Tan`, `Tanh`, `Sqrt`, `DegToRad`, `RadToDeg`; every one returns a float, `Floor` and `Ceil` included, as in the original engine |
+| `Directory` (a global) | see [Script library classes](#script-library-classes) | |
 | `Game`, music and volumes | | `PlayMusic`, `PlayMusicChannel`, `StopMusic`, `StopMusicChannel`, `PauseMusic`, `ResumeMusic`, `GetMusic`, `SetMusicPosition`, `GetMusicPosition`, `IsMusicPlaying`, `SetMusicVolume`, `GetMusicVolume` (and their `...Channel` forms), `MusicCrossfade`, `GetSoundLength`, `SetGlobalSFXVolume`, `SetGlobalSpeechVolume`, `SetGlobalMusicVolume`, `SetGlobalMasterVolume` and their getters, `AddSpeechDir`, `RemoveSpeechDir` |
-| Windows (`Game.LoadWindow`, `Game.CreateWindow`) | `Name`, `X`, `Y`, `Width`, `Height`, `Visible`, `Disabled`, `Text`, `Parent`, `ParentNotify`, `NumControls`, `Exclusive`, `SystemExclusive`, `Menu`, `InGame`, `PauseMusic`, `Transparent`, `FadeColor`, `NextSibling`, `PrevSibling` | `GetWidget`, `GetControl`, `Close`, `GoExclusive`, `GoSystemExclusive`, `Center`, `Focus`, `LoadFromFile`, `SetImage`, `GetImage`, `SetFont`, `SetInactiveImage`, `SetInactiveFont`, `CreateButton`, `CreateStatic`, `CreateEditor`, `CreateWindow`, `DeleteControl`, `MoveAfter`, `MoveBefore`, `MoveToTop`, `MoveToBottom` |
-| Buttons | The controls' properties, plus `TextAlign`, `Focusable`, `Pressed`, `PixelPerfect` | `Press`, `SetHoverImage`, `SetPressedImage`, `SetDisabledImage`, `SetFocusedImage` and their getters, `SetHoverFont`, `SetPressedFont`, `SetDisabledFont`, `SetFocusedFont` |
+| Windows (`Game.LoadWindow`, `Game.CreateWindow`) | `Name`, `X`, `Y`, `Width`, `Height`, `Visible`, `Disabled`, `Text`, `Parent`, `ParentNotify`, `NumControls`, `Exclusive`, `SystemExclusive` (writable: `true` opens the window modally without making the script wait, `false` closes it and leaves it visible), `Menu`, `InGame`, `PauseMusic`, `Transparent`, `FadeColor`, `NextSibling`, `PrevSibling` | `GetWidget`, `GetControl`, `Close`, `GoExclusive`, `GoSystemExclusive`, `Center`, `Focus`, `LoadFromFile`, `SetImage`, `GetImage`, `GetImageObject`, `SetFont`, `SetInactiveImage`, `SetInactiveFont`, `GetInactiveImage`, `GetInactiveImageObject`, `CreateButton`, `CreateStatic`, `CreateEditor`, `CreateWindow`, `CreateEntityContainer`, `DeleteControl`, `MoveAfter`, `MoveBefore`, `MoveToTop`, `MoveToBottom` |
+| Buttons | The controls' properties, plus `TextAlign`, `Focusable`, `Pressed`, `PixelPerfect` | `Press`, `SetHoverImage`, `SetPressedImage`, `SetDisabledImage`, `SetFocusedImage` and their getters, `GetHoverImageObject`, `GetPressedImageObject`, `GetDisabledImageObject`, `GetFocusedImageObject`, `SetHoverFont`, `SetPressedFont`, `SetDisabledFont`, `SetFocusedFont` |
 | Static texts and editors | `TextAlign`, `VerticalAlign`; `SelStart`, `SelEnd`, `MaxLength`, `FrameWidth`, `CursorChar`, `CursorBlinkRate` | `SizeToFit`, `HeightToFit`; `SetSelectedFont` |
-| Entity containers | The controls' properties, plus `Freezable` | `GetEntity`, `SetEntity`; the entity itself has the entities' properties and methods, `SetSprite` and `Caption` included |
+| Entity containers | The controls' properties, plus `Freezable` (whether the entity's scripts pause when the game freezes; off when the container loads its entity, as in the engine) | `GetEntity`, `SetEntity`; the entity itself has the entities' properties and methods, `SetSprite` and `Caption` included |
 | Items (`ITEMS` of `default.game`) | `Name`, `Caption`, `X`, `Y`, `Amount`, `DisplayAmount`, `AmountOffsetX`, `AmountOffsetY`, `AmountAlign`, `AmountString`, `CursorCombined` | `SetSprite`, `GetSprite`, `SetHoverSprite`, `GetHoverSprite`, `SetNormalCursor`, `GetNormalCursor`, `SetHoverCursor`, `GetHoverCursor`, `SetFont`, `GetFont`, `SetCaption` |
 | `Game`, dialogue | `ResponsesVisible`, `LastResponse`, `LastResponseOrig` | `AddResponse`, `AddResponseOnce`, `AddResponseOnceGame`, `GetResponse`, `GetNumResponses`, `ResetResponse`, `ClearResponses`, `StartDlgBranch`, `EndDlgBranch`, `GetCurrentDlgBranch`, `GetResponsesWindow`, `LoadResponseBox` (see [game-loop.md](game-loop.md#dialogue-responses)) |
 | `Game`, videos | `VideoSubtitles`, `VideoSkipButton` | `PlayTheora`, `PlayVideo`, `StopTheora`, `StopVideo`, `IsVideoPlaying` |
 | `Game`, system | `FPS`, `CurrentTime`, `WindowsTime`, `SoundAvailable`, `WindowedMode`, `AcceleratedMode`, `TextEncoding`, `SFXVolume`, `SpeechVolume`, `MusicVolume`, `MasterVolume`, `StartupScene` | `Caption`, `RunScript`, `GetFileChecksum`, `OpenDocument`, `Reset`, `LockMouseRect`, `LoadInventoryBox` (see [game-loop.md](game-loop.md#a-frame)) |
+| `Game`, accessibility | `AccTTSEnabled`, `AccTTSTalk`, `AccTTSCaptions`, `AccTTSKeypress`, `AccKeyboardEnabled`, `AccKeyboardCursorSkip`, `AccKeyboardPause` (read only, from `settings.ini`); `AccCaption` on the game, entities, actors, items, windows, controls and `new Object`s (the text the speech reads for the object) | `AccOutputText(text, type)` (see [game-loop.md](game-loop.md#accessibility)) |
 | `Game`, saved games and settings | `SaveDirectory`, `MostRecentSaveSlot` | `SaveGame`, `LoadGame`, `IsSaveSlotUsed`, `GetSaveSlotDescription`, `EmptySaveSlot`, `StoreSaveThumbnail`, `DeleteSaveThumbnail`, `Screenshot`, `ScreenshotEx`, `SetLoadingScreen`, `SetSavingScreen`, `DisplayLoadingIcon`, `HideLoadingIcon`, `RegReadNumber`, `RegReadString`, `RegWriteNumber`, `RegWriteString` (see [saving.md](saving.md)) |
 | `Game`, actors and entities, inventory | `Game.SelectedItem`, `InventoryVisible`, `InventoryScrollOffset`, `NumItems`, `TotalNumItems`, `SmartItemCursor` | `TakeItem`, `DropItem`, `HasItem`, `GetItem`, `Game.IsItemTaken`, `Game.QueryItem`, `Game.GetInventoryWindow` |
-| Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
-| Sprite objects (`GetSpriteObject` of an entity, in a scene or in an entity container) | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner`, `Filename` | `Reset`, `Pause`, `Play`, `GetFrame`, `AddFrame`, `InsertFrame`, `DeleteFrame` (by index or by frame object) |
+| Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` (an entity's `Region` has only the first two and `NumPoints`) | `GetPoint`, `SkipTo`, `AddPoint`, `InsertPoint`, `SetPoint`, `RemovePoint` (see [formats/scene.md](formats/scene.md#region)) |
+| Waypoint groups (`Scene.GetWaypointGroup`) | `Name`, `Active` | |
+| Sprite objects (`GetSpriteObject` of an entity, in a scene, in an entity container or the game's own, of an actor, the sprite `SetSprite` gave it, or of an item, its image; `GetImageObject` of a control, `GetInactiveImageObject` of a window, `Get<State>ImageObject` of a button) | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner`, `Filename` | `Reset`, `Pause`, `Play`, `GetFrame`, `AddFrame`, `InsertFrame`, `DeleteFrame` (by index or by frame object) |
 | Frames (`Sprite.GetFrame`, `AddFrame`, `InsertFrame`) | `Delay`, `Keyframe`, `KillSounds`, `MoveX`, `MoveY`, `NumSubframes`, `NumEvents` | `GetSound`, `SetSound`, `GetSubframe`, `AddSubframe`, `InsertSubframe`, `DeleteSubframe`, `AddEvent`, `DeleteEvent`; a frame with a single sub-frame answers for it (`frame.MirrorX`, `frame.SetImage(...)`) |
 | Particle emitters (`CreateParticleEmitter`, `ParticleEmitter` of an entity or an actor; `DeleteParticleEmitter` removes it) | `X`, `Y`, `Width`, `Height`, `Angle1`, `Angle2`, `Velocity1`, `Velocity2`, `VelocityZBased`, `Scale1`, `Scale2`, `ScaleZBased`, `LifeTime1`, `LifeTime2`, `LifeTimeZBased`, `Rotation1`, `Rotation2`, `AngVelocity1`, `AngVelocity2`, `GrowthRate1`, `GrowthRate2`, `ExponentialGrowth`, `Alpha1`, `Alpha2`, `AlphaTimeBased`, `MaxParticles`, `GenerationInterval`, `GenerationAmount`, `MaxBatches`, `FadeInTime`, `FadeOutTime`, `UseRegion`, `EmitEvent`, `NumLiveParticles` | `AddSprite`, `RemoveSprite`, `Start`, `Stop`, `Pause`, `Resume`, `SetBorder`, `SetBorderThickness`, `AddGlobalForce`, `AddPointForce`, `RemoveForce` (see [docs/particles.md](particles.md)) |
 | Sub-frames (`Frame.GetSubframe`, `AddSubframe`, `InsertSubframe`) | `HotspotX`, `HotspotY`, `MirrorX`, `MirrorY`, `Decoration`, `AlphaColor`, `TransparentColor` (read only), `Is2DOnly`, `Is3DOnly` | `GetImage`, `SetImage` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
+| `new Object(scripts...)` | `Type` (`object`), `Name` (`<unnamed>` until a script sets it), script-set properties | The script holder's methods; the scripts given to the constructor are attached, so the object answers their methods and events. `Game.UnloadObject` removes it. The string form is `[object]`. |
 | `String`, `Array`, `Date`, `File`, `MemBuffer` objects | see [Script library classes](#script-library-classes) | |
+| Every object (`CBObject`, `CAdObject`) | `Movable`, `SceneIndependent`, `NonIntMouseEvents` (see below); `NumAttachments` on actors and entities | `SetCursor`, `RemoveCursor`, `GetCursor`, `GetCursorObject`, `HasCursor` (see [game-loop.md](game-loop.md#cursors)); `SetCaption(text, slot)` and `Caption(slot)`: slot 1 (or 0) is the object's caption, slots 2 to 7 are extra captions, all expanded through the string table; on actors and entities `AddAttachment`, `RemoveAttachment`, `GetAttachment` (see [formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments)) |
+
+Every object carries the flags of the original engine's base object
+(`ObjectState`, saved with the object): `Movable`, which Wintermute 1.x
+only consults when a sprite with an owner is drawn through
+`CBSprite::Draw`, a path no scene object takes, so it is kept for the
+scripts and changes nothing on screen; `SceneIndependent`, which places
+the object's speech as if its position were on the screen rather than
+in the scrolled scene (entity containers set it on their entities);
+and `NonIntMouseEvents`, described in
+[game-loop.md](game-loop.md#the-active-object).
 
 When a frame of an object's sprite becomes current, its `SOUND` plays,
 `FrameChanged` is raised on the sprite object (a script attached to it
@@ -183,6 +205,13 @@ with `AttachScript` can handle it) and the frame's `APPLY_EVENT`s are
 raised on the object showing the sprite: an entity, an actor or a
 control; the handlers run on the next frame with the other events
 ([docs/game-loop.md](game-loop.md#a-frame)).
+
+A control's images (`IMAGE`, a window's `IMAGE_INACTIVE`, a button's
+`IMAGE_HOVER`, `IMAGE_PRESS`, `IMAGE_DISABLE`, `IMAGE_FOCUS`) are sprites
+of their own, each with its own animation that advances while the image
+is the one shown; `Get...ImageObject` hands each to scripts, or `null`
+when the control has no image in that slot. A sprite object's `Owner`
+is then the control, and a frame's events are raised on it.
 
 Sprite, frame and sub-frame objects are handles into the sprite
 definition the owner shows (see [docs/formats/sprite.md](formats/sprite.md)):
@@ -227,10 +256,13 @@ interactive.
 Input (see [docs/game-loop.md](game-loop.md)): the mouse raises
 `LeftClick`, `LeftRelease`, `RightClick`, `RightRelease` and
 `LeftDoubleClick` on the game first, then on the object under the
-mouse or on the scene; the object under the mouse gets `MouseEntry`
-and `MouseLeave`; a key raises `Keypress` on the focused window when
-its scripts handle it, else on the game. `Game.FadeOut` and `FadeIn`
-make the script wait for the fade.
+mouse or on the scene (`RightDoubleClick`, `MiddleClick` and
+`MiddleRelease` stop at the object); the object under the mouse gets
+`MouseEntry` and `MouseLeave`; the wheel raises `MouseWheelUp` or
+`MouseWheelDown` and a key `Keypress` on the focused window when its
+scripts handle it, else on the game; closing the game's window raises
+`QuitGame` on the game when a script handles it. `Game.FadeOut` and
+`FadeIn` make the script wait for the fade.
 
 Windows (see [docs/formats/window.md](formats/window.md)) and their
 controls are script holders of their own: a window's `SCRIPT` and its
@@ -246,12 +278,21 @@ its speech file, which then times it. The sounds advance with the game
 clock when no audio device is there, so scripts behave the same in
 headless runs.
 
-The inventory (see [docs/formats/window.md](formats/window.md)) is one
-list of taken items shared by the game, the actors and the entities
-(the engine gives each object its own, switched with
-`Game.InventoryObject`); taking an item hides the scene entities whose
-`ITEM` names it, dropping it shows them again, and the selected item
-draws its cursor. `Game.LoadItems(file, merge)` loads another items
+The inventory (see [docs/formats/window.md](formats/window.md)): the
+game has its own list of taken items (`Game.TakeItem`, `DropItem`,
+`GetItem`, `HasItem`, `NumItems`), and every actor and entity gets one
+of its own the first time a script uses these methods on it
+(`CAdObject::GetInventory`). The inventory box shows the game's by
+default; `Game.InventoryObject = object` switches it to the object's
+(`null` or the game itself goes back), keeping the box's scroll
+position per inventory, and `Game.InventoryObject` reads the object
+shown. `Game.IsItemTaken(name)` looks in every inventory, as does the
+hiding of a scene's entities whose `ITEM` is taken when the scene
+loads. Taking an item, into any inventory, hides the scene entities
+whose `ITEM` names it, dropping it shows them again, and the selected
+item draws its cursor; deleting an item takes it out of every
+inventory. An object's inventory goes with the object, and the box
+goes back to the game's when its owner goes. `Game.LoadItems(file, merge)` loads another items
 file: without `merge` the items are replaced and what the inventory
 held is lost, as in the original engine (a language menu does this
 before anything is taken, so that the captions expand with the string
@@ -279,12 +320,14 @@ implemented": transitions.
 `new String(...)`, `new Array(...)`, `new Date(...)`, `new File(...)` and
 `new MemBuffer(...)` create the objects of the script library,
 implemented in `luma_script::classes` after WME 1.x's `SXString`,
-`SXArray`, `SXDate`, `SXFile` and `SXMemBuffer`. The host owns them like
-its other natives (the adventure layer keeps them in its object table,
-so they are saved with the game and never freed, where the original
-frees them by reference count) and forwards property reads, writes and
-method calls to the class; what the classes need from the program is the
-`ClassHost` trait. Like every native they convert to `0`, `0.0` and
+`SXArray`, `SXDate`, `SXFile` and `SXMemBuffer`; the global `Directory`
+(`SXDirectory`) is one more object of the library, made once by the host
+and published like `Math`. The host owns them like its other natives
+(the adventure layer keeps them in its object table, so they are saved
+with the game and never freed, where the original frees them by
+reference count) and forwards property reads, writes and method calls to
+the class; what the classes need from the program is the `ClassHost`
+trait. Like every native they convert to `0`, `0.0` and
 `false` (so `if (obj)` is false and `obj + 1` is `1.000000`); objects of
 different classes compare by class name. Assigning a plain value to a
 variable holding one replaces the object, as `POP_VAR` does in the
@@ -302,6 +345,7 @@ and written to files is Latin-1, as the engine reads the game's files.
 | `Array` | `Type` (`array`), `Length` (settable: truncates, or grows with unset elements), `[index]` (a name of digits only: `a["007"]` is `a[7]`; `a[1.0]` or `a[-1]` is nothing) | `Push(...)` (returns the new length), `Pop()` (`null` when empty) | `new Array()`; `new Array(n)`, `n` unset elements, any single argument being a length; `new Array(a, b, ...)` holds the arguments. Elements are copies. The string form joins the elements with commas, an unset element printing nothing and a `null` one `[null]`. Unknown properties are not kept. |
 | `Date` | `Type` (`date`) | `GetYear`, `GetMonth` (1 to 12), `GetDate`, `GetHours`, `GetMinutes`, `GetSeconds`, `GetWeekday` (0 is Sunday), the matching setters, `SetCurrentTime` | `new Date(y, m, d, h, mi, s)`, a missing field being 0 and every field normalised as `mktime` does, so `new Date(2020)` is 30 November 2019 and `SetMonth(13)` moves to January of the next year; `new Date()` is the host's clock. Dates compare by time. The string form is `asctime`'s, trailing newline included: `Wed Dec 31 13:30:25 2003\n`. |
 | `File` | `Type` (`file`), `Filename`, `Position`, `Length`, `TextMode`, `AccessMode` (0 closed, 1 read, 2 write, 3 append); other properties are kept | `SetFilename`, `OpenAsText(mode)`, `OpenAsBinary(mode)` (mode 1 when missing; another value logs an error and reads), `Close`, `SetPosition`, `Delete`, `Copy(dest, overwrite = true)`, `ReadLine`, `ReadText(n)`, `WriteLine`, `WriteText`, `ReadBool`, `ReadByte`, `ReadShort`, `ReadInt`, `ReadLong`, `ReadFloat`, `ReadDouble`, `ReadString` and the matching `Write...` | Reading finds a file a script wrote first, then the game's files (packages and loose files); writing, deleting and copying happen under the save directory, whose sub-directories are created as needed, and a name leaving it (`..`, an absolute path) fails. A method used in the wrong mode logs a runtime error and yields `null` (reads) or `false` (writes); reading past the end yields `null`. Text is Latin-1, `\r` is dropped when reading and lines are written with `\n`; binary values are little-endian, `ReadString`/`WriteString` a 32-bit length then the bytes, and `ReadShort` is 65536 plus the signed value, as in the original. The string form is the file name, `[file object]` without one. |
+| `Directory` | `Type` (`directory`), `PathSeparator` (`\`, which every file name in the engine accepts along with `/`), `CurrentDirectory` (the save directory; the set is accepted and ignored), `TempDirectory` (`temp` under the save directory, created on demand, with a trailing separator as `GetTempPath` gives); other properties are kept | `Create(path)` (every level; true when the directory exists afterwards), `Delete(path)` (an empty directory only, as `rmdir`), `GetFiles(path, mask)`, `GetDirectories(path, mask)` (an `Array` of names, not paths, sorted without regard to case; the mask is a Windows wildcard, `*.*` by default, compared without case; directories whose name starts with `.` are skipped, as the original skips `.` and `..`), `GetDrives` (an empty `Array`: no drive letters outside Windows) | Paths resolve under the save directory, an empty path or the save directory's own path naming it, and a path leaving it fails or lists nothing. A listing gives what the save directory holds, then the game's own files and directories under the same path (packages and loose files), a name once. The string form is `[native object]`. |
 | `MemBuffer` | `Type` (`membuffer`), `Size`; other properties are kept | `SetSize`, `GetBool`, `GetByte`, `GetShort` (65536 plus the signed value, as in the original), `GetInt`, `GetLong`, `GetFloat`, `GetDouble`, `GetString(pos, length)` (to the terminating zero without a length; the text stops at a zero either way), the matching setters (`SetString` writes the zero too), `GetPointer`, `SetPointer`, `DEBUG_Dump` | `new MemBuffer(n)` is `n` zero bytes, little-endian. An access outside the buffer logs `Set/Get method call is out of bounds` and yields `null` or `false`; an empty buffer has room for nothing (the original reads past its zero-length allocation). `GetPointer` and `SetPointer` deal in raw addresses for DLL plugins: they log a runtime error and yield `null` and `false`. `DEBUG_Dump` does nothing. |
 
 Deliberate differences from the original:
@@ -312,16 +356,21 @@ Deliberate differences from the original:
   keep a character whose mapping is several characters (`ß`); the
   original uses the C library's locale.
 - Files are written with `\n` line ends; the original, on Windows, wrote
-  `\r\n` in text mode. Writes stay under the save directory.
+  `\r\n` in text mode. Writes stay under the save directory, and a name
+  spelled from `Game.SaveDirectory` or `Directory.TempDirectory` is
+  taken relative to it.
+- `Directory` works inside the save directory, where the original works
+  on the whole file system: `CurrentDirectory` is that directory and
+  cannot be changed, `TempDirectory` is a sub-directory of it, and
+  `Create` answers whether the directory exists afterwards, where the
+  original's second `mkdir` of a path it just created answers false
+  unless the path ends with a separator.
 - An array's string form is not capped at 32 KB, and `new Array(n)` with
   a negative `n` is empty where the original keeps the negative length.
 
 ## Not yet
 
-- `Scene.GetWaypointGroup` and `WaypointGroup.Active`: every waypoint
-  group of a scene is used.
-- `GetSpriteObject` on actors.
-- `.talk` files timing talk sprites to a sound, `ForceTalkAnim`, and
-  `AddTalkSprite`; text in UTF-8 string tables is drawn as Latin-1.
-- The echo and reverb sound effects, and streaming of long sounds.
+- `.talk` files timing talk sprites to a sound; text in UTF-8 string
+  tables is drawn as Latin-1.
+- Streaming of long sounds.
 - The debugger protocol (`DBG_LINE` is read but only used for messages).

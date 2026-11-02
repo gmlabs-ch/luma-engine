@@ -98,7 +98,7 @@ height. A `BACK` tiled image then rounds the size down to whole tiles.
 | `ALPHA_COLOR` | `r, g, b` | | A colour multiplied with the window and its controls. |
 | `ALPHA` | int | `255` | Its opacity. |
 | `BUTTON`, `STATIC`, `EDIT`, `WINDOW` | block | | A control, in drawing order. |
-| `ENTITY_CONTAINER` | block | | A control showing an entity: `NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, and `ENTITY`, an `.entity` file (an `ENTITY` block as in a scene). The entity is drawn at the container's position with its own sprite and animation, takes the mouse through its sprite when it is active and registrable and the container is enabled, and its own scripts get the mouse events; `GetEntity` hands it to scripts, `SetEntity` loads another file. OpenQuest's verb bar is made of them. |
+| `ENTITY_CONTAINER` | block | | A control showing an entity: `NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, and `ENTITY`, an `.entity` file (an `ENTITY` block as in a scene). The entity is drawn at the container's position with its own sprite and animation, takes the mouse through its sprite when it is active and registrable and the container is enabled, and its own scripts get the mouse events; `GetEntity` hands it to scripts, `SetEntity` loads another file. OpenQuest's verb bar is made of them. The entity's scripts do not pause when the game freezes unless a script sets the container's `Freezable` to `true`; `CreateEntityContainer(name)` on a window makes an empty one at runtime. |
 
 A window with a `TITLE` but no `TITLE_RECT` shows no title. A window
 whose size is `0` after the correction has the width of its image or
@@ -198,7 +198,15 @@ a name is typed. A `MENU` window registers a button
 named `close` under the whole screen (and under the window) whose press
 closes the window.
 
-Modes (`Window.Exclusive`, `Window.SystemExclusive`):
+Each image of a control (`IMAGE`, `IMAGE_INACTIVE`, a button's
+`IMAGE_HOVER`, `IMAGE_PRESS`, `IMAGE_DISABLE`, `IMAGE_FOCUS`) is a sprite
+with its own animation, advancing while it is the image shown; scripts
+reach them with `GetImageObject`, `GetInactiveImageObject` and the
+button's `Get<State>ImageObject` (see [docs/scripting.md](../scripting.md)).
+
+Modes (`Window.Exclusive`, `Window.SystemExclusive`; the properties can
+be written too: `true` opens the window in that mode without making the
+script wait, `false` closes it and leaves it visible):
 
 - **normal**: the game goes on around the window;
 - **exclusive** (`GoExclusive`): the window becomes visible and focused;

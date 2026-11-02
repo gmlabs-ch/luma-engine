@@ -63,6 +63,7 @@ no code copied):
   crates/luma-script/src/classes/date.rs
   crates/luma-script/src/classes/file.rs
   crates/luma-script/src/classes/membuffer.rs
+  crates/luma-script/src/classes/directory.rs
   crates/luma-adventure/src/world.rs
   crates/luma-adventure/src/natives.rs
   crates/luma-adventure/src/natives_actor.rs
@@ -92,7 +93,12 @@ no code copied):
   crates/luma-adventure/src/save.rs
   crates/luma-adventure/src/registry.rs
   crates/luma-adventure/src/capture.rs
+  crates/luma-adventure/src/accessibility.rs
   crates/luma-audio/src/audio.rs
+  crates/luma-adventure/src/objects.rs
+  crates/luma-adventure/src/natives_object.rs
+  crates/luma-adventure/src/natives_region.rs
+  crates/luma-adventure/src/scene_edit.rs
   docs/3d-actors.md
   docs/formats/geometry.md
   crates/luma-3d/src/math.rs

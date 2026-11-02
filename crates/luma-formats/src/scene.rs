@@ -483,7 +483,7 @@ impl Region {
 }
 
 /// A group of waypoints for path finding.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WaypointGroup {
     /// Name used by scripts.
@@ -494,6 +494,21 @@ pub struct WaypointGroup {
     pub points: Vec<Point>,
     /// Script properties.
     pub properties: Vec<Property>,
+    /// Whether path finding uses the group (`WaypointGroup.Active`); a
+    /// runtime flag scripts set, not a file key.
+    pub active: bool,
+}
+
+impl Default for WaypointGroup {
+    fn default() -> Self {
+        WaypointGroup {
+            name: String::new(),
+            template: None,
+            points: Vec::new(),
+            properties: Vec::new(),
+            active: true,
+        }
+    }
 }
 
 /// A scale level: the scale at a `y`, interpolated between levels.

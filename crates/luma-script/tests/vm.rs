@@ -605,6 +605,24 @@ fn builtin_functions() {
     a.push_int(1);
     a.external_call("GetAValue");
     store(&mut a, "alpha");
+    a.push_int(255);
+    a.push_int(0);
+    a.push_int(0);
+    a.push_int(3);
+    a.external_call("MakeHSL");
+    store(&mut a, "white");
+    a.push_int(rgba(0, 255, 0, 255));
+    a.push_int(1);
+    a.external_call("GetHValue");
+    store(&mut a, "hue");
+    a.push_int(rgba(0, 255, 0, 255));
+    a.push_int(1);
+    a.external_call("GetSValue");
+    store(&mut a, "saturation");
+    a.push_int(rgba(0, 255, 0, 255));
+    a.push_int(1);
+    a.external_call("GetLValue");
+    store(&mut a, "lightness");
     a.push_string("hello");
     a.push_int(1);
     a.external_call("LOG");
@@ -633,6 +651,14 @@ fn builtin_functions() {
     assert_eq!(props["random"], Value::Int(3));
     assert_eq!(props["rgb"], Value::Int(rgba(1, 2, 3, 255)));
     assert_eq!(props["alpha"], Value::Int(4));
+    assert_eq!(props["white"], Value::Int(rgba(255, 255, 255, 255)));
+    assert_eq!(
+        props["hue"],
+        Value::Int(84),
+        "a third of the circle, truncated after single-precision arithmetic"
+    );
+    assert_eq!(props["saturation"], Value::Int(255));
+    assert_eq!(props["lightness"], Value::Int(127));
     assert_eq!(props["log"], Value::Null);
     assert_eq!(props["echo"], Value::Int(7));
     assert_eq!(props["line"], Value::Int(0));

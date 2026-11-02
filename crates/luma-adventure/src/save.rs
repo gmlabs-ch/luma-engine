@@ -28,7 +28,7 @@ use crate::inventory::Inventory;
 use crate::objects::Objects;
 use crate::scene_state::SceneState;
 use crate::scene_view::SceneView;
-use crate::sound::{Crossfade, MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound};
+use crate::sound::{Crossfade, MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, SfxEffect};
 use crate::talk::TalkSkipButton;
 use crate::ui::{ControlKind, Ui};
 use crate::world::World;
@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 11;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -84,7 +84,7 @@ pub struct SoundState {
 }
 
 /// An object's sound state as saved.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ObjectSoundState {
     /// The sound, if the object has one.
     pub sound: Option<SoundState>,
@@ -92,10 +92,12 @@ pub struct ObjectSoundState {
     pub start_ms: u64,
     /// The object's sound volume.
     pub volume: i32,
+    /// The object's sound effect.
+    pub effect: Option<SfxEffect>,
 }
 
 /// Everything the world plays, as saved.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SoundsState {
     /// The objects' sounds.
     pub objects: Vec<(NativeId, ObjectSoundState)>,
@@ -157,6 +159,7 @@ world_state! {
     fader_id: NativeId,
     scene_fader_id: NativeId,
     scene: Option<SceneView>,
+    game_view: SceneView,
     prev_scene_name: String,
     prev_scene_filename: String,
     scheduled_scene: Option<(String, bool)>,
@@ -281,6 +284,12 @@ pub fn read_save_header(path: &Path) -> Result<SaveHeader, String> {
 fn read_file(path: &Path) -> Result<(SaveHeader, Vec<u8>), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let (header, offset) = read_header_bytes(&bytes)?;
+    let version = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+    if version != VERSION {
+        return Err(format!(
+            "saved game version {version} is older than this engine's ({VERSION})"
+        ));
+    }
     let mut body = Vec::new();
     ZlibDecoder::new(&bytes[offset..])
         .read_to_end(&mut body)
@@ -512,6 +521,7 @@ impl World {
                             .map(|s| state(s.id, &s.filename, s.event.clone())),
                         start_ms: sfx.start_ms,
                         volume: sfx.volume,
+                        effect: sfx.effect,
                     },
                 )
             })
@@ -577,12 +587,18 @@ impl World {
                         event: s.event,
                     })
             });
+            if let Some(id) = sound.as_ref().map(|s| s.id) {
+                self.sounds
+                    .audio
+                    .set_effect(id, saved.effect.map(Into::into));
+            }
             self.sounds.objects.insert(
                 owner,
                 ObjectSfx {
                     sound,
                     start_ms: saved.start_ms,
                     volume: saved.volume,
+                    effect: saved.effect,
                 },
             );
         }
@@ -623,6 +639,7 @@ impl World {
         if let Some(view) = self.scene.as_mut() {
             view.reload_sprites(&self.vfs);
         }
+        self.game_view.reload_sprites(&self.vfs);
         for (_, actor) in &mut self.actors {
             actor.reload_sprites(&self.vfs);
         }
@@ -699,7 +716,7 @@ impl World {
             cursors.extend(actor.def.cursor.clone());
             fonts.extend(actor.sentence.as_ref().and_then(|s| s.font.clone()));
         }
-        if let Some(view) = &self.scene {
+        for view in self.scene.iter().chain([&self.game_view]) {
             for r in view.entity_refs() {
                 if let Some(e) = view.entity(r) {
                     fonts.extend(e.font.clone());

@@ -138,6 +138,20 @@ fn game_script() -> Vec<u8> {
     call(&mut a, "kb", "IsKeyDown", &[Arg::Str("a")]);
     store(&mut a, "aDown");
     a.emit(Instruction::RetEvent);
+    // on "MouseWheelUp" / "MouseWheelDown": result.wheel = "up" / "down";
+    // on "QuitGame": result.quitAsked = true (the game goes on).
+    for (event, key, value) in [
+        ("MouseWheelUp", "wheel", "up"),
+        ("MouseWheelDown", "wheel", "down"),
+        ("QuitGame", "quitAsked", "asked"),
+    ] {
+        a.event(event);
+        a.emit(Instruction::Scope);
+        a.def_glob_var("result");
+        a.push_string(value);
+        store(&mut a, key);
+        a.emit(Instruction::RetEvent);
+    }
     // on "PlayIntro": Game.PlayTheora("intro.ogv"); result.afterVideo = true;
     a.event("PlayIntro");
     a.emit(Instruction::Scope);
@@ -203,6 +217,62 @@ fn window_script() -> Vec<u8> {
     a.pop_var("kb");
     get(&mut a, "kb", "KeyCode");
     store(&mut a, "winKey");
+    a.emit(Instruction::RetEvent);
+    a.event("MouseWheelDown");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.push_string("window");
+    store(&mut a, "winWheel");
+    a.emit(Instruction::RetEvent);
+    // on "Probe": the state images as sprite objects, a container made
+    // at runtime, Freezable, and Exclusive written as a property.
+    a.event("Probe");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.def_var("ok");
+    a.def_var("h");
+    a.def_var("c");
+    call(&mut a, "self", "GetWidget", &[Arg::Str("ok")]);
+    a.pop_var("ok");
+    call(&mut a, "ok", "GetHoverImageObject", &[]);
+    a.pop_var("h");
+    get(&mut a, "h", "NumFrames");
+    store(&mut a, "hoverFrames");
+    get(&mut a, "h", "Owner");
+    store(&mut a, "hoverOwner");
+    get(&mut a, "h", "Type");
+    store(&mut a, "hoverType");
+    call(&mut a, "ok", "GetPressedImageObject", &[]);
+    store(&mut a, "pressedObj");
+    call(&mut a, "self", "GetInactiveImageObject", &[]);
+    store(&mut a, "inactiveObj");
+    call(
+        &mut a,
+        "self",
+        "CreateEntityContainer",
+        &[Arg::Str("extra")],
+    );
+    a.pop_var("c");
+    get(&mut a, "c", "Type");
+    store(&mut a, "containerType");
+    call(&mut a, "c", "SetEntity", &[Arg::Str("verb.entity")]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "c", "Freezable");
+    store(&mut a, "freezable0");
+    a.push_bool(true);
+    set(&mut a, "c", "Freezable");
+    get(&mut a, "c", "Freezable");
+    store(&mut a, "freezable1");
+    a.push_bool(true);
+    set(&mut a, "self", "Exclusive");
+    get(&mut a, "self", "Exclusive");
+    store(&mut a, "excl1");
+    a.push_bool(false);
+    set(&mut a, "self", "Exclusive");
+    get(&mut a, "self", "Exclusive");
+    store(&mut a, "excl2");
+    get(&mut a, "self", "Visible");
+    store(&mut a, "visAfter");
     a.emit(Instruction::RetEvent);
     a.build()
 }
@@ -619,6 +689,18 @@ fn sound_script() -> Vec<u8> {
     a.emit(Instruction::PopEmpty);
     call(&mut a, "hum", "IsSoundPlaying", &[]);
     store(&mut a, "humPlaying1");
+    // hum.SoundFXEcho(40, 30, 200, 300); Game.SoundFXReverb();
+    call(
+        &mut a,
+        "hum",
+        "SoundFXEcho",
+        &[Arg::Int(40), Arg::Int(30), Arg::Int(200), Arg::Int(300)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "Game", "SoundFXReverb", &[]);
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "hum", "IsSoundPlaying", &[]);
+    store(&mut a, "humPlaying2");
     a.def_var("lamp");
     call(&mut a, "Scene", "GetNode", &[Arg::Str("lamp")]);
     a.pop_var("lamp");
@@ -686,12 +768,55 @@ fn prop_script() -> Vec<u8> {
         ("LeftClick", "clicked"),
         ("RightClick", "rightClicked"),
         ("LeftDoubleClick", "doubleClicked"),
+        ("RightDoubleClick", "rightDoubleClicked"),
+        ("MiddleClick", "middleClicked"),
+        ("MiddleRelease", "middleReleased"),
     ] {
         a.event(event);
         a.emit(Instruction::Scope);
         a.def_glob_var("result");
         get(&mut a, "this", "Name");
         store(&mut a, key);
+        a.emit(Instruction::RetEvent);
+    }
+    // on "PlayVideo": this.PlayTheora("intro.ogv", true); the state after.
+    a.event("PlayVideo");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(
+        &mut a,
+        "this",
+        "PlayTheora",
+        &[Arg::Str("intro.ogv"), Arg::Int(1)],
+    );
+    store(&mut a, "videoOk");
+    call(&mut a, "this", "IsTheoraPlaying", &[]);
+    store(&mut a, "videoPlaying");
+    call(&mut a, "this", "IsTheoraPaused", &[]);
+    store(&mut a, "videoPaused");
+    a.emit(Instruction::RetEvent);
+    // on "PlayMissingVideo": result.videoMissing = this.PlayTheora("none.ogv");
+    a.event("PlayMissingVideo");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(&mut a, "this", "PlayTheora", &[Arg::Str("none.ogv")]);
+    store(&mut a, "videoMissing");
+    a.emit(Instruction::RetEvent);
+    // on "PauseVideo" / "ResumeVideo" / "StopVideo".
+    for (event, method, key) in [
+        ("PauseVideo", "PauseTheora", "pauseOk"),
+        ("ResumeVideo", "ResumeTheora", "resumeOk"),
+        ("StopVideo", "StopTheora", "stopOk"),
+    ] {
+        a.event(event);
+        a.emit(Instruction::Scope);
+        a.def_glob_var("result");
+        call(&mut a, "this", method, &[]);
+        store(&mut a, key);
+        call(&mut a, "this", "IsTheoraPlaying", &[]);
+        store(&mut a, "videoPlaying");
+        call(&mut a, "this", "IsTheoraPaused", &[]);
+        store(&mut a, "videoPaused");
         a.emit(Instruction::RetEvent);
     }
     a.bind(end);
@@ -1365,6 +1490,7 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     REGION { NAME=\"exit\" POINT {0,0} POINT {8,0} POINT {8,8} POINT {0,8} }
     ENTITY { NAME=\"fixed\" X=10 Y=10 SPRITE=\"art\\prop.sprite\" SAVE_STATE=FALSE }
   }
+  WAYPOINTS { NAME=\"wp\" POINT {16,16} POINT {24,24} }
 }"
         .to_vec(),
     );
@@ -2036,6 +2162,27 @@ fn sounds_music_and_speech_play_on_the_game_clock() {
     assert_eq!(result(&runtime, "humVol"), Value::Int(50));
     assert_eq!(result(&runtime, "humPlaying0"), Value::Bool(false));
     assert_eq!(result(&runtime, "humPlaying1"), Value::Bool(true));
+    // The effects: kept on the object, applied to its playing sound,
+    // with the engine's defaults for the arguments left out.
+    assert_eq!(result(&runtime, "humPlaying2"), Value::Bool(true));
+    let echo = luma_adventure::SfxEffect::Echo {
+        wet_dry_mix: 40.0,
+        feedback: 30.0,
+        left_delay_ms: 200.0,
+        right_delay_ms: 300.0,
+    };
+    assert_eq!(runtime.world.sounds().objects[&hum].effect, Some(echo));
+    let hum_sound = runtime.world.sfx_of(hum).unwrap().id;
+    assert_eq!(runtime.world.audio().effect(hum_sound), Some(echo.into()));
+    assert_eq!(
+        runtime.world.sounds().objects[&game].effect,
+        Some(luma_adventure::SfxEffect::Reverb {
+            in_gain_db: 0.0,
+            reverb_mix_db: 0.0,
+            reverb_time_ms: 1000.0,
+            high_freq_rt_ratio: 0.001,
+        })
+    );
     assert_eq!(result(&runtime, "eventStarted"), Value::Bool(true));
     assert_eq!(result(&runtime, "musicStarted"), Value::Bool(true));
     assert_eq!(result(&runtime, "music"), Value::Bool(true));
@@ -2137,11 +2284,37 @@ fn mouse_keyboard_cursors_and_fades() {
     runtime.mouse_right_down();
     runtime.tick(16);
     assert_eq!(result(&runtime, "rightClicked"), Value::from("prop"));
-    // A second click at once is a double click.
+    // A second click at once is a double click, for either button.
     runtime.mouse_left_down();
     runtime.mouse_left_up();
     runtime.tick(16);
     assert_eq!(result(&runtime, "doubleClicked"), Value::from("prop"));
+    runtime.engine.set_global("result", Value::object());
+    runtime.mouse_right_down();
+    runtime.mouse_right_up();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "rightDoubleClicked"), Value::from("prop"));
+    assert_eq!(result(&runtime, "rightClicked"), Value::Null);
+    // The middle button, and the wheel, which goes to the game while no
+    // window is focused.
+    runtime.mouse_middle_down();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "middleClicked"), Value::from("prop"));
+    runtime.mouse_middle_up();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "middleReleased"), Value::from("prop"));
+    runtime.mouse_wheel(-1);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "wheel"), Value::from("down"));
+    runtime.mouse_wheel(3);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "wheel"), Value::from("up"));
+    // Closing the window asks the game script, which keeps the game
+    // running here.
+    assert!(runtime.window_close());
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "quitAsked"), Value::from("asked"));
+    assert!(!runtime.world.quit_requested());
     // Off the prop: the cursor is the default one and animates; a click
     // reaches the scene with the mouse in scene coordinates.
     runtime.mouse_move(20, 30);
@@ -2360,6 +2533,226 @@ fn objects_scale_per_axis_rotate_and_blend() {
 }
 
 #[test]
+fn entities_play_videos_in_their_place() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    let prop_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    runtime.world.skip_to(0, 0);
+    runtime.tick(16);
+    // A missing file: false, logged, and nothing plays.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "PlayMissingVideo", false);
+    let log = runtime.tick(16);
+    assert_eq!(result(&runtime, "videoMissing"), Value::Bool(false));
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Entity.PlayTheora - error playing video 'none.ogv'")),
+        "{log:?}"
+    );
+    assert!(runtime.world.entity_video(prop).is_none());
+    // The video plays in the prop's place, looping, on the game timer;
+    // the game is not frozen and the scripts go on.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "PlayVideo", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "videoOk"), Value::Bool(true));
+    assert_eq!(result(&runtime, "videoPlaying"), Value::Bool(true));
+    assert_eq!(result(&runtime, "videoPaused"), Value::Bool(false));
+    assert!(!runtime.world.is_frozen());
+    assert!(!runtime.world.is_video_playing(), "not a game video");
+    let video = runtime.world.entity_video(prop).unwrap();
+    assert!(video.looping);
+    assert_eq!(video.frame_index(), Some(0));
+    for _ in 0..20 {
+        runtime.tick(16);
+    }
+    assert_eq!(
+        runtime.world.entity_video(prop).unwrap().frame_index(),
+        Some(3),
+        "about 340 ms at 10 fps"
+    );
+    // Paused: the frame holds; resumed: it goes on from there.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "PauseVideo", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "pauseOk"), Value::Bool(true));
+    assert_eq!(result(&runtime, "videoPlaying"), Value::Bool(false));
+    assert_eq!(result(&runtime, "videoPaused"), Value::Bool(true));
+    for _ in 0..30 {
+        runtime.tick(16);
+    }
+    assert_eq!(
+        runtime.world.entity_video(prop).unwrap().frame_index(),
+        Some(3)
+    );
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "ResumeVideo", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "resumeOk"), Value::Bool(true));
+    assert_eq!(result(&runtime, "videoPlaying"), Value::Bool(true));
+    for _ in 0..10 {
+        runtime.tick(16);
+    }
+    let frame = runtime.world.entity_video(prop).unwrap().frame_index();
+    assert!(frame == Some(4) || frame == Some(5), "{frame:?}");
+    // Looping: still playing well past its second.
+    for _ in 0..100 {
+        runtime.tick(16);
+    }
+    let video = runtime.world.entity_video(prop).unwrap();
+    assert!(video.is_running());
+    assert!(video.frame_index().unwrap() < 10);
+    // Stopped: the sprite is back; stopping again is false.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "StopVideo", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "stopOk"), Value::Bool(true));
+    assert_eq!(result(&runtime, "videoPlaying"), Value::Bool(false));
+    assert!(runtime.world.entity_video(prop).is_none());
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "StopVideo", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "stopOk"), Value::Bool(false));
+    // A video that does not loop, started half-way, ends by itself and
+    // the entity shows its sprite again.
+    assert!(
+        runtime
+            .world
+            .play_entity_theora(prop, "intro.ogv", false, None, 500)
+    );
+    runtime.tick(16);
+    assert!(
+        runtime
+            .world
+            .entity_video(prop)
+            .unwrap()
+            .frame_index()
+            .unwrap()
+            >= 5
+    );
+    for _ in 0..40 {
+        runtime.tick(16);
+    }
+    assert!(runtime.world.entity_video(prop).is_none());
+    // The video of an entity that leaves with its scene goes with it.
+    assert!(
+        runtime
+            .world
+            .play_entity_theora(prop, "intro.ogv", true, None, 0)
+    );
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.tick(16);
+    assert!(runtime.world.entity_video(prop).is_none());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn state_images_containers_and_modes_from_scripts() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let win = runtime.world.window_ids()[0];
+    let ok = runtime.world.widget(win, "ok").unwrap();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, win, "Probe", false);
+    runtime.tick(16);
+    // The hover image is a sprite object owned by the button; the states
+    // without an image, and a window without an inactive image, give null.
+    assert_eq!(result(&runtime, "hoverFrames"), Value::Int(1));
+    assert_eq!(result(&runtime, "hoverType"), Value::from("sprite"));
+    assert_eq!(result(&runtime, "hoverOwner"), Value::Native(ok));
+    assert_eq!(result(&runtime, "pressedObj"), Value::Null);
+    assert_eq!(result(&runtime, "inactiveObj"), Value::Null);
+    let hover = runtime
+        .world
+        .control_image_object(ok, luma_adventure::ImageSlot::Hover)
+        .unwrap();
+    assert_eq!(
+        runtime.world.get_property(hover, "CurrentFrame"),
+        Some(Value::Int(0))
+    );
+    // Its frames are the sprite's: a frame added shows in the count, and
+    // the same slot gives the same object.
+    assert_eq!(
+        runtime
+            .world
+            .control_image_object(ok, luma_adventure::ImageSlot::Hover),
+        Some(hover)
+    );
+    assert_eq!(
+        runtime
+            .world
+            .control_image_object(ok, luma_adventure::ImageSlot::Press),
+        None
+    );
+    // A container created at runtime, its entity loaded, not freezable
+    // until the script says so; the entity's scripts follow.
+    assert_eq!(
+        result(&runtime, "containerType"),
+        Value::from("entity container")
+    );
+    assert_eq!(result(&runtime, "freezable0"), Value::Bool(false));
+    assert_eq!(result(&runtime, "freezable1"), Value::Bool(true));
+    let extra = runtime.world.widget(win, "extra").unwrap();
+    let entity = runtime.world.container_entity(extra).unwrap();
+    assert!(
+        runtime.engine.scripts_of(entity).iter().all(|s| runtime
+            .engine
+            .script(*s)
+            .unwrap()
+            .is_freezable())
+    );
+    // Exclusive written: on, then off, which leaves the window visible.
+    assert_eq!(result(&runtime, "excl1"), Value::Bool(true));
+    assert_eq!(result(&runtime, "excl2"), Value::Bool(false));
+    assert_eq!(result(&runtime, "visAfter"), Value::Bool(true));
+    assert!(runtime.world.control(win).unwrap().visible);
+    // SystemExclusive written freezes the game at the next frame and
+    // writing it off unfreezes it.
+    runtime
+        .world
+        .set_property(win, "SystemExclusive", &Value::Bool(true));
+    assert!(!runtime.world.is_frozen());
+    runtime.tick(16);
+    assert!(runtime.world.is_frozen());
+    assert_eq!(
+        runtime.world.get_property(win, "SystemExclusive"),
+        Some(Value::Bool(true))
+    );
+    runtime
+        .world
+        .set_property(win, "SystemExclusive", &Value::Bool(false));
+    runtime.tick(16);
+    assert!(!runtime.world.is_frozen());
+    assert!(runtime.world.control(win).unwrap().visible);
+    // The sprite objects of a window go with it.
+    runtime.world.unload_object(&mut runtime.engine, win);
+    assert_eq!(runtime.world.get_property(hover, "Type"), None);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn windows_buttons_keys_and_menus() {
     let dir = game();
     let vfs = Vfs::open_game(&dir).unwrap();
@@ -2433,6 +2826,13 @@ fn windows_buttons_keys_and_menus() {
     runtime.key_down(9, None, false, false, false);
     runtime.tick(16);
     assert_eq!(result(&runtime, "winKey"), Value::Int(9));
+    // The wheel goes to the focused window when it handles the event,
+    // else to the game.
+    runtime.mouse_wheel(-1);
+    runtime.mouse_wheel(1);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "winWheel"), Value::from("window"));
+    assert_eq!(result(&runtime, "wheel"), Value::from("up"));
     // A menu opened system-exclusive freezes the game: the timer stops
     // and the opening script waits.
     runtime
@@ -3403,6 +3803,1487 @@ fn load_items_reloads_the_items_as_the_original_engine_does() {
     let rock = runtime.world.create_item(&mut runtime.engine, Some("rock"));
     assert_eq!(runtime.world.item_by_name("rock"), Some(rock));
     assert_eq!(names(&runtime), ["key", "rock"]);
+}
+
+/// Calls a method on a native as a script would, from the game's own
+/// script, and returns the value it leaves.
+fn call_native(
+    runtime: &mut Runtime,
+    target: luma_script::NativeId,
+    name: &str,
+    args: &[Value],
+) -> Value {
+    use luma_script::Host;
+    let game = runtime.world.game_id();
+    let script = runtime.engine.scripts_of(game)[0];
+    let ctx = luma_script::Context {
+        engine: &mut runtime.engine,
+        script,
+        owner: Some(game),
+        line: 0,
+    };
+    runtime
+        .world
+        .call_method(target, name, args, ctx)
+        .map(|r| r.value)
+        .unwrap_or(Value::Null)
+}
+
+#[test]
+fn objects_have_their_own_cursor_caption_slots_and_flags() {
+    use luma_adventure::EntityRef;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    let prop_ref = EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    let text = |v: Value| v.get_string(&());
+
+    // The object's own cursor (`SetCursor`) is shown over it instead of
+    // the active cursor; a cursor that does not load leaves the old one.
+    assert_eq!(
+        call_native(&mut runtime, prop, "HasCursor", &[]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(&mut runtime, prop, "GetCursor", &[]),
+        Value::Null
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "SetCursor",
+            &[Value::from("sprites\\cursor.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "SetCursor",
+            &[Value::from("missing.sprite")]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        text(call_native(&mut runtime, prop, "GetCursor", &[])),
+        "sprites\\cursor.sprite"
+    );
+    assert_eq!(
+        call_native(&mut runtime, prop, "HasCursor", &[]),
+        Value::Bool(true)
+    );
+    let cursor = call_native(&mut runtime, prop, "GetCursorObject", &[])
+        .as_native()
+        .expect("a sprite object");
+    assert_eq!(
+        runtime.world.get_property(cursor, "Filename"),
+        Some(Value::from("sprites\\cursor.sprite"))
+    );
+    assert_eq!(
+        runtime.world.get_property(cursor, "NumFrames"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(
+        runtime.world.get_property(cursor, "Owner"),
+        Some(Value::Native(prop))
+    );
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(6, 7);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(prop));
+    assert_eq!(
+        runtime.world.cursors().shown(),
+        Some("sprites\\cursor.sprite")
+    );
+    call_native(&mut runtime, prop, "RemoveCursor", &[]);
+    assert_eq!(
+        call_native(&mut runtime, prop, "HasCursor", &[]),
+        Value::Bool(false)
+    );
+    assert!(
+        !runtime.world.objects().contains(cursor)
+            || runtime.world.get_property(cursor, "Filename").is_none(),
+        "the cursor object has nothing to show"
+    );
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.cursors().shown(),
+        Some("art\\green.png"),
+        "back to the active cursor"
+    );
+
+    // Caption slots: slot 1 is the caption, 2 to 7 are extra, all
+    // expanded through the string table.
+    call_native(
+        &mut runtime,
+        prop,
+        "SetCaption",
+        &[Value::from("/GREET/x"), Value::Int(2)],
+    );
+    call_native(
+        &mut runtime,
+        prop,
+        "SetCaption",
+        &[Value::from("Prop"), Value::Int(0)],
+    );
+    assert_eq!(
+        text(call_native(&mut runtime, prop, "Caption", &[Value::Int(2)])),
+        "Hello"
+    );
+    assert_eq!(
+        text(call_native(&mut runtime, prop, "Caption", &[])),
+        "Prop"
+    );
+    assert_eq!(
+        runtime.world.get_property(prop, "Caption"),
+        Some(Value::from("Prop"))
+    );
+    assert_eq!(
+        text(call_native(&mut runtime, prop, "Caption", &[Value::Int(3)])),
+        ""
+    );
+    assert_eq!(
+        text(call_native(&mut runtime, prop, "Caption", &[Value::Int(9)])),
+        ""
+    );
+
+    // The flags are kept per object; `NonIntMouseEvents` keeps the
+    // object under the mouse while the game is not interactive.
+    assert_eq!(
+        runtime.world.get_property(prop, "Movable"),
+        Some(Value::Bool(true))
+    );
+    runtime
+        .world
+        .set_property(prop, "Movable", &Value::Bool(false));
+    assert_eq!(
+        runtime.world.get_property(prop, "Movable"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(
+        runtime.world.get_property(prop, "SceneIndependent"),
+        Some(Value::Bool(false))
+    );
+    runtime
+        .world
+        .set_property(prop, "SceneIndependent", &Value::Bool(true));
+    assert_eq!(
+        runtime.world.get_property(prop, "SceneIndependent"),
+        Some(Value::Bool(true))
+    );
+    let window = runtime.world.window_ids()[0];
+    assert_eq!(
+        runtime.world.get_property(window, "NonIntMouseEvents"),
+        Some(Value::Bool(true)),
+        "windows take the mouse while the game is not interactive"
+    );
+    assert_eq!(
+        runtime.world.get_property(prop, "NonIntMouseEvents"),
+        Some(Value::Bool(false))
+    );
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(false));
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), None);
+    runtime
+        .world
+        .set_property(prop, "NonIntMouseEvents", &Value::Bool(true));
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(prop));
+
+    // The state is part of a saved game.
+    runtime.save_game(11, "flags", false).unwrap();
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(11).unwrap();
+    assert_eq!(
+        loaded.world.get_property(prop, "Movable"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(
+        loaded.world.get_property(prop, "NonIntMouseEvents"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        text(call_native(&mut loaded, prop, "Caption", &[Value::Int(2)])),
+        "Hello"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn talk_sprite_sets_forced_talk_anims_and_sprite_objects() {
+    use luma_adventure::EntityRef;
+    use luma_formats::font::TextAlign;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let prop_ref = EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    let shown = |runtime: &Runtime| runtime.world.scene().unwrap().shown_sprite(prop_ref);
+    let talk_sprites = |runtime: &Runtime| {
+        let e = runtime.world.scene().unwrap().entity(prop_ref).unwrap();
+        (e.talk_sprites.clone(), e.talk_special_sprites.clone())
+    };
+
+    // AddTalkSprite: a file that does not load fails; the others join the
+    // generic or the special set and the next sentence plays them.
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "AddTalkSprite",
+            &[Value::from("missing.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "AddTalkSprite",
+            &[Value::from("art\\walk.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "AddTalkSprite",
+            &[Value::from("art\\stand.sprite"), Value::Bool(true)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        talk_sprites(&runtime),
+        (
+            vec!["art\\walk.sprite".to_string()],
+            vec!["art\\stand.sprite".to_string()]
+        )
+    );
+    assert!(
+        runtime
+            .world
+            .talk(prop, "Hi", None, 500, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\walk.sprite"));
+    assert!(runtime.world.talk(
+        prop,
+        "Hi",
+        None,
+        500,
+        Some("stand".into()),
+        TextAlign::Center
+    ));
+    runtime.tick(16);
+    assert_eq!(
+        shown(&runtime).as_deref(),
+        Some("art\\stand.sprite"),
+        "a special stance by name"
+    );
+
+    // SetTalkSprite replaces a set, and what the entity is playing from it.
+    assert!(
+        runtime
+            .world
+            .talk(prop, "Hi", None, 500, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\walk.sprite"));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "SetTalkSprite",
+            &[Value::from("art\\prop.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        talk_sprites(&runtime).0,
+        vec!["art\\prop.sprite".to_string()]
+    );
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\prop.sprite"));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "RemoveTalkSprite",
+            &[Value::from("ART\\PROP.SPRITE"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    assert!(talk_sprites(&runtime).0.is_empty());
+    runtime.world.stop_talk(prop);
+
+    // ForceTalkAnim: the next sentence starts with that sprite, then the
+    // sets are used again; the sentence after is back to normal.
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "AddTalkSprite",
+            &[Value::from("art\\walk.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "ForceTalkAnim",
+            &[Value::from("art\\stand.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    assert!(
+        runtime
+            .world
+            .talk(prop, "Forced", None, 500, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\stand.sprite"));
+    assert!(
+        runtime
+            .world
+            .talk(prop, "Normal", None, 500, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\walk.sprite"));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "ForceTalkAnim",
+            &[Value::from("missing.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    assert!(
+        runtime
+            .world
+            .talk(prop, "Dropped", None, 500, None, TextAlign::Center)
+    );
+    let log = runtime.tick(16);
+    assert!(
+        log.iter().any(|l| l.contains("error loading talk sprite")),
+        "{log:?}"
+    );
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\walk.sprite"));
+
+    // An actor's sprite object stands for the sprite `SetSprite` gave it;
+    // an item's for its image; both animate.
+    let actor = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\bob.actor", false)
+        .unwrap();
+    assert_eq!(
+        call_native(&mut runtime, actor, "GetSpriteObject", &[]),
+        Value::Null
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "SetSprite",
+            &[Value::from("art\\prop.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    let sprite = call_native(&mut runtime, actor, "GetSpriteObject", &[])
+        .as_native()
+        .expect("the actor's sprite object");
+    assert_eq!(
+        runtime.world.get_property(sprite, "Filename"),
+        Some(Value::from("art\\prop.sprite"))
+    );
+    assert_eq!(
+        runtime.world.get_property(sprite, "NumFrames"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(
+        runtime.world.get_property(sprite, "Owner"),
+        Some(Value::Native(actor))
+    );
+    for _ in 0..20 {
+        runtime.tick(16);
+    }
+    assert_eq!(
+        runtime.world.get_property(sprite, "CurrentFrame"),
+        Some(Value::Int(1))
+    );
+    assert_eq!(
+        runtime.world.get_property(sprite, "Finished"),
+        Some(Value::Bool(true))
+    );
+    let key = runtime.world.item_by_name("key").unwrap();
+    let image = call_native(&mut runtime, key, "GetSpriteObject", &[])
+        .as_native()
+        .expect("the item's sprite object");
+    assert_eq!(
+        runtime.world.get_property(image, "Filename"),
+        Some(Value::from("art\\green.png"))
+    );
+    assert_eq!(
+        runtime.world.get_property(image, "NumFrames"),
+        Some(Value::Int(1))
+    );
+    // ForceTalkAnim on an actor plays the file as the first stance too.
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "ForceTalkAnim",
+            &[Value::from("art\\walk.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    assert!(
+        runtime
+            .world
+            .talk(actor, "Hey", None, 500, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.actor(actor).unwrap().current_sprite(),
+        Some("art\\walk.sprite")
+    );
+    // Actors keep their talk sets in the file: the method only loads.
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "AddTalkSprite",
+            &[Value::from("missing.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "AddTalkSprite",
+            &[Value::from("art\\stand.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn regions_are_edited_entities_get_regions_and_waypoint_groups_switch_off() {
+    use luma_adventure::EntityRef;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+
+    // The floor region's polygon is edited point by point; an index
+    // outside the polygon is refused.
+    let floor = runtime.world.region_id(0, 1).unwrap();
+    let points = |runtime: &Runtime| {
+        runtime
+            .world
+            .scene()
+            .unwrap()
+            .region(0, 1)
+            .unwrap()
+            .points
+            .clone()
+    };
+    let point = |runtime: &mut Runtime, i: i32| {
+        let p = call_native(runtime, floor, "GetPoint", &[Value::Int(i)]);
+        (
+            p.get_property("X", &()).unwrap_or(Value::Null),
+            p.get_property("Y", &()).unwrap_or(Value::Null),
+        )
+    };
+    assert_eq!(point(&mut runtime, 0), (Value::Int(0), Value::Int(16)));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            floor,
+            "AddPoint",
+            &[Value::Int(10), Value::Int(40)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            floor,
+            "InsertPoint",
+            &[Value::Int(0), Value::Int(1), Value::Int(1)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            floor,
+            "SetPoint",
+            &[Value::Int(0), Value::Int(2), Value::Int(3)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            floor,
+            "SetPoint",
+            &[Value::Int(9), Value::Int(2), Value::Int(3)]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        runtime.world.get_property(floor, "NumPoints"),
+        Some(Value::Int(6))
+    );
+    assert_eq!(point(&mut runtime, 0), (Value::Int(2), Value::Int(3)));
+    assert_eq!(
+        call_native(&mut runtime, floor, "RemovePoint", &[Value::Int(0)]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(&mut runtime, floor, "RemovePoint", &[Value::Int(9)]),
+        Value::Bool(false)
+    );
+    assert_eq!(points(&runtime).len(), 5);
+    assert_eq!(
+        points(&runtime)[4],
+        luma_formats::scene::Point { x: 10, y: 40 }
+    );
+
+    // An entity without a region gets one with `CreateRegion`, empty
+    // until points are added; the region is then its clickable area.
+    let lamp_ref = EntityRef::Node { layer: 0, index: 2 };
+    let lamp = runtime.world.node_id(lamp_ref).unwrap();
+    {
+        let e = runtime
+            .world
+            .scene_mut()
+            .unwrap()
+            .entity_mut(lamp_ref)
+            .unwrap();
+        e.active = true;
+        e.interactive = true;
+    }
+    assert_eq!(
+        runtime.world.get_property(lamp, "Region"),
+        Some(Value::Null)
+    );
+    assert_eq!(
+        call_native(&mut runtime, lamp, "DeleteRegion", &[]),
+        Value::Bool(false)
+    );
+    let region = call_native(&mut runtime, lamp, "CreateRegion", &[])
+        .as_native()
+        .expect("a region object");
+    assert_eq!(
+        runtime.world.get_property(lamp, "Region"),
+        Some(Value::Native(region))
+    );
+    assert_eq!(
+        call_native(&mut runtime, lamp, "CreateRegion", &[]),
+        Value::Native(region),
+        "an entity keeps the region it has"
+    );
+    assert_eq!(
+        runtime.world.get_property(region, "Type"),
+        Some(Value::from("region"))
+    );
+    assert_eq!(
+        runtime.world.get_property(region, "NumPoints"),
+        Some(Value::Int(0))
+    );
+    assert_eq!(
+        runtime.world.get_property(region, "Blocked"),
+        None,
+        "a plain region has no scene-region members"
+    );
+    for (x, y) in [(20, 20), (26, 20), (26, 26), (20, 26)] {
+        call_native(
+            &mut runtime,
+            region,
+            "AddPoint",
+            &[Value::Int(x), Value::Int(y)],
+        );
+    }
+    runtime
+        .world
+        .set_property(region, "Name", &Value::from("hot"));
+    assert_eq!(
+        runtime.world.get_property(region, "Name"),
+        Some(Value::from("hot"))
+    );
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(23, 23);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(lamp));
+    assert_eq!(
+        call_native(&mut runtime, lamp, "DeleteRegion", &[]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        runtime.world.get_property(lamp, "Region"),
+        Some(Value::Null)
+    );
+    assert!(!runtime.world.objects().contains(region));
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), None);
+
+    // A region from the file is a region object from the start, and the
+    // edits are part of a saved game.
+    runtime.change_scene("scenes\\small.scene").unwrap();
+    let spot = runtime.world.find_node("spot").unwrap();
+    let spot_region = runtime
+        .world
+        .get_property(spot, "Region")
+        .and_then(|v| v.as_native())
+        .expect("the file's region");
+    assert_eq!(
+        runtime.world.get_property(spot_region, "NumPoints"),
+        Some(Value::Int(4))
+    );
+    call_native(
+        &mut runtime,
+        spot_region,
+        "AddPoint",
+        &[Value::Int(8), Value::Int(14)],
+    );
+    runtime.save_game(12, "regions", false).unwrap();
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(12).unwrap();
+    assert_eq!(
+        loaded.world.get_property(spot_region, "NumPoints"),
+        Some(Value::Int(5))
+    );
+
+    // Waypoint groups are objects: switching one off takes its points
+    // out of path finding; the handle dies with the scene.
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    let scene = runtime.world.scene_id();
+    assert_eq!(
+        runtime.world.get_property(scene, "NumWaypointGroups"),
+        Some(Value::Int(1))
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "GetWaypointGroup", &[Value::Int(1)]),
+        Value::Null
+    );
+    let group = call_native(&mut runtime, scene, "GetWaypointGroup", &[Value::Int(0)])
+        .as_native()
+        .expect("a waypoint group object");
+    assert_eq!(
+        runtime.world.get_property(group, "Type"),
+        Some(Value::from("waypoint-group"))
+    );
+    assert_eq!(
+        runtime.world.get_property(group, "Name"),
+        Some(Value::from("wp"))
+    );
+    assert_eq!(
+        runtime.world.get_property(group, "Active"),
+        Some(Value::Bool(true))
+    );
+    let waypoints = |runtime: &Runtime| {
+        luma_adventure::actor::scene_obstacles(&runtime.world.scene().unwrap().scene)
+            .1
+            .len()
+    };
+    assert_eq!(waypoints(&runtime), 2);
+    runtime
+        .world
+        .set_property(group, "Active", &Value::Bool(false));
+    assert_eq!(
+        runtime.world.get_property(group, "Active"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(waypoints(&runtime), 0);
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    assert!(!runtime.world.objects().contains(group));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn scripts_create_edit_and_delete_scene_content() {
+    use luma_adventure::{DrawItem, EntityRef};
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    let scene = runtime.world.scene_id();
+    let main = runtime.world.layer_id(0).unwrap();
+    let name = |runtime: &Runtime, id| runtime.world.get_property(id, "Name");
+
+    // Free entities are created empty or loaded from a file; removing
+    // one keeps the handles of the others good.
+    let created = call_native(&mut runtime, scene, "CreateEntity", &[Value::from("dyn")])
+        .as_native()
+        .expect("a created entity");
+    assert_eq!(name(&runtime, created), Some(Value::from("dyn")));
+    assert_eq!(
+        runtime.world.get_property(created, "Scalable"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        runtime.world.get_property(scene, "NumFreeNodes"),
+        Some(Value::Int(2))
+    );
+    runtime.world.set_property(created, "X", &Value::Int(10));
+    runtime.world.set_property(created, "Y", &Value::Int(20));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            created,
+            "SetSprite",
+            &[Value::from("art\\green.png")]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            scene,
+            "LoadEntity",
+            &[Value::from("missing.entity")]
+        ),
+        Value::Null
+    );
+    let pick = call_native(
+        &mut runtime,
+        scene,
+        "LoadEntity",
+        &[Value::from("verb.entity")],
+    )
+    .as_native()
+    .expect("the loaded entity");
+    assert_eq!(name(&runtime, pick), Some(Value::from("pick")));
+    assert_eq!(
+        runtime.world.get_property(pick, "Caption"),
+        Some(Value::from("Hello"))
+    );
+    assert_eq!(
+        call_native(&mut runtime, pick, "GetSprite", &[]),
+        Value::from("art\\green.png")
+    );
+    assert_eq!(
+        runtime.engine.scripts_of(pick).len(),
+        1,
+        "its script is attached"
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "GetFreeNode", &[Value::from("pick")]),
+        Value::Native(pick)
+    );
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(11, 21);
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.active_object(),
+        Some(created),
+        "drawn and under the mouse"
+    );
+    call_native(
+        &mut runtime,
+        scene,
+        "UnloadObject",
+        &[Value::Native(created)],
+    );
+    assert!(!runtime.world.objects().contains(created));
+    assert_eq!(
+        runtime.world.get_property(scene, "NumFreeNodes"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(
+        name(&runtime, pick),
+        Some(Value::from("pick")),
+        "renumbered, still good"
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "GetFreeNode", &[Value::Int(1)]),
+        Value::Native(pick)
+    );
+
+    // Nodes join and leave a layer; the handles of the others follow.
+    let floor = runtime.world.region_id(0, 1).unwrap();
+    let lamp = runtime
+        .world
+        .node_id(EntityRef::Node { layer: 0, index: 2 })
+        .unwrap();
+    let r0 = call_native(
+        &mut runtime,
+        main,
+        "InsertRegion",
+        &[Value::Int(0), Value::from("r0")],
+    )
+    .as_native()
+    .expect("a region node");
+    assert_eq!(
+        runtime.world.get_property(main, "NumNodes"),
+        Some(Value::Int(5))
+    );
+    assert_eq!(runtime.world.region_id(0, 0), Some(r0));
+    assert_eq!(runtime.world.region_id(0, 2), Some(floor));
+    assert_eq!(name(&runtime, floor), Some(Value::from("floor")));
+    assert_eq!(name(&runtime, lamp), Some(Value::from("lamp")));
+    assert_eq!(
+        call_native(&mut runtime, main, "GetNode", &[Value::Int(3)]),
+        Value::Native(lamp)
+    );
+    let added = call_native(&mut runtime, main, "AddEntity", &[Value::from("added")])
+        .as_native()
+        .expect("an entity node");
+    assert_eq!(
+        runtime.world.get_property(added, "Scalable"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(
+        call_native(&mut runtime, main, "GetNode", &[Value::Int(5)]),
+        Value::Native(added)
+    );
+    call_native(
+        &mut runtime,
+        main,
+        "InsertEntity",
+        &[Value::Int(99), Value::from("tail")],
+    );
+    assert_eq!(
+        runtime.world.get_property(main, "NumNodes"),
+        Some(Value::Int(7))
+    );
+    assert_eq!(
+        call_native(&mut runtime, main, "DeleteNode", &[Value::Native(r0)]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(&mut runtime, main, "DeleteNode", &[Value::Int(42)]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        runtime.world.get_property(main, "NumNodes"),
+        Some(Value::Int(6))
+    );
+    assert!(!runtime.world.objects().contains(r0));
+    assert_eq!(runtime.world.region_id(0, 1), Some(floor));
+    assert_eq!(name(&runtime, lamp), Some(Value::from("lamp")));
+
+    // Layers too; the main layer stays.
+    let fx = call_native(&mut runtime, scene, "AddLayer", &[Value::from("fx")])
+        .as_native()
+        .expect("a layer");
+    assert_eq!(
+        runtime.world.get_property(scene, "NumLayers"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(
+        runtime.world.get_property(fx, "Width"),
+        Some(Value::Int(200))
+    );
+    let bg = call_native(
+        &mut runtime,
+        scene,
+        "InsertLayer",
+        &[Value::Int(0), Value::from("bg")],
+    )
+    .as_native()
+    .expect("a layer");
+    assert_eq!(
+        runtime.world.get_property(scene, "NumLayers"),
+        Some(Value::Int(3))
+    );
+    assert_eq!(runtime.world.layer_id(1), Some(main));
+    assert_eq!(
+        runtime.world.get_property(scene, "MainLayer"),
+        Some(Value::Native(main))
+    );
+    assert_eq!(name(&runtime, floor), Some(Value::from("floor")));
+    assert_eq!(name(&runtime, lamp), Some(Value::from("lamp")));
+    assert_eq!(
+        call_native(&mut runtime, scene, "DeleteLayer", &[Value::Native(main)]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "DeleteLayer", &[Value::Native(bg)]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "DeleteLayer", &[Value::Int(5)]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        runtime.world.get_property(scene, "NumLayers"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(runtime.world.layer_id(0), Some(main));
+    assert_eq!(name(&runtime, floor), Some(Value::from("floor")));
+
+    // An actor stuck to the floor is drawn in the floor's slot even when
+    // it stands outside it.
+    let actor = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\bob.actor", false)
+        .unwrap();
+    runtime.world.set_property(actor, "Y", &Value::Int(5));
+    runtime.tick(16);
+    let slots = |runtime: &Runtime| {
+        let order = runtime.world.draw_order();
+        let actor_at = order
+            .iter()
+            .position(|i| matches!(i, DrawItem::Other { index: 0, .. }))
+            .expect("the actor is drawn");
+        let lamp_at = order
+            .iter()
+            .position(|i| *i == DrawItem::Node { layer: 0, index: 2 })
+            .expect("the lamp is drawn");
+        (actor_at, lamp_at)
+    };
+    let (actor_at, lamp_at) = slots(&runtime);
+    assert!(actor_at > lamp_at, "outside every region: drawn last");
+    assert_eq!(
+        call_native(&mut runtime, actor, "StickToRegion", &[Value::from("nope")]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "StickToRegion",
+            &[Value::from("FLOOR")]
+        ),
+        Value::Bool(true)
+    );
+    let (actor_at, lamp_at) = slots(&runtime);
+    assert!(actor_at < lamp_at, "stuck to the floor: drawn with it");
+    assert_eq!(
+        call_native(&mut runtime, actor, "StickToRegion", &[Value::Null]),
+        Value::Bool(true)
+    );
+    let (actor_at, lamp_at) = slots(&runtime);
+    assert!(actor_at > lamp_at);
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "StickToRegion",
+            &[Value::Native(floor)]
+        ),
+        Value::Bool(true)
+    );
+
+    // Everything created lives in the saved game.
+    runtime.save_game(13, "built", false).unwrap();
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(13).unwrap();
+    loaded.tick(16);
+    assert_eq!(
+        loaded.world.get_property(scene, "NumLayers"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(
+        loaded.world.get_property(main, "NumNodes"),
+        Some(Value::Int(6))
+    );
+    assert_eq!(
+        loaded.world.get_property(scene, "NumFreeNodes"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(name(&loaded, pick), Some(Value::from("pick")));
+    assert_eq!(name(&loaded, added), Some(Value::from("added")));
+    assert!(
+        loaded
+            .world
+            .scene()
+            .unwrap()
+            .sprite("art\\green.png")
+            .is_some(),
+        "loaded again"
+    );
+    let (actor_at, lamp_at) = slots(&loaded);
+    assert!(actor_at < lamp_at, "still stuck to the floor");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn game_entities_outlive_scenes_and_attachments_follow_their_owner() {
+    use luma_adventure::{DrawItem, EntityRef};
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    let scene = runtime.world.scene_id();
+    let name = |runtime: &Runtime, id| runtime.world.get_property(id, "Name");
+
+    // An entity of the game is drawn among the scene's free objects and
+    // stays when the scene changes.
+    let hud = call_native(&mut runtime, game, "CreateEntity", &[Value::from("hud")])
+        .as_native()
+        .expect("a game entity");
+    assert_eq!(
+        runtime.world.get_property(hud, "Type"),
+        Some(Value::from("entity"))
+    );
+    assert_eq!(name(&runtime, hud), Some(Value::from("hud")));
+    runtime.world.set_property(hud, "X", &Value::Int(2));
+    runtime.world.set_property(hud, "Y", &Value::Int(2));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            hud,
+            "SetSprite",
+            &[Value::from("art\\green.png")]
+        ),
+        Value::Bool(true)
+    );
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(3, 3);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(hud));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            game,
+            "LoadEntity",
+            &[Value::from("missing.entity")]
+        ),
+        Value::Null
+    );
+    let loaded = call_native(
+        &mut runtime,
+        game,
+        "LoadEntity",
+        &[Value::from("verb.entity")],
+    )
+    .as_native()
+    .expect("a loaded game entity");
+    assert_eq!(name(&runtime, loaded), Some(Value::from("pick")));
+    assert_eq!(
+        runtime.world.get_property(scene, "NumFreeNodes"),
+        Some(Value::Int(1)),
+        "not the scene's"
+    );
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.tick(16);
+    assert_eq!(name(&runtime, hud), Some(Value::from("hud")));
+    assert_eq!(name(&runtime, loaded), Some(Value::from("pick")));
+    assert_eq!(
+        runtime.world.get_property(scene, "NumFreeNodes"),
+        Some(Value::Int(0))
+    );
+
+    // Attachments are entities drawn around their owner, scaled with it,
+    // and hit as it; GetAttachment counts the ones drawn before first.
+    let actor = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\bob.actor", false)
+        .unwrap();
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "AddAttachment",
+            &[
+                Value::from("missing.entity"),
+                Value::Bool(true),
+                Value::Int(0),
+                Value::Int(0)
+            ]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "AddAttachment",
+            &[
+                Value::from("verb.entity"),
+                Value::Bool(false),
+                Value::Int(4),
+                Value::Int(0)
+            ]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "AddAttachment",
+            &[
+                Value::from("verb.entity"),
+                Value::Bool(true),
+                Value::Int(0),
+                Value::Int(-10)
+            ]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        runtime.world.get_property(actor, "NumAttachments"),
+        Some(Value::Int(2))
+    );
+    let pre = call_native(&mut runtime, actor, "GetAttachment", &[Value::Int(0)])
+        .as_native()
+        .expect("the attachment drawn before");
+    let post = call_native(&mut runtime, actor, "GetAttachment", &[Value::Int(1)])
+        .as_native()
+        .expect("the attachment drawn after");
+    assert_ne!(pre, post);
+    assert_eq!(runtime.world.get_property(pre, "Y"), Some(Value::Int(-10)));
+    assert_eq!(runtime.world.get_property(post, "X"), Some(Value::Int(4)));
+    assert_eq!(
+        call_native(&mut runtime, actor, "GetAttachment", &[Value::from("PICK")]),
+        Value::Native(post)
+    );
+    assert_eq!(
+        call_native(&mut runtime, actor, "GetAttachment", &[Value::Int(5)]),
+        Value::Null
+    );
+    runtime.tick(16);
+    let others = runtime
+        .world
+        .draw_order()
+        .into_iter()
+        .filter(|i| matches!(i, DrawItem::Other { .. }))
+        .count();
+    assert_eq!(
+        others, 3,
+        "the actor, the two game entities; attachments are not free objects"
+    );
+    let drawables = runtime.world.drawables();
+    let bob = drawables
+        .iter()
+        .find(|d| d.x == 10 && d.y == 24)
+        .expect("the actor's drawable");
+    assert_eq!(bob.before.len(), 1);
+    assert_eq!(bob.after.len(), 1);
+    assert_eq!((bob.before[0].x, bob.before[0].y), (10, 14));
+    assert_eq!((bob.after[0].x, bob.after[0].y), (14, 24));
+    runtime.mouse_move(11, 15);
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.active_object(),
+        Some(actor),
+        "an attachment is hit as its owner"
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "RemoveAttachment",
+            &[Value::from("nothing")]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "RemoveAttachment",
+            &[Value::Native(pre)]
+        ),
+        Value::Bool(true)
+    );
+    assert!(!runtime.world.objects().contains(pre));
+    assert_eq!(
+        runtime.world.get_property(actor, "NumAttachments"),
+        Some(Value::Int(1))
+    );
+    assert_eq!(
+        name(&runtime, post),
+        Some(Value::from("pick")),
+        "the other is renumbered, still good"
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "RemoveAttachment",
+            &[Value::from("pick")]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        runtime.world.get_property(actor, "NumAttachments"),
+        Some(Value::Int(0))
+    );
+
+    // An attachment of a scene entity goes with the scene; one of a game
+    // entity stays, and both live in a saved game.
+    let door = runtime
+        .world
+        .node_id(EntityRef::Node { layer: 0, index: 0 })
+        .unwrap();
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            door,
+            "AddAttachment",
+            &[
+                Value::from("verb.entity"),
+                Value::Bool(true),
+                Value::Int(0),
+                Value::Int(0)
+            ]
+        ),
+        Value::Bool(true)
+    );
+    let door_hat = call_native(&mut runtime, door, "GetAttachment", &[Value::Int(0)])
+        .as_native()
+        .unwrap();
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            hud,
+            "AddAttachment",
+            &[
+                Value::from("verb.entity"),
+                Value::Bool(false),
+                Value::Int(1),
+                Value::Int(1)
+            ]
+        ),
+        Value::Bool(true)
+    );
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    assert!(
+        !runtime.world.objects().contains(door_hat),
+        "gone with the scene"
+    );
+    assert_eq!(
+        runtime.world.get_property(hud, "NumAttachments"),
+        Some(Value::Int(1))
+    );
+    runtime.save_game(14, "hud", false).unwrap();
+    let mut saved = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    saved.start();
+    saved.tick(16);
+    saved.load_game(14).unwrap();
+    saved.tick(16);
+    assert_eq!(name(&saved, hud), Some(Value::from("hud")));
+    assert_eq!(
+        saved.world.get_property(hud, "NumAttachments"),
+        Some(Value::Int(1))
+    );
+    assert!(
+        saved.world.game_view().sprite("art\\green.png").is_some(),
+        "loaded again"
+    );
+    let drawables = saved.world.drawables();
+    let hud_draw = drawables
+        .iter()
+        .find(|d| d.x == 2 && d.y == 2)
+        .expect("the hud");
+    assert_eq!(hud_draw.after.len(), 1);
+
+    // Game.UnloadObject removes a game entity with its attachments.
+    call_native(&mut runtime, game, "UnloadObject", &[Value::Native(hud)]);
+    assert!(!runtime.world.objects().contains(hud));
+    assert_eq!(name(&runtime, loaded), Some(Value::from("pick")));
+    assert_eq!(runtime.world.game_view().entity_refs().len(), 1);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn objects_have_their_own_inventories_and_the_box_switches_between_them() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    let actor = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\bob.actor", false)
+        .unwrap();
+    let key = runtime.world.item_by_name("key").unwrap();
+    let coin = runtime.world.item_by_name("coin").unwrap();
+
+    // The game's own inventory and the actor's are separate lists;
+    // IsItemTaken sees both.
+    call_native(&mut runtime, game, "TakeItem", &[Value::from("key")]);
+    call_native(&mut runtime, actor, "TakeItem", &[Value::from("coin")]);
+    assert_eq!(runtime.world.taken_items(), &[key]);
+    assert_eq!(runtime.world.taken_items_of(actor), &[coin]);
+    assert_eq!(
+        runtime.world.get_property(game, "NumItems"),
+        Some(Value::Int(1))
+    );
+    assert_eq!(
+        runtime.world.get_property(actor, "NumItems"),
+        Some(Value::Int(1))
+    );
+    assert_eq!(
+        call_native(&mut runtime, game, "HasItem", &[Value::from("coin")]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(&mut runtime, actor, "HasItem", &[Value::from("coin")]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(&mut runtime, game, "IsItemTaken", &[Value::from("coin")]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(&mut runtime, actor, "GetItem", &[Value::Int(0)]),
+        Value::Native(coin)
+    );
+    assert_eq!(
+        call_native(&mut runtime, game, "GetItem", &[Value::Int(0)]),
+        Value::Native(key)
+    );
+    assert!(runtime.world.is_item_taken("coin"));
+    // The scene entity tied to a taken item hides whoever took it.
+    call_native(&mut runtime, actor, "TakeItem", &[Value::from("key")]);
+    let keyspot = runtime.world.find_node("keyspot").unwrap();
+    assert_eq!(
+        runtime.world.get_property(keyspot, "Active"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(runtime.world.taken_items_of(actor), &[coin, key]);
+    assert_eq!(
+        call_native(&mut runtime, actor, "DropItem", &[Value::from("key")]),
+        Value::Null
+    );
+    assert_eq!(runtime.world.taken_items_of(actor), &[coin]);
+    assert_eq!(runtime.world.taken_items(), &[key], "the game's copy stays");
+
+    // The box shows the game's inventory until InventoryObject names
+    // another; the scroll position is kept per inventory.
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(game))
+    );
+    runtime
+        .world
+        .set_property(game, "InventoryVisible", &Value::Bool(true));
+    runtime
+        .world
+        .set_property(game, "InventoryScrollOffset", &Value::Int(1));
+    runtime
+        .world
+        .set_property(game, "InventoryObject", &Value::Native(actor));
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(actor))
+    );
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryScrollOffset"),
+        Some(Value::Int(0))
+    );
+    runtime.tick(16);
+    let cells: Vec<luma_script::NativeId> = runtime
+        .world
+        .inventory()
+        .items
+        .iter()
+        .filter(|(_, item)| item.current_sprite.is_some())
+        .map(|(id, _)| *id)
+        .collect();
+    assert_eq!(cells, vec![coin], "the box shows the actor's coin");
+    runtime
+        .world
+        .set_property(game, "InventoryObject", &Value::Null);
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(game))
+    );
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryScrollOffset"),
+        Some(Value::Int(1))
+    );
+    runtime
+        .world
+        .set_property(game, "InventoryObject", &Value::Native(game));
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(game))
+    );
+
+    // Deleting an item takes it out of every inventory; unloading the
+    // owner shown brings the box back to the game's.
+    runtime
+        .world
+        .set_property(game, "InventoryObject", &Value::Native(actor));
+    assert!(runtime.world.delete_item(&mut runtime.engine, coin));
+    assert!(runtime.world.taken_items_of(actor).is_empty());
+    runtime.save_game(15, "pockets", false).unwrap();
+    assert!(runtime.world.unload_object(&mut runtime.engine, actor));
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(game))
+    );
+
+    // A saved game keeps each inventory and the owner shown.
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(15).unwrap();
+    assert_eq!(
+        loaded.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(actor))
+    );
+    assert_eq!(loaded.world.taken_items(), &[key]);
+    call_native(&mut loaded, actor, "TakeItem", &[Value::from("key")]);
+    assert_eq!(loaded.world.taken_items_of(actor), &[key]);
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]

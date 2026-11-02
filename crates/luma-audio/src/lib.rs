@@ -8,7 +8,8 @@
 //!   Symphonia.
 //! - [`Audio`]: the sounds loaded, with the engine's rules for volumes
 //!   (per type, per sound, master), panning, looping with a loop start,
-//!   pausing and positions, mixed by Kira. With the `device` feature the
+//!   pausing and positions, and the echo and reverb effects
+//!   ([`SoundEffect`]), mixed by Kira. With the `device` feature the
 //!   output goes to the default device through `cpal`; otherwise, or
 //!   when no device is there, the sounds advance by game time, so that
 //!   durations and `IsPlaying` behave the same in headless runs and on
@@ -24,6 +25,6 @@ mod audio;
 mod clip;
 mod error;
 
-pub use audio::{Audio, SoundId, SoundType, gain};
+pub use audio::{Audio, SoundEffect, SoundId, SoundType, gain};
 pub use clip::{Clip, decode, silent_wav};
 pub use error::{Error, Result};
