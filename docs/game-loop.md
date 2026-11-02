@@ -153,8 +153,10 @@ since the original engine applies the lock only while all four edges
 are non-zero); the original engine also moves the system cursor back
 into the rectangle, which Luma does not. `Scene.MouseX` and `Scene.MouseY`
 add the scene's scroll offset and take off the scene viewport's origin
-(`SCENE_VIEWPORT` in the game file, `Game.SetSceneViewport`; see
-[formats/game.md](formats/game.md)). The viewport also sizes the view
+(`SCENE_VIEWPORT` in the game file, `Game.SetSceneViewport`, see
+[formats/game.md](formats/game.md); a scene's own `VIEWPORT` or
+`Scene.SetViewport` comes before it, see
+[formats/scene.md](formats/scene.md)). The viewport also sizes the view
 the scroll centres on the main object, and `Scene.IsPointInViewport`
 answers for it. The scene is not clipped to it yet: a scene taller than
 its viewport draws over whatever lies below, which the games seen so far

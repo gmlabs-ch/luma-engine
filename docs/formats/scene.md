@@ -124,7 +124,7 @@ is absent.
 | `PERSISTENT_STATE` | bool | false | Remember the state of the scene's named nodes (active, caption, sprite, cursor, alpha colour) when the player leaves, and put it back when they come back; see [game-loop.md](../game-loop.md#scene-state-between-visits). Positions and script variables are not kept. |
 | `PERSISTENT_STATE_SPRITES` | bool | true | With `PERSISTENT_STATE`, also keep the sprites objects were switched to. |
 | `CURSOR` | string | | Sprite used as the mouse cursor over the scene instead of the game's cursor. |
-| `VIEWPORT` | `left,top,right,bottom` | the whole window | Part of the window the scene is drawn in. Not written by the editor. |
+| `VIEWPORT` | `left,top,right,bottom` | the game's `SCENE_VIEWPORT`, else the whole window | Part of the window the scene is drawn in and scrolled for; the scene's own viewport comes before the game's. `Scene.SetViewport(x, y, width, height)` sets it at run time (a width or height of 0 or less means the window's; the rectangle is kept inside the window), and it goes with the scene. Not written by the editor. |
 | `GEOMETRY` | string | | The `.3ds` scene geometry of a 3D scene, see [geometry.md](geometry.md) and [3D keys](#3d-keys). A 2D scene has none. |
 | `CAMERA` | string | the geometry's first | Name of the active camera of the scene geometry (case-insensitive); an unknown name keeps the first camera. |
 | `FOV_OVERRIDE` | float | | Vertical field of view in **radians** (SceneEdit shows degrees and writes radians) replacing the camera's. Absent or negative keeps the camera's. |
@@ -468,7 +468,9 @@ draws a full-screen shield that captures the mouse.
 ## Camera
 
 The 2D engine has no camera object: the scene is drawn through a
-**viewport** (the window, or `VIEWPORT` when set) and a **scroll offset**
+**viewport** (the window, or the game's `SCENE_VIEWPORT`, or the
+scene's own `VIEWPORT` / `Scene.SetViewport`, the most specific one) and
+a **scroll offset**
 `(offset_x, offset_y)` clamped to `[0, scene_width - viewport_width]` and
 `[0, scene_height - viewport_height]`. The scroll follows the main actor
 ("auto scroll": one pixel every 10 ms by default, both configurable by

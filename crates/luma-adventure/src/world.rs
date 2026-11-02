@@ -422,10 +422,20 @@ impl World {
         (self.offset_x, self.offset_y)
     }
 
-    /// The part of the screen the scene is shown in (`SCENE_VIEWPORT`,
-    /// `Game.SetSceneViewport`): `(x, y, width, height)`, the whole
-    /// screen by default.
+    /// The part of the screen the scene is shown in: the scene's own
+    /// viewport (`VIEWPORT` in the scene file, `Scene.SetViewport`) when
+    /// it has one, else the game's (`SCENE_VIEWPORT`,
+    /// `Game.SetSceneViewport`), as `CAdScene::GetViewportSize` picks
+    /// them: `(x, y, width, height)`, the whole screen by default.
     pub fn viewport(&self) -> (i32, i32, i32, i32) {
+        if let Some(rect) = self.scene.as_ref().and_then(|v| v.scene.viewport) {
+            return (
+                rect.left,
+                rect.top,
+                (rect.right - rect.left).max(0),
+                (rect.bottom - rect.top).max(0),
+            );
+        }
         self.scene_viewport.unwrap_or((
             0,
             0,

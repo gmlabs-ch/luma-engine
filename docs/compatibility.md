@@ -325,7 +325,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdScene.cpp
 - Hierarchy and Luma: CBObject → CAdScene; Luma: scene (`scene_call`, `scene_get`, `scene_set`, `scene_view.rs`)
-- Count: 57 done, 24 todo, 2 no-op
+- Count: 58 done, 23 todo, 2 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -351,7 +351,7 @@ How the list was made. For every class with a script interface, the names tested
 | `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled` | method | **todo** | Shows / hides / queries a mesh node of the scene's 3D geometry. |
 | `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `GetLightColor`, `GetLightPosition` | method | **todo** | Controls the lights of the scene's 3D geometry. |
 | `SetActiveCamera` | method | **todo** | Selects a camera of the 3D geometry. |
-| `SetViewport` | method | **todo** | Sets the scene's viewport rectangle. Stubbed. |
+| `SetViewport` | method | **done** | Sets the scene's own viewport (x, y, width, height; a width or height of 0 or less means the screen's), which comes before the game's `SCENE_VIEWPORT`; kept on the screen, saved with the scene, gone with it. |
 | `AddLayer`, `InsertLayer`, `DeleteLayer` | method | **done** | Adds, inserts or deletes a layer at runtime (the main layer cannot be deleted); handles to the other layers and nodes stay valid. |
 | `EnableFog`, `DisableFog` | method | **todo** | 3D fog (colour, start, end). |
 | `Type` | get | **done** | `scene`. |
@@ -1036,7 +1036,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CBGame | 133 | 13 | 19 | 165 |
 | CAdGame | 63 | 2 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
-| CAdScene | 57 | 24 | 2 | 83 |
+| CAdScene | 58 | 23 | 2 | 83 |
 | CAdLayer | 18 | 0 | 0 | 18 |
 | CBRegion | 11 | 0 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
@@ -1072,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **925** | **196** | **32** | **1153** |
+| **All** | **926** | **195** | **32** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 904 done, 196 todo, 32 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 905 done, 195 todo, 32 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1099,12 +1099,12 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
-| Game services | 5 | `TextRTL`, `SuspendedRendering`, `Scene.SetViewport`. Done: private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`, the game's and the items' cursor objects and the items' hover image objects. |
+| Game services | 4 | `TextRTL`, `SuspendedRendering`. Done: `Scene.SetViewport`, private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`, the game's and the items' cursor objects and the items' hover image objects. |
 | Script library | 2 | `new Actor` and `new Entity`, which follow runtime entity creation. (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory`, `new Object` and the HSL colour helpers are done.) |
 | Object model (2D) | 0 | Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories (`Game.InventoryObject`). |
 | Rendering features | 0 | Done: rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades (see `docs/rendering.md`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **196** | |
+| **All** | **195** | |
 
 ## Members in Luma that WME 1.x does not define
 

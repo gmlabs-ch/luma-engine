@@ -1238,9 +1238,32 @@ impl World {
                 };
                 Return::value(index.is_some_and(|i| self.delete_layer(ctx.engine, i)))
             }
+            // The scene's own viewport, before the game's; a width or
+            // height of zero or less means the screen's, and the
+            // rectangle is kept on the screen (`CBViewport::SetRect`).
             "SetViewport" => {
-                self.stub(&format!("Scene.{name}"));
-                Return::null()
+                let (x, y, w, h) = (
+                    arg(0).get_int(self),
+                    arg(1).get_int(self),
+                    arg(2).get_int(self),
+                    arg(3).get_int(self),
+                );
+                let (sw, sh) = (self.settings().width as i32, self.settings().height as i32);
+                let w = if w <= 0 { sw } else { w };
+                let h = if h <= 0 { sh } else { h };
+                let rect = luma_formats::Rect {
+                    left: x.max(0),
+                    top: y.max(0),
+                    right: (x + w).min(sw),
+                    bottom: (y + h).min(sh),
+                };
+                match self.scene.as_mut() {
+                    Some(view) => {
+                        view.scene.viewport = Some(rect);
+                        Return::value(true)
+                    }
+                    None => Return::value(false),
+                }
             }
             // The scene's own fader, over the scene viewport only; it
             // runs on the game timer (`CAdScene::ScCallMethod`).

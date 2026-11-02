@@ -66,6 +66,11 @@ var coinNormal = coin.GetNormalCursorObject();
 result.coinNormalCursor = coinNormal.Filename;
 
 Game.ChangeScene("scenes\room.scene");
+
+on "Check"
+{
+  result.checked = true;
+}
 "#;
 
 const SCENE: &[u8] = b"SCENE {
@@ -107,6 +112,29 @@ fn game() -> std::path::PathBuf {
     );
     std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
     dir
+}
+
+/// Calls a method of a native object from the game's script.
+fn call_native(
+    runtime: &mut Runtime,
+    target: luma_script::NativeId,
+    name: &str,
+    args: &[Value],
+) -> Value {
+    use luma_script::Host;
+    let game = runtime.world.game_id();
+    let script = runtime.engine.scripts_of(game)[0];
+    let ctx = luma_script::Context {
+        engine: &mut runtime.engine,
+        script,
+        owner: Some(game),
+        line: 0,
+    };
+    runtime
+        .world
+        .call_method(target, name, args, ctx)
+        .map(|r| r.value)
+        .unwrap_or(Value::Null)
 }
 
 /// A property of the `result` global, a `new Object()` the world owns.
@@ -185,5 +213,45 @@ fn cursors_and_item_images_are_sprite_objects() {
         !log.iter().any(|l| l.starts_with("not implemented")),
         "{log:?}"
     );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_scenes_own_viewport_comes_before_the_games() {
+    let (dir, mut runtime, _) = start();
+    let scene = runtime.world.scene_id();
+    let game = runtime.world.game_id();
+    let ints = |v: &[i32]| v.iter().map(|&i| Value::Int(i)).collect::<Vec<_>>();
+    assert_eq!(runtime.world.viewport(), (0, 0, 64, 48));
+    assert_eq!(
+        call_native(&mut runtime, scene, "SetViewport", &ints(&[10, 5, 40, 30])),
+        Value::Bool(true)
+    );
+    assert_eq!(runtime.world.viewport(), (10, 5, 40, 30));
+    // The game's viewport stands behind the scene's own.
+    call_native(
+        &mut runtime,
+        game,
+        "SetSceneViewport",
+        &ints(&[1, 1, 10, 10]),
+    );
+    assert_eq!(runtime.world.viewport(), (10, 5, 40, 30));
+    assert_eq!(
+        call_native(&mut runtime, scene, "IsPointInViewport", &ints(&[9, 5])),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "IsPointInViewport", &ints(&[10, 5])),
+        Value::Bool(true)
+    );
+    // A width or height of zero means the screen's; the rectangle is
+    // kept on the screen (`CBViewport::SetRect`).
+    call_native(&mut runtime, scene, "SetViewport", &ints(&[-4, 8, 0, 0]));
+    assert_eq!(runtime.world.viewport(), (0, 8, 60, 40));
+    // The viewport is the scene's: the next scene starts without one and
+    // sees the game's.
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    assert_eq!(runtime.world.viewport(), (1, 1, 10, 10));
     std::fs::remove_dir_all(&dir).ok();
 }
