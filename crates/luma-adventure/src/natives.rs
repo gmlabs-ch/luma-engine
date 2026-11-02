@@ -11,15 +11,16 @@
 //! `BKeyboardState.cpp` and `BScriptHolder.cpp` of WME Lite (MIT
 //! License, Copyright (c) 2011 Jan Nedoma); see `NOTICE`.
 
-use luma_formats::Rgba;
 use luma_formats::scene::Direction;
+use luma_formats::{BlendMode, Rgba};
 use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 
 use crate::accessibility::SpeechKind;
+use crate::natives_region::RegionRef;
 use crate::objects::Kind;
-use crate::scene_view::{EntityRef, frame_height};
+use crate::scene_view::{EntityRef, frame_height, key};
 use crate::talk::TalkSkipButton;
-use crate::video::VideoPlayback;
+use crate::video::{VideoPlayback, VideoPlayer};
 use crate::world::World;
 use luma_formats::font::TextAlign;
 
@@ -50,30 +51,9 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 const GAME_STUBS: &[&str] = &[
     "ShowStatusLine",
     "HideStatusLine",
-    "LoadEntity",
-    "CreateEntity",
     "DumpTextureStats",
     "EnableScriptProfiling",
     "DisableScriptProfiling",
-];
-
-const OBJECT_STUBS: &[&str] = &[
-    "SetCursor",
-    "RemoveCursor",
-    "PlayAnim",
-    "PlayAnimAsync",
-    "ForceTalkAnim",
-    "StickToRegion",
-    "CreateParticleEmitter",
-    "DeleteParticleEmitter",
-    "AddAttachment",
-    "RemoveAttachment",
-    "AddTalkSprite",
-    "RemoveTalkSprite",
-    "SetTalkSprite",
-    "CreateRegion",
-    "DeleteRegion",
-    "SetCaption",
 ];
 
 impl World {
@@ -83,11 +63,10 @@ impl World {
         if let Kind::Class(object) = &self.native(id)?.kind {
             return object.get_property(name, self);
         }
-        // `AccCaption` belongs to every CBObject (`m_AccessCaption`).
-        if name == "AccCaption" && self.has_access_caption(id) {
-            return Some(self.access_caption_value(id));
-        }
         let kind = self.native(id)?.kind.clone();
+        if let Some(value) = self.object_get(id, name) {
+            return Some(value);
+        }
         match kind {
             Kind::Game => self.game_get(name),
             Kind::Keyboard => match name {
@@ -114,16 +93,28 @@ impl World {
                 "Ready" => Some(Value::Bool(self.fader.ready)),
                 _ => None,
             },
+            Kind::SceneFader => match name {
+                "Type" => Some(Value::from("fader")),
+                "Ready" => Some(Value::Bool(self.scene_fader.ready)),
+                _ => None,
+            },
             Kind::Scene => self.scene_get(name),
             Kind::Layer(index) => self.layer_get(index, name),
             Kind::Entity(r) => self.entity_get(r, name),
-            Kind::Region { layer, index } => self.region_get(layer, index, name),
+            Kind::Region { layer, index } => {
+                self.region_get(RegionRef::Node { layer, index }, name)
+            }
+            Kind::EntityRegion(owner) => self.region_get(RegionRef::Entity(owner), name),
+            Kind::WaypointGroup(index) => self.waypoint_group_get(index, name),
+            Kind::CursorSprite(owner) => self.cursor_sprite_get(owner, name),
             Kind::Sprite(owner) => self.sprite_get(id, owner, name),
+            Kind::ControlImage { control, .. } => self.sprite_get(id, control, name),
             Kind::Frame { .. } => self.frame_get(id, name),
             Kind::SubFrame { .. } => self.subframe_get(id, name),
             Kind::Actor => self.actor_get(id, name),
             Kind::Control => self.control_get(id, name),
             Kind::Item => self.item_get(id, name),
+            Kind::Emitter(_) => self.emitter_get(id, name),
             Kind::Inert(kind) => match name {
                 "Type" => Some(Value::from(kind.to_ascii_lowercase())),
                 "Name" => Some(Value::from(kind)),
@@ -158,9 +149,7 @@ impl World {
             Some(native) => native.kind.clone(),
             None => return false,
         };
-        if name == "AccCaption" && self.has_access_caption(id) {
-            let caption = (!value.is_null()).then(|| value.get_string(self));
-            self.set_access_caption(id, caption);
+        if self.object_set(id, name, value) {
             return true;
         }
         match kind {
@@ -168,17 +157,24 @@ impl World {
             Kind::Scene => self.scene_set(name, value),
             Kind::Layer(index) => self.layer_set(index, name, value),
             Kind::Entity(r) => self.entity_set(r, name, value),
-            Kind::Region { layer, index } => self.region_set(layer, index, name, value),
-            Kind::Sprite(owner) => self.sprite_set(id, owner, name, value),
+            Kind::Region { layer, index } => {
+                self.region_set(RegionRef::Node { layer, index }, name, value)
+            }
+            Kind::EntityRegion(owner) => self.region_set(RegionRef::Entity(owner), name, value),
+            Kind::WaypointGroup(index) => self.waypoint_group_set(index, name, value),
+            Kind::CursorSprite(owner) => self.cursor_sprite_set(owner, name, value),
+            Kind::Sprite(_) | Kind::ControlImage { .. } => self.sprite_set(id, name, value),
             Kind::Frame { .. } => self.frame_set(id, name, value),
             Kind::SubFrame { .. } => self.subframe_set(id, name, value),
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
+            Kind::Emitter(_) => self.emitter_set(id, name, value),
             Kind::Keyboard
             | Kind::Math
             | Kind::ResponseBox
             | Kind::Fader
+            | Kind::SceneFader
             | Kind::Inert(_)
             | Kind::Object
             | Kind::Class(_) => false,
@@ -205,6 +201,9 @@ impl World {
         if let Some(ret) = self.holder_call(id, name, args, &mut ctx) {
             return Some(ret);
         }
+        if let Some(ret) = self.object_call(id, name, args, ctx.engine) {
+            return Some(ret);
+        }
         match kind {
             Kind::Game => self.game_call(name, args, ctx),
             Kind::Keyboard => match name {
@@ -222,17 +221,23 @@ impl World {
             },
             Kind::Math => math_call(name, args).map(Return::value),
             Kind::ResponseBox => None,
-            Kind::Fader => None,
+            Kind::Fader | Kind::SceneFader => None,
             Kind::Scene => self.scene_call(name, args, ctx),
-            Kind::Layer(index) => self.layer_call(index, name, args),
+            Kind::Layer(index) => self.layer_call(index, name, args, ctx),
             Kind::Entity(r) => self.entity_call(id, r, name, args),
-            Kind::Region { layer, index } => self.region_call(layer, index, name, args),
-            Kind::Sprite(owner) => self.sprite_call(id, owner, name, args, &ctx),
+            Kind::Region { layer, index } => {
+                self.region_call(RegionRef::Node { layer, index }, name, args)
+            }
+            Kind::EntityRegion(owner) => self.region_call(RegionRef::Entity(owner), name, args),
+            Kind::WaypointGroup(_) => None,
+            Kind::CursorSprite(owner) => self.cursor_sprite_call(owner, name),
+            Kind::Sprite(_) | Kind::ControlImage { .. } => self.sprite_call(id, name, args, &ctx),
             Kind::Frame { .. } => self.frame_call(id, name, args, &ctx),
             Kind::SubFrame { .. } => self.subframe_call(id, name, args),
             Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
+            Kind::Emitter(_) => self.emitter_call(id, name, args),
             Kind::Class(_) | Kind::Object => None,
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
@@ -305,9 +310,10 @@ impl World {
         })
     }
 
-    /// The inventory methods every adventure object shares
-    /// (`CAdObject::ScCallMethod`): one inventory, the game's.
-    pub(crate) fn inventory_call(&mut self, name: &str, args: &[Value]) -> Return {
+    /// The inventory methods every adventure object has
+    /// (`CAdObject::ScCallMethod`), on the inventory of `owner`: the
+    /// game's own for the game, else the object's.
+    pub(crate) fn inventory_call(&mut self, owner: NativeId, name: &str, args: &[Value]) -> Return {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         match name {
             "TakeItem" => {
@@ -319,7 +325,7 @@ impl World {
                             Value::Null => None,
                             a => Some(a.get_string(self)),
                         };
-                        if !self.take_item(&item, after.as_deref()) {
+                        if !self.take_item_for(owner, &item, after.as_deref()) {
                             self.log(format!("Cannot add item '{item}' to inventory"));
                         }
                     }
@@ -331,7 +337,7 @@ impl World {
                     Value::Null => self.log("DropItem: item name expected".to_string()),
                     v => {
                         let item = v.get_string(self);
-                        if !self.drop_item(&item) {
+                        if !self.drop_item_for(owner, &item) {
                             self.log(format!("Cannot remove item '{item}' from inventory"));
                         }
                     }
@@ -345,14 +351,22 @@ impl World {
                     let index = v.get_int(self);
                     usize::try_from(index)
                         .ok()
-                        .and_then(|i| self.inventory.taken.get(i).copied())
+                        .and_then(|i| self.taken_items_of(owner).get(i).copied())
                 }
             })),
-            "HasItem" | "IsItemTaken" => match arg(0) {
+            "HasItem" => match arg(0) {
                 Value::Null => Return::value(false),
                 v => {
                     let name = v.get_string(self);
-                    Return::value(self.has_item(&name))
+                    Return::value(self.has_item_for(owner, &name))
+                }
+            },
+            // `IsItemTaken` looks in every inventory (`CAdGame::IsItemTaken`).
+            "IsItemTaken" => match arg(0) {
+                Value::Null => Return::value(false),
+                v => {
+                    let name = v.get_string(self);
+                    Return::value(self.is_item_taken(&name))
                 }
             },
             _ => Return::null(),
@@ -381,7 +395,7 @@ impl World {
             "TotalNumItems" => Value::Int(self.inventory.items.len() as i32),
             "InventoryScrollOffset" => Value::Int(self.inventory.scroll_offset),
             "SmartItemCursor" => Value::Bool(self.inventory.smart_item_cursor),
-            "InventoryObject" => Value::Native(self.game_id),
+            "InventoryObject" => Value::Native(self.inventory_owner()),
             "ScreenWidth" => Value::Int(self.settings().width as i32),
             "ScreenHeight" => Value::Int(self.settings().height as i32),
             "Interactive" => Value::Bool(self.interactive),
@@ -456,7 +470,7 @@ impl World {
             "InventoryVisible" => self.inventory.visible = value.get_bool(self),
             "InventoryScrollOffset" => self.inventory.scroll_offset = value.get_int(self),
             "SmartItemCursor" => self.inventory.smart_item_cursor = value.get_bool(self),
-            "InventoryObject" => {}
+            "InventoryObject" => self.set_inventory_owner(value.as_native()),
             "TalkSkipButton" => {
                 self.talk_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }
@@ -526,6 +540,15 @@ impl World {
                         "Warning: Game.PlayVideo() is now deprecated. Use Game.PlayTheora() instead."
                             .to_string(),
                     );
+                    if filename.to_ascii_lowercase().ends_with(".avi") {
+                        // The engine played AVI files through DirectShow
+                        // and the codecs installed on Windows; Luma
+                        // decodes Ogg Theora only.
+                        self.log(format!(
+                            "Game.PlayVideo: AVI files are not supported ('{filename}'); only Ogg Theora videos play."
+                        ));
+                        return Some(Return::value(false));
+                    }
                 }
                 let started = self.play_theora(
                     ctx.engine,
@@ -571,6 +594,19 @@ impl World {
             "LoadActor" => {
                 let path = arg(0).get_string(self);
                 Return::value(native_or_null(self.load_actor(ctx.engine, &path, false)))
+            }
+            "LoadEntity" => {
+                let path = arg(0).get_string(self);
+                Return::value(native_or_null(self.load_game_entity(ctx.engine, &path)))
+            }
+            "CreateEntity" => {
+                let entity_name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                Return::value(Value::Native(
+                    self.create_game_entity(ctx.engine, entity_name.as_deref()),
+                ))
             }
             "UnloadObject" | "UnloadActor" | "UnloadEntity" | "DeleteEntity" => {
                 if let Some(id) = arg(0).as_native() {
@@ -844,7 +880,7 @@ impl World {
             })),
             "GetInventoryWindow" => Return::value(native_or_null(self.inventory.window)),
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" | "IsItemTaken" => {
-                return Some(self.inventory_call(name, args));
+                return Some(self.inventory_call(game_id, name, args));
             }
             "GetActiveCursorObject" | "GetWaitCursorObject" => {
                 self.stub(&format!("Game.{name}"));
@@ -1151,15 +1187,83 @@ impl World {
                 let (vx, vy, vw, vh) = self.viewport();
                 Return::value(x >= vx && y >= vy && x < vx + vw && y < vy + vh)
             }
-            "GetWaypointGroup" | "LoadEntity" | "CreateEntity" | "AddLayer" | "InsertLayer" => {
+            "GetWaypointGroup" => {
+                let index = usize::try_from(arg(0).get_int(self)).ok();
+                Return::value(native_or_null(
+                    index.and_then(|i| self.waypoint_group_object(i)),
+                ))
+            }
+            "CreateEntity" => {
+                let entity_name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                Return::value(native_or_null(
+                    self.create_scene_entity(ctx.engine, entity_name.as_deref()),
+                ))
+            }
+            "LoadEntity" => {
+                let path = arg(0).get_string(self);
+                Return::value(native_or_null(self.load_scene_entity(ctx.engine, &path)))
+            }
+            "AddLayer" | "InsertLayer" => {
+                let (index, layer_name) = if name == "AddLayer" {
+                    (None, arg(0))
+                } else {
+                    (Some(arg(0).get_int(self).max(0) as usize), arg(1))
+                };
+                let layer_name = match layer_name {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                Return::value(native_or_null(self.add_layer(index, layer_name.as_deref())))
+            }
+            "DeleteLayer" => {
+                let index = match arg(0) {
+                    Value::Native(id) => match self.native(id).map(|n| &n.kind) {
+                        Some(Kind::Layer(i)) => Some(*i),
+                        _ => None,
+                    },
+                    v => usize::try_from(v.get_int(self)).ok(),
+                };
+                Return::value(index.is_some_and(|i| self.delete_layer(ctx.engine, i)))
+            }
+            "SetViewport" => {
                 self.stub(&format!("Scene.{name}"));
                 Return::null()
             }
-            "DeleteLayer" | "SetViewport" | "FadeOut" | "FadeOutAsync" | "FadeIn"
-            | "FadeInAsync" => {
-                self.stub(&format!("Scene.{name}"));
-                Return::null()
+            // The scene's own fader, over the scene viewport only; it
+            // runs on the game timer (`CAdScene::ScCallMethod`).
+            "FadeOut" | "FadeOutAsync" | "FadeIn" | "FadeInAsync" => {
+                let duration = match arg(0) {
+                    Value::Null => 500,
+                    v => u64::try_from(v.get_int(self)).unwrap_or(0),
+                };
+                let channel = |n: usize, default: i32| match arg(n) {
+                    Value::Null => default,
+                    v => v.get_int(self),
+                };
+                let color = Rgba {
+                    r: channel(1, 0).clamp(0, 255) as u8,
+                    g: channel(2, 0).clamp(0, 255) as u8,
+                    b: channel(3, 0).clamp(0, 255) as u8,
+                    a: channel(4, 255).clamp(0, 255) as u8,
+                };
+                let (timer, clock) = (self.timer(), self.clock);
+                if name.starts_with("FadeOut") {
+                    self.scene_fader
+                        .fade_out(color, duration, false, timer, clock);
+                } else {
+                    self.scene_fader
+                        .fade_in(color, duration, false, timer, clock);
+                }
+                if name.ends_with("Async") {
+                    Return::null()
+                } else {
+                    Return::effect(Effect::WaitFor(self.scene_fader_id))
+                }
             }
+            "GetFadeColor" => Return::value(self.scene_fader.color_int()),
             _ => return None,
         })
     }
@@ -1167,15 +1271,19 @@ impl World {
     /// The height of an entity's current frame (`CAdObject::GetHeight`):
     /// the largest hotspot `y` of its sub-frames, scaled with the entity.
     pub(crate) fn entity_height(&self, r: EntityRef) -> i32 {
-        let Some(view) = self.scene() else { return 0 };
+        let Some(view) = self.view_of(r) else {
+            return 0;
+        };
         let Some(entity) = view.entity(r) else {
             return 0;
         };
         let Some(loaded) = entity.sprite.as_deref().and_then(|p| view.sprite(p)) else {
             return 0;
         };
+        // A game-level entity is scaled by the scene it is shown in.
+        let levels = self.scene().map_or(&view.scene, |v| &v.scene);
         let zoom = if entity.scalable {
-            view.scene.zoom_at(entity.x, entity.y)
+            levels.zoom_at(entity.x, entity.y)
         } else {
             100.0
         };
@@ -1224,7 +1332,13 @@ impl World {
         true
     }
 
-    fn layer_call(&mut self, index: usize, name: &str, args: &[Value]) -> Option<Return> {
+    fn layer_call(
+        &mut self,
+        index: usize,
+        name: &str,
+        args: &[Value],
+        ctx: Context<'_>,
+    ) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         Some(match name {
             "GetNode" => {
@@ -1258,9 +1372,37 @@ impl World {
                 });
                 Return::value(native_or_null(id))
             }
-            "AddRegion" | "AddEntity" | "InsertRegion" | "InsertEntity" | "DeleteNode" => {
-                self.stub(&format!("Layer.{name}"));
-                Return::null()
+            "AddRegion" | "AddEntity" | "InsertRegion" | "InsertEntity" => {
+                let (at, node_name) = if name.starts_with("Add") {
+                    (None, arg(0))
+                } else {
+                    (Some(arg(0).get_int(self).max(0) as usize), arg(1))
+                };
+                let node_name = match node_name {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let id = if name.ends_with("Region") {
+                    self.add_region_node(ctx.engine, index, at, node_name.as_deref())
+                } else {
+                    self.add_entity_node(ctx.engine, index, at, node_name.as_deref())
+                };
+                Return::value(native_or_null(id))
+            }
+            "DeleteNode" => {
+                let node = match arg(0) {
+                    Value::Native(id) => match self.native(id).map(|n| n.kind.clone()) {
+                        Some(Kind::Entity(EntityRef::Node { layer, index: ni }))
+                            if layer == index =>
+                        {
+                            Some(ni)
+                        }
+                        Some(Kind::Region { layer, index: ni }) if layer == index => Some(ni),
+                        _ => None,
+                    },
+                    v => usize::try_from(v.get_int(self)).ok(),
+                };
+                Return::value(node.is_some_and(|ni| self.delete_node(ctx.engine, index, ni)))
             }
             _ => return None,
         })
@@ -1280,25 +1422,27 @@ impl World {
             "X" => Value::Int(e.x),
             "Y" => Value::Int(e.y),
             "Height" => Value::Int(self.entity_height(r)),
-            "Ready" => Value::Bool(!self.scene().is_some_and(|v| v.is_talking(r))),
-            "Movable" => Value::Bool(true),
+            "Ready" => Value::Bool(!self.view_of(r).is_some_and(|v| v.is_talking(r))),
             "Registrable" | "Interactive" => Value::Bool(e.interactive),
             "Zoomable" | "Scalable" => Value::Bool(e.scalable),
             "Rotatable" => Value::Bool(e.rotatable),
             "AlphaColor" => Value::Int(e.tint.map_or(0, color_int)),
-            "BlendMode" => Value::Int(0),
+            "BlendMode" => Value::Int(e.blend_mode.to_int()),
             "Scale" => e.scale.map_or(Value::Null, |s| Value::Float(f64::from(s))),
-            "ScaleX" | "ScaleY" => Value::Null,
+            "ScaleX" => e
+                .scale_x
+                .map_or(Value::Null, |s| Value::Float(f64::from(s))),
+            "ScaleY" => e
+                .scale_y
+                .map_or(Value::Null, |s| Value::Float(f64::from(s))),
             "RelativeScale" => Value::Float(f64::from(e.relative_scale)),
-            "Rotate" => Value::Null,
-            "RelativeRotate" => Value::Float(0.0),
+            "Rotate" => e.rotate.map_or(Value::Null, |r| Value::Float(f64::from(r))),
+            "RelativeRotate" => Value::Float(f64::from(e.relative_rotate)),
             "Colorable" => Value::Bool(e.colorable),
             "SoundPanning" => Value::Bool(e.sound_panning),
             "SaveState" => Value::Bool(e.save_state),
-            "NonIntMouseEvents" => Value::Bool(false),
             "Active" => Value::Bool(e.active),
             "IgnoreItems" => Value::Bool(e.ignore_items),
-            "SceneIndependent" => Value::Bool(false),
             "SubtitlesWidth" => Value::Int(self.subtitle_mods_of(r).map_or(0, |m| m.width)),
             "SubtitlesPosX" => Value::Int(self.subtitle_mods_of(r).map_or(0, |m| m.x)),
             "SubtitlesPosY" => Value::Int(self.subtitle_mods_of(r).map_or(0, |m| m.y)),
@@ -1308,9 +1452,11 @@ impl World {
             "SubtitlesPosXCenter" => {
                 Value::Bool(self.subtitle_mods_of(r).is_none_or(|m| m.x_center))
             }
-            "NumItems" => Value::Int(self.inventory.taken.len() as i32),
-            "NumAttachments" => Value::Int(0),
-            "ParticleEmitter" => Value::Null,
+            "NumItems" => Value::Int(
+                self.node_id(r)
+                    .map_or(0, |id| self.taken_items_of(id).len() as i32),
+            ),
+            "ParticleEmitter" => native_or_null(self.node_id(r).and_then(|id| self.emitter_of(id))),
             "Item" => e.item.clone().map_or(Value::Null, Value::from),
             "Subtype" => Value::from(match e.kind {
                 luma_formats::EntityKind::Sound => "sound",
@@ -1319,7 +1465,7 @@ impl World {
             "WalkToX" => Value::Int(e.walk_to_x),
             "WalkToY" => Value::Int(e.walk_to_y),
             "WalkToDirection" => Value::Int(e.walk_to_dir.map_or(8, |d| i32::from(d.code()))),
-            "Region" => Value::Null,
+            "Region" => native_or_null(self.node_id(r).and_then(|id| self.entity_region_id(id))),
             _ => return None,
         })
     }
@@ -1334,7 +1480,7 @@ impl World {
         let caption = self.expand(&text);
         let is_null = value.is_null();
         if name.starts_with("Subtitles") {
-            let Some(view) = self.scene_mut() else {
+            let Some(view) = self.view_of_mut(r) else {
                 return false;
             };
             let mods = view.subtitles.entry(r).or_default();
@@ -1360,8 +1506,13 @@ impl World {
             "Zoomable" | "Scalable" => e.scalable = flag,
             "Rotatable" => e.rotatable = flag,
             "AlphaColor" => e.tint = Some(color_of(int)),
+            "BlendMode" => e.blend_mode = BlendMode::from_int(int),
             "Scale" => e.scale = if is_null { None } else { Some(float as f32) },
+            "ScaleX" => e.scale_x = if is_null { None } else { Some(float as f32) },
+            "ScaleY" => e.scale_y = if is_null { None } else { Some(float as f32) },
             "RelativeScale" => e.relative_scale = float as f32,
+            "Rotate" => e.rotate = if is_null { None } else { Some(float as f32) },
+            "RelativeRotate" => e.relative_rotate = float as f32,
             "Colorable" => e.colorable = flag,
             "SoundPanning" => e.sound_panning = flag,
             "SaveState" => e.save_state = flag,
@@ -1371,8 +1522,6 @@ impl World {
             "WalkToX" => e.walk_to_x = int,
             "WalkToY" => e.walk_to_y = int,
             "WalkToDirection" => e.walk_to_dir = Direction::from_code(i64::from(int)),
-            "Movable" | "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate"
-            | "NonIntMouseEvents" | "SceneIndependent" => {}
             _ => return false,
         }
         true
@@ -1398,13 +1547,31 @@ impl World {
                 }
                 Return::null()
             }
-            "Caption" => {
-                let caption = self
-                    .entity_def(r)
-                    .map(|e| e.caption.clone())
-                    .unwrap_or_default();
-                Return::value(caption)
+            "PlayTheora" => {
+                // PlayTheora(file, looping, alphaFile, startTime)
+                let filename = arg(0).get_string(self);
+                let looping = !arg(1).is_null() && arg(1).get_bool(self);
+                let alpha = match arg(2) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let start_ms = u64::try_from(arg(3).get_int(self)).unwrap_or(0);
+                let ok =
+                    self.play_entity_theora(id, &filename, looping, alpha.as_deref(), start_ms);
+                if !ok {
+                    self.log(format!(
+                        "Runtime error. Entity.PlayTheora - error playing video '{filename}'"
+                    ));
+                }
+                Return::value(ok)
             }
+            "StopTheora" => Return::value(self.stop_entity_video(id)),
+            "IsTheoraPlaying" => {
+                Return::value(self.entity_video(id).is_some_and(VideoPlayer::is_running))
+            }
+            "PauseTheora" => Return::value(self.pause_entity_video(id)),
+            "ResumeTheora" => Return::value(self.resume_entity_video(id)),
+            "IsTheoraPaused" => Return::value(self.entity_video(id).is_some_and(|v| v.paused)),
             "SetSprite" => {
                 let path = match arg(0) {
                     Value::Null => None,
@@ -1412,9 +1579,9 @@ impl World {
                 };
                 let ok = match (&path, r) {
                     (Some(path), EntityRef::Ui(_)) => self.ui.bank.add_sprite(&self.vfs, path),
-                    (Some(path), _) => match self.scene.as_mut() {
-                        Some(view) => view.add_sprite(&self.vfs, path),
-                        None => true,
+                    (Some(path), r) => match self.view_and_vfs(r) {
+                        (vfs, Some(view)) => view.add_sprite(vfs, path),
+                        (_, None) => true,
                     },
                     (None, _) => true,
                 };
@@ -1440,9 +1607,9 @@ impl World {
             }
             "PlayAnim" | "PlayAnimAsync" => {
                 let path = arg(0).get_string(self);
-                let ok = match (r, self.scene.as_mut()) {
-                    (EntityRef::Ui(_), _) | (_, None) => false,
-                    (r, Some(view)) => view.play_anim(&self.vfs, r, &path),
+                let ok = match (r, self.view_and_vfs(r)) {
+                    (EntityRef::Ui(_), _) | (_, (_, None)) => false,
+                    (r, (vfs, Some(view))) => view.play_anim(vfs, r, &path),
                 };
                 if !ok {
                     let who = self.describe(id);
@@ -1463,6 +1630,55 @@ impl World {
             "Talk" | "TalkAsync" => self.talk_call(id, name == "Talk", args),
             "StopTalk" | "StopTalking" => Return::value(self.stop_talk(id)),
             "IsTalking" => Return::value(self.is_talking(id)),
+            "AddTalkSprite" | "SetTalkSprite" | "RemoveTalkSprite" => {
+                let path = arg(0).get_string(self);
+                let special = arg(1).get_bool(self);
+                let vfs = &self.vfs;
+                let view = match r {
+                    EntityRef::Game(_) => Some(&mut self.game_view),
+                    EntityRef::Ui(_) => None,
+                    _ => self.scene.as_mut(),
+                };
+                let ok = match (r, view) {
+                    (EntityRef::Ui(_), _) => {
+                        // A container's entity does not talk; its sets are
+                        // kept all the same.
+                        let ok =
+                            name == "RemoveTalkSprite" || self.ui.bank.add_sprite(&self.vfs, &path);
+                        if ok {
+                            if let Some(e) = self.entity_def_mut(r) {
+                                let list = if special {
+                                    &mut e.talk_special_sprites
+                                } else {
+                                    &mut e.talk_sprites
+                                };
+                                match name {
+                                    "AddTalkSprite" => list.push(path.clone()),
+                                    "SetTalkSprite" => {
+                                        list.clear();
+                                        list.push(path.clone());
+                                    }
+                                    _ => list.retain(|p| key(p) != key(&path)),
+                                }
+                            }
+                        }
+                        ok
+                    }
+                    (_, None) => false,
+                    (r, Some(view)) => match name {
+                        "AddTalkSprite" => view.add_talk_sprite(vfs, r, &path, special),
+                        "SetTalkSprite" => view.set_talk_sprite(vfs, r, &path, special),
+                        _ => {
+                            view.remove_talk_sprite(r, &path, special);
+                            true
+                        }
+                    },
+                };
+                if !ok {
+                    self.log(format!("{name} method failed for file '{path}'"));
+                }
+                Return::value(ok)
+            }
             "SetFont" => {
                 let path = match arg(0) {
                     Value::Null => None,
@@ -1477,13 +1693,12 @@ impl World {
                     .map_or(Value::Null, Value::from),
             ),
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
-                return Some(self.inventory_call(name, args));
+                return Some(self.inventory_call(id, name, args));
             }
-            "HasCursor" => Return::value(false),
-            "GetCursor" | "GetCursorObject" | "GetAttachment" => Return::null(),
-            _ if OBJECT_STUBS.contains(&name) => {
-                self.stub(&format!("Entity.{name}"));
-                Return::null()
+            "CreateRegion" => Return::value(native_or_null(self.create_entity_region(id))),
+            "DeleteRegion" => Return::value(self.delete_entity_region(id)),
+            "CreateParticleEmitter" | "DeleteParticleEmitter" => {
+                self.emitter_owner_call(id, name, args)
             }
             _ => return None,
         })
@@ -1516,103 +1731,69 @@ impl World {
     }
 
     // ----------------------------------------------------------------
-    // Regions
+    // Sprites
     // ----------------------------------------------------------------
 
-    fn region_get(&self, layer: usize, index: usize, name: &str) -> Option<Value> {
-        let region = self.scene()?.region(layer, index)?;
+    /// The cursor of an object as a sprite object (`GetCursorObject`):
+    /// the cursor sprite with its animation, as the cursor shows it.
+    fn cursor_sprite_get(&self, owner: NativeId, name: &str) -> Option<Value> {
+        let path = self.object_cursor(owner)?;
+        let loaded = self.cursors.bank.sprite(&path);
+        let frames = loaded.map_or(0, |l| l.sprite.frames.len());
+        let anim = self.cursors.anim(&path);
         Some(match name {
-            "Type" => Value::from("ad region"),
-            "Name" => Value::from(region.name.clone()),
-            "Caption" => Value::from(region.caption.clone()),
-            "Active" => Value::Bool(region.active),
-            "Blocked" => Value::Bool(region.blocked),
-            "Decoration" => Value::Bool(region.decoration),
-            "Scale" => Value::Float(f64::from(region.zoom.unwrap_or(0.0))),
-            "AlphaColor" => Value::Int(color_int(region.tint)),
-            "NumPoints" => Value::Int(region.points.len() as i32),
-            "X" => Value::Int(region.bounds().map_or(0, |b| b.left)),
-            "Y" => Value::Int(region.bounds().map_or(0, |b| b.top)),
-            "Ready" => Value::Bool(true),
+            "Type" => Value::from("sprite"),
+            "Filename" => Value::from(path.clone()),
+            "NumFrames" => Value::Int(frames as i32),
+            "CurrentFrame" => Value::Int(if frames == 0 {
+                -1
+            } else {
+                anim.map_or(0, |a| a.current_frame.min(frames - 1) as i32)
+            }),
+            "PixelPerfect" => Value::Bool(loaded.is_some_and(|l| l.sprite.precise)),
+            "Looping" => Value::Bool(
+                anim.and_then(|a| a.looping)
+                    .unwrap_or_else(|| loaded.is_some_and(|l| l.sprite.looping)),
+            ),
+            "Owner" => Value::Native(owner),
+            "Finished" => Value::Bool(anim.is_some_and(|a| a.finished)),
+            "Paused" => Value::Bool(anim.is_some_and(|a| a.paused)),
             _ => return None,
         })
     }
 
-    fn region_set(&mut self, layer: usize, index: usize, name: &str, value: &Value) -> bool {
-        let (text, int, flag, float) = (
-            value.get_string(self),
-            value.get_int(self),
-            value.get_bool(self),
-            value.get_float(self),
-        );
-        let caption = self.expand(&text);
-        let Some(region) = self.scene_mut().and_then(|v| v.region_mut(layer, index)) else {
+    fn cursor_sprite_set(&mut self, owner: NativeId, name: &str, value: &Value) -> bool {
+        let Some(path) = self.object_cursor(owner) else {
             return false;
         };
+        let (int, flag) = (value.get_int(self), value.get_bool(self));
+        let anim = self.cursors.anim_mut(&path);
         match name {
-            "Name" => region.name = text,
-            "Caption" => region.caption = caption,
-            "Active" => region.active = flag,
-            "Blocked" => region.blocked = flag,
-            "Decoration" => region.decoration = flag,
-            "Scale" => {
-                region.zoom = if float == 0.0 {
-                    None
-                } else {
-                    Some(float as f32)
-                }
+            "CurrentFrame" => {
+                anim.current_frame = int.max(0) as usize;
+                anim.last_frame_time = 0;
+                anim.finished = false;
             }
-            "AlphaColor" => region.tint = color_of(int),
+            "Looping" => anim.looping = Some(flag),
+            "PixelPerfect" => {}
             _ => return false,
         }
         true
     }
 
-    fn region_call(
-        &mut self,
-        layer: usize,
-        index: usize,
-        name: &str,
-        args: &[Value],
-    ) -> Option<Return> {
-        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+    fn cursor_sprite_call(&mut self, owner: NativeId, name: &str) -> Option<Return> {
+        let path = self.object_cursor(owner)?;
         Some(match name {
-            "GetPoint" => {
-                let i = usize::try_from(arg(0).get_int(self)).ok();
-                let point = self
-                    .scene()
-                    .and_then(|v| v.region(layer, index))
-                    .and_then(|r| i.and_then(|i| r.points.get(i)))
-                    .copied();
-                match point {
-                    Some(p) => {
-                        let mut object = Value::object();
-                        object.set_property("X", Value::Int(p.x), self);
-                        object.set_property("Y", Value::Int(p.y), self);
-                        Return::value(object)
-                    }
-                    None => Return::null(),
-                }
-            }
-            "SkipTo" => {
-                let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
-                if let Some(region) = self.scene_mut().and_then(|v| v.region_mut(layer, index)) {
-                    if let Some(b) = region.bounds() {
-                        let (dx, dy) = (x - b.left, y - b.top);
-                        for p in &mut region.points {
-                            p.x += dx;
-                            p.y += dy;
-                        }
-                    }
-                }
+            "Reset" => {
+                self.cursors.anim_mut(&path).reset();
                 Return::null()
             }
-            "AddPoint" | "InsertPoint" | "SetPoint" | "RemovePoint" => {
-                self.stub(&format!("Region.{name}"));
-                Return::value(false)
+            "Pause" | "Play" => {
+                self.cursors.anim_mut(&path).paused = name == "Pause";
+                Return::null()
             }
-            _ if OBJECT_STUBS.contains(&name) => {
-                self.stub(&format!("Region.{name}"));
+            "GetFrame" | "DeleteFrame" | "AddFrame" | "InsertFrame" => {
+                self.stub(&format!("Sprite.{name}"));
                 Return::null()
             }
             _ => return None,
@@ -1662,7 +1843,7 @@ fn math_call(name: &str, args: &[Value]) -> Option<Value> {
 impl World {
     /// The subtitle placement scripts set on a scene entity.
     fn subtitle_mods_of(&self, r: EntityRef) -> Option<&crate::talk::SubtitleMods> {
-        self.scene().and_then(|v| v.subtitles.get(&r))
+        self.view_of(r).and_then(|v| v.subtitles.get(&r))
     }
 
     /// Restarts the animation of an entity's sprite (`SetSprite`, `Reset`).
@@ -1674,7 +1855,7 @@ impl World {
                 }
             }
             r => {
-                if let Some(view) = self.scene_mut() {
+                if let Some(view) = self.view_of_mut(r) {
                     view.reset_anim(r);
                 }
             }

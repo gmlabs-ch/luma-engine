@@ -1,9 +1,11 @@
 //! The sprite, frame and sub-frame objects scripts hold: the sprite of an
-//! entity (`GetSpriteObject`), its frames (`GetFrame`, `AddFrame`) and
-//! their sub-frames (`GetSubframe`, `AddSubframe`). Frames and sub-frames
-//! are handles by position into the sprite definition held by the
-//! owner's sprite bank; what a script changes through them changes what
-//! is drawn, and the edited sprite is kept in saved games.
+//! entity (`GetSpriteObject`) or one of the images of a control
+//! (`GetImageObject`, `GetHoverImageObject`...), its frames (`GetFrame`,
+//! `AddFrame`) and their sub-frames (`GetSubframe`, `AddSubframe`).
+//! Frames and sub-frames are handles by position into the sprite
+//! definition held by the owner's sprite bank; what a script changes
+//! through them changes what is drawn, and the edited sprite is kept in
+//! saved games.
 //!
 //! Written with reference to the `ScGetProperty`, `ScSetProperty` and
 //! `ScCallMethod` methods of `BSprite.cpp`, `BFrame.cpp` and
@@ -16,6 +18,7 @@ use luma_script::{Context, NativeId, Return, Value};
 use crate::natives::{color_int, color_of};
 use crate::objects::Kind;
 use crate::scene_view::{AnimState, EntityRef, key};
+use crate::ui::ImageSlot;
 use crate::world::World;
 
 /// Which sprite bank an owner's sprite lives in.
@@ -23,8 +26,13 @@ use crate::world::World;
 enum Home {
     /// The scene's bank (scene entities).
     Scene,
-    /// The windows' bank (the entities of entity containers).
+    /// The windows' bank (the entities of entity containers, the items'
+    /// images).
     Ui,
+    /// The game's own view (game-level entities and attachments).
+    Game,
+    /// An actor's own bank.
+    Actor(NativeId),
 }
 
 impl World {
@@ -42,20 +50,37 @@ impl World {
     }
 
     /// The owner of a sprite object, the bank its sprite is in and the
-    /// sprite's path.
+    /// sprite's path (`World::own_sprite_path`): an entity's sprite, the
+    /// sprite `SetSprite` gave an actor, an item's image, or the image in
+    /// a slot of a control (the controls' images live in the windows'
+    /// bank).
     fn sprite_home(&self, sprite: NativeId) -> Option<(NativeId, Home, String)> {
-        let Kind::Sprite(owner) = self.native(sprite)?.kind else {
-            return None;
-        };
-        let Kind::Entity(r) = self.native(owner)?.kind else {
-            return None;
-        };
-        let path = self.entity_def(r)?.sprite.clone()?;
-        let home = match r {
-            EntityRef::Ui(_) => Home::Ui,
-            _ => Home::Scene,
-        };
-        Some((owner, home, path))
+        match self.native(sprite)?.kind {
+            Kind::Sprite(owner) => {
+                let path = self.own_sprite_path(owner)?;
+                let home = match self.native(owner)?.kind {
+                    Kind::Entity(EntityRef::Ui(_)) | Kind::Item => Home::Ui,
+                    Kind::Entity(EntityRef::Game(_)) => Home::Game,
+                    Kind::Entity(_) => Home::Scene,
+                    Kind::Actor => Home::Actor(owner),
+                    _ => return None,
+                };
+                Some((owner, home, path))
+            }
+            Kind::ControlImage { control, slot } => {
+                let path = self.control(control)?.image_in(slot)?.to_string();
+                Some((control, Home::Ui, path))
+            }
+            _ => None,
+        }
+    }
+
+    /// The slot of a control's sprite object; `None` for an entity's.
+    fn sprite_slot(&self, sprite: NativeId) -> Option<ImageSlot> {
+        match self.native(sprite)?.kind {
+            Kind::ControlImage { slot, .. } => Some(slot),
+            _ => None,
+        }
     }
 
     /// The definition of a sprite object's sprite.
@@ -64,6 +89,8 @@ impl World {
         let bank = match home {
             Home::Scene => &self.scene()?.bank,
             Home::Ui => &self.ui.bank,
+            Home::Game => &self.game_view.bank,
+            Home::Actor(actor) => &self.actor(actor)?.bank,
         };
         bank.sprite(&path).map(|l| &l.sprite)
     }
@@ -75,36 +102,72 @@ impl World {
         match home {
             Home::Scene => self.scene.as_mut()?.bank.edit_sprite(&path),
             Home::Ui => self.ui.bank.edit_sprite(&path),
+            Home::Game => self.game_view.bank.edit_sprite(&path),
+            Home::Actor(actor) => self.actor_mut(actor)?.bank.edit_sprite(&path),
         }
     }
 
-    /// The animation state of an owner's sprite, if it has been shown.
-    fn sprite_anim(&self, owner: NativeId) -> Option<&AnimState> {
-        let Kind::Entity(r) = self.native(owner)?.kind else {
-            return None;
-        };
-        match r {
-            EntityRef::Ui(i) => self.ui_entities.get(i)?.anim.as_ref(),
-            r => self.scene()?.anim(r),
+    /// The animation state of a sprite object's sprite, if it has been
+    /// shown.
+    fn sprite_anim(&self, sprite: NativeId) -> Option<&AnimState> {
+        let (owner, _, path) = self.sprite_home(sprite)?;
+        match self.native(owner)?.kind {
+            Kind::Entity(EntityRef::Ui(i)) => self.ui_entities.get(i)?.anim.as_ref(),
+            Kind::Entity(r) => self.view_of(r)?.anim(r),
+            Kind::Actor => self.actor(owner)?.anim_state(&path),
+            Kind::Item => self
+                .item(owner)?
+                .anim
+                .as_ref()
+                .filter(|a| a.sprite == key(&path)),
+            Kind::Control => self.control(owner)?.anim_in(self.sprite_slot(sprite)?),
+            _ => None,
         }
     }
 
-    /// The animation state of an owner's sprite, created for its sprite.
-    fn sprite_anim_mut(&mut self, owner: NativeId) -> Option<&mut AnimState> {
-        let Kind::Entity(r) = self.native(owner)?.kind else {
-            return None;
+    /// The animation state of a sprite object's sprite, created for it.
+    fn sprite_anim_mut(&mut self, sprite: NativeId) -> Option<&mut AnimState> {
+        let (owner, _, path) = self.sprite_home(sprite)?;
+        let slot = self.sprite_slot(sprite);
+        let anim = match self.native(owner)?.kind {
+            Kind::Entity(EntityRef::Ui(i)) => &mut self.ui_entities.get_mut(i)?.anim,
+            Kind::Entity(r) => return self.view_of_mut(r)?.anim_mut(r),
+            Kind::Actor => return Some(self.actor_mut(owner)?.anim(&path)),
+            Kind::Item => &mut self.item_mut(owner)?.anim,
+            Kind::Control => self.control_mut(owner)?.anim_slot_mut(slot?)?,
+            _ => return None,
         };
-        match r {
-            EntityRef::Ui(i) => {
-                let entity = self.ui_entities.get_mut(i)?;
-                let path = entity.def.sprite.clone()?;
-                let anim = entity.anim.get_or_insert_with(|| AnimState::new(&path));
-                if anim.sprite != key(&path) {
-                    *anim = AnimState::new(&path);
+        let anim = anim.get_or_insert_with(|| AnimState::new(&path));
+        if anim.sprite != key(&path) {
+            *anim = AnimState::new(&path);
+        }
+        Some(anim)
+    }
+
+    /// Restarts a sprite object's animation (`Reset`, `CBSprite::Reset`):
+    /// an entity's `Reset` ends a `PlayAnim` too; a control image's
+    /// starts over with the sprite's frame sounds stopped; the others go
+    /// back to their first frame.
+    fn reset_sprite_anim(&mut self, sprite: NativeId) {
+        let Some((owner, _, _)) = self.sprite_home(sprite) else {
+            return;
+        };
+        match self.native(owner).map(|n| n.kind.clone()) {
+            Some(Kind::Entity(r)) => self.reset_entity_anim(r),
+            Some(Kind::Control) => {
+                if let Some(anim) = self
+                    .sprite_slot(sprite)
+                    .and_then(|slot| self.control_mut(owner)?.anim_slot_mut(slot))
+                {
+                    *anim = None;
                 }
-                Some(anim)
+                self.kill_frame_sounds(owner);
             }
-            r => self.scene_mut()?.anim_mut(r),
+            _ => {
+                if let Some(anim) = self.sprite_anim_mut(sprite) {
+                    anim.reset();
+                }
+            }
         }
     }
 
@@ -235,7 +298,7 @@ impl World {
         let path = self.sprite_home(id).map(|(_, _, path)| path);
         let def = self.sprite_def(id);
         let frames = def.map_or(0, |s| s.frames.len());
-        let anim = self.sprite_anim(owner);
+        let anim = self.sprite_anim(id);
         Some(match name {
             "Type" => Value::from("sprite"),
             "Filename" => path.map_or(Value::Null, Value::from),
@@ -257,20 +320,14 @@ impl World {
         })
     }
 
-    pub(crate) fn sprite_set(
-        &mut self,
-        id: NativeId,
-        owner: NativeId,
-        name: &str,
-        value: &Value,
-    ) -> bool {
+    pub(crate) fn sprite_set(&mut self, id: NativeId, name: &str, value: &Value) -> bool {
         let (int, flag) = (value.get_int(self), value.get_bool(self));
         match name {
             "CurrentFrame" => {
                 // Out of range is "no frame" in the engine (`-1`); Luma
                 // clamps when it draws, so the frame count is checked here.
                 let frames = self.sprite_def(id).map_or(0, |s| s.frames.len());
-                let Some(anim) = self.sprite_anim_mut(owner) else {
+                let Some(anim) = self.sprite_anim_mut(id) else {
                     return true;
                 };
                 anim.current_frame = usize::try_from(int)
@@ -281,7 +338,7 @@ impl World {
                 anim.finished = false;
             }
             "Looping" => {
-                if let Some(anim) = self.sprite_anim_mut(owner) {
+                if let Some(anim) = self.sprite_anim_mut(id) {
                     anim.looping = Some(flag);
                 }
             }
@@ -298,23 +355,20 @@ impl World {
     pub(crate) fn sprite_call(
         &mut self,
         id: NativeId,
-        owner: NativeId,
         name: &str,
         args: &[Value],
         ctx: &Context<'_>,
     ) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
-        let Kind::Entity(r) = self.native(owner)?.kind else {
-            return None;
-        };
+        self.sprite_home(id)?;
         Some(match name {
             "Reset" => {
-                self.reset_entity_anim(r);
+                self.reset_sprite_anim(id);
                 Return::null()
             }
             "Pause" | "Play" => {
                 let paused = name == "Pause";
-                if let Some(anim) = self.sprite_anim_mut(owner) {
+                if let Some(anim) = self.sprite_anim_mut(id) {
                     anim.paused = paused;
                 }
                 Return::null()
@@ -355,12 +409,12 @@ impl World {
                     }
                 };
                 if let Some(index) = index.filter(|i| *i < frames) {
-                    let current = self.sprite_anim(owner).map(|a| a.current_frame);
+                    let current = self.sprite_anim(id).map(|a| a.current_frame);
                     if let Some(sprite) = self.sprite_def_mut(id) {
                         sprite.frames.remove(index);
                     }
                     if current == Some(index) {
-                        if let Some(anim) = self.sprite_anim_mut(owner) {
+                        if let Some(anim) = self.sprite_anim_mut(id) {
                             anim.last_frame_time = 0;
                         }
                     }

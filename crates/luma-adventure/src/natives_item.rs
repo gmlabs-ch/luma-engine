@@ -112,14 +112,6 @@ impl World {
                 };
                 Return::value(path.map_or(Value::Null, Value::from))
             }
-            "SetCaption" => {
-                let caption = arg(0).get_string(self);
-                let caption = self.expand(&caption);
-                if let Some(item) = self.item_mut(id) {
-                    item.def.caption = caption;
-                }
-                Return::null()
-            }
             "SetFont" => {
                 let path = match arg(0) {
                     Value::Null => None,
@@ -137,8 +129,20 @@ impl World {
                     .map_or(Value::Null, Value::from),
             ),
             "IsTalking" => Return::value(false),
-            "GetSpriteObject"
-            | "GetHoverSpriteObject"
+            "GetSpriteObject" => {
+                Return::value(self.sprite_object(id).map_or(Value::Null, Value::Native))
+            }
+            "AddTalkSprite" | "SetTalkSprite" | "RemoveTalkSprite" => {
+                // Items do not talk in Luma; the sets are loaded and kept
+                // for the scripts' sake only.
+                let path = arg(0).get_string(self);
+                let ok = name == "RemoveTalkSprite" || self.load_ui_image(&path);
+                if !ok {
+                    self.log(format!("{name} method failed for file '{path}'"));
+                }
+                Return::value(ok)
+            }
+            "GetHoverSpriteObject"
             | "GetNormalCursorObject"
             | "GetHoverCursorObject"
             | "Talk"
@@ -146,13 +150,7 @@ impl World {
             | "StopTalk"
             | "PlayAnim"
             | "PlayAnimAsync"
-            | "Reset"
-            | "ForceTalkAnim"
-            | "AddTalkSprite"
-            | "RemoveTalkSprite"
-            | "SetTalkSprite"
-            | "SetCursor"
-            | "RemoveCursor" => {
+            | "Reset" => {
                 self.stub(&format!("Item.{name}"));
                 Return::null()
             }

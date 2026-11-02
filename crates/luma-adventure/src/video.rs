@@ -1,19 +1,23 @@
-//! Video playback in the game (`Game.PlayTheora`): timing, skipping,
-//! subtitles and drawing of a video decoded by `luma-video`.
+//! Video playback in the game (`Game.PlayTheora`) and in an entity's
+//! place (`Entity.PlayTheora`): timing, skipping, looping, subtitles and
+//! drawing of a video decoded by `luma-video`.
 //!
-//! Written with reference to `VidTheoraPlayer.cpp`, `VidSubtitler.cpp`
-//! and `BGame.cpp` of Wintermute Engine 1.x (MIT License, Copyright (c)
-//! 2003-2013 Jan Nedoma); see `NOTICE`. The rules are documented in
-//! `docs/video.md`.
+//! Written with reference to `VidTheoraPlayer.cpp`, `VidSubtitler.cpp`,
+//! `BGame.cpp` and `AdEntity.cpp` of Wintermute Engine 1.x (MIT License,
+//! Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`. The rules are
+//! documented in `docs/video.md`.
 
 use std::sync::Arc;
 
-use luma_audio::{SoundId, SoundType};
+use luma_audio::{Audio, SoundId, SoundType};
 use luma_formats::font::TextAlign;
+use luma_formats::{DEFAULT_COLOR_KEY, Image, Rgba};
 use luma_render::{DrawList, Quad, Rect, Texture};
-use luma_script::Engine;
+use luma_script::{Engine, NativeId};
 use luma_video::{Frame, Video, VideoInfo};
 
+use crate::objects::Kind;
+use crate::scene_view::{EntityRef, VideoOverlay};
 use crate::world::World;
 
 /// How a video is placed on the screen (`TVideoPlayback`).
@@ -180,8 +184,20 @@ pub struct VideoPlayer {
     pub freeze_game: bool,
     /// Every frame is shown, none dropped.
     pub dont_drop_frames: bool,
+    /// Starts again at its end (an entity's video).
+    pub looping: bool,
+    /// Held by `PauseTheora`.
+    pub paused: bool,
+    /// Where playback started in the movie (`StartTime`), in
+    /// milliseconds.
+    pub time_offset_ms: u64,
+    /// An image whose alpha channel masks the frames (an entity's video
+    /// with an alpha file).
+    alpha: Option<Image>,
     started: bool,
     start_clock: u64,
+    /// When the pause started, on the clock timing the video.
+    pause_started: Option<u64>,
     /// The sound track.
     pub sound: Option<SoundId>,
     pending: Option<Frame>,
@@ -227,13 +243,154 @@ impl VideoPlayer {
     /// position when there is one, else the wall clock since the start.
     fn movie_time_ms(&self, clock: u64, sound_position: Option<u64>) -> u64 {
         if !self.started {
-            return 0;
+            return self.time_offset_ms;
         }
         match sound_position {
             Some(position) => position,
-            None => clock.saturating_sub(self.start_clock),
+            None => clock.saturating_sub(self.start_clock) + self.time_offset_ms,
         }
     }
+
+    /// Whether the video plays and is not paused (`IsPlaying`).
+    pub fn is_running(&self) -> bool {
+        !self.finished && !self.paused
+    }
+}
+
+/// A video shown in an entity's place (`CAdEntity::m_Theora`).
+pub struct EntityVideo {
+    /// The playback.
+    pub player: VideoPlayer,
+    /// The frame shown, once uploaded.
+    pub texture: Option<Texture>,
+    uploaded: u64,
+}
+
+/// Gives a frame the alpha of a mask image, pixel by pixel; outside the
+/// mask the frame stays opaque (`CVidTheoraPlayer::GetAlphaAt`).
+fn apply_alpha(frame: &mut Frame, mask: &Image) {
+    for y in 0..frame.height {
+        for x in 0..frame.width {
+            let alpha = if x < mask.width && y < mask.height {
+                mask.pixels[((y * mask.width + x) * 4 + 3) as usize]
+            } else {
+                0xff
+            };
+            frame.rgba[((y * frame.width + x) * 4 + 3) as usize] = alpha;
+        }
+    }
+}
+
+/// One step of a video's playback (`CVidTheoraPlayer::Update`): decodes
+/// up to the frame due at the movie time on the clock `now`, drops the
+/// late ones unless asked not to, starts the sound with the first frame
+/// and shows the frame that is due. `true` when the stream ended and
+/// nothing is left to show.
+fn step_player(
+    player: &mut VideoPlayer,
+    audio: &mut Audio,
+    now: u64,
+    log: &mut Vec<String>,
+) -> bool {
+    let sound_position = player
+        .sound
+        .filter(|_| player.started)
+        .map(|s| audio.position_ms(s));
+    let movie_time = player.movie_time_ms(now, sound_position);
+    let mut ended = false;
+    // The frame ready to show (`DecodeTheora`): the first decoded whose
+    // time is not past, late ones being dropped as they are decoded
+    // unless asked not to; a frame kept from an earlier tick is shown
+    // once its time comes.
+    loop {
+        let fresh = player.pending.is_none();
+        if fresh {
+            match player.video.next_frame() {
+                Ok(Some(frame)) => player.pending = Some(frame),
+                Ok(None) => {
+                    ended = true;
+                    break;
+                }
+                Err(err) => {
+                    log.push(format!("Error decoding video '{}': {err}", player.filename));
+                    ended = true;
+                    break;
+                }
+            }
+        }
+        let late = player
+            .pending
+            .as_ref()
+            .is_some_and(|f| f.time_ms < movie_time);
+        // Before the start, the frames up to the start time are skipped
+        // (`SeekToTime`).
+        let seeking = !player.started && player.time_offset_ms != 0;
+        if !late || !fresh || (!seeking && (player.dont_drop_frames || !player.started)) {
+            break;
+        }
+        player.pending = None;
+    }
+    if ended && player.pending.is_none() {
+        return true;
+    }
+    if !player.started {
+        player.started = true;
+        player.start_clock = now;
+        if let Some(sound) = player.sound {
+            if player.time_offset_ms != 0 {
+                audio.set_position_ms(sound, player.time_offset_ms);
+            }
+            audio.play(sound, false);
+        }
+    }
+    let show = player
+        .pending
+        .as_ref()
+        .is_some_and(|f| player.frame.is_none() || f.time_ms <= movie_time);
+    if show {
+        let mut frame = player.pending.take();
+        if let (Some(frame), Some(mask)) = (frame.as_mut(), player.alpha.as_ref()) {
+            apply_alpha(frame, mask);
+        }
+        player.frame = frame;
+        player.frame_serial += 1;
+    }
+    if let Some(subtitler) = player.subtitler.as_mut() {
+        let frame = player.info.frame_at_ms(movie_time) as i64;
+        subtitler.update(frame);
+    }
+    false
+}
+
+/// Uploads the frame a player shows as `texture`, reusing it while the
+/// size does not change; `uploaded` remembers the frame uploaded.
+fn upload_frame(
+    renderer: &luma_render::Renderer,
+    player: &VideoPlayer,
+    texture: &mut Option<Texture>,
+    uploaded: &mut u64,
+) {
+    let Some(frame) = player.frame.as_ref() else {
+        return;
+    };
+    if *uploaded == player.frame_serial && texture.is_some() {
+        return;
+    }
+    let same_size = texture
+        .as_ref()
+        .is_some_and(|t| t.width == frame.width && t.height == frame.height);
+    if same_size {
+        if let Some(texture) = texture {
+            renderer.write_texture(texture, &frame.rgba);
+        }
+    } else {
+        if let Some(old) = texture.take() {
+            renderer.forget(&old);
+        }
+        *texture =
+            Some(renderer.texture_from_rgba("video", frame.width, frame.height, &frame.rgba));
+    }
+    *uploaded = player.frame_serial;
 }
 
 /// The path of a video's subtitle file: the same name with `.sub`.
@@ -263,6 +420,49 @@ impl World {
         self.video.as_ref().is_some_and(VideoPlayer::is_playing)
     }
 
+    /// Opens a video file and loads its sound track as a sound effect at
+    /// `volume` percent (`CVidTheoraPlayer::Initialize`); `None`, logged,
+    /// when the file cannot be read or decoded.
+    fn open_video(&mut self, filename: &str, volume: i32) -> Option<(Video, Option<SoundId>)> {
+        let bytes = match self.vfs.read(filename) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                self.log(format!("Error opening video file '{filename}': {err}"));
+                return None;
+            }
+        };
+        let sound = if luma_video::Video::open(bytes.clone())
+            .as_ref()
+            .is_ok_and(|v| v.info().has_audio)
+        {
+            match luma_audio::decode(&bytes) {
+                Ok(clip) => Some(
+                    self.sounds
+                        .audio
+                        .add(Arc::new(clip), SoundType::Sfx, volume),
+                ),
+                Err(err) => {
+                    self.log(format!(
+                        "Error decoding the sound of video '{filename}': {err}"
+                    ));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        match Video::open(bytes) {
+            Ok(video) => Some((video, sound)),
+            Err(err) => {
+                self.log(format!("Error loading video '{filename}': {err}"));
+                if let Some(sound) = sound {
+                    self.sounds.audio.remove(sound);
+                }
+                None
+            }
+        }
+    }
+
     /// Opens and starts a video (`Game.PlayTheora`): the game freezes,
     /// the sound track plays at the sound effects' volume, the subtitles
     /// load from `subtitle_file` or the video's `.sub`. `false` when the
@@ -280,45 +480,9 @@ impl World {
         subtitle_file: Option<&str>,
     ) -> bool {
         self.stop_video(engine);
-        let bytes = match self.vfs.read(filename) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                self.log(format!("Error opening video file '{filename}': {err}"));
-                return false;
-            }
-        };
-        let sound = if luma_video::Video::open(bytes.clone())
-            .as_ref()
-            .is_ok_and(|v| v.info().has_audio)
-        {
-            match luma_audio::decode(&bytes) {
-                Ok(clip) => {
-                    let volume = self.sounds.audio.volume(SoundType::Sfx);
-                    Some(
-                        self.sounds
-                            .audio
-                            .add(Arc::new(clip), SoundType::Sfx, volume),
-                    )
-                }
-                Err(err) => {
-                    self.log(format!(
-                        "Error decoding the sound of video '{filename}': {err}"
-                    ));
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        let video = match Video::open(bytes) {
-            Ok(video) => video,
-            Err(err) => {
-                self.log(format!("Error loading video '{filename}': {err}"));
-                if let Some(sound) = sound {
-                    self.sounds.audio.remove(sound);
-                }
-                return false;
-            }
+        let volume = self.sounds.audio.volume(SoundType::Sfx);
+        let Some((video, sound)) = self.open_video(filename, volume) else {
+            return false;
         };
         let info = video.info().clone();
         let (sw, sh) = (self.settings.width as f32, self.settings.height as f32);
@@ -354,8 +518,13 @@ impl World {
             zoom,
             freeze_game: true,
             dont_drop_frames: !drop_frames,
+            looping: false,
+            paused: false,
+            time_offset_ms: 0,
+            alpha: None,
             started: false,
             start_clock: 0,
+            pause_started: None,
             sound,
             pending: None,
             frame: None,
@@ -396,46 +565,8 @@ impl World {
         if player.finished {
             return;
         }
-        let sound_position = player
-            .sound
-            .filter(|_| player.started)
-            .map(|s| self.sounds.audio.position_ms(s));
-        let movie_time = player.movie_time_ms(clock, sound_position);
-        let mut ended = false;
-        // The frame ready to show (`DecodeTheora`): the first decoded
-        // whose time is not past, late ones being dropped as they are
-        // decoded unless asked not to; a frame kept from an earlier
-        // tick is shown once its time comes.
-        loop {
-            let fresh = player.pending.is_none();
-            if fresh {
-                match player.video.next_frame() {
-                    Ok(Some(frame)) => player.pending = Some(frame),
-                    Ok(None) => {
-                        ended = true;
-                        break;
-                    }
-                    Err(err) => {
-                        let what = format!("Error decoding video '{}': {err}", player.filename);
-                        self.log(what);
-                        ended = true;
-                        break;
-                    }
-                }
-            }
-            let late = player
-                .pending
-                .as_ref()
-                .is_some_and(|f| f.time_ms < movie_time);
-            if !late || !fresh || player.dont_drop_frames || !player.started {
-                break;
-            }
-            player.pending = None;
-        }
-        let Some(player) = self.video.as_mut() else {
-            return;
-        };
-        if ended && player.pending.is_none() {
+        let ended = step_player(player, &mut self.sounds.audio, clock, &mut self.log);
+        if ended {
             player.finished = true;
             let sound = player.sound.take();
             let unfreeze = player.freeze_game;
@@ -448,29 +579,263 @@ impl World {
             }
             return;
         }
-        if !player.started {
-            player.started = true;
-            player.start_clock = clock;
-            if let Some(sound) = player.sound {
-                self.sounds.audio.play(sound, false);
-            }
+        self.prepare_video_subtitle();
+    }
+
+    // ----------------------------------------------------------------
+    // Videos in an entity's place
+    // ----------------------------------------------------------------
+
+    /// The video an entity plays, if any (`Entity.PlayTheora`).
+    pub fn entity_video(&self, owner: NativeId) -> Option<&VideoPlayer> {
+        self.entity_videos.get(&owner).map(|v| &v.player)
+    }
+
+    /// Plays a video in an entity's place (`CAdEntity::ScCallMethod`
+    /// `PlayTheora`): at the entity's position, scaled by its `Scale`
+    /// when it has one, at the entity's sound volume, from `start_ms`,
+    /// looping when asked, with the alpha channel of `alpha_file` masking
+    /// the frames. The game runs on; the entity's sprite shows again when
+    /// the video ends. `false`, logged, when the file cannot be opened.
+    pub fn play_entity_theora(
+        &mut self,
+        owner: NativeId,
+        filename: &str,
+        looping: bool,
+        alpha_file: Option<&str>,
+        start_ms: u64,
+    ) -> bool {
+        if !matches!(
+            self.objects.get(owner).map(|n| &n.kind),
+            Some(Kind::Entity(_))
+        ) {
+            return false;
         }
-        let Some(player) = self.video.as_mut() else {
+        self.stop_entity_video(owner);
+        let volume = self.sounds.objects.get(&owner).map_or(100, |s| s.volume);
+        let Some((video, sound)) = self.open_video(filename, volume) else {
+            return false;
+        };
+        let alpha = alpha_file.and_then(|file| match self.vfs.read(file) {
+            Ok(bytes) => match luma_formats::image::decode(&bytes, DEFAULT_COLOR_KEY) {
+                Ok(image) => Some(image),
+                Err(err) => {
+                    self.log(format!("Error loading alpha image '{file}': {err}"));
+                    None
+                }
+            },
+            Err(err) => {
+                self.log(format!("Error opening alpha image '{file}': {err}"));
+                None
+            }
+        });
+        let info = video.info().clone();
+        let player = VideoPlayer {
+            filename: filename.to_string(),
+            video,
+            info,
+            playback: VideoPlayback::Pos,
+            x: 0,
+            y: 0,
+            zoom: 100.0,
+            freeze_game: false,
+            dont_drop_frames: false,
+            looping,
+            paused: false,
+            time_offset_ms: start_ms,
+            alpha,
+            started: false,
+            start_clock: 0,
+            pause_started: None,
+            sound,
+            pending: None,
+            frame: None,
+            frame_serial: 0,
+            finished: false,
+            subtitler: None,
+            subtitle_height: 0,
+        };
+        self.entity_videos.insert(
+            owner,
+            EntityVideo {
+                player,
+                texture: None,
+                uploaded: 0,
+            },
+        );
+        self.update_entity_video(owner);
+        true
+    }
+
+    /// Stops and drops an entity's video (`StopTheora`); whether it had
+    /// one.
+    pub fn stop_entity_video(&mut self, owner: NativeId) -> bool {
+        let Some(mut video) = self.entity_videos.remove(&owner) else {
+            return false;
+        };
+        if let Some(sound) = video.player.sound.take() {
+            self.sounds.audio.stop(sound);
+            self.sounds.audio.remove(sound);
+        }
+        if let Some(texture) = video.texture.take() {
+            self.dropped_textures.push(texture);
+        }
+        true
+    }
+
+    /// Pauses an entity's video and its sound (`PauseTheora`); `false`
+    /// when none plays.
+    pub fn pause_entity_video(&mut self, owner: NativeId) -> bool {
+        let timer = self.timer;
+        let Some(video) = self.entity_videos.get_mut(&owner) else {
+            return false;
+        };
+        if !video.player.is_running() {
+            return false;
+        }
+        video.player.paused = true;
+        video.player.pause_started = Some(timer);
+        if let Some(sound) = video.player.sound {
+            self.sounds.audio.pause(sound);
+        }
+        true
+    }
+
+    /// Resumes an entity's paused video (`ResumeTheora`); `false` when
+    /// none is paused.
+    pub fn resume_entity_video(&mut self, owner: NativeId) -> bool {
+        let timer = self.timer;
+        let Some(video) = self.entity_videos.get_mut(&owner) else {
+            return false;
+        };
+        if !video.player.paused {
+            return false;
+        }
+        video.player.paused = false;
+        if let Some(since) = video.player.pause_started.take() {
+            video.player.start_clock += timer.saturating_sub(since);
+        }
+        if let Some(sound) = video.player.sound {
+            self.sounds.audio.resume(sound);
+        }
+        true
+    }
+
+    /// One frame of the entities' videos (`CAdEntity::Update`): each
+    /// advances on the game timer, so none moves while the game is
+    /// frozen; a looping one starts again at its end, another ends and
+    /// its entity shows its sprite again. The videos of entities that are
+    /// gone go with them.
+    pub(crate) fn update_entity_videos(&mut self) {
+        let owners: Vec<NativeId> = self.entity_videos.keys().copied().collect();
+        for owner in owners {
+            if !self.objects.contains(owner) {
+                self.stop_entity_video(owner);
+                continue;
+            }
+            self.update_entity_video(owner);
+        }
+    }
+
+    fn update_entity_video(&mut self, owner: NativeId) {
+        if self.is_frozen() {
+            return;
+        }
+        let timer = self.timer;
+        let Some(video) = self.entity_videos.get_mut(&owner) else {
             return;
         };
-        let show = player
-            .pending
-            .as_ref()
-            .is_some_and(|f| player.frame.is_none() || f.time_ms <= movie_time);
-        if show {
-            player.frame = player.pending.take();
-            player.frame_serial += 1;
+        if video.player.paused {
+            return;
         }
-        if let Some(subtitler) = player.subtitler.as_mut() {
-            let frame = player.info.frame_at_ms(movie_time) as i64;
-            subtitler.update(frame);
+        let ended = step_player(
+            &mut video.player,
+            &mut self.sounds.audio,
+            timer,
+            &mut self.log,
+        );
+        if !ended {
+            return;
         }
-        self.prepare_video_subtitle();
+        if !video.player.looping {
+            self.stop_entity_video(owner);
+            return;
+        }
+        // `ResetStream`: back to the first frame, the sound with it.
+        match video.player.video.rewind() {
+            Ok(()) => {
+                video.player.started = false;
+                video.player.time_offset_ms = 0;
+                video.player.pending = None;
+                if let Some(sound) = video.player.sound {
+                    self.sounds.audio.stop(sound);
+                }
+            }
+            Err(err) => {
+                let filename = video.player.filename.clone();
+                self.log(format!("Error restarting video '{filename}': {err}"));
+                self.stop_entity_video(owner);
+            }
+        }
+    }
+
+    /// The videos drawn in the scene's entities' places this frame: an
+    /// entity's video at its position, scaled by its `Scale` and tinted
+    /// like it (`CAdEntity::Display`).
+    pub(crate) fn video_overlays(&self) -> Vec<VideoOverlay<'_>> {
+        let Some(view) = self.scene.as_ref() else {
+            return Vec::new();
+        };
+        self.entity_videos
+            .iter()
+            .filter_map(|(owner, video)| {
+                let texture = video.texture.as_ref()?;
+                let Kind::Entity(r) = self.objects.get(*owner)?.kind else {
+                    return None;
+                };
+                if matches!(r, EntityRef::Ui(_)) {
+                    return None;
+                }
+                let entity = view.entity(r)?;
+                Some(VideoOverlay {
+                    entity: r,
+                    texture,
+                    zoom: entity.scale.filter(|s| *s >= 0.0).unwrap_or(100.0),
+                    tint: view.scene.entity_tint(entity),
+                })
+            })
+            .collect()
+    }
+
+    /// The quad of a container entity's video, drawn at `(x, y)` on
+    /// screen, if the entity plays one.
+    pub(crate) fn ui_video_quad<'a>(
+        &'a self,
+        owner: NativeId,
+        x: i32,
+        y: i32,
+        tint: Rgba,
+    ) -> Option<Quad<'a>> {
+        let video = self.entity_videos.get(&owner)?;
+        let texture = video.texture.as_ref()?;
+        let Kind::Entity(EntityRef::Ui(index)) = self.objects.get(owner)?.kind else {
+            return None;
+        };
+        let entity = self.ui_entities.get(index)?;
+        let zoom = entity.def.scale.filter(|s| *s >= 0.0).unwrap_or(100.0) / 100.0;
+        Some(Quad {
+            texture,
+            dst: Rect::new(
+                x as f32,
+                y as f32,
+                (texture.width as f32 * zoom).trunc(),
+                (texture.height as f32 * zoom).trunc(),
+            ),
+            src: None,
+            tint: entity.def.tint.unwrap_or(tint),
+            flip_x: false,
+            flip_y: false,
+        })
     }
 
     /// The font of the video subtitles: `VIDEO_FONT`, else the system
@@ -508,6 +873,17 @@ impl World {
     /// Uploads the frame shown as a texture, reusing the texture while
     /// the size does not change.
     pub(crate) fn upload_video(&mut self, renderer: &luma_render::Renderer) {
+        for texture in self.dropped_textures.drain(..) {
+            renderer.forget(&texture);
+        }
+        for video in self.entity_videos.values_mut() {
+            upload_frame(
+                renderer,
+                &video.player,
+                &mut video.texture,
+                &mut video.uploaded,
+            );
+        }
         let Some(player) = self.video.as_ref() else {
             if let Some(texture) = self.video_texture.take() {
                 renderer.forget(&texture);
@@ -515,28 +891,12 @@ impl World {
             self.video_uploaded = 0;
             return;
         };
-        let Some(frame) = player.frame.as_ref() else {
-            return;
-        };
-        if self.video_uploaded == player.frame_serial && self.video_texture.is_some() {
-            return;
-        }
-        let same_size = self
-            .video_texture
-            .as_ref()
-            .is_some_and(|t| t.width == frame.width && t.height == frame.height);
-        if same_size {
-            if let Some(texture) = &self.video_texture {
-                renderer.write_texture(texture, &frame.rgba);
-            }
-        } else {
-            if let Some(old) = self.video_texture.take() {
-                renderer.forget(&old);
-            }
-            self.video_texture =
-                Some(renderer.texture_from_rgba("video", frame.width, frame.height, &frame.rgba));
-        }
-        self.video_uploaded = player.frame_serial;
+        upload_frame(
+            renderer,
+            player,
+            &mut self.video_texture,
+            &mut self.video_uploaded,
+        );
     }
 
     /// Draws the video and its subtitle (`CVidTheoraPlayer::Display`).
@@ -544,8 +904,7 @@ impl World {
         let Some(player) = self.video.as_ref() else {
             return;
         };
-        if let (Some(texture), Some(frame)) = (&self.video_texture, &player.frame) {
-            let _ = frame;
+        if let (Some(texture), Some(_)) = (&self.video_texture, &player.frame) {
             let zoom = player.zoom / 100.0;
             list.push(Quad {
                 texture,

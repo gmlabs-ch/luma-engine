@@ -8,7 +8,7 @@
 
 use crate::def::{Document, Node, Nodes};
 use crate::error::{Error, Result};
-use crate::image::{Rgb, Rgba};
+use crate::image::{BlendMode, Rgb, Rgba};
 use crate::sprite::Rect;
 
 /// A point in scene coordinates.
@@ -286,8 +286,20 @@ pub struct Entity {
     pub scale: Option<f32>,
     /// Added to the scene's scale, in percent.
     pub relative_scale: f32,
+    /// Horizontal scale in percent set by a script (`ScaleX`); with
+    /// `scale_y`, it replaces `scale` and the scene's.
+    pub scale_x: Option<f32>,
+    /// See `scale_x`.
+    pub scale_y: Option<f32>,
     /// Follows the scene's rotation levels.
     pub rotatable: bool,
+    /// Fixed rotation in degrees set by a script (`Rotate`), overriding
+    /// the scene's; only applies when rotatable.
+    pub rotate: Option<f32>,
+    /// Added to the scene's rotation, in degrees (`RelativeRotate`).
+    pub relative_rotate: f32,
+    /// How the sprite is blended (`BlendMode`).
+    pub blend_mode: BlendMode,
     /// Reacts to the mouse (`INTERACTIVE`).
     pub interactive: bool,
     /// Takes the tint of the region it stands in (`COLORABLE`).
@@ -344,7 +356,12 @@ impl Default for Entity {
             scalable: true,
             scale: None,
             relative_scale: 0.0,
+            scale_x: None,
+            scale_y: None,
             rotatable: false,
+            rotate: None,
+            relative_rotate: 0.0,
+            blend_mode: BlendMode::Normal,
             interactive: true,
             colorable: true,
             tint: None,
@@ -466,7 +483,7 @@ impl Region {
 }
 
 /// A group of waypoints for path finding.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WaypointGroup {
     /// Name used by scripts.
@@ -477,6 +494,21 @@ pub struct WaypointGroup {
     pub points: Vec<Point>,
     /// Script properties.
     pub properties: Vec<Property>,
+    /// Whether path finding uses the group (`WaypointGroup.Active`); a
+    /// runtime flag scripts set, not a file key.
+    pub active: bool,
+}
+
+impl Default for WaypointGroup {
+    fn default() -> Self {
+        WaypointGroup {
+            name: String::new(),
+            template: None,
+            points: Vec::new(),
+            properties: Vec::new(),
+            active: true,
+        }
+    }
 }
 
 /// A scale level: the scale at a `y`, interpolated between levels.
@@ -630,9 +662,10 @@ impl Scene {
         blocked
     }
 
-    /// Scale in percent an entity is drawn at: its own `SCALE`, else the
-    /// scene's scale at its position plus `RELATIVE_SCALE`; `100` when it
-    /// is not scalable.
+    /// Scale in percent an entity is drawn at when it has no per-axis
+    /// scale: its own `SCALE`, else the scene's scale at its position
+    /// plus `RELATIVE_SCALE`; `100` when it is not scalable. See
+    /// [`Scene::entity_scale_xy`] for the whole rule.
     pub fn entity_scale(&self, entity: &Entity) -> f32 {
         if !entity.scalable {
             return 100.0;
@@ -640,6 +673,63 @@ impl Scene {
         entity
             .scale
             .unwrap_or_else(|| self.zoom_at(entity.x, entity.y) + entity.relative_scale)
+    }
+
+    /// Scale per axis, in percent, an entity is drawn at
+    /// (`CAdObject::GetScale`): `ScaleX` and `ScaleY` when either is set
+    /// (the other axis at 100), else [`Scene::entity_scale`]; `100` on
+    /// both axes when the entity is not scalable.
+    pub fn entity_scale_xy(&self, entity: &Entity) -> (f32, f32) {
+        self.object_scale(
+            (entity.x, entity.y),
+            entity.scalable,
+            entity.scale,
+            (entity.scale_x, entity.scale_y),
+            entity.relative_scale,
+        )
+    }
+
+    /// Scale per axis, in percent, of an object at `position` with the
+    /// scale settings of `CBObject` (`CAdObject::GetScale`): `(100, 100)`
+    /// unless `scalable`; `scale_xy` when either axis is set, the other
+    /// axis at 100; else `scale`; else the scene's scale at the position
+    /// plus `relative_scale`.
+    pub fn object_scale(
+        &self,
+        position: (i32, i32),
+        scalable: bool,
+        scale: Option<f32>,
+        scale_xy: (Option<f32>, Option<f32>),
+        relative_scale: f32,
+    ) -> (f32, f32) {
+        if !scalable {
+            return (100.0, 100.0);
+        }
+        match scale_xy {
+            (None, None) => {
+                let s =
+                    scale.unwrap_or_else(|| self.zoom_at(position.0, position.1) + relative_scale);
+                (s, s)
+            }
+            (x, y) => (x.unwrap_or(100.0), y.unwrap_or(100.0)),
+        }
+    }
+
+    /// Rotation in degrees of an object at `x` with the rotation
+    /// settings of `CBObject` (`CAdEntity::Display`, `CAdActor::Display`):
+    /// `0` unless `rotatable`; `rotate` when set; else the scene's
+    /// rotation at `x` plus `relative_rotate`.
+    pub fn object_rotation(
+        &self,
+        x: i32,
+        rotatable: bool,
+        rotate: Option<f32>,
+        relative_rotate: f32,
+    ) -> f32 {
+        if !rotatable {
+            return 0.0;
+        }
+        rotate.unwrap_or_else(|| self.rotation_at(x) + relative_rotate)
     }
 
     /// Tint an entity is drawn with: its own, else the scene's tint at
@@ -652,14 +742,16 @@ impl Scene {
         }
     }
 
-    /// Rotation in degrees an entity is drawn with: the scene's rotation
-    /// at its position when rotatable, else `0`.
+    /// Rotation in degrees an entity is drawn with: its `Rotate` when
+    /// set, else the scene's rotation at its position plus
+    /// `RelativeRotate`, when rotatable; else `0`.
     pub fn entity_rotation(&self, entity: &Entity) -> f32 {
-        if entity.rotatable {
-            self.rotation_at(entity.x)
-        } else {
-            0.0
-        }
+        self.object_rotation(
+            entity.x,
+            entity.rotatable,
+            entity.rotate,
+            entity.relative_rotate,
+        )
     }
 
     /// Every entity of the scene: layer nodes in order, then free
@@ -852,7 +944,7 @@ impl Region {
     /// Parses a region block. Scene regions (`scene == true`) read the
     /// blocking, decoration, scale and tint keys; the hotspot of an entity
     /// reads only the base keys, like the engine.
-    pub(crate) fn from_node(node: &Node, scene: bool) -> Result<Region> {
+    pub fn from_node(node: &Node, scene: bool) -> Result<Region> {
         let mut region = Region::default();
         let (mut r, mut g, mut b, mut alpha) = (255i64, 255i64, 255i64, 255i64);
         for child in node.nodes() {
@@ -897,7 +989,9 @@ impl Region {
 }
 
 impl WaypointGroup {
-    pub(crate) fn from_node(node: &Node) -> Result<WaypointGroup> {
+    /// Parses a `WAYPOINTS` block (a scene's, or the private one of an
+    /// actor definition).
+    pub fn from_node(node: &Node) -> Result<WaypointGroup> {
         let mut group = WaypointGroup::default();
         for child in node.nodes() {
             match child.key.to_ascii_uppercase().as_str() {
@@ -1378,6 +1472,43 @@ SCENE {
             ..actor.clone()
         };
         assert_eq!(scene.entity_scale(&fixed), 33.0);
+        assert_eq!(scene.entity_scale_xy(&fixed), (33.0, 33.0));
+
+        // A per-axis scale replaces `Scale` and the scene's; the other
+        // axis is 100, as in `CAdObject::GetScale`.
+        let wide = Entity {
+            scale_x: Some(150.0),
+            ..fixed.clone()
+        };
+        assert_eq!(scene.entity_scale_xy(&wide), (150.0, 100.0));
+        let both = Entity {
+            scale_y: Some(50.0),
+            ..wide.clone()
+        };
+        assert_eq!(scene.entity_scale_xy(&both), (150.0, 50.0));
+        let flat = Entity {
+            scalable: false,
+            ..both.clone()
+        };
+        assert_eq!(scene.entity_scale_xy(&flat), (100.0, 100.0));
+
+        // `RelativeRotate` adds to the levels; `Rotate` replaces them;
+        // neither applies to an object that is not rotatable.
+        let leaning = Entity {
+            relative_rotate: 2.5,
+            ..actor.clone()
+        };
+        assert_eq!(scene.entity_rotation(&leaning), 7.5);
+        let fixed_rotation = Entity {
+            rotate: Some(-90.0),
+            ..leaning.clone()
+        };
+        assert_eq!(scene.entity_rotation(&fixed_rotation), -90.0);
+        let upright = Entity {
+            rotatable: false,
+            ..fixed_rotation.clone()
+        };
+        assert_eq!(scene.entity_rotation(&upright), 0.0);
     }
 
     #[test]

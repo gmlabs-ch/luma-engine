@@ -10,8 +10,8 @@ use std::collections::HashMap;
 
 use luma_archive::Vfs;
 use luma_formats::scene::{Entity, EntityKind, Layer, Region, SceneNode};
-use luma_formats::{Frame, Rgb, Rgba, Scene, Sprite, SubFrame};
-use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
+use luma_formats::{BlendMode, Frame, Rgb, Rgba, Scene, Sprite, SubFrame};
+use luma_render::{Attributes, DrawList, Quad, Rect, Renderer, Texture};
 
 use crate::error::{Error, Result};
 use crate::talk::{Sentence, SubtitleMods};
@@ -105,6 +105,10 @@ pub enum EntityRef {
     /// An entity shown by a window's entity container, by index in the
     /// world's list; it lives outside the scene.
     Ui(usize),
+    /// An entity of the game rather than of a scene (`Game.CreateEntity`,
+    /// `Game.LoadEntity`, an attachment), by index in the game's own
+    /// view; it survives scene changes.
+    Game(usize),
 }
 
 /// The animation state of a sprite shown by an object, advanced like the
@@ -442,6 +446,79 @@ impl SpriteBank {
     }
 }
 
+/// A free object of another list drawn among the scene's (an actor):
+/// where it stands, and the region it sticks to, if any.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FreeObject {
+    /// Position of the hotspot.
+    pub x: i32,
+    /// See `x`.
+    pub y: i32,
+    /// The region node of the main layer the object is drawn in whatever
+    /// its position (`StickToRegion`), as `(layer, node)`.
+    pub stick: Option<(usize, usize)>,
+}
+
+/// How an object's sprite is transformed when drawn: its scale per axis
+/// in percent (`CAdObject::GetScale`) and its rotation in degrees
+/// (`CAdEntity::Display`, `CAdActor::Display`), both around the hotspot,
+/// which stays at the object's position.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform {
+    /// Horizontal scale in percent.
+    pub scale_x: f32,
+    /// Vertical scale in percent.
+    pub scale_y: f32,
+    /// Rotation in degrees, positive clockwise on screen.
+    pub rotation: f32,
+}
+
+impl Default for Transform {
+    fn default() -> Self {
+        Transform::IDENTITY
+    }
+}
+
+impl Transform {
+    /// Unscaled and unrotated.
+    pub const IDENTITY: Transform = Transform {
+        scale_x: 100.0,
+        scale_y: 100.0,
+        rotation: 0.0,
+    };
+
+    /// The same scale on both axes, no rotation.
+    pub fn uniform(scale: f32) -> Transform {
+        Transform {
+            scale_x: scale,
+            scale_y: scale,
+            rotation: 0.0,
+        }
+    }
+
+    /// The transform of an entity in a scene.
+    pub fn of_entity(scene: &Scene, entity: &Entity) -> Transform {
+        let (scale_x, scale_y) = scene.entity_scale_xy(entity);
+        Transform {
+            scale_x,
+            scale_y,
+            rotation: scene.entity_rotation(entity),
+        }
+    }
+
+    /// Whether the sprite is drawn at its own size (the engine's
+    /// `ZoomX == 100 && ZoomY == 100` test, which skips the scaling
+    /// arithmetic and its truncation).
+    pub fn is_unscaled(&self) -> bool {
+        self.scale_x == 100.0 && self.scale_y == 100.0
+    }
+
+    /// Whether the sprite is turned.
+    pub fn is_rotated(&self) -> bool {
+        self.rotation != 0.0
+    }
+}
+
 /// An object drawn among the free objects of a scene: an actor, or an
 /// entity of another bank.
 pub struct Drawable<'a> {
@@ -455,8 +532,40 @@ pub struct Drawable<'a> {
     pub bank: &'a SpriteBank,
     /// The frame shown.
     pub frame: usize,
+    /// Scale and rotation.
+    pub transform: Transform,
+    /// Tint and opacity.
+    pub tint: Rgba,
+    /// How the sprite is blended.
+    pub blend: BlendMode,
+    /// The region node of the main layer the object is drawn in whatever
+    /// its position (`StickToRegion`), as `(layer, node)`.
+    pub stick: Option<(usize, usize)>,
+    /// The attachments drawn before the object (`AddAttachment` with
+    /// `preDisplay`), placed and scaled with it already.
+    pub before: Vec<Drawable<'a>>,
+    /// The attachments drawn after the object.
+    pub after: Vec<Drawable<'a>>,
+}
+
+/// The attachments of a scene entity, drawn around it.
+#[derive(Default)]
+pub struct AttachedDraws<'a> {
+    /// Drawn before the entity.
+    pub before: Vec<Drawable<'a>>,
+    /// Drawn after it.
+    pub after: Vec<Drawable<'a>>,
+}
+
+/// A video drawn in an entity's place (`Entity.PlayTheora`): the frame
+/// shown, at the entity's position, scaled and tinted like the entity.
+pub struct VideoOverlay<'a> {
+    /// The entity whose video it is.
+    pub entity: EntityRef,
+    /// The frame shown.
+    pub texture: &'a Texture,
     /// Scale in percent.
-    pub scale: f32,
+    pub zoom: f32,
     /// Tint and opacity.
     pub tint: Rgba,
 }
@@ -470,6 +579,9 @@ pub struct EntityTalk {
     pub sprite: Option<String>,
     /// Whether the sentence is shown this frame.
     pub show: bool,
+    /// The sprite `ForceTalkAnim` asked for, played as the first stance
+    /// in place of the talk sprites.
+    pub forced: Option<String>,
 }
 
 /// One object in the drawing order of a scene.
@@ -509,6 +621,20 @@ impl DrawItem {
     }
 }
 
+/// Quads drawn right after an object of the scene, in its layer: the
+/// particles of its emitter (`CAdEntity::Display`, `CAdActor::Display`
+/// draw the emitter after the sprite).
+#[derive(Default)]
+pub struct Overlays<'a> {
+    /// By entity, for the scene's entities: the quads with their
+    /// attributes (a particle's rotation, the emitter's blend mode).
+    pub entities: HashMap<EntityRef, Vec<(Quad<'a>, Attributes)>>,
+    /// By index among the other objects given to the drawing (actors).
+    pub others: HashMap<usize, Vec<(Quad<'a>, Attributes)>>,
+    /// The videos drawn in entities' places instead of their sprites.
+    pub videos: Vec<VideoOverlay<'a>>,
+}
+
 /// A scene and everything needed to run and draw it.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SceneView {
@@ -526,6 +652,9 @@ pub struct SceneView {
     playing: HashMap<EntityRef, String>,
     /// The subtitle placement of entities scripts changed it on.
     pub subtitles: HashMap<EntityRef, SubtitleMods>,
+    /// Whether this view holds the game's own entities rather than a
+    /// scene: its free entities are then `EntityRef::Game`, not `Free`.
+    pub(crate) game_level: bool,
     /// The frames that became current at the last [`SceneView::advance`]:
     /// the entity, its sprite's key and the frame's index. The world takes
     /// them to play the frames' sounds and raise their events.
@@ -552,6 +681,7 @@ impl SceneView {
             talks: HashMap::new(),
             playing: HashMap::new(),
             subtitles: HashMap::new(),
+            game_level: false,
             shown: Vec::new(),
         };
         let paths: Vec<String> = view
@@ -564,6 +694,42 @@ impl SceneView {
             view.bank.add_sprite(vfs, &sprite_path);
         }
         Ok(view)
+    }
+
+    /// The view holding the game's own entities (`Game.CreateEntity`,
+    /// `Game.LoadEntity`, attachments): an empty scene whose free
+    /// entities are the game's, named by `EntityRef::Game`, with their
+    /// sprites and states, kept across scene changes.
+    pub fn game_level() -> SceneView {
+        SceneView {
+            scene: Scene::default(),
+            path: String::new(),
+            bank: SpriteBank::new(),
+            anims: HashMap::new(),
+            talks: HashMap::new(),
+            playing: HashMap::new(),
+            subtitles: HashMap::new(),
+            game_level: true,
+            shown: Vec::new(),
+        }
+    }
+
+    /// The reference naming free entity `index` of this view.
+    pub fn free_ref(&self, index: usize) -> EntityRef {
+        if self.game_level {
+            EntityRef::Game(index)
+        } else {
+            EntityRef::Free(index)
+        }
+    }
+
+    /// The index in `free_entities` a reference names in this view.
+    fn free_index(&self, r: EntityRef) -> Option<usize> {
+        match r {
+            EntityRef::Free(i) if !self.game_level => Some(i),
+            EntityRef::Game(i) if self.game_level => Some(i),
+            _ => None,
+        }
     }
 
     /// Loads a sprite definition if it is not loaded yet, for an entity
@@ -584,6 +750,7 @@ impl SceneView {
             .collect();
         for (r, talk) in &self.talks {
             paths.extend(talk.sprite.clone());
+            paths.extend(talk.forced.clone());
             if let Some(e) = self.entity(*r) {
                 paths.extend(e.talk_sprites.iter().cloned());
                 paths.extend(e.talk_special_sprites.iter().cloned());
@@ -623,6 +790,35 @@ impl SceneView {
         self.bank.missing()
     }
 
+    /// Renumbers the states kept per entity, after a node or a free
+    /// entity was inserted or deleted.
+    pub(crate) fn remap_refs(&mut self, f: impl Fn(EntityRef) -> EntityRef) {
+        self.anims = std::mem::take(&mut self.anims)
+            .into_iter()
+            .map(|(r, v)| (f(r), v))
+            .collect();
+        self.talks = std::mem::take(&mut self.talks)
+            .into_iter()
+            .map(|(r, v)| (f(r), v))
+            .collect();
+        self.playing = std::mem::take(&mut self.playing)
+            .into_iter()
+            .map(|(r, v)| (f(r), v))
+            .collect();
+        self.subtitles = std::mem::take(&mut self.subtitles)
+            .into_iter()
+            .map(|(r, v)| (f(r), v))
+            .collect();
+    }
+
+    /// Drops the states kept for an entity that left the scene.
+    pub(crate) fn forget_entity(&mut self, r: EntityRef) {
+        self.anims.remove(&r);
+        self.talks.remove(&r);
+        self.playing.remove(&r);
+        self.subtitles.remove(&r);
+    }
+
     /// Every entity of the scene: layer nodes in order, then free ones.
     pub fn entity_refs(&self) -> Vec<EntityRef> {
         let mut refs = Vec::new();
@@ -633,7 +829,7 @@ impl SceneView {
                 }
             }
         }
-        refs.extend((0..self.scene.free_entities.len()).map(EntityRef::Free));
+        refs.extend((0..self.scene.free_entities.len()).map(|i| self.free_ref(i)));
         refs
     }
 
@@ -649,7 +845,9 @@ impl SceneView {
                 SceneNode::Entity(e) => Some(e),
                 SceneNode::Region(_) => None,
             },
-            EntityRef::Free(i) => self.scene.free_entities.get(i),
+            EntityRef::Free(_) | EntityRef::Game(_) => {
+                self.scene.free_entities.get(self.free_index(r)?)
+            }
             EntityRef::Ui(_) => None,
         }
     }
@@ -663,7 +861,10 @@ impl SceneView {
                     SceneNode::Region(_) => None,
                 }
             }
-            EntityRef::Free(i) => self.scene.free_entities.get_mut(i),
+            EntityRef::Free(_) | EntityRef::Game(_) => {
+                let i = self.free_index(r)?;
+                self.scene.free_entities.get_mut(i)
+            }
             EntityRef::Ui(_) => None,
         }
     }
@@ -759,8 +960,10 @@ impl SceneView {
     /// Starts a sentence on an entity (`CAdObject::Talk`): talking is the
     /// entity's state now, so a sprite `PlayAnim` was showing is dropped
     /// (`CAdEntity::Update` frees it once the entity is ready again) and
-    /// the entity is ready as soon as the sentence ends.
-    pub fn talk(&mut self, r: EntityRef, sentence: Sentence) {
+    /// the entity is ready as soon as the sentence ends. `forced` is the
+    /// sprite `ForceTalkAnim` named, already loaded, played as the first
+    /// stance.
+    pub fn talk(&mut self, r: EntityRef, sentence: Sentence, forced: Option<String>) {
         self.playing.remove(&r);
         self.talks.insert(
             r,
@@ -768,8 +971,77 @@ impl SceneView {
                 sentence,
                 sprite: None,
                 show: false,
+                forced,
             },
         );
+    }
+
+    /// Adds a talk sprite to an entity (`AddTalkSprite`): to the special
+    /// set with `special`, else to the generic one. `false` when the
+    /// file does not load.
+    pub fn add_talk_sprite(&mut self, vfs: &Vfs, r: EntityRef, path: &str, special: bool) -> bool {
+        if self.entity(r).is_none() || !self.bank.add_sprite(vfs, path) {
+            return false;
+        }
+        if let Some(entity) = self.entity_mut(r) {
+            if special {
+                entity.talk_special_sprites.push(path.to_string());
+            } else {
+                entity.talk_sprites.push(path.to_string());
+            }
+        }
+        true
+    }
+
+    /// Removes a talk sprite from an entity (`RemoveTalkSprite`), by file
+    /// name; an entity playing it goes back to its own sprite until the
+    /// next stance.
+    pub fn remove_talk_sprite(&mut self, r: EntityRef, path: &str, special: bool) {
+        let Some(entity) = self.entity_mut(r) else {
+            return;
+        };
+        let list = if special {
+            &mut entity.talk_special_sprites
+        } else {
+            &mut entity.talk_sprites
+        };
+        if let Some(i) = list.iter().position(|p| key(p) == key(path)) {
+            list.remove(i);
+        }
+        if let Some(talk) = self.talks.get_mut(&r) {
+            if talk.sprite.as_deref().is_some_and(|p| key(p) == key(path)) {
+                talk.sprite = None;
+            }
+        }
+    }
+
+    /// Replaces an entity's talk sprites of a set with one
+    /// (`SetTalkSprite`); an entity playing one of the old ones plays the
+    /// new one at once. `false` when the file does not load.
+    pub fn set_talk_sprite(&mut self, vfs: &Vfs, r: EntityRef, path: &str, special: bool) -> bool {
+        if self.entity(r).is_none() || !self.bank.add_sprite(vfs, path) {
+            return false;
+        }
+        let current = self.talks.get(&r).and_then(|t| t.sprite.clone());
+        let Some(entity) = self.entity_mut(r) else {
+            return false;
+        };
+        let list = if special {
+            &mut entity.talk_special_sprites
+        } else {
+            &mut entity.talk_sprites
+        };
+        let playing_old =
+            current.is_some_and(|current| list.iter().any(|p| key(p) == key(&current)));
+        list.clear();
+        list.push(path.to_string());
+        if playing_old {
+            if let Some(talk) = self.talks.get_mut(&r) {
+                talk.sprite = Some(path.to_string());
+            }
+            self.anims.insert(r, AnimState::new(path));
+        }
+        true
     }
 
     /// Ends an entity's sentence (`StopTalk`); whether one was playing.
@@ -845,11 +1117,13 @@ impl SceneView {
                 continue;
             }
             if sprite_done {
-                let stance = self
-                    .talks
-                    .get_mut(&r)
-                    .and_then(|t| t.sentence.next_stance());
-                let sprite = self.talk_stance(r, stance.as_deref(), random);
+                // The forced sprite is the first stance (`GetTalkStance`);
+                // the sentence's stance list still advances.
+                let (stance, forced) = match self.talks.get_mut(&r) {
+                    Some(t) => (t.sentence.next_stance(), t.forced.take()),
+                    None => (None, None),
+                };
+                let sprite = forced.or_else(|| self.talk_stance(r, stance.as_deref(), random));
                 if let Some(talk) = self.talks.get_mut(&r) {
                     talk.sprite = sprite.clone();
                     talk.show = true;
@@ -956,39 +1230,65 @@ impl SceneView {
     /// Fills a draw list with the scene as seen by `camera`, showing the
     /// frames the animations are at (see [`SceneView::advance`]).
     pub fn draw<'a>(&'a self, list: &mut DrawList<'a>, camera: &Camera) {
-        self.draw_with(list, camera, &[]);
+        self.draw_with(list, camera, &[], &HashMap::new(), |_| None);
     }
 
     /// The order the scene's objects are drawn in (`CAdScene::
     /// TraverseNodes`): layer by layer, each layer's nodes in order; a
     /// walkable region of a layer is followed by the free objects
-    /// standing in it, sorted by `y`; the main layer ends with the free
-    /// objects not drawn yet, sorted by `y`. The free objects are the
-    /// `others` (actors, at their positions) first, then the scene's free
-    /// entities, as the engine lists them.
-    pub fn draw_order(&self, others: &[(i32, i32)]) -> Vec<DrawItem> {
+    /// standing in it, or stuck to it (`StickToRegion`), sorted by `y`;
+    /// the main layer ends with the free objects not drawn yet, sorted
+    /// by `y`. The free objects are the `others` (actors, at their
+    /// positions) first, then the scene's free entities, as the engine
+    /// lists them; `free_stick` gives the region a free entity sticks
+    /// to.
+    pub fn draw_order(
+        &self,
+        others: &[FreeObject],
+        free_stick: impl Fn(usize) -> Option<(usize, usize)>,
+    ) -> Vec<DrawItem> {
         let scene = &self.scene;
-        let mut objects: Vec<(i32, i32, DrawItem)> = Vec::new();
-        for (i, &(x, y)) in others.iter().enumerate() {
-            objects.push((x, y, DrawItem::Other { index: i, layer: 0 }));
+        let mut objects: Vec<(FreeObject, DrawItem)> = Vec::new();
+        for (i, object) in others.iter().enumerate() {
+            objects.push((*object, DrawItem::Other { index: i, layer: 0 }));
         }
         for (i, e) in scene.free_entities.iter().enumerate() {
             if e.active && e.kind == EntityKind::Normal {
-                objects.push((e.x, e.y, DrawItem::Free { index: i, layer: 0 }));
+                objects.push((
+                    FreeObject {
+                        x: e.x,
+                        y: e.y,
+                        stick: free_stick(i),
+                    },
+                    DrawItem::Free { index: i, layer: 0 },
+                ));
             }
         }
         let mut drawn = vec![false; objects.len()];
         let mut order = Vec::new();
-        let mut draw_in = |order: &mut Vec<DrawItem>, layer: usize, region: Option<&Region>| {
+        // The objects of a region (`DisplayRegionContent`): those stuck to
+        // it, and those standing in it that stick to none; with no region,
+        // every one left.
+        let mut draw_in = |order: &mut Vec<DrawItem>,
+                           layer: usize,
+                           region: Option<(usize, &Region)>| {
             let mut inside: Vec<usize> = (0..objects.len())
                 .filter(|&i| {
-                    !drawn[i] && region.is_none_or(|r| r.contains(objects[i].0, objects[i].1))
+                    let object = objects[i].0;
+                    !drawn[i]
+                        && match region {
+                            None => true,
+                            Some((node, r)) => {
+                                object.stick == Some((layer, node))
+                                    || (object.stick.is_none() && r.contains(object.x, object.y))
+                            }
+                        }
                 })
                 .collect();
-            inside.sort_by_key(|&i| objects[i].1);
+            inside.sort_by_key(|&i| objects[i].0.y);
             for i in inside {
                 drawn[i] = true;
-                order.push(match objects[i].2 {
+                order.push(match objects[i].1 {
                     DrawItem::Other { index, .. } => DrawItem::Other { index, layer },
                     DrawItem::Free { index, .. } => DrawItem::Free { index, layer },
                     DrawItem::Node { layer, index } => DrawItem::Node { layer, index },
@@ -1009,7 +1309,7 @@ impl SceneView {
                         if region.blocked || region.decoration || !region.active {
                             continue;
                         }
-                        draw_in(&mut order, li, Some(region));
+                        draw_in(&mut order, li, Some((ni, region)));
                     }
                 }
             }
@@ -1021,45 +1321,134 @@ impl SceneView {
     }
 
     /// Like [`SceneView::draw`], with other objects (actors) drawn among
-    /// the free entities, in the order of [`SceneView::draw_order`].
+    /// the free entities, in the order of [`SceneView::draw_order`], and
+    /// `videos` drawn in their entities' places instead of the sprites.
     pub fn draw_with<'a>(
         &'a self,
         list: &mut DrawList<'a>,
         camera: &Camera,
         others: &[Drawable<'a>],
+        attached: &HashMap<EntityRef, AttachedDraws<'a>>,
+        free_stick: impl Fn(usize) -> Option<(usize, usize)>,
+    ) {
+        self.draw_with_overlays(
+            list,
+            camera,
+            others,
+            attached,
+            &Overlays::default(),
+            free_stick,
+        );
+    }
+
+    /// Like [`SceneView::draw_with`], with the `overlays` of the objects
+    /// (their particles) pushed right after each object, in its layer.
+    pub fn draw_with_overlays<'a>(
+        &'a self,
+        list: &mut DrawList<'a>,
+        camera: &Camera,
+        others: &[Drawable<'a>],
+        attached: &HashMap<EntityRef, AttachedDraws<'a>>,
+        overlays: &Overlays<'a>,
+        free_stick: impl Fn(usize) -> Option<(usize, usize)>,
     ) {
         let scene = &self.scene;
-        let positions: Vec<(i32, i32)> = others.iter().map(|d| (d.x, d.y)).collect();
+        let positions: Vec<FreeObject> = others
+            .iter()
+            .map(|d| FreeObject {
+                x: d.x,
+                y: d.y,
+                stick: d.stick,
+            })
+            .collect();
+        // An entity's attachments are drawn around it (`CAdEntity::Display`).
+        let draw_entity = |list: &mut DrawList<'a>, r: EntityRef, d: &Drawable<'a>| {
+            let around = attached.get(&r);
+            for a in around.iter().flat_map(|a| &a.before) {
+                draw_object(list, a);
+            }
+            draw_object(list, d);
+            for a in around.iter().flat_map(|a| &a.after) {
+                draw_object(list, a);
+            }
+        };
         let mut current_layer = usize::MAX;
-        for item in self.draw_order(&positions) {
+        // An entity's video, where it plays, takes the sprite's place,
+        // the attachments around it (`CAdEntity::Display`).
+        let video_of = |r: EntityRef| overlays.videos.iter().find(|v| v.entity == r);
+        let draw_video =
+            |list: &mut DrawList<'a>, r: EntityRef, entity: &Entity, video: &VideoOverlay<'a>| {
+                let around = attached.get(&r);
+                for a in around.iter().flat_map(|a| &a.before) {
+                    draw_object(list, a);
+                }
+                let zoom = video.zoom / 100.0;
+                list.push(Quad {
+                    texture: video.texture,
+                    dst: Rect::new(
+                        entity.x as f32,
+                        entity.y as f32,
+                        (video.texture.width as f32 * zoom).trunc(),
+                        (video.texture.height as f32 * zoom).trunc(),
+                    ),
+                    src: None,
+                    tint: video.tint,
+                    flip_x: false,
+                    flip_y: false,
+                });
+                for a in around.iter().flat_map(|a| &a.after) {
+                    draw_object(list, a);
+                }
+            };
+        for item in self.draw_order(&positions, free_stick) {
             let layer = item.layer();
             if layer != current_layer {
                 current_layer = layer;
                 let (ox, oy) = camera.layer_offset(scene, &scene.layers[layer]);
                 list.set_offset(-ox, -oy);
             }
-            match item {
+            let overlay = match item {
                 DrawItem::Node { layer, index } => {
+                    let r = EntityRef::Node { layer, index };
                     if let Some(SceneNode::Entity(entity)) = self.node(layer, index) {
-                        if let Some(d) = self.drawable(EntityRef::Node { layer, index }, entity) {
-                            draw_object(list, &d);
+                        match video_of(r) {
+                            Some(video) if entity.active && entity.kind == EntityKind::Normal => {
+                                draw_video(list, r, entity, video);
+                            }
+                            _ => {
+                                if let Some(d) = self.drawable(r, entity) {
+                                    draw_entity(list, r, &d);
+                                }
+                            }
                         }
                     }
+                    overlays.entities.get(&r)
                 }
                 DrawItem::Free { index, .. } => {
-                    if let Some(d) = scene
-                        .free_entities
-                        .get(index)
-                        .and_then(|e| self.drawable(EntityRef::Free(index), e))
-                    {
-                        draw_object(list, &d);
+                    let r = EntityRef::Free(index);
+                    if let Some(entity) = scene.free_entities.get(index) {
+                        match video_of(r) {
+                            Some(video) if entity.active && entity.kind == EntityKind::Normal => {
+                                draw_video(list, r, entity, video);
+                            }
+                            _ => {
+                                if let Some(d) = self.drawable(r, entity) {
+                                    draw_entity(list, r, &d);
+                                }
+                            }
+                        }
                     }
+                    overlays.entities.get(&r)
                 }
                 DrawItem::Other { index, .. } => {
                     if let Some(d) = others.get(index) {
                         draw_object(list, d);
                     }
+                    overlays.others.get(&index)
                 }
+            };
+            for (quad, attributes) in overlay.into_iter().flatten() {
+                list.push_with(*quad, *attributes);
             }
         }
         list.set_offset(0.0, 0.0);
@@ -1079,8 +1468,12 @@ impl SceneView {
             sprite: Some(loaded),
             bank: &self.bank,
             frame: self.frame_of(r),
-            scale: self.scene.entity_scale(entity),
+            transform: Transform::of_entity(&self.scene, entity),
             tint: self.scene.entity_tint(entity),
+            stick: None,
+            before: Vec::new(),
+            after: Vec::new(),
+            blend: entity.blend_mode,
         })
     }
 }
@@ -1126,19 +1519,33 @@ pub fn drawn_subframes(frame: &Frame) -> impl Iterator<Item = &SubFrame> {
     frame.subframes.iter().filter(|sub| is_drawn(sub))
 }
 
-/// Draws an object's current frame.
+/// Draws an object's current frame (`CBSprite::Display`,
+/// `CBSubFrame::Draw`): each drawn sub-frame placed by its hotspot,
+/// scaled, turned around the hotspot and blended as the object says,
+/// between the attachments drawn before and after the object.
 pub fn draw_object<'a>(list: &mut DrawList<'a>, d: &Drawable<'a>) {
-    let Some(loaded) = d.sprite else { return };
-    if loaded.sprite.frames.is_empty() {
-        return;
+    for a in &d.before {
+        draw_object(list, a);
     }
-    let frame = d.frame.min(loaded.sprite.frames.len() - 1);
-    for sub in drawn_subframes(&loaded.sprite.frames[frame]) {
-        let Some(image) = &sub.image else { continue };
-        let Some(texture) = d.bank.texture(image, sub.color_key) else {
-            continue;
-        };
-        list.push(place(sub, texture, d.x, d.y, d.scale / 100.0, d.tint));
+    if let Some(loaded) = d.sprite.filter(|l| !l.sprite.frames.is_empty()) {
+        let frame = d.frame.min(loaded.sprite.frames.len() - 1);
+        for sub in drawn_subframes(&loaded.sprite.frames[frame]) {
+            let Some(image) = &sub.image else { continue };
+            let Some(texture) = d.bank.texture(image, sub.color_key) else {
+                continue;
+            };
+            let (quad, attributes) = place_transformed(sub, texture, d.x, d.y, d.transform, d.tint);
+            list.push_with(
+                quad,
+                Attributes {
+                    blend: d.blend,
+                    ..attributes
+                },
+            );
+        }
+    }
+    for a in &d.after {
+        draw_object(list, a);
     }
 }
 
@@ -1162,7 +1569,7 @@ pub fn frame_height(sprite: &Sprite, frame: usize, zoom: f32) -> i32 {
 /// scale factor (`1.0` for 100 %) and the owner's tint: the hotspot is
 /// placed at the position, scaled around it, and the sub-frame's own tint
 /// replaces the owner's when it has one. Integer truncation matches the
-/// engine.
+/// engine. See [`place_transformed`] for a scale per axis and a rotation.
 pub fn place<'a>(
     sub: &SubFrame,
     texture: &'a Texture,
@@ -1171,6 +1578,31 @@ pub fn place<'a>(
     scale: f32,
     owner_tint: Rgba,
 ) -> Quad<'a> {
+    place_transformed(
+        sub,
+        texture,
+        x,
+        y,
+        Transform::uniform(scale * 100.0),
+        owner_tint,
+    )
+    .0
+}
+
+/// Like [`place`], with a [`Transform`]: the sub-frame is scaled by a
+/// factor per axis around the hotspot, which stays at `(x, y)`, and the
+/// returned attributes turn it around that point by the transform's
+/// rotation (`CBSubFrame::Draw`: the hotspot is the centre handed to
+/// `DisplayTransform`). The attributes' blend mode is the default; the
+/// caller sets the owner's.
+pub fn place_transformed<'a>(
+    sub: &SubFrame,
+    texture: &'a Texture,
+    x: i32,
+    y: i32,
+    transform: Transform,
+    owner_tint: Rgba,
+) -> (Quad<'a>, Attributes) {
     let src = sub.rect.filter(|r| !r.is_empty()).map(|r| {
         Rect::new(
             r.left as f32,
@@ -1183,17 +1615,18 @@ pub fn place<'a>(
         Some(r) => (r.w, r.h),
         None => (texture.width as f32, texture.height as f32),
     };
-    let dst = if scale == 1.0 {
+    let (zx, zy) = (transform.scale_x / 100.0, transform.scale_y / 100.0);
+    let dst = if transform.is_unscaled() {
         Rect::new((x - sub.hotspot_x) as f32, (y - sub.hotspot_y) as f32, w, h)
     } else {
         Rect::new(
-            (x as f32 - sub.hotspot_x as f32 * scale).trunc(),
-            (y as f32 - sub.hotspot_y as f32 * scale).trunc(),
-            (w * scale).trunc(),
-            (h * scale).trunc(),
+            (x as f32 - sub.hotspot_x as f32 * zx).trunc(),
+            (y as f32 - sub.hotspot_y as f32 * zy).trunc(),
+            (w * zx).trunc(),
+            (h * zy).trunc(),
         )
     };
-    Quad {
+    let quad = Quad {
         texture,
         dst,
         src,
@@ -1204,5 +1637,16 @@ pub fn place<'a>(
         },
         flip_x: sub.mirror_x,
         flip_y: sub.mirror_y,
-    }
+    };
+    let attributes = Attributes {
+        rotation: transform.rotation,
+        // The centre `DisplayTransform` turns around: the hotspot, from
+        // the truncated top-left corner.
+        pivot: (
+            dst.x + sub.hotspot_x as f32 * zx,
+            dst.y + sub.hotspot_y as f32 * zy,
+        ),
+        blend: BlendMode::Normal,
+    };
+    (quad, attributes)
 }

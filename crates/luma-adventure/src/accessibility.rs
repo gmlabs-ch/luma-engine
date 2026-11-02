@@ -402,18 +402,13 @@ impl World {
     /// `AccCaption` of an object: the text the speech reads for it in
     /// place of its caption; `None` when unset.
     pub fn access_caption(&self, id: NativeId) -> Option<&str> {
-        self.access_captions.get(&id).map(String::as_str)
+        self.object_state(id)?.access_caption.as_deref()
     }
 
     /// Sets or clears `AccCaption` of an object.
     pub fn set_access_caption(&mut self, id: NativeId, caption: Option<String>) {
-        match caption {
-            Some(caption) => {
-                self.access_captions.insert(id, caption);
-            }
-            None => {
-                self.access_captions.remove(&id);
-            }
+        if let Some(state) = self.object_state_mut(id) {
+            state.access_caption = caption;
         }
     }
 

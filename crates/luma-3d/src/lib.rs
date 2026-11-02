@@ -17,21 +17,34 @@
 //! - [`scene_geometry`]: the classified geometry of a scene and the
 //!   queries on it;
 //! - [`camera`]: the scene camera, the projection that maps the layer onto
-//!   the 3D world, and the conversions between scene pixels and 3D points.
+//!   the 3D world, and the conversions between scene pixels and 3D points;
+//! - [`xfile`]: the DirectX `.X` text container the actor models are
+//!   stored in, read into a generic object tree;
+//! - [`model`]: a model built from that tree: the frame hierarchy, the
+//!   meshes with their materials and skin weights, the animation sets and
+//!   a sampler that poses the frames at a time;
+//! - [`actor3d`]: the `.act3d` actor definition (model paths, speeds,
+//!   shadow, animation properties) and the `.anim` sidecar.
 //!
 //! The behaviour follows `docs/3d-actors.md`, which is the specification;
-//! `docs/formats/geometry.md` describes the files. The crate is an optional
+//! `docs/formats/geometry.md`, `docs/formats/xfile.md` and
+//! `docs/formats/actor3d.md` describe the files. The crate is an optional
 //! module of the engine: `luma` re-exports it as `luma::three_d` behind its
 //! `3d` feature.
 
+pub mod actor3d;
 pub mod camera;
 pub mod math;
+pub mod model;
 pub mod node_patterns;
 pub mod scene_geometry;
 pub mod three_ds;
+pub mod xfile;
 
+pub use actor3d::{Actor3dDef, AnimationDef, ShadowType};
 pub use camera::{CameraSettings, Projection, Ray, ViewSetup, Viewport};
 pub use math::{Mat4, Plane, Quat, Vec3};
+pub use model::{Animation, AnimationSet, Bone, Frame, Material, Mesh, Model, Transform};
 pub use node_patterns::{NodeKind, NodePattern, NodePatterns};
 pub use scene_geometry::{Camera, Light, MeshNode, SceneGeometry, TriangleMesh};
 

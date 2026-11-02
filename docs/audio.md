@@ -69,7 +69,7 @@ Every object (the game, actors, entities) owns at most one sound effect:
 | `IsSoundPlaying()` | Whether it plays (a sound paused by a system window counts as playing). |
 | `SetSoundPosition(ms)`, `GetSoundPosition()` | Where it plays from: at once when playing, else when it next starts. |
 | `SetSoundVolume(percent)`, `GetSoundVolume()` | The sound's own volume. |
-| `SoundFXEcho`, `SoundFXReverb`, `SoundFXNone` | Accepted and logged; no effect is applied. |
+| `SoundFXEcho(wetDryMix, feedback, leftDelay, rightDelay)`, `SoundFXReverb(inGain, reverbMix, reverbTime, highFreqRTRatio)`, `SoundFXNone()` | The effect applied to the object's sounds, now and next (see [Sound effects](#sound-effects)). |
 
 A sound entity (`SUBTYPE="sound"`) loads its `SOUND` when the scene
 loads, with `SOUND_START_TIME` and `SOUND_VOLUME`, and a script plays it
@@ -84,6 +84,37 @@ frame marked `KILL_SOUND` stops the sprite's earlier frame sounds when
 it becomes current, and `Reset` stops them too (`CBSprite::
 KillAllSounds`). Frame sounds that ended are forgotten each frame; they
 are not kept in saved games.
+
+## Sound effects
+
+Every object keeps one effect for its sounds (`m_SFXType` and its four
+parameters), set by `SoundFXEcho`, `SoundFXReverb` or cleared by
+`SoundFXNone`: the engine applied it to the object's sound when the
+sound was loaded and again every frame (`CBObject::UpdateOneSound`), so
+a change takes effect on the sound playing. Luma applies it when a
+sound is loaded and when the effect changes; the effect is kept in
+saved games with the object's sound. The parameters are those of the
+DirectSound effects the engine used (`DSFXEcho`, `DSFXWavesReverb`), with
+the engine's defaults for arguments left out; Kira's delay and reverb
+take them as follows:
+
+| Engine parameter | Default | Kira |
+|------------------|---------|------|
+| Echo: wet/dry mix, 0-100 % | 0 | the delay's mix (`0` dry, `1` wet). |
+| Echo: feedback, 0-100 % | 0 | the delay's feedback, as decibels of the fraction (`50` → −6 dB). |
+| Echo: left and right delays, 1-2000 ms | 333 | one delay time, the mean of the two: Kira's delay has one line, not one per channel. |
+| Reverb: input gain, −96-0 dB | 0 | the volume of the track the sound plays on. |
+| Reverb: reverb mix, −96-0 dB | 0 | the reverb's mix, `wet / (1 + wet)` with `wet = 10^(dB/20)` (0 dB gives equal dry and wet). |
+| Reverb: reverb time, 0.001-3000 ms | 1000 | the reverb's feedback: the decay by 60 dB in that time of a comb filter of 35 ms (Freeverb's tuning): 1000 ms → 0.785, 3000 ms → 0.92, 100 ms → 0.09, capped at 0.98. |
+| Reverb: high-frequency ratio, 0.001-0.999 | 0.001 | the reverb's damping, `1 − ratio`. |
+
+A sound with an effect plays on a sub-track of its own carrying the
+effect; the volumes and the panning are the sound's, as without one.
+Changing the parameters of an effect of the same kind applies in place;
+switching between echo, reverb and none restarts the sound where it was
+(paused when it was paused), as the engine pauses and resumes the buffer
+around `SetFX`. The echo with one delay line and the reverb's mapping
+are approximations of the DirectSound effects, not their algorithms.
 
 ## Music
 
@@ -114,6 +145,5 @@ the sound does; skipping the sentence stops the sound. See
 ## Not yet
 
 - Streaming of long files (Kira can stream; the engine decodes in full
-  for now); the echo and reverb effects; the `.talk` files timing talk
-  sprites to a sound.
+  for now); the `.talk` files timing talk sprites to a sound.
 - Pausing every sound while a system window is open (no windows yet).

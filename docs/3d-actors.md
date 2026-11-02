@@ -8,9 +8,11 @@ the code in `crates/luma-3d` (the module `luma::three_d`, feature `3d`):
 the conventions (section 2), the scene keys (3.1), the geometry file and
 its classification (3.2, 3.3, specified in
 [formats/geometry.md](formats/geometry.md)), the camera and the 2D/3D
-mapping (section 4) and the floor height (9.1). The rest is still the
-plan; the remaining specifications (`docs/formats/actor3d.md`,
-`xfile.md`) come with the tasks that implement them.
+mapping (section 4), the actor definition file (section 5, specified in
+[formats/actor3d.md](formats/actor3d.md)), the `.X` model as data
+(section 6 and the sampling of 7, specified in
+[formats/xfile.md](formats/xfile.md)) and the floor height (9.1). The
+rest is still the plan.
 
 ## 0. Sources and rules
 
@@ -438,6 +440,17 @@ actor standing in a region of another layer would use that layer's
 
 ## 5. The actor definition file (`.act3d`)
 
+**As implemented** in `luma_3d::actor3d` (`Actor3dDef::parse`,
+`parse_with` for templates, `is_actor_x`, `AnimationDef::parse_file` for
+the sidecar and `AnimationDef::apply` onto a model) and specified in
+[formats/actor3d.md](formats/actor3d.md), which is the reference; the
+table below is the summary. Found while implementing: an **unknown key
+fails the load** (the parser stops on a token it does not know),
+reproduced; a `SHADOW_TYPE` word that is neither a name nor a number gives
+`none` (`atoi` returns 0); `SHADOW_MODEL`, `ANIMATION` and `EFFECT` before
+any `MODEL` are dropped, not errors; the `.anim` sidecar is only looked
+for by `MergeAnims`, not by the `MODEL` keys.
+
 Same syntax as every definition file ([definition-files.md](formats/
 definition-files.md)). The keyword is `ACTOR3DX` for `.X` actors;
 `AdActor3D.cpp` (`IsActorX`) reads the first keyword and takes the legacy
@@ -497,6 +510,15 @@ the legacy `ACTOR3D` format only.
 
 ## 6. The model: the `.X` subset WME uses
 
+**As implemented** in `luma_3d::xfile` (the text container, read into a
+generic object tree without interpreting the template declarations) and
+`luma_3d::model` (`Model::parse`, `merge_animations`, `find_frame`,
+`animation_set`, the sampler of 6.4 and 7), specified in
+[formats/xfile.md](formats/xfile.md), which is the reference for the
+subset; the tables below are kept as the summary with the corrections
+found while implementing. Binary and compressed files are detected and
+rejected (task 4).
+
 ### 6.1 Who parses what
 
 `CXFile::OpenFile` reads the whole file, creates a DirectX file object,
@@ -524,9 +546,13 @@ rejected if no top-level frame was found.
 | `FrameTransformMatrix` | 16 floats, row-major, stored as both the *original* and the current local matrix. |
 | `Mesh` | A mesh attached to the frame; loaded by D3DX (section 6.3). |
 | `AnimationSet` | Loaded into the model (section 6.4); also accepted inside a frame. |
-| `Animation` (outside a set) | Becomes an anim set named after the file. |
+| `Animation` (outside a set) | Becomes an anim set of its own, named after the file (two loose animations give two sets with the same name). |
 | `AnimTicksPerSecond` `{9E415A43-7BA6-4a73-8743-B73D47E88476}` | One `DWORD`; default **4800**. All animation key times are in these ticks. |
 | anything else | Ignored. |
+
+Templates are matched by **name** in Luma (D3DX matches the GUIDs of the
+registered templates). An **empty frame** (`Frame x { }`) fails the whole
+load in the original, an accident of its child loop; Luma accepts it.
 
 Merging a second file (`MergeFromFile`) takes only `AnimationSet` and
 `Animation` objects, searching the frames of the file recursively (the
@@ -555,6 +581,19 @@ sample `.x` files, which also declare `AnimTicksPerSecond`, `FVFData`,
 `DeclData`, `EffectInstance` and the `Effect*` templates. WME ignores the
 effect templates (it asks D3DX for no effect instances); a loader should skip
 every template it does not know.
+
+As implemented (`luma_3d::model::Mesh`, [formats/xfile.md](formats/xfile.md)
+2.2): polygons are fan-triangulated; a vertex used with two different
+normal indices is duplicated, the file's vertices keeping their indices
+and the duplicates appended with a copy of their original's UV and skin
+weights (`Mesh::original_vertices` records the origin); a mesh without
+`MeshNormals` gets smooth normals computed from its faces (a Luma choice,
+the original's vertex format would have none); `VertexDuplicationIndices`
+is read and not used, since the sample exporters write the skin weights
+against the file's own vertex indices (Trinity's table is the identity);
+a material list shorter than the faces repeats its last entry. The
+position-welded adjacency is left to the runtime (task 9 / 12b): the
+vertex list keeps the positions and origins it needs.
 
 What WME makes of the result:
 
@@ -592,8 +631,11 @@ What WME makes of the result:
 
 `AnimationSet` holds `Animation` objects. Each `Animation` has:
 
-- exactly one **frame reference** (a data reference to a `Frame`; only its
-  name is kept and later looked up with `FindFrame`),
+- one **frame reference** (a data reference to a `Frame`; only its
+  name is kept and later looked up with `FindFrame`). The check that
+  rejects a duplicated reference is dead code (it tests the frame pointer,
+  which is only set by `FindBones` after loading), so with two references
+  the **last wins**; Luma does the same,
 - `AnimationKey` objects, each `{ keyType; nKeys; keys }` with each key
   `{ time; nValues; values }`:
 
@@ -620,6 +662,13 @@ Timing derived from the keys: the *total time* of a set is the largest key
 time of any track divided by `ticksPerSecond / 1000` (milliseconds); the
 *frame time* is the smallest gap between two consecutive keys of any track
 (milliseconds). "Frames" exist only to place events (`FRAME` is 1-based).
+As implemented (`AnimationSet::total_time_ms`, `frame_time_ms`,
+`total_frames`, `add_event`): the divisions are done in single precision
+and truncated as in the original, so `4800 / 4.8f` is **999 ms** for a
+one-second set at 4800 ticks; the gap scan counts the gap from time 0 to
+the first key, and a zero gap met after a positive one resets the minimum
+(the next gap replaces it). An event's frame is clamped to `1..=total_frames`
+(`total / frame_time + 1`, 0 when the frame time is 0).
 
 ## 7. Animation at runtime
 
@@ -641,7 +690,17 @@ All in `XModel.cpp`, `XAnimationChannel.cpp`, `XActiveAnimation.cpp`,
   gives the first key. If *no* key is later than `t` the indices stay at
   **0 and 0**: the pose snaps to the **first** key (not the last). Callers
   keep `t` below the last key time (a finished animation uses
-  `total - 1` ms) so this is only reached by degenerate data.
+  `total - 1` ms) so this is only reached by degenerate data. **As
+  implemented** by `Animation::sample` (one frame's `Transform`),
+  `AnimationSet::apply` (the sampled frames written over a list of local
+  matrices), `Model::rest_pose`, `Model::combine` and `Model::sample`
+  (rest pose, one set applied, combined matrices); a missing track leaves
+  position `0`, scale `1`, rotation identity, so a rotation-only track
+  also moves the frame to its parent's origin, as in the original. The
+  blend of the two transition slots is `Transform::blend`
+  (`Lerp`/`Slerp`/`Lerp`), the event selection of a frame change is
+  `AnimationSet::events_between`; the channels and active animations that
+  drive them are task 9.
 - **Active animation.** Started with the game timer; local time = elapsed
   ms. If `elapsed > total`: looping wraps with `%`, a non-looping one
   becomes *finished* and holds `total - 1`. `Looping` comes from the set
@@ -1141,7 +1200,7 @@ the core crates:
 | Piece | Home | Why |
 |-------|------|-----|
 | Math with the D3D conventions (matrices, quaternions, project/unproject, the D3DX functions listed in 12.2) | `luma-3d` | **Done**: `luma_3d::math`. |
-| `.X` reader (text, optional binary), `.3ds` reader, `.geometry`, `.act3d`, `.anim` parsers: pure data | `luma-3d` | **Decided**: the module crate, re-exported by `luma` as `luma::three_d` under the `3d` feature; `luma-formats` only parses the scene keys (done). `.3ds` and `.geometry` are done (`luma_3d::three_ds`, `node_patterns`). |
+| `.X` reader (text, optional binary), `.3ds` reader, `.geometry`, `.act3d`, `.anim` parsers: pure data | `luma-3d` | **Done** except binary `.X`: `luma_3d::three_ds`, `node_patterns`, `xfile`, `model`, `actor3d`; the module crate is re-exported by `luma` as `luma::three_d` under the `3d` feature; `luma-formats` only parses the scene keys. |
 | Model, skeleton, animation channels, CPU skinning, geometry queries, path finder, camera projection, picking | `luma-3d` | No GPU, no game logic, unit-testable. |
 | The 3D pass on wgpu (pipelines, lights, shadows) | `luma-3d::render`, depending on `luma-render` for `Gpu`/`Target` | The 2D `luma-render` stays small. |
 | A small generic extension point in `luma-render` | `luma-render` | See 12.3. |
@@ -1305,11 +1364,11 @@ read first.
 | # | Task | WME files to read | Size | After |
 |---|------|-------------------|------|-------|
 | 1 | **Crate and conventions.** `luma-3d` with a feature in `luma`, `README.md` and `docs/modules.md` rows, the `math` module (D3D conventions, the functions of 12.2). **Done.** | `3DUtils.cpp`, `3DCamera.cpp`, `BObject.cpp` (`GetMatrix`), `dcgf.h` (`DegToRad`) | S | |
-| 2 | **`.X` text container.** Tokenizer and template-aware reader to a generic object tree (`xof 0303txt`, 32- and 64-bit floats, named templates, nested data, data references, comments). `docs/formats/xfile.md`. | `XFile.cpp`, `XModel.cpp` (`LoadFromFile`), `XFrameNode.cpp` (`LoadFromXData`); samples `trinity.x`, `teapot.x` | M | 1 |
-| 3 | **`.X` to model.** Frames, `FrameTransformMatrix`, meshes (triangulation, normal and UV vertex splitting, materials, `TextureFilename`), `SkinWeights` and the bind matrices, position-welded adjacency, `AnimTicksPerSecond`, animation sets with the four key types, `AnimationOptions`, merging, material naming. | `XMesh.cpp`, `SkinMeshHelper.cpp`, `XAnimation.cpp` (`Load`, `LoadAnimationKeyData`), `XAnimationSet.cpp`, `3DMaterial.cpp` | L | 2 |
+| 2 | **`.X` text container.** Tokenizer and template-agnostic reader to a generic object tree (`xof 0303txt`, named templates recorded by name and GUID, nested data, data references, comments; binary and compressed headers rejected). `docs/formats/xfile.md`. **Done** (`luma_3d::xfile`). | `XFile.cpp`, `XModel.cpp` (`LoadFromFile`), `XFrameNode.cpp` (`LoadFromXData`); samples `trinity.x`, `teapot.x` | M | 1 |
+| 3 | **`.X` to model.** Frames, `FrameTransformMatrix`, meshes (triangulation, normal vertex splitting, materials, `TextureFilename`), `SkinWeights` and the bind matrices, `AnimTicksPerSecond`, animation sets with the four key types, `AnimationOptions`, merging, material naming, the sampler. **Done** (`luma_3d::model`); the position-welded adjacency moves to task 9 / 12b, where it is consumed. | `XMesh.cpp`, `SkinMeshHelper.cpp`, `XAnimation.cpp` (`Load`, `LoadAnimationKeyData`), `XAnimationSet.cpp`, `3DMaterial.cpp` | L | 2 |
 | 4 | **`.X` binary and compressed.** `bin `, `tzip`/`bzip` (MSZIP) with `flate2`. Only if a real game needs it; check first which variant the games use. | (public DirectX documentation **[ext]**) | M | 2 |
 | 5 | **`.3ds` geometry and `.geometry`.** The chunk walker of 3.2 into planes, blocks, generics, waypoint points, cameras, lights; the node patterns; scene keys of 3.1 in `luma_formats::scene`. `docs/formats/geometry.md`. **Done** (`luma_3d::three_ds`, `node_patterns`, `scene_geometry`). | `3DLoader3DS.cpp`, `3DS_chunks.h`, `AdSceneGeometry.cpp` (`LoadFile`), `AdGeomExt*.cpp`, `AdWaypointGroup3D.cpp`, `3DMesh.cpp`, `3DLight.cpp` | M | 1 |
-| 6 | **`.act3d` and `.anim`.** Parser to a typed definition, TEMPLATE, defaults, `ANIMATION`/`EVENT`, obsolete keys. `docs/formats/actor3d.md`. | `AdActor3DX.cpp` (`LoadBuffer`, `ParseEffect`, `MergeAnimations2`), `XModel.cpp` (`ParseAnim`, `ParseEvent`), `AdActor3D.cpp` (`IsActorX`) | S | |
+| 6 | **`.act3d` and `.anim`.** Parser to a typed definition, TEMPLATE, defaults, `ANIMATION`/`EVENT`, obsolete keys. `docs/formats/actor3d.md`. **Done** (`luma_3d::actor3d`). | `AdActor3DX.cpp` (`LoadBuffer`, `ParseEffect`, `MergeAnimations2`), `XModel.cpp` (`ParseAnim`, `ParseEvent`), `AdActor3D.cpp` (`IsActorX`) | S | |
 | 7 | **Camera and the 2D/3D mapping.** View and projection of 4.1 for a scene (`Camera`, viewport, scroll, layer size, `SCROLL_3D_COMPATIBILITY`, `FOV_OVERRIDE`, clip planes), `convert_2d_to_3d` (exact and tolerant), `convert_3d_to_2d`, the object's 2D position. **Done** (`luma_3d::camera`; the object's 2D position is `Projection::project` of its origin, to be called by task 14). | `BRenderD3D.cpp` (`SetProjection`, `GetProjectionParams`), `AdSceneGeometry.cpp` (`Convert*`, `StoreDrawingParams`), `AdObject3D.cpp`, `AdGame.cpp` (`GetLayerSize`), `AdScene.cpp` (`ScrollTo`) | M | 1, 5 |
 | 8 | **Geometry queries and the 3D path finder.** `DirectPathExists`, `GetBlockIntersection`, Dijkstra with the alternate-target rerun. Decide per quirk (9.2, 9.3) whether to reproduce. Already done with task 5: `GetHeightAt` (`SceneGeometry::height_at`), `DropWaypoints`, node enabling, the triangle tests of 9.2 (`math::intersect_triangle`, `pick_get_intersect`). | `AdSceneGeometry.cpp`, `3DUtils.cpp` (`IntersectTriangle`, `PickGetIntersect`), `AdPath3D.cpp`, `AdPathPoint3D.cpp` | M | 5 |
 | 9 | **Skeleton animation and skinning.** Frame hierarchy and matrices, channels, active animations, blending slots, events, transition-time table, looping and finish rules, CPU skinning, bounding box, ray/triangle picking of a posed model, bone matrices and positions. | `XFrameNode.cpp`, `XModel.cpp`, `XAnimationChannel.cpp`, `XActiveAnimation.cpp`, `XAnimation.cpp` (`Update`), `XAnimationSet.cpp`, `XMesh.cpp` (`Update`, `PickPoly`) | L | 3 |
@@ -1373,7 +1432,9 @@ models are not part of it.
    is a real commercial 3D game available for local tests? Are the sample
    models (teapot) acceptable in CI?
 3. **Binary `.X`.** The samples are text; real games probably ship both.
-   Which does the target game use?
+   Which does the target game use? The text reader is done and reports a
+   binary or compressed header as an unsupported format, so the first
+   real game will tell.
 4. **Quirk policy.** Where the original is arguably wrong (single-sided
    picking, walk planes ignoring `active` in queries, the alternate-target
    path, the first-key pose when the time is past the last key, `PlayAnimAsync`

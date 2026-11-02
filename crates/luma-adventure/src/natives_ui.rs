@@ -7,7 +7,7 @@ use luma_formats::font::TextAlign;
 use luma_formats::{Rgba, VerticalAlign};
 use luma_script::{Context, Effect, NativeId, Return, Value};
 
-use crate::ui::{Control, ControlKind, StaticState, WindowMode};
+use crate::ui::{Control, ControlKind, ImageSlot, StaticState, WindowMode};
 use crate::world::World;
 
 fn native_or_null(id: Option<NativeId>) -> Value {
@@ -56,7 +56,6 @@ impl World {
                     .and_then(|w| w.filename.clone())
                     .map_or(Value::Null, Value::from),
             ),
-            "Movable" => Some(Value::Null),
             "NextSibling" | "PrevSibling" => {
                 let parent = c.parent?;
                 let siblings = self.widgets_of(parent);
@@ -108,9 +107,14 @@ impl World {
                 "CursorBlinkRate" => Value::Int(e.cursor_blink_rate),
                 _ => return None,
             },
-            ControlKind::EntityContainer(_) => match name {
-                // The entity of a container is never frozen with the game.
-                "Freezable" => Value::Bool(false),
+            ControlKind::EntityContainer(entity) => match name {
+                // Off unless a script turned it on (`MakeFreezable(false)`
+                // when the container loads its entity).
+                "Freezable" => Value::Bool(
+                    entity
+                        .and_then(|i| self.ui_entities.get(i))
+                        .is_some_and(|e| e.freezable),
+                ),
                 _ => return None,
             },
         })
@@ -124,6 +128,23 @@ impl World {
             value.get_int(self),
             value.get_bool(self),
         );
+        // The properties that reach beyond the control itself.
+        match (self.control(id).map(|c| &c.kind), name) {
+            (Some(ControlKind::Window(_)), "Exclusive" | "SystemExclusive") => {
+                self.set_window_mode(id, name == "SystemExclusive", flag);
+                return true;
+            }
+            (Some(ControlKind::EntityContainer(entity)), "Freezable") => {
+                // The flag is kept now, the entity's scripts follow at
+                // the next window update or freeze, with the engine.
+                if let Some(e) = entity.and_then(|i| self.ui_entities.get_mut(i)) {
+                    e.freezable = flag;
+                }
+                self.ui.pending_freezable.push((id, flag));
+                return true;
+            }
+            _ => {}
+        }
         let Some(c) = self.control_mut(id) else {
             return false;
         };
@@ -229,7 +250,7 @@ impl World {
                         }
                         _ => false,
                     },
-                    ControlKind::EntityContainer(_) => name == "Freezable",
+                    ControlKind::EntityContainer(_) => false,
                 };
             }
         }
@@ -283,7 +304,9 @@ impl World {
                     .and_then(|c| c.image.clone())
                     .map_or(Value::Null, Value::from),
             )),
-            "GetImageObject" => Some(Return::value(native_or_null(self.sprite_object_id(id)))),
+            "GetImageObject" => Some(Return::value(native_or_null(
+                self.control_image_object(id, ImageSlot::Image),
+            ))),
             "Focus" => {
                 self.focus_control(id);
                 Some(Return::null())
@@ -328,9 +351,20 @@ impl World {
                     .and_then(|w| w.image_inactive.clone())
                     .map_or(Value::Null, Value::from),
             ),
-            ("window", "GetInactiveImageObject" | "CreateEntityContainer") => {
-                self.stub(&format!("window.{name}"));
-                Return::null()
+            ("window", "GetInactiveImageObject") => Return::value(native_or_null(
+                self.control_image_object(id, ImageSlot::Inactive),
+            )),
+            ("window", "CreateEntityContainer") => {
+                let widget_name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let created = self.create_control(
+                    id,
+                    ControlKind::EntityContainer(None),
+                    widget_name.as_deref(),
+                );
+                Return::value(Value::Native(created))
             }
             ("window", "Close") => Return::value(self.close_window(ctx.engine, id)),
             ("window", "GoExclusive") => {
@@ -444,8 +478,13 @@ impl World {
                 | "GetPressedImageObject"
                 | "GetFocusedImageObject",
             ) => {
-                self.stub(&format!("button.{name}"));
-                Return::null()
+                let slot = match name {
+                    "GetDisabledImageObject" => ImageSlot::Disable,
+                    "GetHoverImageObject" => ImageSlot::Hover,
+                    "GetPressedImageObject" => ImageSlot::Press,
+                    _ => ImageSlot::Focus,
+                };
+                Return::value(native_or_null(self.control_image_object(id, slot)))
             }
             ("entity container", "GetEntity") => {
                 Return::value(native_or_null(self.container_entity(id)))

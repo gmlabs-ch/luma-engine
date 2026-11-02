@@ -87,6 +87,13 @@ pub trait App {
         Flow::Continue
     }
 
+    /// Called when the user asks to close the window. [`Flow::Exit`],
+    /// the default, closes it; [`Flow::Continue`] keeps it open, for an
+    /// app that asks the user first.
+    fn close_requested(&mut self) -> Flow {
+        Flow::Exit
+    }
+
     /// Fills the draw list for a frame. Return [`Flow::Exit`] to close
     /// the window after this frame.
     fn draw<'a>(&'a mut self, frame: &Frame<'a>, list: &mut DrawList<'a>) -> Flow;
@@ -273,7 +280,11 @@ impl<A: App> ApplicationHandler for Runner<A> {
             return;
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                if self.app.close_requested() == Flow::Exit {
+                    event_loop.exit();
+                }
+            }
             WindowEvent::Resized(size) => self.resize(size),
             WindowEvent::RedrawRequested => match self.redraw() {
                 Ok(Flow::Continue) => {}

@@ -243,6 +243,18 @@ joined to the first. A region in a layer carries the extra keys marked
 | `TEMPLATE` | string | | Another region file loaded first. |
 | `EDITOR_SELECTED`, `EDITOR_SELECTED_POINT`, `EDITOR_PROPERTY` | | | Editor state, ignored. |
 
+Scripts edit a polygon at run time with `AddPoint(x, y)`,
+`InsertPoint(index, x, y)`, `SetPoint(index, x, y)` and
+`RemovePoint(index)` (an index outside the polygon answers `false`),
+read it with `NumPoints` and `GetPoint(index)` (an object with `X` and
+`Y`), and move it with `SkipTo(x, y)`. An entity's own `REGION` is a
+region object too, reached through the entity's `Region` property;
+`CreateRegion()` gives an entity without one an empty region to fill
+and returns it, `DeleteRegion()` takes it away. A region created this
+way is the entity's clickable area from then on, whatever its `Active`
+(the engine registers an entity's region whenever the entity reacts to
+the mouse).
+
 ### Point in region
 
 A point is inside a region when it is inside the polygon's bounding
@@ -267,6 +279,13 @@ straight line when nothing blocks the way; otherwise the engine looks for
 a path from the actor to the target through waypoints that see each other
 (a straight line between them crosses no blocked region and leaves no
 walkable one).
+
+`Scene.GetWaypointGroup(index)` returns a group as an object (`Type`
+`waypoint-group`, `Name`) whose `Active` a script may switch off to
+take its points out of path finding, as the original engine's
+`CAdWaypointGroup::m_Active` does; the flag is not a file key and
+starts on. It is not part of the scene's persistent state (nor is it
+in the original engine), but a saved game keeps it.
 
 ## `PROPERTY`
 
@@ -323,6 +342,23 @@ An entity then uses, in order: its own `SCALE` if set, else the scale at
 its position plus its `RELATIVE_SCALE`. A non-scalable entity is drawn at
 100 %.
 
+Scripts can also set a scale per axis (`ScaleX`, `ScaleY`); the engine
+(`CAdObject::GetScale`) then uses them in place of the rule above, with
+the axis left unset at 100 %. The scale applies around the sprite's
+hotspot, which stays at the object's position. The same rule holds for
+actors.
+
+### Rotation of an object
+
+A `ROTATABLE` entity or actor is drawn rotated by the rotation at its
+`X` (see above) plus the `RelativeRotate` a script may set, or by the
+script's `Rotate` when set, which replaces both. The angle is in degrees,
+positive clockwise on screen, and the sprite turns around its hotspot,
+which stays at the object's position (`CBSubFrame::Draw`,
+`CBSurface::DisplayTransform`). An object that is not rotatable is never
+rotated, whatever a script sets. How the renderer draws the rotated and
+scaled sprite is in [docs/rendering.md](../rendering.md#transforms).
+
 ### Tint at a point
 
 The tint of a colorable object at `(x, y)` is the `ALPHA_COLOR` and
@@ -347,6 +383,68 @@ nodes of a layer but belong to the scene's object list, like actors. The
 editor writes them after the layers under a `; ----- free entities`
 comment. Unlike layer entities they are scalable by default.
 
+## Scenes changed by scripts
+
+Scripts add to and take from a scene while it runs, as the original
+engine's `CAdScene` and `CAdLayer` allow:
+
+- `Scene.CreateEntity(name)` makes an empty free entity (scalable, no
+  sprite) and `Scene.LoadEntity(file)` loads an `.entity` file as a free
+  entity (its sprites, sound, region, properties and scripts set up as
+  for the scene's own; its `TEMPLATE` is not followed, as for entity
+  containers). `Scene.UnloadObject(entity)` removes a free entity, the
+  file's as well as a created one, ending its scripts.
+- `layer.AddEntity(name)`, `AddRegion(name)`, `InsertEntity(index,
+  name)` and `InsertRegion(index, name)` add a node to a layer, at the
+  end or before the node at `index` (an index past the end appends); a
+  new entity node is not scalable, like the file's. `DeleteNode(node)`,
+  by object or by index, removes one and ends its scripts.
+- `Scene.AddLayer(name)` and `InsertLayer(index, name)` add a layer the
+  size of the main layer; `DeleteLayer(layer)`, by object or by index,
+  removes one with its nodes, except the main layer.
+
+Handles are positional in Luma (a node is "node 3 of layer 1"), so
+inserting or deleting renumbers what follows: the handles scripts hold
+keep naming the same objects, as do the animation and sentence states
+and the regions the actors stand in. The scene is saved with its
+changes, so a saved game brings the created content back (see
+[saving.md](../saving.md)); the scene's persistent state notes the
+created entities by name like the file's, and ignores them when the
+scene reloads without them.
+
+## Entities of the game, and attachments
+
+`Game.CreateEntity(name)` and `Game.LoadEntity(file)` make entities that
+belong to the game rather than to a scene (the original engine's
+`CAdGame::m_Objects`), as `Game.LoadActor` does for actors: they are
+drawn among the scene's free objects, scaled and tinted by the scene
+they are shown in, updated every frame, and they stay when the scene
+changes, reset like the game's actors (their sentence and `PlayAnim`
+end, their scripts' waits are cut). `Game.UnloadObject` removes one.
+Luma keeps them in a view of their own (`World::game_view`), named by
+`EntityRef::Game`, with their sprites.
+
+`AddAttachment(file, preDisplay, x, y)` on an actor or an entity loads an
+entity file as an attachment of the object (`CAdObject::m_AttachmentsPre`,
+`m_AttachmentsPost`): an entity of the game, drawn right before
+(`preDisplay`, the default) or right after the object's own sprite, at
+the object's position plus `(x, y)` scaled by the object's scale, with
+the object's scale and tint, and registered for the mouse as the object
+itself (`m_RegisterAlias`). It animates on its own and is a script
+object (`GetAttachment(index)`, those drawn before first, or
+`GetAttachment(name)`; `NumAttachments`), so a script may change its
+sprite or play an animation on it. `RemoveAttachment(object)` or
+`RemoveAttachment(name)` removes it; the attachments of an object go
+with the object, so a scene entity's are removed when the scene
+changes while a game entity's or an actor's stay. The file's `TEMPLATE`
+is not followed. An attachment's own attachments are not drawn.
+
+`StickToRegion(region)` on an actor or a free entity (the region of the
+main layer by object or by name, `null` to unstick) draws the object
+in that region's slot of the drawing order whatever its position, until
+the scene changes; see [Drawing](#drawing). It answers `false` when the
+region is not found.
+
 ## Drawing
 
 For each active layer, in order:
@@ -358,6 +456,9 @@ For each active layer, in order:
    inside it and that have not been drawn yet, sorted by `Y`, so that an
    actor standing on the floor region is drawn between the background
    (before the region in the file) and the foreground props (after it).
+   A free object stuck to a region (`StickToRegion`) is drawn with that
+   region wherever it stands, and with no other
+   (`CAdScene::DisplayRegionContent`).
 3. After the nodes of the **main** layer, draw the remaining free objects
    (those inside no region), sorted by `Y`.
 
