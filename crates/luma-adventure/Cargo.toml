@@ -16,6 +16,7 @@ luma-video.workspace = true
 luma-formats = { workspace = true, features = ["serde"] }
 luma-render.workspace = true
 luma-script = { workspace = true, features = ["serde"] }
+crc32fast.workspace = true
 fontdue.workspace = true
 flate2.workspace = true
 postcard.workspace = true

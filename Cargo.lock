@@ -996,6 +996,7 @@ dependencies = [
 name = "luma-adventure"
 version = "0.0.1"
 dependencies = [
+ "crc32fast",
  "flate2",
  "fontdue",
  "luma-archive",

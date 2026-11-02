@@ -34,10 +34,15 @@
 //! - [`Runtime`]: a script engine and a world, driven once per frame.
 //! - [`save`]: saved games, the whole engine written to a slot and read
 //!   back (`Game.SaveGame`, `Game.LoadGame`).
+//! - [`registry`]: the private settings a game keeps between runs
+//!   (`Game.RegReadNumber`, `RegWriteString`...).
+//! - [`capture`]: screenshots and save thumbnails, captured from the
+//!   frame the front-end renders next.
 
 #![forbid(unsafe_code)]
 
 pub mod actor;
+pub mod capture;
 mod error;
 pub mod fader;
 pub mod input;
@@ -46,9 +51,11 @@ mod natives;
 mod natives_actor;
 mod natives_item;
 mod natives_sound;
+mod natives_sprite;
 mod natives_ui;
 pub mod objects;
 pub mod path;
+pub mod registry;
 pub mod responses;
 pub mod save;
 pub mod scene_state;
@@ -74,7 +81,7 @@ pub use save::{SAVE_EXTENSION, SaveHeader, read_save_header};
 pub use scene_state::{NodeState, SceneState, state_key};
 pub use scene_view::{
     AnimState, Camera, DrawItem, Drawable, EntityRef, EntityTalk, LoadedSprite, Mask, SceneView,
-    SpriteBank, draw_object, frame_height, place,
+    SpriteBank, draw_object, drawn_subframes, frame_height, is_drawn, place,
 };
 pub use settings::{GameSettings, SETTINGS_FILE};
 pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, Sounds};
@@ -85,4 +92,4 @@ pub use ui::{
     WindowState,
 };
 pub use video::{Subtitle, Subtitler, VideoPlayback, VideoPlayer, parse_subtitles};
-pub use world::{Runtime, World};
+pub use world::{LoadingIcon, QuickMessage, Runtime, ScreenImage, World};

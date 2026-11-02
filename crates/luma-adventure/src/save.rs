@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 6;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -195,6 +195,12 @@ world_state! {
     main_object: Option<NativeId>,
     name: String,
     caption: String,
+    text_encoding: i32,
+    startup_scene: Option<String>,
+    mouse_lock: (i32, i32, i32, i32),
+    temp_disable_save_state: bool,
+    loading_screen: Option<crate::world::ScreenImage>,
+    saving_screen: Option<crate::world::ScreenImage>,
     timer: u64,
     clock: u64,
     rng: u64,
@@ -316,11 +322,13 @@ pub fn save_game(
     world.log(format!("Saving game '{}'...", path.display()));
     let game = world.game_id;
     engine.apply_event(world, game, "BeforeSave", true);
+    // The thumbnail `StoreSaveThumbnail` kept goes into this file and no
+    // other (`BPersistMgr::InitSave` destroys the cached one once used).
     let header = SaveHeader {
         game: world.game_file.name.clone(),
         description: description.to_string(),
         timestamp: now(),
-        thumbnail: None,
+        thumbnail: world.save_thumbnail.take(),
     };
     let snapshot = engine.snapshot();
     let sounds = world.sounds_state();
@@ -400,7 +408,7 @@ impl World {
     /// The save directory, after trying the game's own once
     /// (`GetSaveDir`): when a file cannot be written there, saves go to
     /// the user's directory from then on.
-    fn checked_save_directory(&mut self) -> PathBuf {
+    pub(crate) fn checked_save_directory(&mut self) -> PathBuf {
         if !self.personal_save && !self.save_dir_checked {
             self.save_dir_checked = true;
             let dir = self.local_save_dir();
@@ -620,6 +628,8 @@ impl World {
         fonts.extend(self.video_font.clone());
         let mut images: Vec<String> = Vec::new();
         let mut cursors: Vec<String> = Vec::new();
+        images.extend(self.loading_screen.as_ref().map(|s| s.path.clone()));
+        images.extend(self.saving_screen.as_ref().map(|s| s.path.clone()));
         if let Some(def) = &self.responses.def {
             fonts.extend(def.font.clone());
             fonts.extend(def.font_hover.clone());
