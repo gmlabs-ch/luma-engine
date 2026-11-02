@@ -72,6 +72,9 @@ and gets the core alone; the CI checks that this builds.
 
 - A module of another genre, to prove the public API carries one without
   touching the core (`luma-lumen` is a second module, but it needs nothing
-  from the core yet).
+  from the core yet; `luma-3d` is a second one that reaches the renderer
+  without touching it: it depends on `luma-formats` only, and the adventure
+  module draws its models through the public mesh API of `luma-render`,
+  the 3D pass of [3d-actors.md](3d-actors.md) section 12.4).
 - Features for the parts of the core a game may not need (the video
   decoder, the TrueType rasterizer).

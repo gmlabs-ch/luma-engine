@@ -3,7 +3,7 @@
 [![CI](https://github.com/gmlabs-ch/luma-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/gmlabs-ch/luma-engine/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-**A modern 2D narrative game engine, written in Rust.**
+**A modern narrative game engine, written in Rust, that plays Wintermute's 2D adventures and its 3D characters on painted backgrounds.**
 
 Luma Engine plays point-and-click adventure games made with
 [Wintermute Engine](https://github.com/MnemonicWME/wintermute-engine) (WME),
@@ -36,7 +36,7 @@ Luma Engine reads the same game data with a new engine built for today:
 | 0 | Workspace, licensing and CI | ✅ Done |
 | 1 | Read and unpack WME game packages (`luma list`, `luma unpack`) | ✅ Done |
 | 2 | Display a static scene (`luma-player <game> --scene ...`) | ✅ Done |
-| 3 | Run compiled game scripts (`luma-player <game>` plays a game) | In progress |
+| 3 | Run compiled game scripts (`luma-player <game>` plays a game) | ✅ Done |
 | 4 | A complete game playable from start to finish on macOS | Planned |
 | 5 | Playable in the browser, then on iOS | Planned |
 
@@ -194,6 +194,20 @@ luma-player path/to/game --headless --load 36 --drag 61,100:261,109
 luma-player path/to/game --headless --scene scenes/room/room.scene --click Cupboard:Take --after 250 --save 5
 luma-player path/to/game --headless --load 5 --entities
 ```
+
+## Compatibility
+
+Luma implements the whole scripting interface of Wintermute Engine 1.x, as
+inventoried in [docs/compatibility.md](docs/compatibility.md): every method,
+property, function, constructor and event. Of the 1153 members, 1076 are
+implemented and 77 are deliberately without effect, because they are
+Windows-, debugger- or editor-only, belong to unfinished stubs of WME itself,
+or belong to the legacy WME 1.0 3D actors with MS3D models, which Luma refuses
+with a clear message. The behaviour follows the MIT-licensed WME 1.x sources,
+quirks included.
+
+The two test games play from start to finish with the headless player; a
+complete playthrough in a window is the next milestone.
 
 ## Games
 
