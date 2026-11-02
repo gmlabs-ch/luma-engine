@@ -95,6 +95,13 @@ impl World {
                 });
                 Some((actor.x, actor.y, scale_x, scale_y))
             }
+            // A 3D actor's emitter follows its projected position, unscaled
+            // (`CAdActor3DX::UpdatePartEmitter` without a bone).
+            #[cfg(feature = "3d")]
+            Kind::Actor3D => {
+                let actor = self.actor3d(owner)?;
+                Some((actor.x, actor.y, 100.0, 100.0))
+            }
             Kind::Entity(r) => {
                 let entity = self.entity_def(*r)?;
                 let (scale_x, scale_y) = match r {

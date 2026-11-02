@@ -421,6 +421,7 @@ impl World {
                 Kind::Game
                     | Kind::Entity(_)
                     | Kind::Actor
+                    | Kind::Actor3D
                     | Kind::Item
                     | Kind::Control
                     | Kind::Object
@@ -443,6 +444,8 @@ impl World {
             Some(Kind::Game) => Some(self.caption.clone()),
             Some(Kind::Entity(r)) => self.entity_def(*r).map(|e| e.caption.clone()),
             Some(Kind::Actor) => self.actor(id).map(|a| a.def.caption.clone()),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d(id).map(|a| a.caption.clone()),
             Some(Kind::Item) => self.item(id).map(|i| i.def.caption.clone()),
             Some(Kind::Control) => self.control(id).map(|c| {
                 if c.text.is_empty() {

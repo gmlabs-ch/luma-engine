@@ -655,6 +655,13 @@ pub struct SceneView {
     /// Whether this view holds the game's own entities rather than a
     /// scene: its free entities are then `EntityRef::Game`, not `Free`.
     pub(crate) game_level: bool,
+    /// The 3D side of the scene when it has `GEOMETRY` (and the `3d`
+    /// feature is on): the geometry, the path finder, the camera's
+    /// projection; see `docs/3d-actors.md`.
+    pub three_d: Option<crate::scene3d::Scene3d>,
+    /// What loading the geometry logged, taken by the world.
+    #[serde(skip)]
+    pub(crate) three_d_log: Vec<String>,
     /// The frames that became current at the last [`SceneView::advance`]:
     /// the entity, its sprite's key and the frame's index. The world takes
     /// them to play the frames' sounds and raise their events.
@@ -682,8 +689,11 @@ impl SceneView {
             playing: HashMap::new(),
             subtitles: HashMap::new(),
             game_level: false,
+            three_d: None,
+            three_d_log: Vec::new(),
             shown: Vec::new(),
         };
+        view.load_geometry(vfs);
         let paths: Vec<String> = view
             .scene
             .entities()
@@ -710,7 +720,33 @@ impl SceneView {
             playing: HashMap::new(),
             subtitles: HashMap::new(),
             game_level: true,
+            three_d: None,
+            three_d_log: Vec::new(),
             shown: Vec::new(),
+        }
+    }
+
+    /// Loads the scene's 3D geometry (`GEOMETRY`) with the `3d` feature;
+    /// without it, a scene with geometry is logged and runs as a 2D scene.
+    #[cfg(feature = "3d")]
+    fn load_geometry(&mut self, vfs: &Vfs) {
+        match crate::scene3d::Scene3d::load(vfs, &self.scene) {
+            Some(Ok((three_d, warnings))) => {
+                self.three_d_log.extend(warnings);
+                self.three_d = Some(three_d);
+            }
+            Some(Err(err)) => self.three_d_log.push(err),
+            None => {}
+        }
+    }
+
+    /// See the `3d` version.
+    #[cfg(not(feature = "3d"))]
+    fn load_geometry(&mut self, _vfs: &Vfs) {
+        if let Some(file) = &self.scene.geometry {
+            self.three_d_log.push(format!(
+                "Scene geometry '{file}' ignored: this build of Luma Engine was made without the `3d` feature"
+            ));
         }
     }
 

@@ -47,6 +47,8 @@
 
 pub mod accessibility;
 pub mod actor;
+#[cfg(feature = "3d")]
+pub mod actor3d;
 pub mod capture;
 mod error;
 pub mod fader;
@@ -54,6 +56,8 @@ pub mod input;
 pub mod inventory;
 mod natives;
 mod natives_actor;
+#[cfg(feature = "3d")]
+mod natives_actor3d;
 mod natives_item;
 mod natives_object;
 mod natives_particles;
@@ -67,6 +71,8 @@ pub mod path;
 pub mod registry;
 pub mod responses;
 pub mod save;
+#[cfg(feature = "3d")]
+pub mod scene3d;
 mod scene_edit;
 pub mod scene_state;
 pub mod scene_view;
@@ -74,14 +80,21 @@ pub mod settings;
 pub mod sound;
 pub mod talk;
 pub mod text;
+#[cfg(not(feature = "3d"))]
+mod three_d_off;
 pub mod ui;
 pub mod video;
 pub mod world;
+
+#[cfg(not(feature = "3d"))]
+use three_d_off::{actor3d, scene3d};
 
 pub use accessibility::{
     Accessibility, CommandSpeech, RecordingSpeech, Speech, SpeechKind, SpeechRecord,
 };
 pub use actor::{Actor, ActorEvent, ActorState, WalkContext};
+#[cfg(feature = "3d")]
+pub use actor3d::{Actor3d, Actor3dDraw, Actor3dState, ThreeDFrame};
 pub use error::{Error, Result};
 pub use fader::{Fader, SCENE_FADE_MS};
 pub use input::{Cursors, Keyboard, Mouse};
@@ -98,6 +111,8 @@ pub use scene_view::{
     LoadedSprite, Mask, Overlays, SceneView, SpriteBank, Transform, draw_object, drawn_subframes,
     frame_height, is_drawn, place, place_transformed,
 };
+#[cfg(feature = "3d")]
+pub use scene3d::{Fog, Scene3d};
 pub use settings::{GameSettings, SETTINGS_FILE};
 pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, SfxEffect, Sounds};
 pub use talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};

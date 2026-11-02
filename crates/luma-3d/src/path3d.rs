@@ -23,6 +23,7 @@ pub const ALTERNATE_TARGET_BACKOFF: f32 = 30.0;
 /// points with [`Self::first`] and [`Self::advance`] and reads the one it is
 /// walking toward with [`Self::current`].
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Path3D {
     points: Vec<Vec3>,
     /// The cursor: `None` before `first`/`advance`, else an index that may

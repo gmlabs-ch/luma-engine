@@ -27,6 +27,8 @@ impl World {
     pub fn object_cursor(&self, id: NativeId) -> Option<String> {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).and_then(|a| a.def.cursor.clone()),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d(id).and_then(|a| a.cursor.clone()),
             Some(Kind::Entity(r)) => self.entity_def(*r).and_then(|e| e.cursor.clone()),
             Some(Kind::Control) => self.control(id).and_then(|c| c.cursor.clone()),
             _ => None,
@@ -46,6 +48,11 @@ impl World {
         match self.objects.get(id).map(|n| n.kind.clone()) {
             Some(Kind::Actor) => match self.actor_mut(id) {
                 Some(actor) => actor.def.cursor = value,
+                None => return false,
+            },
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => match self.actor3d_mut(id) {
+                Some(actor) => actor.cursor = value,
                 None => return false,
             },
             Some(Kind::Entity(r)) => match self.entity_def_mut(r) {
@@ -110,6 +117,8 @@ impl World {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Game) => Some(self.caption.clone()),
             Some(Kind::Actor) => self.actor(id).map(|a| a.def.caption.clone()),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d(id).map(|a| a.caption.clone()),
             Some(Kind::Entity(r)) => self.entity_def(*r).map(|e| e.caption.clone()),
             Some(Kind::Region { layer, index }) => self
                 .scene()
@@ -136,6 +145,12 @@ impl World {
                 Some(Kind::Actor) => {
                     if let Some(actor) = self.actor_mut(id) {
                         actor.def.caption = text;
+                    }
+                }
+                #[cfg(feature = "3d")]
+                Some(Kind::Actor3D) => {
+                    if let Some(actor) = self.actor3d_mut(id) {
+                        actor.caption = text;
                     }
                 }
                 Some(Kind::Entity(r)) => {
@@ -253,7 +268,7 @@ impl World {
             "StickToRegion"
                 if matches!(
                     self.objects.get(id).map(|n| &n.kind),
-                    Some(Kind::Actor | Kind::Entity(_))
+                    Some(Kind::Actor | Kind::Actor3D | Kind::Entity(_))
                 ) =>
             {
                 Return::value(self.stick_to_region(id, &arg(0)))

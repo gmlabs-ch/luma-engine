@@ -112,6 +112,10 @@ impl World {
             Kind::Frame { .. } => self.frame_get(id, name),
             Kind::SubFrame { .. } => self.subframe_get(id, name),
             Kind::Actor => self.actor_get(id, name),
+            #[cfg(feature = "3d")]
+            Kind::Actor3D => self.actor3d_get(id, name),
+            #[cfg(not(feature = "3d"))]
+            Kind::Actor3D => None,
             Kind::Control => self.control_get(id, name),
             Kind::Item => self.item_get(id, name),
             Kind::Emitter(_) => self.emitter_get(id, name),
@@ -167,6 +171,10 @@ impl World {
             Kind::Frame { .. } => self.frame_set(id, name, value),
             Kind::SubFrame { .. } => self.subframe_set(id, name, value),
             Kind::Actor => self.actor_set(id, name, value),
+            #[cfg(feature = "3d")]
+            Kind::Actor3D => self.actor3d_set(id, name, value),
+            #[cfg(not(feature = "3d"))]
+            Kind::Actor3D => false,
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
             Kind::Emitter(_) => self.emitter_set(id, name, value),
@@ -235,6 +243,10 @@ impl World {
             Kind::Frame { .. } => self.frame_call(id, name, args, &ctx),
             Kind::SubFrame { .. } => self.subframe_call(id, name, args),
             Kind::Actor => self.actor_call(id, name, args, ctx),
+            #[cfg(feature = "3d")]
+            Kind::Actor3D => self.actor3d_call(id, name, args, ctx),
+            #[cfg(not(feature = "3d"))]
+            Kind::Actor3D => None,
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
             Kind::Emitter(_) => self.emitter_call(id, name, args),
@@ -426,6 +438,13 @@ impl World {
                 return Some(self.volume_property(name));
             }
             "FPS" => Value::Int(self.fps),
+            // The 3D shadow settings (`CBGame`): Luma's renderer supports
+            // every shadow type, where the original asks the device.
+            "MaxShadowType" => Value::Int(i32::from(self.max_shadow_type)),
+            "Shadows" => Value::Bool(self.max_shadow_type > 0),
+            "SimpleShadows" => Value::Bool(self.max_shadow_type == 1),
+            "SupportsRealTimeShadows" => Value::Bool(true),
+            "MaxActiveLights" => Value::Int(8),
             "TextEncoding" => Value::Int(self.text_encoding),
             "StartupScene" => self.startup_scene.clone().map_or(Value::Null, Value::from),
             "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
@@ -486,6 +505,9 @@ impl World {
                 // `NUM_TEXT_ENCODINGS` is 2: ANSI and UTF-8.
                 self.text_encoding = value.get_int(self).clamp(0, 1);
             }
+            "MaxShadowType" => self.max_shadow_type = value.get_int(self).clamp(0, 3) as u8,
+            "Shadows" => self.max_shadow_type = if value.get_bool(self) { 3 } else { 0 },
+            "SimpleShadows" => self.max_shadow_type = if value.get_bool(self) { 1 } else { 3 },
             "StartupScene" => {
                 self.startup_scene = match value {
                     Value::Null => None,
@@ -591,9 +613,22 @@ impl World {
                 });
                 Return::value(deleted)
             }
-            "LoadActor" => {
+            "LoadActor" | "LoadActor3D" => {
                 let path = arg(0).get_string(self);
                 Return::value(native_or_null(self.load_actor(ctx.engine, &path, false)))
+            }
+            "IsShadowTypeSupported" => Return::value((0..=3).contains(&arg(0).get_int(self))),
+            "SetShadowImage" => {
+                let image = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let ok = image.as_deref().is_none_or(|p| self.vfs.exists(p));
+                self.shadow_image = if ok { image } else { None };
+                Return::value(ok)
+            }
+            "GetShadowImage" => {
+                Return::value(self.shadow_image.clone().map_or(Value::Null, Value::from))
             }
             "LoadEntity" => {
                 let path = arg(0).get_string(self);
@@ -608,7 +643,7 @@ impl World {
                     self.create_game_entity(ctx.engine, entity_name.as_deref()),
                 ))
             }
-            "UnloadObject" | "UnloadActor" | "UnloadEntity" | "DeleteEntity" => {
+            "UnloadObject" | "UnloadActor" | "UnloadEntity" | "UnloadActor3D" | "DeleteEntity" => {
                 if let Some(id) = arg(0).as_native() {
                     self.unload_object(ctx.engine, id);
                 }
@@ -1017,7 +1052,7 @@ impl World {
             "ScrollPixelsY" => Value::Int(self.scroll_pixels_y),
             "ScrollSpeedX" => Value::Int(self.scroll_time_x as i32),
             "ScrollSpeedY" => Value::Int(self.scroll_time_y as i32),
-            _ => return None,
+            _ => return self.scene3d_get(name),
         })
     }
 
@@ -1054,7 +1089,7 @@ impl World {
                     view.scene.persistent_state_sprites = v;
                 }
             }
-            _ => return false,
+            _ => return self.scene3d_set(name, value),
         }
         true
     }
@@ -1062,7 +1097,7 @@ impl World {
     fn scene_call(&mut self, name: &str, args: &[Value], ctx: Context<'_>) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         Some(match name {
-            "LoadActor" => {
+            "LoadActor" | "LoadActor3D" => {
                 let path = arg(0).get_string(self);
                 Return::value(native_or_null(self.load_actor(ctx.engine, &path, true)))
             }
@@ -1264,7 +1299,7 @@ impl World {
                 }
             }
             "GetFadeColor" => Return::value(self.scene_fader.color_int()),
-            _ => return None,
+            _ => return self.scene3d_call(name, args, ctx),
         })
     }
 

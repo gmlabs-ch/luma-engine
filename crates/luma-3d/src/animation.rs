@@ -352,6 +352,7 @@ struct TransitionTime {
 /// that the state survives a reload of the model (`CXActiveAnimation::
 /// Persist` stores the set by pointer into the model's own list).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActiveAnimationState {
     /// The animation set's name.
     pub set: String,
@@ -369,6 +370,7 @@ pub struct ActiveAnimationState {
 
 /// A channel as a saved game keeps it (`CXAnimationChannel::Persist`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ChannelState {
     /// The current animation and, while transitioning, the incoming one.
     pub anims: [Option<ActiveAnimationState>; 2],
@@ -388,6 +390,7 @@ pub struct ChannelState {
 /// [`AnimatedModel::state`] and put back on a freshly loaded model with
 /// [`AnimatedModel::restore`].
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AnimationState {
     /// The timer the deltas added up to.
     pub timer: u32,

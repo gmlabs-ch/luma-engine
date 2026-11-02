@@ -20,7 +20,7 @@ core crates under short names and the modules behind Cargo features:
 | `luma::video` | `luma-video`: Ogg Theora videos | yes |
 | `luma::adventure` | `luma-adventure`: the point-and-click adventure game as Wintermute runs it | feature `adventure`, on by default |
 | `luma::lumen` | `luma-lumen`: the Lumen scenario format for games made for Luma (parser, checker, text runner; see [lumen.md](lumen.md)) | feature `lumen`, off by default |
-| `luma::three_d` | `luma-3d`: 3D characters on painted backgrounds, as Wintermute's 3D actors (the `.3ds` scene geometry, the camera that maps scene pixels to the 3D world, the `.x` models with their skin and animation sets, the Direct3D maths conventions; see [3d-actors.md](3d-actors.md)). The feature is `3d`; the module path needs a name that can start an identifier. | feature `3d`, off by default |
+| `luma::three_d` | `luma-3d`: 3D characters on painted backgrounds, as Wintermute's 3D actors (the `.3ds` scene geometry, the camera that maps scene pixels to the 3D world, the `.x` models with their skin and animation sets, the Direct3D maths conventions; see [3d-actors.md](3d-actors.md)). The feature is `3d`; the module path needs a name that can start an identifier. With `adventure` on, the feature also turns on `luma-adventure/3d`: the scenes load their `GEOMETRY`, `LoadActor3D` builds 3D actors, and their state goes into the saved games. | feature `3d`, off by default |
 
 One more core crate is not re-exported: `luma-compiler`, the compiler
 from script sources to the bytecode `luma::script` runs (see

@@ -53,6 +53,10 @@ impl World {
         for (_, actor) in &mut self.actors {
             actor.remap_regions(|(l, i)| node(l, i));
         }
+        #[cfg(feature = "3d")]
+        for (_, actor) in &mut self.actors3d {
+            actor.remap_regions(|(l, i)| node(l, i));
+        }
     }
 
     /// Renumbers the handles and states naming the game's own entities
@@ -612,7 +616,7 @@ impl World {
     pub fn stick_to_region(&mut self, id: NativeId, region: &Value) -> bool {
         if !matches!(
             self.objects.get(id).map(|n| &n.kind),
-            Some(Kind::Actor | Kind::Entity(_))
+            Some(Kind::Actor | Kind::Actor3D | Kind::Entity(_))
         ) {
             return false;
         }

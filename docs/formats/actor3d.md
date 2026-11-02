@@ -139,13 +139,22 @@ does.
 
 ## What Luma does with the result
 
-`Actor3dDef` holds paths and values; it loads nothing itself. The caller
-(the actor of the game module, task 14 of [../3d-actors.md](../3d-actors.md)):
+`Actor3dDef` holds paths and values; it loads nothing itself. The caller,
+`luma_adventure::actor3d::Actor3d::load` (the `3d` feature of the
+adventure module; see [../3d-actors.md](../3d-actors.md), section 8):
 
 1. reads the file; with templates, `Actor3dDef::parse_with` and a closure
    that reads a path through the game's file system;
 2. loads `models[0]` with `Model::parse(bytes, path)`, then merges each
    further model with `Model::merge_animations`, and loads `shadow_model`
    the same way when present;
-3. applies the `ANIMATION` blocks with `Actor3dDef::apply_animations`;
-4. uses the other fields as the actor's initial state.
+3. applies the `ANIMATION` blocks with `Actor3dDef::apply_animations`
+   (a block naming no set of the model is logged);
+4. uses the other fields as the actor's initial state, attaches the
+   `SCRIPT`s and sets the `PROPERTY` values on the script object; the
+   `SHADOW_MODEL` path is kept for the shadow drawing step, and the
+   `EFFECT` blocks are ignored.
+
+A game loads such a file with `Game.LoadActor3D`, `Scene.LoadActor3D`,
+or `LoadActor`: the first keyword of the file decides which actor type
+is built, as `CAdActor3D::CreateFromFile` does.

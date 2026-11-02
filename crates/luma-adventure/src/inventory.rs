@@ -755,7 +755,7 @@ impl World {
         let usable = active.is_some_and(|a| {
             matches!(
                 self.objects.get(a).map(|n| &n.kind),
-                Some(Kind::Entity(_) | Kind::Actor | Kind::Item)
+                Some(Kind::Entity(_) | Kind::Actor | Kind::Actor3D | Kind::Item)
             )
         });
         let hover = usable

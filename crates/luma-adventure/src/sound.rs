@@ -272,7 +272,7 @@ impl World {
     fn can_own_sound(&self, owner: NativeId) -> bool {
         matches!(
             self.objects.get(owner).map(|n| &n.kind),
-            Some(Kind::Game | Kind::Entity(_) | Kind::Actor)
+            Some(Kind::Game | Kind::Entity(_) | Kind::Actor | Kind::Actor3D)
         )
     }
 
@@ -488,6 +488,11 @@ impl World {
             Some(Kind::Actor) => self
                 .actor(owner)
                 .filter(|a| a.def.active && a.def.sound_panning)
+                .map(|a| a.x),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self
+                .actor3d(owner)
+                .filter(|a| a.active && a.sound_panning)
                 .map(|a| a.x),
             Some(Kind::Entity(r)) => self
                 .entity_def(r)

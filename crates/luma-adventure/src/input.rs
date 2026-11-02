@@ -232,6 +232,11 @@ enum HitShape {
     Polygon(Vec<Point>),
     /// A rectangle on screen (a window, a button).
     Rect(i32, i32, i32, i32),
+    /// The projected bounding rectangle of a 3D actor's model, in layer
+    /// coordinates (left, top, right, bottom); a point inside is
+    /// confirmed by a pick into the model (`CXModel::IsTransparentAt`).
+    #[cfg_attr(not(feature = "3d"), allow(dead_code))]
+    Model3D(i32, i32, i32, i32),
 }
 
 /// An object's hit area.
@@ -250,6 +255,21 @@ impl HitArea {
             owner,
             layer_offset: (0, 0),
             shape: HitShape::Rect(x, y, w, h),
+        }
+    }
+
+    /// The projected bounding rectangle of a 3D actor, in the
+    /// coordinates of the layer it is drawn in.
+    #[cfg_attr(not(feature = "3d"), allow(dead_code))]
+    pub(crate) fn model3d(
+        owner: NativeId,
+        layer_offset: (i32, i32),
+        (left, top, right, bottom): (i32, i32, i32, i32),
+    ) -> HitArea {
+        HitArea {
+            owner,
+            layer_offset,
+            shape: HitShape::Model3D(left, top, right, bottom),
         }
     }
 }
@@ -560,6 +580,7 @@ impl World {
                     };
                     match self.objects.get(*id).map(|n| n.kind.clone()) {
                         Some(Kind::Actor) => self.actor_hits(*id, layer_offset, hits),
+                        Some(Kind::Actor3D) => self.actor3d_hits(*id, layer_offset, hits),
                         Some(Kind::Entity(r)) => self.entity_hits(*id, r, layer_offset, hits),
                         _ => {}
                     }
@@ -810,6 +831,7 @@ impl World {
                     (l, t, r - l, b - t)
                 }
                 HitShape::Rect(x, y, w, h) => (*x, *y, *w, *h),
+                HitShape::Model3D(l, t, r, b) => (*l, *t, r - l, b - t),
                 HitShape::Pixels {
                     bank,
                     image,
@@ -866,6 +888,13 @@ impl World {
                 HitShape::Polygon(points) => crate::path::polygon_contains(points, lx, ly),
                 HitShape::Rect(rx, ry, rw, rh) => {
                     lx >= *rx && ly >= *ry && lx < rx + rw && ly < ry + rh
+                }
+                HitShape::Model3D(l, t, r, b) => {
+                    lx >= *l
+                        && ly >= *t
+                        && lx <= *r
+                        && ly <= *b
+                        && self.actor3d_hit_at(hit.owner, lx, ly)
                 }
                 HitShape::Pixels {
                     bank,

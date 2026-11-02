@@ -990,6 +990,7 @@ name = "luma-3d"
 version = "0.0.1"
 dependencies = [
  "luma-formats",
+ "serde",
 ]
 
 [[package]]
@@ -999,6 +1000,7 @@ dependencies = [
  "crc32fast",
  "flate2",
  "fontdue",
+ "luma-3d",
  "luma-archive",
  "luma-audio",
  "luma-compiler",

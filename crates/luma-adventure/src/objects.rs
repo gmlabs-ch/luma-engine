@@ -80,6 +80,10 @@ pub enum Kind {
     /// An actor (`Game.LoadActor`, `Scene.LoadActor`); its state lives in
     /// the world's actor list.
     Actor,
+    /// A 3D actor (`Game.LoadActor3D`, `Scene.LoadActor3D`, or `LoadActor`
+    /// given an `ACTOR3DX` file); its state lives in the world's 3D actor
+    /// list, which only the `3d` feature fills.
+    Actor3D,
     /// The screen fader scripts wait for (`Game.FadeOut`).
     Fader,
     /// The current scene's own fader, over the scene only

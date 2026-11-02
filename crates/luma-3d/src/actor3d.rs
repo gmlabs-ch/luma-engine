@@ -32,6 +32,7 @@ pub const ANIM_EXTENSION: &str = "anim";
 
 /// How an actor casts its shadow (`TShadowType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ShadowType {
     /// No shadow.
     None = 0,

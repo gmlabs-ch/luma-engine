@@ -122,6 +122,15 @@ pub struct World {
     pub(crate) last_scroll_x: u64,
     pub(crate) last_scroll_y: u64,
     pub(crate) actors: Vec<(NativeId, Actor)>,
+    /// The 3D actors (`Game.LoadActor3D`, `Scene.LoadActor3D`), the game's
+    /// then the scene's, in load order; empty without the `3d` feature.
+    pub(crate) actors3d: Vec<(NativeId, crate::actor3d::Actor3d)>,
+    /// `Game.MaxShadowType`: the highest shadow type the game allows its
+    /// 3D actors (3, stencil, by default).
+    pub(crate) max_shadow_type: u8,
+    /// `Game.SetShadowImage`: the image of the 3D actors' simple shadows
+    /// when they name none.
+    pub(crate) shadow_image: Option<String>,
     /// The particle emitters of entities and actors, by handle.
     pub(crate) emitters: Vec<(NativeId, crate::particles::Emitter)>,
     pub(crate) pending_events: Vec<(NativeId, String)>,
@@ -281,6 +290,9 @@ impl World {
             last_scroll_x: 0,
             last_scroll_y: 0,
             actors: Vec::new(),
+            actors3d: Vec::new(),
+            max_shadow_type: 3,
+            shadow_image: None,
             emitters: Vec::new(),
             pending_events: Vec::new(),
             sounds: Sounds::new(audio),
@@ -953,6 +965,10 @@ impl World {
                 .actor(id)
                 .map(|a| a.def.name.clone())
                 .unwrap_or_default(),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d(id).map(|a| a.name.clone()).unwrap_or_default(),
+            #[cfg(not(feature = "3d"))]
+            Some(Kind::Actor3D) => String::new(),
             Some(Kind::Control) => self.control(id).map(|c| c.name.clone()).unwrap_or_default(),
             Some(Kind::Item) => self
                 .item(id)
@@ -1000,14 +1016,24 @@ impl World {
         self.actors.iter().map(|(id, _)| *id).collect()
     }
 
-    /// Loads an actor (`Game.LoadActor`, `Scene.LoadActor`) and attaches
-    /// its scripts; `None` when the file cannot be loaded.
+    /// Loads an actor (`Game.LoadActor`, `Scene.LoadActor`, `LoadActor3D`)
+    /// and attaches its scripts; `None` when the file cannot be loaded.
+    /// The file's first keyword tells a 2D `ACTOR` from a 3D `ACTOR3DX`
+    /// (`CAdActor3D::IsActorX`), whatever method asked.
     pub fn load_actor(
         &mut self,
         engine: &mut Engine,
         path: &str,
         scene_bound: bool,
     ) -> Option<NativeId> {
+        #[cfg(feature = "3d")]
+        if self
+            .vfs
+            .read(path)
+            .is_ok_and(|bytes| luma_3d::Actor3dDef::is_actor_x(&bytes))
+        {
+            return self.load_actor3d(engine, path, scene_bound);
+        }
         let mut actor = match Actor::load(&self.vfs, path, scene_bound) {
             Ok(actor) => actor,
             Err(err) => {
@@ -1040,7 +1066,7 @@ impl World {
     /// whether the handle named one.
     pub fn unload_object(&mut self, engine: &mut Engine, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| &n.kind) {
-            Some(Kind::Actor | Kind::Inert(_) | Kind::Object) => {}
+            Some(Kind::Actor | Kind::Actor3D | Kind::Inert(_) | Kind::Object) => {}
             Some(Kind::Control) => return self.unload_control(engine, id),
             // A free entity is one of the scene's objects (`m_Objects`);
             // a layer node is not, and stays.
@@ -1063,6 +1089,7 @@ impl World {
         self.stop_sfx(id, true);
         self.sounds.objects.remove(&id);
         self.actors.retain(|(i, _)| *i != id);
+        self.actors3d.retain(|(i, _)| *i != id);
         if self.main_object == Some(id) {
             self.main_object = None;
         }
@@ -1076,7 +1103,7 @@ impl World {
 
     /// The floor an actor walks on: the scene, the polygons of the other
     /// active objects, and every waypoint but its own.
-    fn obstacles_for(
+    pub(crate) fn obstacles_for(
         &self,
         id: NativeId,
     ) -> (Vec<Vec<luma_formats::Point>>, Vec<luma_formats::Point>) {
@@ -1216,6 +1243,7 @@ impl World {
             });
             self.queue_events(id, events);
         }
+        self.update_actors3d();
         if self.auto_scroll {
             if let Some(main) = self.main_object.filter(|id| self.objects.contains(*id)) {
                 if let Some((x, y)) = self.position_of(main) {
@@ -1344,6 +1372,11 @@ impl World {
                 let height = self.scene.as_ref().map_or(0, |v| actor.height(&v.scene));
                 Some((actor.x, actor.y - height / 2))
             }
+            #[cfg(feature = "3d")]
+            Kind::Actor3D => {
+                let actor = self.actor3d(id)?;
+                Some((actor.x, actor.y - actor.height() / 2))
+            }
             Kind::Entity(r) => {
                 let e = self.entity_def(*r)?;
                 Some((e.x, e.y - self.entity_height(*r) / 2))
@@ -1436,6 +1469,26 @@ impl World {
                         d.after = around.after;
                         d
                     }
+                    // A 3D actor has no sprite: its model is drawn by the
+                    // 3D pass at this place of the order
+                    // (`World::three_d_draws`).
+                    #[cfg(feature = "3d")]
+                    Some(Kind::Actor3D) => {
+                        let actor = self.actor3d(id).expect("a free 3D actor");
+                        Drawable {
+                            x: actor.x,
+                            y: actor.y,
+                            sprite: None,
+                            bank: &actor.bank,
+                            frame: 0,
+                            transform: crate::scene_view::Transform::IDENTITY,
+                            tint: actor.tint.unwrap_or(Rgba::OPAQUE_WHITE),
+                            blend: actor.blend_mode,
+                            stick: None,
+                            before: Vec::new(),
+                            after: Vec::new(),
+                        }
+                    }
                     Some(Kind::Entity(r)) => {
                         // A game-level entity is scaled, turned and tinted
                         // by the scene it is shown in.
@@ -1479,9 +1532,10 @@ impl World {
     }
 
     /// The free objects of the game drawn among the scene's: the active
-    /// actors (the game's then the scene's) and the game's active
-    /// entities that are not attachments, with their handles, where they
-    /// stand and the region they stick to.
+    /// actors (the game's then the scene's), the active 3D actors at
+    /// their projected positions, and the game's active entities that
+    /// are not attachments, with their handles, where they stand and the
+    /// region they stick to.
     pub(crate) fn free_objects(&self) -> Vec<(NativeId, crate::scene_view::FreeObject)> {
         let mut objects: Vec<(NativeId, crate::scene_view::FreeObject)> = self
             .actors
@@ -1498,6 +1552,13 @@ impl World {
                 )
             })
             .collect();
+        #[cfg(feature = "3d")]
+        objects.extend(
+            self.actors3d
+                .iter()
+                .filter(|(_, a)| a.active)
+                .map(|(id, a)| (*id, a.free_object(self.stick_region_of(*id)))),
+        );
         for r in self.game_view.entity_refs() {
             let Some(entity) = self.game_view.entity(r) else {
                 continue;
@@ -1672,12 +1733,13 @@ impl World {
             self.temp_disable_save_state = false;
         }
         // Objects of the old scene, and the scripts attached to them.
-        let scene_actors: Vec<NativeId> = self
+        let mut scene_actors: Vec<NativeId> = self
             .actors
             .iter()
             .filter(|(_, a)| a.scene_bound)
             .map(|(id, _)| *id)
             .collect();
+        scene_actors.extend(self.scene_bound_actors3d());
         // The windows' container entities live outside the scene.
         // The windows' container entities and the game's own live outside
         // the scene; the scene's objects are its nodes, free entities and
@@ -1696,7 +1758,7 @@ impl World {
             .iter()
             .filter(|(id, n)| match n.kind {
                 Kind::Layer(_) | Kind::Region { .. } | Kind::WaypointGroup(_) => true,
-                Kind::Entity(_) | Kind::Actor => is_scene_object(*id),
+                Kind::Entity(_) | Kind::Actor | Kind::Actor3D => is_scene_object(*id),
                 // The sprite, cursor and region objects of the scene's
                 // objects, their frames and sub-frames go with them.
                 Kind::Sprite(owner) | Kind::CursorSprite(owner) | Kind::EntityRegion(owner) => {
@@ -1717,6 +1779,7 @@ impl World {
             .map(|(id, _)| id)
             .collect();
         self.actors.retain(|(id, _)| !scene_actors.contains(id));
+        self.actors3d.retain(|(id, _)| !scene_actors.contains(id));
         if self
             .main_object
             .is_some_and(|id| scene_actors.contains(&id))
@@ -1726,6 +1789,11 @@ impl World {
         // The game's actors and entities are reset before the new scene
         // loads (`CAdGame::ChangeScene`).
         for (id, actor) in &mut self.actors {
+            actor.reset();
+            engine.reset_object(*id);
+        }
+        #[cfg(feature = "3d")]
+        for (id, actor) in &mut self.actors3d {
             actor.reset();
             engine.reset_object(*id);
         }
@@ -1807,6 +1875,18 @@ impl World {
         self.hide_taken_item_entities();
         for (_, actor) in &mut self.actors {
             actor.invalidate_regions();
+        }
+        #[cfg(feature = "3d")]
+        for (_, actor) in &mut self.actors3d {
+            actor.invalidate_regions();
+        }
+        for message in std::mem::take(
+            &mut self
+                .scene_mut()
+                .map(|v| std::mem::take(&mut v.three_d_log))
+                .unwrap_or_default(),
+        ) {
+            self.log(message);
         }
 
         // Attach scripts in file order: the scene's, then each layer's and
@@ -1959,6 +2039,8 @@ impl World {
     pub fn font_of(&self, id: NativeId) -> Option<String> {
         let own = match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).and_then(|a| a.def.font.clone()),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d(id).and_then(|a| a.font.clone()),
             Some(Kind::Entity(r)) => self.entity_def(*r).and_then(|e| e.font.clone()),
             _ => None,
         };
@@ -1984,6 +2066,12 @@ impl World {
                     actor.def.font = value;
                 }
             }
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => {
+                if let Some(actor) = self.actor3d_mut(id) {
+                    actor.font = value;
+                }
+            }
             Some(Kind::Entity(r)) => {
                 if let Some(entity) = self.entity_def_mut(r) {
                     entity.font = value;
@@ -1998,6 +2086,8 @@ impl World {
     pub fn subtitle_mods(&self, id: NativeId) -> SubtitleMods {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).map(|a| a.subtitles).unwrap_or_default(),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d(id).map(|a| a.subtitles).unwrap_or_default(),
             Some(Kind::Entity(r)) => self
                 .view_of(*r)
                 .and_then(|v| v.subtitles.get(r).copied())
@@ -2011,6 +2101,12 @@ impl World {
         match self.objects.get(id).map(|n| n.kind.clone()) {
             Some(Kind::Actor) => {
                 if let Some(actor) = self.actor_mut(id) {
+                    actor.subtitles = mods;
+                }
+            }
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => {
+                if let Some(actor) = self.actor3d_mut(id) {
                     actor.subtitles = mods;
                 }
             }
@@ -2030,6 +2126,8 @@ impl World {
                 (Some(actor), Some(view)) => actor.height(&view.scene),
                 _ => 0,
             },
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d(id).map_or(0, |a| a.height()),
             Some(Kind::Entity(r)) => self.entity_height(*r),
             _ => 0,
         }
@@ -2049,7 +2147,7 @@ impl World {
         align: TextAlign,
     ) -> bool {
         let kind = match self.objects.get(id).map(|n| n.kind.clone()) {
-            Some(kind @ (Kind::Actor | Kind::Entity(_))) => kind,
+            Some(kind @ (Kind::Actor | Kind::Actor3D | Kind::Entity(_))) => kind,
             _ => return false,
         };
         // End the sentence being said, with its sound.
@@ -2089,6 +2187,8 @@ impl World {
         let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
         let (mut x, mut y) = match &kind {
             Kind::Actor => self.actor(id).map_or((0, 0), |a| (a.x, a.y)),
+            #[cfg(feature = "3d")]
+            Kind::Actor3D => self.actor3d(id).map_or((0, 0), |a| (a.x, a.y)),
             Kind::Entity(r) => self.entity_def(*r).map_or((0, 0), |e| (e.x, e.y)),
             _ => (0, 0),
         };
@@ -2151,6 +2251,14 @@ impl World {
                     actor.talk(sentence, forced);
                 }
             }
+            // A 3D actor plays the sentence's stances as skeletal
+            // animations; `ForceTalkAnim` names a sprite and is not used.
+            #[cfg(feature = "3d")]
+            Kind::Actor3D => {
+                if let Some(actor) = self.actor3d_mut(id) {
+                    actor.talk(sentence);
+                }
+            }
             Kind::Entity(r) => {
                 let sprites: Vec<String> = self
                     .entity_def(r)
@@ -2198,6 +2306,8 @@ impl World {
             Some(Kind::Actor) => self
                 .actor_and_vfs(id)
                 .is_some_and(|(vfs, actor)| actor.bank.add_sprite(vfs, &path)),
+            // A 3D actor has no talk sprites: the name is kept and ignored.
+            Some(Kind::Actor3D) => true,
             Some(Kind::Entity(r)) => {
                 let vfs = &self.vfs;
                 match r {
@@ -2225,6 +2335,8 @@ impl World {
     pub fn stop_talk(&mut self, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| n.kind.clone()) {
             Some(Kind::Actor) => self.actor_mut(id).is_some_and(|a| a.stop_talk()),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d_mut(id).is_some_and(|a| a.stop_talk()),
             Some(Kind::Entity(r)) => self.view_of_mut(r).is_some_and(|v| v.stop_talk(r)),
             _ => false,
         }
@@ -2234,6 +2346,8 @@ impl World {
     pub fn is_talking(&self, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).is_some_and(|a| a.is_talking()),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d(id).is_some_and(|a| a.is_talking()),
             Some(Kind::Entity(r)) => self.view_of(*r).is_some_and(|v| v.is_talking(*r)),
             _ => false,
         }
@@ -2244,6 +2358,14 @@ impl World {
     pub fn skip_sentences(&mut self) {
         let timer = self.timer;
         for (_, actor) in &mut self.actors {
+            if let Some(sentence) = &mut actor.sentence {
+                if sentence.can_skip(timer) {
+                    sentence.finish();
+                }
+            }
+        }
+        #[cfg(feature = "3d")]
+        for (_, actor) in &mut self.actors3d {
             if let Some(sentence) = &mut actor.sentence {
                 if sentence.can_skip(timer) {
                     sentence.finish();
@@ -2276,6 +2398,18 @@ impl World {
         let (ox, oy, sw) = (self.offset_x, self.offset_y, self.settings.width as i32);
         let mut draws = Vec::new();
         for (_, actor) in &self.actors {
+            if actor.show_sentence {
+                if let Some(draw) = actor
+                    .sentence
+                    .as_ref()
+                    .and_then(|s| SentenceDraw::of(s, ox, oy, sw))
+                {
+                    draws.push(draw);
+                }
+            }
+        }
+        #[cfg(feature = "3d")]
+        for (_, actor) in &self.actors3d {
             if actor.show_sentence {
                 if let Some(draw) = actor
                     .sentence
@@ -2478,9 +2612,19 @@ impl World {
     }
 
     /// Scrolls the view towards a point (`Scene.ScrollTo`): the target
-    /// the auto-scroll moves to.
+    /// the auto-scroll moves to. With a 3D main object a change of the
+    /// target under 5 pixels is ignored, against the jitter of a
+    /// projected position (`CAdScene::ScrollTo`).
     pub fn scroll_to(&mut self, x: i32, y: i32) {
-        let (ox, oy) = self.centred_offset(x, y);
+        let (mut ox, mut oy) = self.centred_offset(x, y);
+        if self.main_object_is_3d() {
+            if (ox - self.target_offset_x).abs() < 5 {
+                ox = self.target_offset_x;
+            }
+            if (oy - self.target_offset_y).abs() < 5 {
+                oy = self.target_offset_y;
+            }
+        }
         self.target_offset_x = ox;
         self.target_offset_y = oy;
     }
@@ -2524,6 +2668,7 @@ impl Natives for World {
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Emitter(_)) => "particle-emitter".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
+            Some(Kind::Actor3D) => "actor3dx".to_string(),
             Some(Kind::Fader) | Some(Kind::SceneFader) => "fader".to_string(),
             Some(Kind::Control) => self
                 .control(id)
@@ -2545,6 +2690,7 @@ impl Natives for World {
                 format!("[{}]", self.describe(id))
             }
             Some(Kind::Actor) => "[actor object]".to_string(),
+            Some(Kind::Actor3D) => "[actor3dx object]".to_string(),
             Some(Kind::Control | Kind::Item) => format!("[{}]", self.describe(id)),
             Some(Kind::Sprite(_) | Kind::ControlImage { .. }) => "[sprite]".to_string(),
             Some(Kind::Frame { .. }) => "[frame]".to_string(),
@@ -2717,6 +2863,8 @@ impl Host for World {
     fn is_ready(&self, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).is_none_or(|a| a.ready),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d(id).is_none_or(|a| a.ready),
             Some(Kind::Entity(r)) => self
                 .view_of(*r)
                 .is_none_or(|v| !v.is_talking(*r) && !v.is_playing_anim(*r)),

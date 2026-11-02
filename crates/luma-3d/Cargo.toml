@@ -11,6 +11,12 @@ publish.workspace = true
 
 [dependencies]
 luma-formats.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+## Serialization of the run-time state a saved game keeps (positions,
+## paths, animation channels) with serde.
+serde = ["dep:serde"]
 
 [lints]
 workspace = true

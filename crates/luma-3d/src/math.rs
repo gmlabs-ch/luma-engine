@@ -37,6 +37,7 @@ pub fn rad_to_deg(radians: f32) -> f32 {
 
 /// A point or direction in 3D.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Vec3 {
     /// Right.
     pub x: f32,

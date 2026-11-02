@@ -128,8 +128,8 @@ How the list was made. For every class with a script interface, the names tested
 | `StopSound`, `PauseSound`, `ResumeSound`, `IsSoundPlaying` | method | **done** | Controls the object's sound effect. |
 | `SetSoundPosition`, `GetSoundPosition` | method | **done** | Seeks / reads the sound's position in milliseconds. |
 | `SetSoundVolume`, `GetSoundVolume` | method | **done** | Sets / reads the sound's volume (percent). |
-| `SetShadowImage`, `GetShadowImage` | method | **todo** | Sets / reads the image used for the object's 3D simple shadow. |
-| `SetLightPosition` | method | **todo** | Sets the position of the light attached to a 3D object. |
+| `SetShadowImage`, `GetShadowImage` | method | **todo** | Sets / reads the image used for the object's 3D simple shadow. Done on the game and on 3D actors (the only objects whose shadow uses it); a 2D object has no such method yet. |
+| `SetLightPosition` | method | **todo** | Sets the position of the light attached to a 3D object. Done on 3D actors; a 2D object has no such method yet. |
 | `SoundFXNone` | method | **done** | Removes the effect from the object's sounds. |
 | `SoundFXEcho`, `SoundFXReverb` | method | **done** | Applies an echo / reverb effect to the object's sounds, now and next, with the engine's parameters mapped onto Kira's delay and reverb (`docs/audio.md`); an approximation of the DirectSound effects. |
 | `Type` | get | **done** | Class name of the object. |
@@ -161,7 +161,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp
 - Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`, `accessibility.rs`)
-- Count: 131 done, 15 todo, 19 no-op
+- Count: 140 done, 6 todo, 19 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -215,7 +215,7 @@ How the list was made. For every class with a script interface, the names tested
 | `HideLoadingIcon` | method | **done** | Hides the loading icon. |
 | `DumpTextureStats` | method | **no-op** | Writes texture memory statistics to a file (D3D only); debugging aid. |
 | `AccOutputText` | method | **done** | Speaks text through the accessibility text-to-speech (text, type: 0 caption, 1 talk, 2 keypress), when it is on and the type's switch allows it. The backend is macOS's `say`; elsewhere the text-to-speech is unavailable, as WME's is without a SAPI voice. |
-| `IsShadowTypeSupported` | method | **todo** | True when the renderer supports a 3D shadow type. |
+| `IsShadowTypeSupported` | method | **done** | True when the renderer supports a 3D shadow type: the four types (0..3) with wgpu, where WME asks the device. |
 | `StoreSaveThumbnail`, `DeleteSaveThumbnail` | method | **done** | Captures / discards the screenshot stored in the next save file (size from `THUMBNAIL_WIDTH/HEIGHT`). The capture is the next frame rendered; a save without a stored thumbnail carries none, where WME takes one at save time. |
 | `GetFileChecksum` | method | **done** | CRC-32 of a file in the virtual file system, as integer or hex string; `null` for a missing file. |
 | `EnableScriptProfiling`, `DisableScriptProfiling` | method | **no-op** | Turns the script profiler on / off; Luma has no profiler and accepts the calls. |
@@ -238,10 +238,10 @@ How the list was made. For every class with a script interface, the names tested
 | `SubtitlesSpeed` | get/set | **done** | Subtitle reading speed (characters per second basis). |
 | `VideoSubtitles` | get/set | **done** | Show subtitles during videos. |
 | `FPS` | get | **done** | Frames of the last whole second, counted as WME does (0 during the first second). |
-| `Shadows` | get/set | **todo** | Enables real-time 3D shadows (3D renderer). |
-| `SimpleShadows` | get/set | **todo** | Enables simple blob shadows for 3D objects. |
-| `SupportsRealTimeShadows` | get | **todo** | True when the renderer can draw 3D real-time shadows. |
-| `MaxShadowType` | get/set | **todo** | Highest shadow quality allowed (none, simple, flat, stencil). |
+| `Shadows` | get/set | **done** | Obsolete alias of `MaxShadowType`: true when shadows are on; setting true means stencil, false none. |
+| `SimpleShadows` | get/set | **done** | Obsolete alias of `MaxShadowType`: true when it is simple; setting true means simple, false stencil. |
+| `SupportsRealTimeShadows` | get | **done** | True when the renderer can draw 3D real-time shadows; Luma reads true. |
+| `MaxShadowType` | get/set | **done** | Highest shadow quality allowed (none, simple, flat, stencil), clamped to 0..3; the shadow drawn for a 3D actor is the lowest of its own, this and the scene's. Saved with the game. |
 | `AcceleratedMode` | get | **done** | True when GPU accelerated; Luma reads true. |
 | `Accelerated` | get | **done** | Alias of `AcceleratedMode`. |
 | `TextEncoding` | get/set | **done** | Text encoding of the game: 0 ANSI, 1 UTF-8, set by each string table loaded (byte order mark) and by the script, clamped as WME does. The fonts still draw text as Latin-1 whatever the value (see `docs/rendering.md`). |
@@ -254,7 +254,7 @@ How the list was made. For every class with a script interface, the names tested
 | `AccTTSEnabled`, `AccTTSTalk`, `AccTTSCaptions`, `AccTTSKeypress` | get | **done** | Accessibility: text-to-speech master switch and which texts it reads out (sentences without a speech file, captions of the object under the mouse, keys typed). From the `Accessibility` section of `settings.ini` (WME: of the registry, through its settings dialog). |
 | `AccKeyboardEnabled`, `AccKeyboardCursorSkip`, `AccKeyboardPause` | get | **done** | Accessibility: Ctrl+Tab cycling through the clickable objects with a red frame while Ctrl is held, the cursor jumping to the object picked, Ctrl+Space pausing under a shield window. Same source. Luma moves the cursor whether or not Ctrl is still held, and does not list objects through region nodes (see `docs/game-loop.md`). |
 | `UsedMemory` | get | **no-op** | Memory use statistic. |
-| `MaxActiveLights` | get | **todo** | Number of simultaneous 3D lights the device supports. |
+| `MaxActiveLights` | get | **done** | Number of simultaneous 3D lights the device supports; Luma reads 8, the number its renderer lights an actor with. |
 | `HardwareTL` | get | **no-op** | True when the Direct3D device does hardware transform and lighting; no meaning with wgpu. |
 | `AutorunDisabled` | get/set | **no-op** | Windows CD autorun switch; no meaning on macOS. |
 | `SaveDirectory` | get | **done** | Folder holding the save files. |
@@ -264,16 +264,16 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdGame.cpp
 - Hierarchy and Luma: CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `responses.rs`, `inventory.rs`)
-- Count: 63 done, 2 todo, 0 no-op
+- Count: 65 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `ChangeScene` | method | **done** | Changes scene at the start of the next frame (scene file, fade-in flag). |
 | `LoadActor` | method | **done** | Loads a 2D actor from an `.actor` file and returns it. |
-| `LoadActor3D` | method | **todo** | Loads a 3D actor (`.actor3d`, X model). 3D is not implemented. |
+| `LoadActor3D` | method | **done** | Loads a 3D actor (`.act3d`, X model) kept across scenes (the `3d` feature; see `docs/3d-actors.md`). `LoadActor` does the same for an `ACTOR3DX` file, as WME sniffs the keyword. |
 | `LoadEntity` | method | **done** | Loads an entity from an `.entity` file as an entity of the game, kept across scene changes (`TEMPLATE` is not followed). |
 | `UnloadObject`, `UnloadActor`, `UnloadEntity`, `DeleteEntity` | method | **done** | Unloads an actor or entity loaded at runtime. |
-| `UnloadActor3D` | method | **todo** | Unloads a 3D actor. 3D is not implemented. |
+| `UnloadActor3D` | method | **done** | Unloads a 3D actor (an alias of `UnloadObject`). |
 | `CreateEntity` | method | **done** | Creates an empty entity of the game, kept across scene changes. |
 | `CreateItem` | method | **done** | Creates an inventory item at runtime. |
 | `DeleteItem` | method | **done** | Deletes an inventory item. |
@@ -325,16 +325,16 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdScene.cpp
 - Hierarchy and Luma: CBObject → CAdScene; Luma: scene (`scene_call`, `scene_get`, `scene_set`, `scene_view.rs`)
-- Count: 57 done, 24 todo, 2 no-op
+- Count: 80 done, 1 todo, 2 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `LoadActor` | method | **done** | Loads a 2D actor into the scene. |
-| `LoadActor3D` | method | **todo** | Loads a 3D actor. 3D is not implemented. |
+| `LoadActor3D` | method | **done** | Loads a 3D actor into the scene (the `3d` feature); `LoadActor` does the same for an `ACTOR3DX` file. |
 | `LoadEntity` | method | **done** | Loads an entity file into the scene as a free entity (`TEMPLATE` is not followed). |
 | `CreateEntity` | method | **done** | Creates an empty free entity in the scene. |
 | `UnloadObject`, `UnloadActor`, `UnloadEntity`, `DeleteEntity` | method | **done** | Removes a runtime-loaded object. |
-| `UnloadActor3D` | method | **todo** | Removes a 3D actor. 3D is not implemented. |
+| `UnloadActor3D` | method | **done** | Removes a 3D actor (an alias of `UnloadObject`). |
 | `SkipTo` | method | **done** | Jumps the view to a position or object. |
 | `ScrollTo`, `ScrollToAsync` | method | **done** | Scrolls the view to a position or object, waiting or not. |
 | `GetLayer` | method | **done** | Layer by index or name. |
@@ -348,12 +348,12 @@ How the list was made. For every class with a script interface, the names tested
 | `FadeOut`, `FadeOutAsync`, `FadeIn`, `FadeInAsync` | method | **done** | Fades only the scene viewport (not the UI), on the game timer; the scene's own fader, new with every scene. |
 | `GetFadeColor` | method | **done** | Colour of the scene fade (0xAARRGGBB, the alpha as it is now). |
 | `IsPointInViewport` | method | **done** | True when a point is inside the scene viewport. |
-| `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled` | method | **todo** | Shows / hides / queries a mesh node of the scene's 3D geometry. |
-| `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `GetLightColor`, `GetLightPosition` | method | **todo** | Controls the lights of the scene's 3D geometry. |
-| `SetActiveCamera` | method | **todo** | Selects a camera of the 3D geometry. |
+| `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled` | method | **done** | Shows / hides / queries a mesh node of the scene's 3D geometry. |
+| `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `GetLightColor`, `GetLightPosition` | method | **done** | Controls the lights of the scene's 3D geometry, by name; `GetLightColor` packs the colour with full alpha. |
+| `SetActiveCamera` | method | **done** | Selects a camera of the 3D geometry by name (a runtime error when it does not exist). |
 | `SetViewport` | method | **todo** | Sets the scene's viewport rectangle. Stubbed. |
 | `AddLayer`, `InsertLayer`, `DeleteLayer` | method | **done** | Adds, inserts or deletes a layer at runtime (the main layer cannot be deleted); handles to the other layers and nodes stay valid. |
-| `EnableFog`, `DisableFog` | method | **todo** | 3D fog (colour, start, end). |
+| `EnableFog`, `DisableFog` | method | **done** | 3D fog (colour, start, end), stored with the scene for the 3D pass, which does not draw it yet. |
 | `Type` | get | **done** | `scene`. |
 | `NumLayers`, `NumWaypointGroups`, `MainLayer`, `NumFreeNodes` | get | **done** | Counts and the main layer. |
 | `MouseX`, `MouseY` | get | **done** | Mouse position in scene coordinates. |
@@ -363,12 +363,12 @@ How the list was made. For every class with a script interface, the names tested
 | `PersistentStateSprites` | get/set | **done** | Whether sprite state is kept too. |
 | `ScrollPixelsX`, `ScrollPixelsY`, `ScrollSpeedX`, `ScrollSpeedY` | get/set | **done** | Auto-scroll step and speed. |
 | `OffsetX`, `OffsetY` | get/set | **done** | Current view offset. |
-| `GeometryFile` | get | **todo** | The 3D geometry file. 3D is not implemented. |
-| `WaypointsHeight` | get/set | **todo** | Height of 3D waypoints. |
+| `GeometryFile` | get | **done** | The 3D geometry file, `null` without one. |
+| `WaypointsHeight` | get/set | **done** | Height of the 3D waypoints over the floor; setting it drops them again. |
 | `Width`, `Height` | get | **done** | Scene size in pixels. |
-| `MaxShadowType` | get/set | **todo** | Highest 3D shadow quality for the scene. |
-| `AmbientLightColor` | get/set | **todo** | 3D ambient colour. |
-| `NumLights` | get | **todo** | Number of 3D lights. |
+| `MaxShadowType` | get/set | **done** | Highest 3D shadow quality for the scene (`MAX_SHADOW_TYPE`, 2 by default), clamped to 0..3. |
+| `AmbientLightColor` | get/set | **done** | 3D ambient colour (`AMBIENT_LIGHT_COLOR`); the alpha of a set value is dropped. |
+| `NumLights` | get | **done** | Number of 3D lights of the geometry. |
 | `Name` | set | **done** | Renames the scene. |
 
 ### CAdLayer
@@ -905,85 +905,85 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 ### CAdObject3D (base of 3D actors)
 
 - WME source: src/engine_core/wme_ad/AdObject3D.cpp
-- Hierarchy and Luma: CAdObject → CAdObject3D → CAdActor3D / CAdActor3DX / CAdAttach3DX; Luma: absent (no 3D)
-- Count: 0 done, 38 todo, 0 no-op
+- Hierarchy and Luma: CAdObject → CAdObject3D → CAdActor3D / CAdActor3DX / CAdAttach3DX; Luma: `Actor3d` (`actor3d.rs`, `natives_actor3d.rs`, the `3d` feature)
+- Count: 38 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `SkipTo` | method | **todo** | Moves the object to (x, y) on the 3D floor immediately. |
-| `SkipTo3D` | method | **todo** | Moves the object to (x, y, z) immediately. |
-| `GetBonePosition2D` | method | **todo** | Screen position of a skeleton bone. |
-| `GetBonePosition3D` | method | **todo** | World position of a skeleton bone. |
-| `AddIgnoredLight`, `RemoveIgnoredLight` | method | **todo** | Excludes / re-includes a scene light when lighting the object. |
-| `Angle` | get/set | **todo** | Heading in degrees. |
-| `PosX`, `PosY`, `PosZ` | get/set | **todo** | World position. |
-| `X`, `Y` | set | **todo** | 2D alias of the world position. |
-| `Velocity` | get/set | **todo** | Walking speed. |
-| `AngularVelocity`, `AngVelocity` | get/set | **todo** | Turning speed. |
-| `DropToFloor` | get/set | **todo** | Keeps the object on the floor mesh. |
-| `ShadowType`, `Shadow` | get/set | **todo** | Shadow kind (none, simple, flat, stencil). |
-| `SimpleShadow` | get/set | **todo** | Uses the simple blob shadow. |
-| `ShadowColor` | get/set | **todo** | Shadow colour. |
-| `Scale` | get/set | **todo** | Uniform scale of the model. |
-| `DrawBackfaces` | get/set | **todo** | Draws back faces of the mesh. |
-| `AmbientLightColor` | get/set | **todo** | Per-object ambient colour. |
+| `SkipTo` | method | **done** | Moves the object to (x, y) on the 3D floor immediately (the exact conversion; nothing moves off the walk planes). |
+| `SkipTo3D` | method | **done** | Moves the object to (x, y, z) immediately; the 2D position follows at the next update. |
+| `GetBonePosition2D` | method | **done** | Screen position of a skeleton bone, as `{ X, Y }`; an empty object for an unknown bone. |
+| `GetBonePosition3D` | method | **done** | World position of a skeleton bone, as `{ X, Y, Z }`. |
+| `AddIgnoredLight`, `RemoveIgnoredLight` | method | **done** | Excludes / re-includes a scene light when lighting the object (the list goes to the drawing step). |
+| `Angle` | get/set | **done** | Heading in degrees, as set (not normalised). |
+| `PosX`, `PosY`, `PosZ` | get/set | **done** | World position. |
+| `X`, `Y` | set | **done** | 2D alias of the world position: the pixel converts to the walk planes with the exact conversion when it can. |
+| `Velocity` | get/set | **done** | Walking speed, world units per second, times the scale. |
+| `AngularVelocity`, `AngVelocity` | get/set | **done** | Turning speed, degrees per second. |
+| `DropToFloor` | get/set | **done** | Keeps the object on the floor mesh every update. |
+| `ShadowType`, `Shadow` | get/set | **done** | Shadow kind (none, simple, flat, stencil), clamped; `Shadow` true means stencil, false none. Stored for the shadow drawing step. |
+| `SimpleShadow` | get/set | **done** | Obsolete alias: true means simple, false stencil. |
+| `ShadowColor` | get/set | **done** | Shadow colour (`0xAARRGGBB`), stored for the drawing step. |
+| `Scale` | get/set | **done** | Uniform scale of the model, in percent; the walking speed follows it. |
+| `DrawBackfaces` | get/set | **done** | Draws back faces of the mesh (handed to the drawing step). |
+| `AmbientLightColor` | get/set | **done** | Per-object ambient colour; `null` clears the override. |
 
 ### CAdActor3D (legacy 3D actor, MS3D/3DS models)
 
 - WME source: src/engine_core/wme_ad/AdActor3D.cpp
-- Hierarchy and Luma: CAdObject3D → CAdActor3D; Luma: absent
-- Count: 0 done, 40 todo, 0 no-op
+- Hierarchy and Luma: CAdObject3D → CAdActor3D; Luma: refused by design (deprecated by WME 1.6; `LoadActor3D` on an `ACTOR3D` file logs a clear error and returns `null`, see `docs/3d-actors.md` section 13)
+- Count: 0 done, 0 todo, 40 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `PlayAnim`, `PlayAnimAsync` | method | **todo** | Plays a named animation, optionally waiting. |
-| `StopAnim` | method | **todo** | Stops the current animation. |
-| `StopAnimChannel`, `PlayAnimChannel`, `PlayAnimChannelAsync` | method | **todo** | Stops / plays an animation on a numbered blend channel. |
-| `HideMesh`, `ShowMesh` | method | **todo** | Hides / shows a named mesh of the model. |
-| `AddMesh`, `RemoveMesh` | method | **todo** | Adds / removes a mesh from another model file. |
-| `GoTo3D`, `GoTo3DAsync` | method | **todo** | Walks to (x, y, z). |
-| `GoTo`, `GoToAsync` | method | **todo** | Walks to (x, y) on the floor. |
-| `GoToObject`, `GoToObjectAsync` | method | **todo** | Walks to an object. |
-| `TurnTo`, `TurnToAsync` | method | **todo** | Turns toward a point or object. |
-| `TurnToAngle`, `TurnToAngleAsync` | method | **todo** | Turns to an absolute angle. |
-| `IsWalking` | method | **todo** | True while walking. |
-| `DirectWalk`, `DirectWalkBack`, `DirectWalkStop` | method | **todo** | Free keyboard-style walking forward / backward / stop. |
-| `DirectTurnLeft`, `DirectTurnRight`, `DirectTurnStop` | method | **todo** | Free turning left / right / stop. |
-| `Type` | get | **todo** | `actor3d`. |
-| `TalkAnimName`, `WalkAnimName`, `IdleAnimName` | get/set | **todo** | Animation names for talk, walk and idle. |
-| `DirectionAngle`, `DirAngle`, `Direction` | get/set | **todo** | Facing angle. |
+| `PlayAnim`, `PlayAnimAsync` | method | **no-op** | Plays a named animation, optionally waiting. |
+| `StopAnim` | method | **no-op** | Stops the current animation. |
+| `StopAnimChannel`, `PlayAnimChannel`, `PlayAnimChannelAsync` | method | **no-op** | Stops / plays an animation on a numbered blend channel. |
+| `HideMesh`, `ShowMesh` | method | **no-op** | Hides / shows a named mesh of the model. |
+| `AddMesh`, `RemoveMesh` | method | **no-op** | Adds / removes a mesh from another model file. |
+| `GoTo3D`, `GoTo3DAsync` | method | **no-op** | Walks to (x, y, z). |
+| `GoTo`, `GoToAsync` | method | **no-op** | Walks to (x, y) on the floor. |
+| `GoToObject`, `GoToObjectAsync` | method | **no-op** | Walks to an object. |
+| `TurnTo`, `TurnToAsync` | method | **no-op** | Turns toward a point or object. |
+| `TurnToAngle`, `TurnToAngleAsync` | method | **no-op** | Turns to an absolute angle. |
+| `IsWalking` | method | **no-op** | True while walking. |
+| `DirectWalk`, `DirectWalkBack`, `DirectWalkStop` | method | **no-op** | Free keyboard-style walking forward / backward / stop. |
+| `DirectTurnLeft`, `DirectTurnRight`, `DirectTurnStop` | method | **no-op** | Free turning left / right / stop. |
+| `Type` | get | **no-op** | `actor3d`. |
+| `TalkAnimName`, `WalkAnimName`, `IdleAnimName` | get/set | **no-op** | Animation names for talk, walk and idle. |
+| `DirectionAngle`, `DirAngle`, `Direction` | get/set | **no-op** | Facing angle. |
 
 ### CAdActor3DX (3D actor, X-file models with skeletal animation)
 
 - WME source: src/engine_core/wme_ad/AdActor3DX.cpp
-- Hierarchy and Luma: CAdObject3D → CAdActor3DX; Luma: absent
-- Count: 0 done, 67 todo, 0 no-op
+- Hierarchy and Luma: CAdObject3D → CAdActor3DX; Luma: `Actor3d` (`actor3d.rs`, `natives_actor3d.rs`, the `3d` feature; see `docs/3d-actors.md`)
+- Count: 54 done, 8 todo, 5 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `PlayAnim`, `PlayAnimAsync` | method | **todo** | Plays a named animation, optionally waiting. |
-| `StopAnim` | method | **todo** | Stops an animation with a transition time. |
-| `StopAnimChannel`, `PlayAnimChannel`, `PlayAnimChannelAsync` | method | **todo** | Controls animations on numbered blend channels. |
-| `IsAnimPlaying`, `IsAnimChannelPlaying` | method | **todo** | True when an animation (on a channel) plays. |
-| `AddAttachment`, `RemoveAttachment`, `GetAttachment` | method | **todo** | Attaches another model to a bone, removes it, or returns it. |
-| `AddMesh`, `RemoveMesh` | method | **todo** | Adds / removes meshes from another model file. |
-| `GoTo3D`, `GoTo3DAsync`, `GoTo`, `GoToAsync`, `GoToObject`, `GoToObjectAsync` | method | **todo** | Walking orders (3D point, floor point, object). |
-| `TurnTo`, `TurnToAsync`, `TurnToAngle`, `TurnToAngleAsync` | method | **todo** | Turning orders. |
-| `IsWalking` | method | **todo** | True while walking. |
-| `DirectWalk`, `DirectWalkBack`, `DirectWalkStop`, `DirectTurnLeft`, `DirectTurnRight`, `DirectTurnStop` | method | **todo** | Free walking / turning. |
-| `SetTexture` | method | **todo** | Replaces a material's texture. |
-| `SetTheoraTexture` | method | **todo** | Uses a playing video as a material's texture. |
-| `SetEffect`, `RemoveEffect` | method | **todo** | Applies / removes a shader effect on a material. |
-| `SetEffectParam`, `SetEffectParamVector`, `SetEffectParamColor` | method | **todo** | Sets shader effect parameters. |
-| `MergeAnims` | method | **todo** | Merges animation sets from another file. |
-| `UnloadAnim` | method | **todo** | Unloads a named animation set. |
-| `SetAnimTransitionTime`, `GetAnimTransitionTime` | method | **todo** | Sets / reads the blend time between two animations. |
-| `CreateParticleEmitterBone` | method | **todo** | Creates a particle emitter attached to a bone. |
-| `Type` | get | **todo** | `actor3dx`. |
-| `TalkAnimName`, `TalkAnimChannel`, `WalkAnimName`, `IdleAnimName`, `TurnLeftAnimName`, `TurnRightAnimName` | get/set | **todo** | Animation names / channel for talk, walk, idle, turn. |
-| `DirectionAngle`, `DirAngle`, `Direction` | get/set | **todo** | Facing angle. |
-| `AnimTransitionTime`, `AnimStopTransitionTime` | get/set | **todo** | Default blend times. |
-| `GoToTolerance` | get/set | **todo** | Distance at which a walk counts as arrived. |
+| `PlayAnim`, `PlayAnimAsync` | method | **done** | Plays a named animation on channel 0, restarted; both forms set the actor's state, only the blocking one waits. |
+| `StopAnim` | method | **done** | Stops channel 0 with a transition time (the stop transition time by default). |
+| `StopAnimChannel`, `PlayAnimChannel`, `PlayAnimChannelAsync` | method | **done** | Controls animations on numbered blend channels 0..9 (`StopAnimChannel` defaults to no transition). |
+| `IsAnimPlaying`, `IsAnimChannelPlaying` | method | **done** | True when an animation (on a channel) plays, by name or any. |
+| `AddAttachment`, `RemoveAttachment`, `GetAttachment` | method | **todo** | Attaches another model to a bone, removes it, or returns it. The calls fail (`false` / `null`) and log once. |
+| `AddMesh`, `RemoveMesh` | method | **todo** | Obsolete aliases of the attachment methods; fail like them. |
+| `GoTo3D`, `GoTo3DAsync`, `GoTo`, `GoToAsync`, `GoToObject`, `GoToObjectAsync` | method | **done** | Walking orders (3D point, floor point with the tolerant conversion, entity's walk-to point and direction); `GoTo` is skipped within `GoToTolerance`. |
+| `TurnTo`, `TurnToAsync`, `TurnToAngle`, `TurnToAngleAsync` | method | **done** | Turning orders: a direction constant, an object (its 2D position converted to 3D) or an angle, the shorter way. |
+| `IsWalking` | method | **done** | True while following a path. |
+| `DirectWalk`, `DirectWalkBack`, `DirectWalkStop`, `DirectTurnLeft`, `DirectTurnRight`, `DirectTurnStop` | method | **done** | Free walking / turning, stopped by the geometry (or the 2D floor in a `2D_PATHFINDING` scene). |
+| `SetTexture` | method | **todo** | Replaces a material's texture. Fails (`false`) until the material scripting of the 3D pass. |
+| `SetTheoraTexture` | method | **todo** | Uses a playing video as a material's texture. Fails (`false`). |
+| `SetEffect`, `RemoveEffect` | method | **no-op** | Applies / removes an HLSL shader effect on a material; not planned (see `docs/3d-actors.md` section 13), the calls return `false` as WME does when an effect fails to compile. |
+| `SetEffectParam`, `SetEffectParamVector`, `SetEffectParamColor` | method | **no-op** | Sets shader effect parameters; not planned, `false`. |
+| `MergeAnims` | method | **done** | Merges animation sets from another `.x` file, with its `.anim` sidecar. |
+| `UnloadAnim` | method | **done** | Unloads a named animation set (and stops it on its channels). |
+| `SetAnimTransitionTime`, `GetAnimTransitionTime` | method | **done** | Sets / reads the blend time between two animations (`-1` for an unset pair; a negative time removes the pair). |
+| `CreateParticleEmitterBone` | method | **todo** | Creates a particle emitter attached to a bone. Returns `null` and logs once. |
+| `Type` | get | **done** | `actor3dx`. |
+| `TalkAnimName`, `TalkAnimChannel`, `WalkAnimName`, `IdleAnimName`, `TurnLeftAnimName`, `TurnRightAnimName` | get/set | **done** | Animation names / channel for talk, walk, idle, turn; `null` restores a default name. |
+| `DirectionAngle`, `DirAngle`, `Direction` | get/set | **done** | Facing angle (normalised on set) and its eight-sector direction code. |
+| `AnimTransitionTime`, `AnimStopTransitionTime` | get/set | **done** | Default blend times (200 ms). |
+| `GoToTolerance` | get/set | **done** | Distance in pixels within which a `GoTo` is not started (2). |
 
 ### CAdAttach3DX (model attached to a 3D actor bone)
 
@@ -1033,10 +1033,10 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 69 | 3 | 0 | 72 |
-| CBGame | 131 | 15 | 19 | 165 |
-| CAdGame | 63 | 2 | 0 | 65 |
+| CBGame | 140 | 6 | 19 | 165 |
+| CAdGame | 65 | 0 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
-| CAdScene | 57 | 24 | 2 | 83 |
+| CAdScene | 80 | 1 | 2 | 83 |
 | CAdLayer | 18 | 0 | 0 | 18 |
 | CBRegion | 11 | 0 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
@@ -1067,14 +1067,14 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CSXTcpClient | 0 | 0 | 1 | 1 |
 | CSXPluginObject | 0 | 0 | 1 | 1 |
 | CPartEmitter | 79 | 0 | 0 | 79 |
-| CAdObject3D | 0 | 38 | 0 | 38 |
-| CAdActor3D | 0 | 40 | 0 | 40 |
-| CAdActor3DX | 0 | 67 | 0 | 67 |
+| CAdObject3D | 38 | 0 | 0 | 38 |
+| CAdActor3D | 0 | 0 | 40 | 40 |
+| CAdActor3DX | 54 | 8 | 5 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **920** | **201** | **32** | **1153** |
+| **All** | **1046** | **30** | **77** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 899 done, 201 todo, 32 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1025 done, 30 todo, 77 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1084,12 +1084,9 @@ These classes have no done member in Luma: the object does not exist for scripts
 |-------|-----------|-------------------:|
 | `CBFrame` | A frame of a sprite (delay, sound, move, sub-frames, events) | 21 |
 | `CBSubFrame` | The image part of a frame (hotspot, mirror, alpha) | 20 |
-| `CAdObject3D` | Base of 3D objects: position, velocity, shadows, bones, ignored lights | 38 |
-| `CAdActor3D` | Legacy 3D actor (MS3D/3DS models) | 40 |
-| `CAdActor3DX` | 3D actor with X-file models and skeletal animation, effects, attachments | 67 |
 | `CAdAttach3DX` | Model attached to a bone of a 3D actor | 7 |
 
-Classes that exist in WME 1.x with a script interface but that are no-op by design: `CSXTcpClient` (unfinished in WME itself), `CSXPluginObject` (Windows DLL plugins), `CUIMarkup` (never instantiated), the Windows-only parts of `CSXDirectory` (`GetDrives`, the working directory) and `CSXMemBuffer`, and the AVI side of `Game.PlayVideo` (DirectShow).
+Classes that exist in WME 1.x with a script interface but that are no-op by design: `CSXTcpClient` (unfinished in WME itself), `CAdActor3D` (the legacy Milkshape 3D actor WME deprecated in 1.6; `LoadActor3D` refuses its files with a clear error), `CSXPluginObject` (Windows DLL plugins), `CUIMarkup` (never instantiated), the Windows-only parts of `CSXDirectory` (`GetDrives`, the working directory) and `CSXMemBuffer`, and the AVI side of `Game.PlayVideo` (DirectShow).
 
 WME classes with no script interface of their own (nothing to port; scripts reach them only through the owner's methods): `CBSound`, `CBFont`/`CBFontBitmap`/`CBFontTT`, `CAdInventory`, `CAdInventoryBox`, `CAdResponseBox`, `CAdResponse`, `CAdSceneNode`, `CAdSentence`, `CAdSpriteSet`, `CAdTalkDef`, `CAdScaleLevel`, `CAdRotLevel`, `CAdWalkplane`, `CAdBlock`, `CAdGeneric`, `CBViewport`, `CBFader`, `CUITiledImage`, `CBPersistMgr`, `CBEventSet`, the video players (`VidTheoraPlayer`), `C3DLight`, `C3DModel`. The inventory, responses, fader and viewport are driven through `Game` methods and properties (`GetInventoryWindow`, `AddResponse`, `FadeOut`, `SetSceneViewport`), which the tables above cover.
 
@@ -1103,8 +1100,8 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Script library | 2 | `new Actor` and `new Entity`, which follow runtime entity creation. (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory`, `new Object` and the HSL colour helpers are done.) |
 | Object model (2D) | 0 | Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories (`Game.InventoryObject`). |
 | Rendering features | 0 | Done: rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades (see `docs/rendering.md`). |
-| 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **201** | |
+| 3D | 18 | The attachments (`CAdAttach3DX`, `AddAttachment` and its kin, `CreateParticleEmitterBone`), the textures set by script on 3D models (`SetTexture`, `SetTheoraTexture`) and the shadow image and light position of 2D objects. Done: the scene geometry, the 3D actor (`CAdObject3D`, `CAdActor3DX`), its walking, turning, animation and scripting, the scene's lights, nodes, cameras and fog, the game's shadow settings (`docs/3d-actors.md`, the `3d` feature); the drawing of the models and their shadows is the 3D pass, not a script member. |
+| **All** | **30** | |
 
 ## Members in Luma that WME 1.x does not define
 

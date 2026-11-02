@@ -11,9 +11,14 @@ its classification (3.2, 3.3, specified in
 mapping (section 4), the actor definition file (section 5, specified in
 [formats/actor3d.md](formats/actor3d.md)), the `.X` model as data
 (section 6, specified in [formats/xfile.md](formats/xfile.md)), the
-animation and skinning at run time (section 7) and the geometry at
-runtime (section 9: floor height, segment tests, path finder). The rest
-is still the plan.
+animation and skinning at run time (section 7), the geometry at
+runtime (section 9: floor height, segment tests, path finder), and, in
+`crates/luma-adventure` behind its `3d` feature (which `luma`'s `3d`
+feature turns on), the actor logic (section 8), the hit testing (10.3),
+the scripting surface (11) and the saved games (8.7): tasks 13 to 16,
+18 and 19. The drawing (phase B, section 10) and the attachments (task
+17) are still the plan; `World::three_d_draws` hands the drawing step
+what it needs.
 
 ## 0. Sources and rules
 
@@ -846,6 +851,39 @@ the first key, and a zero gap met after a positive one resets the minimum
 
 ## 8. Actor logic
 
+**As implemented** in `luma_adventure::actor3d` (`Actor3d`, the
+`CAdActor3DX` with its `CAdObject3D` and `CAdObject` parts;
+`Actor3d::update` is `CAdActor3DX::Update`) and `luma_adventure::scene3d`
+(`Scene3d`, the `CAdSceneGeometry` the scene owns, with the path finder;
+`World::projection_3d` builds the frame's `Projection` from the game's
+resolution, the main layer, the scene's own `VIEWPORT` or the game's scene
+viewport, the scroll offset and the scene's camera keys, as 4.1 says).
+`World::update_actors3d` runs once per frame after the 2D actors: the
+path finder's open request first (`InitLoop`), then every active 3D
+actor. A 3D actor is loaded by `Game.LoadActor3D`, `Scene.LoadActor3D`,
+and also by `LoadActor`: the file's first keyword decides
+(`CAdActor3D::IsActorX`), so a game may use either method. A scene with
+`GEOMETRY` loads it with the scene (`Scene3d::load`): a file that is
+not a `.3ds` or does not parse is logged and the scene runs in 2D, as
+the original drops its geometry. Without the `3d` feature a scene's
+geometry is logged and ignored, and a 3D actor file fails to load as a
+2D actor.
+
+Differences from the original, chosen while implementing:
+
+- `X` and `Y` of a freshly loaded actor read 0 until its first update
+  projects its position, as in the original; a script that needs the
+  position at once uses `SkipTo`.
+- `GoToObject` on an entity whose `WALK_TO_X/Y` are `0,0` walks to the
+  entity's position (what the `2D_PATHFINDING` branch of the original
+  does); the original's 3D branch converts the `0,0` itself.
+- `TurnTo(object)` whose 2D position converts to no walk plane does not
+  turn (the original turns toward an uninitialised vector).
+- Direct control that only turns requests the turn animation (or idle)
+  and does not run the walking step (8.4); the original walks in place.
+- The path finder's open request is not saved (8.7): an actor saved
+  while searching or waiting for its path asks again after the load.
+
 ### 8.1 Update order, per frame
 
 `CAdActor3DX::Update` (`AdActor3DX.cpp`):
@@ -944,12 +982,17 @@ idle), but the movement code that follows runs with a zero-length step, which
 is always allowed, and requests the walk animation over it: as written the
 actor walks in place while turning and the turn animation is overridden in the
 same frame (and, being a different name, restarts a transition each frame).
-Reproduce or choose one, after looking at the demo.
+Luma takes the first reading (`Actor3d::direct_step`): turning alone
+requests the turn animation (or idle) and skips the walking step; with a
+walk mode on, the walk wins as in the original.
 
 ### 8.5 Drop to floor, position, scale
 
 `CAdObject3D::Update`: if `DropToFloor`, `y = GetHeightAt(position, 5)`.
-`Scale` is a uniform factor; `Velocity` and the shadow follow it. Setting the
+`Scale` is a uniform factor; `Velocity` and the shadow follow it. The
+scene's scale levels do **not** apply to the model (`CBObject::GetMatrix`
+takes `m_Scale3D` alone); they only scale the actor's private
+`BLOCKED_REGION` polygon at its projected `Y`. Setting the
 scripts' `X`/`Y` stores the 2D value and converts the point to 3D with the
 exact conversion (no tolerance); if the conversion fails the 3D position is
 left alone and the two disagree until the next 3D move. `SkipTo(x, y)` does
@@ -985,6 +1028,25 @@ finished, last local time, current frame) and the transition state. The
 scene's geometry saves the active camera and light/node states by name, plus
 the pending path request. Luma has its own save format
 ([saving.md](saving.md)), which needs these fields, not WME's layout.
+
+**As implemented** (layout version 12): `Actor3d` serializes with
+`serde` like the 2D actor: the definition values scripts may change
+(name, caption, flags, speeds, scale, shadow settings, light position,
+ambient override, ignored lights), the position and its last value, the
+angle, target angle and points, the turning flag, the after-walk angle,
+the 3D path with its cursor and the 2D path, the five animation names,
+the talk channel, the state channel, the direct-control modes and
+parameters, the tolerance, the sentence, and the model's
+`AnimationState` (section 7) in place of the model, plus the `MODEL`
+files, the files `MergeAnims` added and the sets `UnloadAnim` removed.
+After a load the actor file and its models are read again, the merges
+and removals replayed and the animation state restored
+(`Actor3d::reload`). `Scene3d` saves the geometry file, the waypoint
+height, the active camera, every light's active flag and colour and
+every node's active flag by name, and the fog; the geometry is read
+again and the state put back (`Scene3d::reload`). The path finder's
+request is not saved. The game's `MaxShadowType` and shadow image are
+saved with the world.
 
 ## 9. Geometry at runtime
 
@@ -1200,6 +1262,16 @@ the **main** layer, the remaining free objects are drawn the same way. So:
 
 ### 10.3 Hit testing
 
+**As implemented**: `Actor3d::update` projects the eight corners of the
+model's box through the world matrix into scene pixels
+(`bounding_rect`, `CXModel::UpdateBoundingRect`); `World::actor3d_hits`
+registers it as a `HitArea` of the actor in the drawing order of the
+frame, and `World::object_at` confirms a point inside it with
+`Actor3d::is_transparent_at` (the pick ray of the pixel moved to model
+space by the inverse world matrix, `AnimatedModel::pick`). `GetHeight`
+is `Y - top - 5` of that rectangle. The attachments' rectangles wait for
+task 17.
+
 Each drawn, registrable 3D actor adds a **precise** clickable rectangle (the
 screen-space bounds of the 8 corners of the model's current bounding box,
 plus its attachments' own) to the frame's rectangle list, in draw order;
@@ -1278,6 +1350,20 @@ properties ignored); `SetTheoraTexture(material, file)` plays a Theora video
 as a looping texture. Both are looked up by material name (section 6.3).
 
 ## 11. The scripting surface
+
+**As implemented** in `luma_adventure::natives_actor3d` (the actor) and
+`luma_adventure::scene3d` (the scene's 3D members), with the game's
+shadow members in `natives.rs`; `docs/compatibility.md` has the row of
+each. Not implemented yet, and answered as the original answers a
+failure: `AddAttachment`, `RemoveAttachment`, `GetAttachment`,
+`AddMesh`, `RemoveMesh`, `CreateParticleEmitterBone` (task 17),
+`SetTexture`, `SetTheoraTexture` (task 20); `SetEffect` and the effect
+parameters return `false` for good (section 13). `Scene.EnableFog` is
+stored for the drawing step. `Game.MaxActiveLights` answers 8,
+`Game.SupportsRealTimeShadows` true and `Game.IsShadowTypeSupported`
+true for the four types: Luma's renderer has what the original asked the
+device for. `GetLightColor` packs the light's colour with full alpha,
+`SetLightColor` keeps the RGB of its argument.
 
 All names are exact. "Blocking" methods wait for the object (`Ready`); the
 `...Async` twins return at once. Unless said, a method returns `true` on
@@ -1470,23 +1556,36 @@ live in `luma-3d`.
 
 ### 12.5 `luma-adventure`
 
-- `Actor3D` beside `Actor` in the world (`actors3d`), `Kind::Actor3D` in
-  `objects.rs`; load from `.act3d`; share the generic object behaviour
-  (name, caption, scripts, sounds, speech, inventory, events).
-- The state machine of 8.2, 8.3, 8.4 over `luma-3d`'s skeleton and geometry;
-  `GoTo` with `2D_PATHFINDING` reuses the existing 2D `path` module.
-- `SceneView` loads the scene's geometry (`GEOMETRY`, `CAMERA`, ...), owns its
-  runtime state (node and light flags, active camera), exposes
-  `Convert2Dto3D`/`Convert3Dto2D` with the current `Camera`, and drives the
-  path finder.
-- Drawing: `draw_order` already takes `others` with positions; a 3D actor is
-  an `Other` whose draw callback appends the custom item (12.3) of the
-  actor, shadow included; hit areas come from the projected rectangle and the
-  polygon test.
-- Scripts: the tables of section 11 in `natives_actor.rs`-style modules
-  (`natives_actor3d.rs`).
-- Saving: section 8.7 into `save.rs`.
-- The headless player and Lumen runner need a 3D switch only if they render.
+**Done**, behind the crate's `3d` feature (`luma-3d` is an optional
+dependency with its `serde` feature; without the feature the 3D types
+are uninhabited stand-ins in `three_d_off.rs`, so the world and the
+saved games keep their shape):
+
+- `Actor3d` beside `Actor` in the world (`World::actors3d`),
+  `Kind::Actor3D` in `objects.rs`; loaded from `.act3d`; the generic
+  object behaviour (name, caption, scripts, sounds, speech, inventory,
+  cursor, events, `StickToRegion`, particle emitters) through the same
+  dispatch arms as the 2D actor.
+- The state machine of 8.2, 8.3, 8.4 over `luma-3d`'s skeleton and
+  geometry; `GoTo` with `2D_PATHFINDING` reuses the 2D `path` module
+  (`Floor`), the points converted with the tolerant conversion.
+- `SceneView::three_d` (`Scene3d`) loads the scene's geometry
+  (`GEOMETRY`, `CAMERA`, `WAYPOINT_HEIGHT`), owns the path finder and
+  the fog, and keeps the projection of the frame for the drawing step.
+- Drawing order: a 3D actor is a free object at its projected position
+  (`DrawItem::Other`), with an empty `Drawable`; the 3D pass takes
+  `World::three_d_draws()`: the frame's `Projection`, the scene's
+  ambient and fog and geometry (shadow receivers), and per actor its
+  index among the free objects, the posed `AnimatedModel`, the world
+  matrix, the lights of 3.4 (`Scene3d::lights_for`), the ambient
+  override, the backface flag and the shadow settings (the effective
+  type, colour, light position, size, image).
+- Hit areas: 10.3.
+- Scripts: `natives_actor3d.rs`, `scene3d.rs`, the game's shadow rows in
+  `natives.rs`.
+- Saving: 8.7, layout version 12.
+- The headless player loads and runs 3D scenes as they are; only the
+  drawing needs the 3D pass.
 
 ### 12.6 Testing
 
@@ -1570,13 +1669,13 @@ read first.
 
 | # | Task | WME files | Size | After |
 |---|------|-----------|------|-------|
-| 13 | **Scene integration.** Load geometry with the scene, active camera and light/node state, the 2D position of 3D objects, the draw order hook with `Other` items, geometry scenes in the headless player. | `AdScene.cpp` (`LoadBuffer`, `TraverseNodes`, `DisplayRegionContent`, `UpdateFreeObjects`, `ScrollTo`) | M | 5, 7, 11 |
-| 14 | **`Actor3D` core.** Load, idle, `PlayAnim` family, drop to floor, `SkipTo`, `X`/`Y`, direction, scale; `Game.LoadActor3D`/`Scene.LoadActor3D`/`Unload*`. | `AdActor3DX.cpp`, `AdObject3D.cpp`, `AdActor3D.cpp` (`CreateFromFile`) | M | 6, 9, 13 |
-| 15 | **Walking, turning, direct control, talking.** 8.2 to 8.4 over tasks 8 and the existing 2D path module for `2D_PATHFINDING`; blocked region and waypoints of the actor. | `AdActor3DX.cpp` (`Update`, `GoTo*`, `FollowPath*`, `GetNextStep*`, `PrepareTurn`, `TurnToStep`) | L | 8, 14 |
-| 16 | **Hit testing and captions.** Projected rectangle and polygon pick, registration order, `GetHeight`. | `XModel.cpp` (`IsTransparentAt`, `UpdateBoundingRect`), `XMesh.cpp` (`PickPoly`), `BRenderer.cpp` (`GetObjectAt`) | S | 9, 14 |
-| 17 | **Attachments and bones.** `AddAttachment`, `GetAttachment`, the attachment object, `GetBonePosition2D/3D`. | `AdAttach3DX.cpp`, `AdObject3D.cpp` (`GetBonePosition*`) | S | 14 |
-| 18 | **Scripting surface.** The remaining methods and properties of section 11, scene lights/camera/fog/nodes, game shadow properties. | `AdActor3DX.cpp`, `AdObject3D.cpp`, `AdScene.cpp`, `AdGame.cpp`, `BGame.cpp`, `BObject.cpp` | M | 14, 15, 17 |
-| 19 | **Saved games.** 8.7 into `save.rs`, geometry state, animation channels. | `Persist` functions of the files above | M | 18 |
+| 13 | **Scene integration.** Load geometry with the scene, active camera and light/node state, the 2D position of 3D objects, the draw order hook with `Other` items, geometry scenes in the headless player. **Done** (`luma_adventure::scene3d`, `World::projection_3d`, `World::three_d_draws`); the custom draw item waits for the 3D pass. | `AdScene.cpp` (`LoadBuffer`, `TraverseNodes`, `DisplayRegionContent`, `UpdateFreeObjects`, `ScrollTo`) | M | 5, 7, 11 |
+| 14 | **`Actor3D` core.** Load, idle, `PlayAnim` family, drop to floor, `SkipTo`, `X`/`Y`, direction, scale; `Game.LoadActor3D`/`Scene.LoadActor3D`/`Unload*`. **Done** (`luma_adventure::actor3d`). | `AdActor3DX.cpp`, `AdObject3D.cpp`, `AdActor3D.cpp` (`CreateFromFile`) | M | 6, 9, 13 |
+| 15 | **Walking, turning, direct control, talking.** 8.2 to 8.4 over tasks 8 and the existing 2D path module for `2D_PATHFINDING`; blocked region and waypoints of the actor. **Done**; the actor's own blocked region and waypoints are parsed and not yet handed to the 2D floor of the other actors. | `AdActor3DX.cpp` (`Update`, `GoTo*`, `FollowPath*`, `GetNextStep*`, `PrepareTurn`, `TurnToStep`) | L | 8, 14 |
+| 16 | **Hit testing and captions.** Projected rectangle and polygon pick, registration order, `GetHeight`. **Done** (10.3). | `XModel.cpp` (`IsTransparentAt`, `UpdateBoundingRect`), `XMesh.cpp` (`PickPoly`), `BRenderer.cpp` (`GetObjectAt`) | S | 9, 14 |
+| 17 | **Attachments and bones.** `AddAttachment`, `GetAttachment`, the attachment object, `GetBonePosition2D/3D`. `GetBonePosition2D/3D` are done (`Actor3d::bone_position`); the attachments are not. | `AdAttach3DX.cpp`, `AdObject3D.cpp` (`GetBonePosition*`) | S | 14 |
+| 18 | **Scripting surface.** The remaining methods and properties of section 11, scene lights/camera/fog/nodes, game shadow properties. **Done** except the attachment, texture and bone-emitter methods (section 11). | `AdActor3DX.cpp`, `AdObject3D.cpp`, `AdScene.cpp`, `AdGame.cpp`, `BGame.cpp`, `BObject.cpp` | M | 14, 15, 17 |
+| 19 | **Saved games.** 8.7 into `save.rs`, geometry state, animation channels. **Done** (layout version 12); the open path request is not kept. | `Persist` functions of the files above | M | 18 |
 | 20 | **Material scripting.** `SetTexture` with images and sprites; later `SetTheoraTexture`; ignore `EFFECT`. | `XModel.cpp` (`SetMaterial*`), `3DMaterial.cpp` | S | 11, 18 |
 
 ### Order
@@ -1643,10 +1742,12 @@ models are not part of it.
 10. **Animation time base.** Animations use the game timer clamped to 1000 ms
     per frame; the existing sprite animation uses the same timer, to be
     reused.
-11. **Save-game scope.** What of the geometry (active camera, light colours,
-    node flags) must survive a load, and whether it also survives a scene
-    change (the original saves it with the scene; the role of
-    `PERSISTENT_STATE` was not checked here).
+11. **Save-game scope.** Decided (8.7): the active camera, the lights'
+    flags and colours, the nodes' flags, the waypoint height and the fog
+    are saved with the scene and reapplied by name after the geometry is
+    read again; a scene change drops them with the scene, as the original
+    does (the scene state of `PERSISTENT_STATE` does not cover the
+    geometry).
 12. **Texture formats.** 3D textures in real games are `.bmp`, `.jpg`, `.tga`,
     `.png`, all loaded by `luma_formats::Image`; power-of-two limits do not
     apply on modern GPUs.

@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 11;
+pub const VERSION: u32 = 12;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -176,6 +176,9 @@ world_state! {
     last_scroll_x: u64,
     last_scroll_y: u64,
     actors: Vec<(NativeId, Actor)>,
+    actors3d: Vec<(NativeId, crate::actor3d::Actor3d)>,
+    max_shadow_type: u8,
+    shadow_image: Option<String>,
     emitters: Vec<(NativeId, crate::particles::Emitter)>,
     pending_events: Vec<(NativeId, String)>,
     system_font: Option<String>,
@@ -646,6 +649,8 @@ impl World {
         for (_, emitter) in &mut self.emitters {
             emitter.reload_sprites(&self.vfs);
         }
+        // The scene's geometry and the 3D actors' models (`3d` feature).
+        self.reload_3d();
         let mut fonts: Vec<String> = Vec::new();
         fonts.extend(self.system_font.clone());
         fonts.extend(self.video_font.clone());
@@ -714,6 +719,12 @@ impl World {
         for (_, actor) in &self.actors {
             fonts.extend(actor.def.font.clone());
             cursors.extend(actor.def.cursor.clone());
+            fonts.extend(actor.sentence.as_ref().and_then(|s| s.font.clone()));
+        }
+        #[cfg(feature = "3d")]
+        for (_, actor) in &self.actors3d {
+            fonts.extend(actor.font.clone());
+            cursors.extend(actor.cursor.clone());
             fonts.extend(actor.sentence.as_ref().and_then(|s| s.font.clone()));
         }
         for view in self.scene.iter().chain([&self.game_view]) {

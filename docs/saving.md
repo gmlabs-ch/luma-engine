@@ -48,6 +48,20 @@ A saved game holds:
   `Game.LoadEntity`, `AddAttachment`) with their sprites' state;
 - the actors with their position, direction, state, path, animation and
   sentence;
+- with the `3d` feature, the 3D actors (their 3D position and angle,
+  targets, paths, speeds and settings, animation names, direct-control
+  modes, sentence, and their model's animation channels by set name, as
+  WME's `CAdActor3DX::Persist` and `CXModel::Persist` keep them; the
+  models are read again from the actor file, the files `MergeAnims`
+  added merged again and the sets `UnloadAnim` removed again) and the
+  scene's 3D side (the geometry file, the waypoint height, the active
+  camera, the lights' flags and colours and the nodes' flags by name,
+  the fog; the geometry is read again); the game's `MaxShadowType` and
+  shadow image. The scene's open path request is not kept: an actor
+  saved while waiting for its path asks again. A build without the
+  feature reads a 3D build's saved games as long as they hold no 3D
+  actor and no geometry, and refuses the others with a clear message
+  (see [3d-actors.md](3d-actors.md), section 8.7);
 - the particle emitters of the entities and actors, with their
   parameters, sprite files, forces and every particle, live or dead
   (see [particles.md](particles.md)); their sprites are loaded again
@@ -255,7 +269,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `11` today |
+| 4 | layout version, little-endian; `12` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -277,7 +291,9 @@ animations of the controls' state images, the container entities'
 `Freezable` flag and the windows' pending mode changes, the right click
 kept for double clicks, and the objects' sound effects. Version 11,
 after 10, added the accessibility captions (`AccCaption`) to the
-objects' runtime state.
+objects' runtime state. Version 12, after 11, added the 3D actors, the
+scene's 3D side and the game's shadow settings (the lists are empty and
+the side absent in a 2D game).
 
 ## Checking a game
 

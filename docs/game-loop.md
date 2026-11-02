@@ -26,7 +26,11 @@ in this order (`Runtime::tick`):
    animate and talk; the actors walk, turn, talk; a sprite frame that
    becomes current plays its `SOUND`, stops the sprite's earlier frame
    sounds when marked `KILL_SOUND`, raises `FrameChanged` on the sprite
-   object and its `APPLY_EVENT`s on the object showing the sprite; the
+   object and its `APPLY_EVENT`s on the object showing the sprite; in a
+   scene with 3D geometry (the `3d` feature), the scene's path finder
+   computes the path asked last frame, then the 3D actors walk, turn,
+   talk and animate, their model's animation events reaching their
+   scripts by name (see [3d-actors.md](3d-actors.md), section 8); the
    particle emitters of the entities and actors follow their owner and
    emit (see [particles.md](particles.md));
 6. the view scrolls towards the main object; the objects' sounds follow
@@ -40,7 +44,9 @@ in this order (`Runtime::tick`):
    next frame).
 
 The frame is then drawn: the scene with the actors (each object's
-particles right after it), the windows marked `IN_GAME`, the other windows, the sentences, the cursor, the fader's
+particles right after it; a 3D actor takes its place in the order at
+its projected position, and `World::three_d_draws` hands the 3D pass
+its model, lights and shadow), the windows marked `IN_GAME`, the other windows, the sentences, the cursor, the fader's
 colour over everything, the loading icon (see
 [saving.md](saving.md#loading-and-saving-screens-loading-icon)), and
 last the messages of `Game.Msg`: short

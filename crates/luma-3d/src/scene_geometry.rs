@@ -230,6 +230,24 @@ pub struct SceneGeometry {
     pub active_camera: Option<usize>,
 }
 
+impl Default for SceneGeometry {
+    /// An empty geometry: no mesh, no camera, no light, the default
+    /// waypoint height. What a saved game holds until the file is read
+    /// again.
+    fn default() -> SceneGeometry {
+        SceneGeometry {
+            walkplanes: Vec::new(),
+            blocks: Vec::new(),
+            generics: Vec::new(),
+            waypoint_groups: Vec::new(),
+            cameras: Vec::new(),
+            lights: Vec::new(),
+            waypoint_height: Self::DEFAULT_WAYPOINT_HEIGHT,
+            active_camera: None,
+        }
+    }
+}
+
 impl SceneGeometry {
     /// The waypoint height a geometry starts with.
     pub const DEFAULT_WAYPOINT_HEIGHT: f32 = 10.0;
