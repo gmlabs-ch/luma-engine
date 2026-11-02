@@ -388,19 +388,11 @@ impl World {
             return;
         };
         let camera = self.camera();
-        let actor_ids = self.actor_ids();
-        let positions: Vec<(i32, i32)> = actor_ids
-            .iter()
-            .filter_map(|id| self.actor(*id))
-            .filter(|a| a.def.active)
-            .map(|a| (a.x, a.y))
-            .collect();
-        let active_actors: Vec<NativeId> = actor_ids
-            .iter()
-            .copied()
-            .filter(|id| self.actor(*id).is_some_and(|a| a.def.active))
-            .collect();
-        for item in view.draw_order(&positions) {
+        let free_actors = self.free_actors();
+        let positions: Vec<crate::scene_view::FreeObject> =
+            free_actors.iter().map(|(_, o)| *o).collect();
+        let active_actors: Vec<NativeId> = free_actors.iter().map(|(id, _)| *id).collect();
+        for item in view.draw_order(&positions, |i| self.free_entity_stick(i)) {
             let layer = &view.scene.layers[item.layer()];
             let (ox, oy) = camera.layer_offset(&view.scene, layer);
             let layer_offset = (ox as i32, oy as i32);

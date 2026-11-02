@@ -75,7 +75,6 @@ const GAME_STUBS: &[&str] = &[
 const OBJECT_STUBS: &[&str] = &[
     "PlayAnim",
     "PlayAnimAsync",
-    "StickToRegion",
     "CreateParticleEmitter",
     "DeleteParticleEmitter",
     "AddAttachment",
@@ -200,7 +199,7 @@ impl World {
             Kind::ResponseBox => None,
             Kind::Fader => None,
             Kind::Scene => self.scene_call(name, args, ctx),
-            Kind::Layer(index) => self.layer_call(index, name, args),
+            Kind::Layer(index) => self.layer_call(index, name, args, ctx),
             Kind::Entity(r) => self.entity_call(id, r, name, args),
             Kind::Region { layer, index } => {
                 self.region_call(RegionRef::Node { layer, index }, name, args)
@@ -990,12 +989,42 @@ impl World {
                     index.and_then(|i| self.waypoint_group_object(i)),
                 ))
             }
-            "LoadEntity" | "CreateEntity" | "AddLayer" | "InsertLayer" => {
-                self.stub(&format!("Scene.{name}"));
-                Return::null()
+            "CreateEntity" => {
+                let entity_name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                Return::value(native_or_null(
+                    self.create_scene_entity(ctx.engine, entity_name.as_deref()),
+                ))
             }
-            "DeleteLayer" | "SetViewport" | "FadeOut" | "FadeOutAsync" | "FadeIn"
-            | "FadeInAsync" => {
+            "LoadEntity" => {
+                let path = arg(0).get_string(self);
+                Return::value(native_or_null(self.load_scene_entity(ctx.engine, &path)))
+            }
+            "AddLayer" | "InsertLayer" => {
+                let (index, layer_name) = if name == "AddLayer" {
+                    (None, arg(0))
+                } else {
+                    (Some(arg(0).get_int(self).max(0) as usize), arg(1))
+                };
+                let layer_name = match layer_name {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                Return::value(native_or_null(self.add_layer(index, layer_name.as_deref())))
+            }
+            "DeleteLayer" => {
+                let index = match arg(0) {
+                    Value::Native(id) => match self.native(id).map(|n| &n.kind) {
+                        Some(Kind::Layer(i)) => Some(*i),
+                        _ => None,
+                    },
+                    v => usize::try_from(v.get_int(self)).ok(),
+                };
+                Return::value(index.is_some_and(|i| self.delete_layer(ctx.engine, i)))
+            }
+            "SetViewport" | "FadeOut" | "FadeOutAsync" | "FadeIn" | "FadeInAsync" => {
                 self.stub(&format!("Scene.{name}"));
                 Return::null()
             }
@@ -1063,7 +1092,13 @@ impl World {
         true
     }
 
-    fn layer_call(&mut self, index: usize, name: &str, args: &[Value]) -> Option<Return> {
+    fn layer_call(
+        &mut self,
+        index: usize,
+        name: &str,
+        args: &[Value],
+        ctx: Context<'_>,
+    ) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         Some(match name {
             "GetNode" => {
@@ -1097,9 +1132,37 @@ impl World {
                 });
                 Return::value(native_or_null(id))
             }
-            "AddRegion" | "AddEntity" | "InsertRegion" | "InsertEntity" | "DeleteNode" => {
-                self.stub(&format!("Layer.{name}"));
-                Return::null()
+            "AddRegion" | "AddEntity" | "InsertRegion" | "InsertEntity" => {
+                let (at, node_name) = if name.starts_with("Add") {
+                    (None, arg(0))
+                } else {
+                    (Some(arg(0).get_int(self).max(0) as usize), arg(1))
+                };
+                let node_name = match node_name {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let id = if name.ends_with("Region") {
+                    self.add_region_node(ctx.engine, index, at, node_name.as_deref())
+                } else {
+                    self.add_entity_node(ctx.engine, index, at, node_name.as_deref())
+                };
+                Return::value(native_or_null(id))
+            }
+            "DeleteNode" => {
+                let node = match arg(0) {
+                    Value::Native(id) => match self.native(id).map(|n| n.kind.clone()) {
+                        Some(Kind::Entity(EntityRef::Node { layer, index: ni }))
+                            if layer == index =>
+                        {
+                            Some(ni)
+                        }
+                        Some(Kind::Region { layer, index: ni }) if layer == index => Some(ni),
+                        _ => None,
+                    },
+                    v => usize::try_from(v.get_int(self)).ok(),
+                };
+                Return::value(node.is_some_and(|ni| self.delete_node(ctx.engine, index, ni)))
             }
             _ => return None,
         })

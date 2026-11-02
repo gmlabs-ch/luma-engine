@@ -564,6 +564,13 @@ impl World {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor | Kind::Inert(_)) => {}
             Some(Kind::Control) => return self.unload_control(engine, id),
+            // A free entity is one of the scene's objects (`m_Objects`);
+            // a layer node is not, and stays.
+            Some(Kind::Entity(crate::scene_view::EntityRef::Free(index))) => {
+                let index = *index;
+                self.remove_free_entity(engine, id, index);
+                return true;
+            }
             _ => return false,
         }
         for script in engine.scripts_of(id) {
@@ -755,15 +762,58 @@ impl World {
         }
     }
 
-    /// The actors as drawn this frame, the game's then the scene's.
+    /// The actors as drawn this frame, the game's then the scene's, each
+    /// with the region it sticks to.
     pub fn drawables(&self) -> Vec<Drawable<'_>> {
         let Some(view) = &self.scene else {
             return Vec::new();
         };
         self.actors
             .iter()
-            .filter_map(|(_, a)| a.drawable(&view.scene))
+            .filter_map(|(id, a)| {
+                let mut drawable = a.drawable(&view.scene)?;
+                drawable.stick = self.stick_region_of(*id);
+                Some(drawable)
+            })
             .collect()
+    }
+
+    /// The active actors as free objects of the scene's drawing order,
+    /// the game's then the scene's: their handles, where they stand and
+    /// the region they stick to.
+    pub(crate) fn free_actors(&self) -> Vec<(NativeId, crate::scene_view::FreeObject)> {
+        self.actors
+            .iter()
+            .filter(|(_, a)| a.def.active)
+            .map(|(id, a)| {
+                (
+                    *id,
+                    crate::scene_view::FreeObject {
+                        x: a.x,
+                        y: a.y,
+                        stick: self.stick_region_of(*id),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// The region a free entity of the scene sticks to.
+    pub(crate) fn free_entity_stick(&self, index: usize) -> Option<(usize, usize)> {
+        let id = self.node_id(crate::scene_view::EntityRef::Free(index))?;
+        self.stick_region_of(id)
+    }
+
+    /// The order the scene's objects are drawn in this frame (see
+    /// [`SceneView::draw_order`]): the `Other` items are the active
+    /// actors, in the order of [`World::actor_ids`].
+    pub fn draw_order(&self) -> Vec<crate::scene_view::DrawItem> {
+        let Some(view) = &self.scene else {
+            return Vec::new();
+        };
+        let positions: Vec<crate::scene_view::FreeObject> =
+            self.free_actors().into_iter().map(|(_, o)| o).collect();
+        view.draw_order(&positions, |i| self.free_entity_stick(i))
     }
 
     /// Fills a draw list with the frame as the engine composes it: the
@@ -783,7 +833,9 @@ impl World {
             return;
         }
         if let Some(view) = &self.scene {
-            view.draw_with(list, camera, &self.drawables());
+            view.draw_with(list, camera, &self.drawables(), |i| {
+                self.free_entity_stick(i)
+            });
         }
         self.draw_windows(list, true, white);
         self.draw_inventory(list, white);
@@ -931,6 +983,11 @@ impl World {
         self.hits.clear();
         self.scene = Some(view);
         self.restore_scene_state();
+        // The regions the game's objects stuck to went with the old scene
+        // (`CAdGame::ChangeScene`).
+        for (_, slot) in self.objects.iter_mut() {
+            slot.state.stick_region = None;
+        }
         self.hide_taken_item_entities();
         for (_, actor) in &mut self.actors {
             actor.invalidate_regions();
@@ -1002,7 +1059,7 @@ impl World {
 
     /// Loads the `SOUND` of an entity without playing it (`CAdEntity`
     /// reads `SOUND`, `SOUND_START_TIME` and `SOUND_VOLUME`).
-    fn load_entity_sound(&mut self, id: NativeId) {
+    pub(crate) fn load_entity_sound(&mut self, id: NativeId) {
         let Some(Kind::Entity(r)) = self.objects.get(id).map(|n| n.kind.clone()) else {
             return;
         };

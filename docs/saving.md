@@ -29,7 +29,8 @@ A saved game holds:
   the `Movable`, `SceneIndependent` and `NonIntMouseEvents` flags, the
   extra caption slots, the forced talk animation);
 - the current scene as the scripts left it (its entities, regions and
-  layers, the animation and the sentence of each entity), the previous
+  layers, those the scripts created at run time included, the
+  animation and the sentence of each entity), the previous
   scene's name, a scene change asked and not done yet, and the states
   remembered of the persistent scenes (see
   [game-loop.md](game-loop.md#scene-state-between-visits));

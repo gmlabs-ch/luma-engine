@@ -13,7 +13,6 @@ use crate::world::World;
 
 /// Methods of later milestones that actors accept and log once.
 const ACTOR_STUBS: &[&str] = &[
-    "StickToRegion",
     "CreateParticleEmitter",
     "DeleteParticleEmitter",
     "AddAttachment",

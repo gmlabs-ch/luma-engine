@@ -3385,3 +3385,310 @@ fn regions_are_edited_entities_get_regions_and_waypoint_groups_switch_off() {
     assert!(!runtime.world.objects().contains(group));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn scripts_create_edit_and_delete_scene_content() {
+    use luma_adventure::{DrawItem, EntityRef};
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    let scene = runtime.world.scene_id();
+    let main = runtime.world.layer_id(0).unwrap();
+    let name = |runtime: &Runtime, id| runtime.world.get_property(id, "Name");
+
+    // Free entities are created empty or loaded from a file; removing
+    // one keeps the handles of the others good.
+    let created = call_native(&mut runtime, scene, "CreateEntity", &[Value::from("dyn")])
+        .as_native()
+        .expect("a created entity");
+    assert_eq!(name(&runtime, created), Some(Value::from("dyn")));
+    assert_eq!(
+        runtime.world.get_property(created, "Scalable"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        runtime.world.get_property(scene, "NumFreeNodes"),
+        Some(Value::Int(2))
+    );
+    runtime.world.set_property(created, "X", &Value::Int(10));
+    runtime.world.set_property(created, "Y", &Value::Int(20));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            created,
+            "SetSprite",
+            &[Value::from("art\\green.png")]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            scene,
+            "LoadEntity",
+            &[Value::from("missing.entity")]
+        ),
+        Value::Null
+    );
+    let pick = call_native(
+        &mut runtime,
+        scene,
+        "LoadEntity",
+        &[Value::from("verb.entity")],
+    )
+    .as_native()
+    .expect("the loaded entity");
+    assert_eq!(name(&runtime, pick), Some(Value::from("pick")));
+    assert_eq!(
+        runtime.world.get_property(pick, "Caption"),
+        Some(Value::from("Hello"))
+    );
+    assert_eq!(
+        call_native(&mut runtime, pick, "GetSprite", &[]),
+        Value::from("art\\green.png")
+    );
+    assert_eq!(
+        runtime.engine.scripts_of(pick).len(),
+        1,
+        "its script is attached"
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "GetFreeNode", &[Value::from("pick")]),
+        Value::Native(pick)
+    );
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(11, 21);
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.active_object(),
+        Some(created),
+        "drawn and under the mouse"
+    );
+    call_native(
+        &mut runtime,
+        scene,
+        "UnloadObject",
+        &[Value::Native(created)],
+    );
+    assert!(!runtime.world.objects().contains(created));
+    assert_eq!(
+        runtime.world.get_property(scene, "NumFreeNodes"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(
+        name(&runtime, pick),
+        Some(Value::from("pick")),
+        "renumbered, still good"
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "GetFreeNode", &[Value::Int(1)]),
+        Value::Native(pick)
+    );
+
+    // Nodes join and leave a layer; the handles of the others follow.
+    let floor = runtime.world.region_id(0, 1).unwrap();
+    let lamp = runtime
+        .world
+        .node_id(EntityRef::Node { layer: 0, index: 2 })
+        .unwrap();
+    let r0 = call_native(
+        &mut runtime,
+        main,
+        "InsertRegion",
+        &[Value::Int(0), Value::from("r0")],
+    )
+    .as_native()
+    .expect("a region node");
+    assert_eq!(
+        runtime.world.get_property(main, "NumNodes"),
+        Some(Value::Int(5))
+    );
+    assert_eq!(runtime.world.region_id(0, 0), Some(r0));
+    assert_eq!(runtime.world.region_id(0, 2), Some(floor));
+    assert_eq!(name(&runtime, floor), Some(Value::from("floor")));
+    assert_eq!(name(&runtime, lamp), Some(Value::from("lamp")));
+    assert_eq!(
+        call_native(&mut runtime, main, "GetNode", &[Value::Int(3)]),
+        Value::Native(lamp)
+    );
+    let added = call_native(&mut runtime, main, "AddEntity", &[Value::from("added")])
+        .as_native()
+        .expect("an entity node");
+    assert_eq!(
+        runtime.world.get_property(added, "Scalable"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(
+        call_native(&mut runtime, main, "GetNode", &[Value::Int(5)]),
+        Value::Native(added)
+    );
+    call_native(
+        &mut runtime,
+        main,
+        "InsertEntity",
+        &[Value::Int(99), Value::from("tail")],
+    );
+    assert_eq!(
+        runtime.world.get_property(main, "NumNodes"),
+        Some(Value::Int(7))
+    );
+    assert_eq!(
+        call_native(&mut runtime, main, "DeleteNode", &[Value::Native(r0)]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(&mut runtime, main, "DeleteNode", &[Value::Int(42)]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        runtime.world.get_property(main, "NumNodes"),
+        Some(Value::Int(6))
+    );
+    assert!(!runtime.world.objects().contains(r0));
+    assert_eq!(runtime.world.region_id(0, 1), Some(floor));
+    assert_eq!(name(&runtime, lamp), Some(Value::from("lamp")));
+
+    // Layers too; the main layer stays.
+    let fx = call_native(&mut runtime, scene, "AddLayer", &[Value::from("fx")])
+        .as_native()
+        .expect("a layer");
+    assert_eq!(
+        runtime.world.get_property(scene, "NumLayers"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(
+        runtime.world.get_property(fx, "Width"),
+        Some(Value::Int(200))
+    );
+    let bg = call_native(
+        &mut runtime,
+        scene,
+        "InsertLayer",
+        &[Value::Int(0), Value::from("bg")],
+    )
+    .as_native()
+    .expect("a layer");
+    assert_eq!(
+        runtime.world.get_property(scene, "NumLayers"),
+        Some(Value::Int(3))
+    );
+    assert_eq!(runtime.world.layer_id(1), Some(main));
+    assert_eq!(
+        runtime.world.get_property(scene, "MainLayer"),
+        Some(Value::Native(main))
+    );
+    assert_eq!(name(&runtime, floor), Some(Value::from("floor")));
+    assert_eq!(name(&runtime, lamp), Some(Value::from("lamp")));
+    assert_eq!(
+        call_native(&mut runtime, scene, "DeleteLayer", &[Value::Native(main)]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "DeleteLayer", &[Value::Native(bg)]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(&mut runtime, scene, "DeleteLayer", &[Value::Int(5)]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        runtime.world.get_property(scene, "NumLayers"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(runtime.world.layer_id(0), Some(main));
+    assert_eq!(name(&runtime, floor), Some(Value::from("floor")));
+
+    // An actor stuck to the floor is drawn in the floor's slot even when
+    // it stands outside it.
+    let actor = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\bob.actor", false)
+        .unwrap();
+    runtime.world.set_property(actor, "Y", &Value::Int(5));
+    runtime.tick(16);
+    let slots = |runtime: &Runtime| {
+        let order = runtime.world.draw_order();
+        let actor_at = order
+            .iter()
+            .position(|i| matches!(i, DrawItem::Other { index: 0, .. }))
+            .expect("the actor is drawn");
+        let lamp_at = order
+            .iter()
+            .position(|i| *i == DrawItem::Node { layer: 0, index: 2 })
+            .expect("the lamp is drawn");
+        (actor_at, lamp_at)
+    };
+    let (actor_at, lamp_at) = slots(&runtime);
+    assert!(actor_at > lamp_at, "outside every region: drawn last");
+    assert_eq!(
+        call_native(&mut runtime, actor, "StickToRegion", &[Value::from("nope")]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "StickToRegion",
+            &[Value::from("FLOOR")]
+        ),
+        Value::Bool(true)
+    );
+    let (actor_at, lamp_at) = slots(&runtime);
+    assert!(actor_at < lamp_at, "stuck to the floor: drawn with it");
+    assert_eq!(
+        call_native(&mut runtime, actor, "StickToRegion", &[Value::Null]),
+        Value::Bool(true)
+    );
+    let (actor_at, lamp_at) = slots(&runtime);
+    assert!(actor_at > lamp_at);
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "StickToRegion",
+            &[Value::Native(floor)]
+        ),
+        Value::Bool(true)
+    );
+
+    // Everything created lives in the saved game.
+    runtime.save_game(13, "built", false).unwrap();
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(13).unwrap();
+    loaded.tick(16);
+    assert_eq!(
+        loaded.world.get_property(scene, "NumLayers"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(
+        loaded.world.get_property(main, "NumNodes"),
+        Some(Value::Int(6))
+    );
+    assert_eq!(
+        loaded.world.get_property(scene, "NumFreeNodes"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(name(&loaded, pick), Some(Value::from("pick")));
+    assert_eq!(name(&loaded, added), Some(Value::from("added")));
+    assert!(
+        loaded
+            .world
+            .scene()
+            .unwrap()
+            .sprite("art\\green.png")
+            .is_some(),
+        "loaded again"
+    );
+    let (actor_at, lamp_at) = slots(&loaded);
+    assert!(actor_at < lamp_at, "still stuck to the floor");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

@@ -373,6 +373,19 @@ impl SpriteBank {
     }
 }
 
+/// A free object of another list drawn among the scene's (an actor):
+/// where it stands, and the region it sticks to, if any.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FreeObject {
+    /// Position of the hotspot.
+    pub x: i32,
+    /// See `x`.
+    pub y: i32,
+    /// The region node of the main layer the object is drawn in whatever
+    /// its position (`StickToRegion`), as `(layer, node)`.
+    pub stick: Option<(usize, usize)>,
+}
+
 /// An object drawn among the free objects of a scene: an actor, or an
 /// entity of another bank.
 pub struct Drawable<'a> {
@@ -390,6 +403,9 @@ pub struct Drawable<'a> {
     pub scale: f32,
     /// Tint and opacity.
     pub tint: Rgba,
+    /// The region node of the main layer the object is drawn in whatever
+    /// its position (`StickToRegion`), as `(layer, node)`.
+    pub stick: Option<(usize, usize)>,
 }
 
 /// An entity saying a sentence.
@@ -551,6 +567,35 @@ impl SceneView {
     /// reason; the scene is still shown without them.
     pub fn missing(&self) -> &[(String, String)] {
         self.bank.missing()
+    }
+
+    /// Renumbers the states kept per entity, after a node or a free
+    /// entity was inserted or deleted.
+    pub(crate) fn remap_refs(&mut self, f: impl Fn(EntityRef) -> EntityRef) {
+        self.anims = std::mem::take(&mut self.anims)
+            .into_iter()
+            .map(|(r, v)| (f(r), v))
+            .collect();
+        self.talks = std::mem::take(&mut self.talks)
+            .into_iter()
+            .map(|(r, v)| (f(r), v))
+            .collect();
+        self.playing = std::mem::take(&mut self.playing)
+            .into_iter()
+            .map(|(r, v)| (f(r), v))
+            .collect();
+        self.subtitles = std::mem::take(&mut self.subtitles)
+            .into_iter()
+            .map(|(r, v)| (f(r), v))
+            .collect();
+    }
+
+    /// Drops the states kept for an entity that left the scene.
+    pub(crate) fn forget_entity(&mut self, r: EntityRef) {
+        self.anims.remove(&r);
+        self.talks.remove(&r);
+        self.playing.remove(&r);
+        self.subtitles.remove(&r);
     }
 
     /// Every entity of the scene: layer nodes in order, then free ones.
@@ -949,39 +994,65 @@ impl SceneView {
     /// Fills a draw list with the scene as seen by `camera`, showing the
     /// frames the animations are at (see [`SceneView::advance`]).
     pub fn draw<'a>(&'a self, list: &mut DrawList<'a>, camera: &Camera) {
-        self.draw_with(list, camera, &[]);
+        self.draw_with(list, camera, &[], |_| None);
     }
 
     /// The order the scene's objects are drawn in (`CAdScene::
     /// TraverseNodes`): layer by layer, each layer's nodes in order; a
     /// walkable region of a layer is followed by the free objects
-    /// standing in it, sorted by `y`; the main layer ends with the free
-    /// objects not drawn yet, sorted by `y`. The free objects are the
-    /// `others` (actors, at their positions) first, then the scene's free
-    /// entities, as the engine lists them.
-    pub fn draw_order(&self, others: &[(i32, i32)]) -> Vec<DrawItem> {
+    /// standing in it, or stuck to it (`StickToRegion`), sorted by `y`;
+    /// the main layer ends with the free objects not drawn yet, sorted
+    /// by `y`. The free objects are the `others` (actors, at their
+    /// positions) first, then the scene's free entities, as the engine
+    /// lists them; `free_stick` gives the region a free entity sticks
+    /// to.
+    pub fn draw_order(
+        &self,
+        others: &[FreeObject],
+        free_stick: impl Fn(usize) -> Option<(usize, usize)>,
+    ) -> Vec<DrawItem> {
         let scene = &self.scene;
-        let mut objects: Vec<(i32, i32, DrawItem)> = Vec::new();
-        for (i, &(x, y)) in others.iter().enumerate() {
-            objects.push((x, y, DrawItem::Other { index: i, layer: 0 }));
+        let mut objects: Vec<(FreeObject, DrawItem)> = Vec::new();
+        for (i, object) in others.iter().enumerate() {
+            objects.push((*object, DrawItem::Other { index: i, layer: 0 }));
         }
         for (i, e) in scene.free_entities.iter().enumerate() {
             if e.active && e.kind == EntityKind::Normal {
-                objects.push((e.x, e.y, DrawItem::Free { index: i, layer: 0 }));
+                objects.push((
+                    FreeObject {
+                        x: e.x,
+                        y: e.y,
+                        stick: free_stick(i),
+                    },
+                    DrawItem::Free { index: i, layer: 0 },
+                ));
             }
         }
         let mut drawn = vec![false; objects.len()];
         let mut order = Vec::new();
-        let mut draw_in = |order: &mut Vec<DrawItem>, layer: usize, region: Option<&Region>| {
+        // The objects of a region (`DisplayRegionContent`): those stuck to
+        // it, and those standing in it that stick to none; with no region,
+        // every one left.
+        let mut draw_in = |order: &mut Vec<DrawItem>,
+                           layer: usize,
+                           region: Option<(usize, &Region)>| {
             let mut inside: Vec<usize> = (0..objects.len())
                 .filter(|&i| {
-                    !drawn[i] && region.is_none_or(|r| r.contains(objects[i].0, objects[i].1))
+                    let object = objects[i].0;
+                    !drawn[i]
+                        && match region {
+                            None => true,
+                            Some((node, r)) => {
+                                object.stick == Some((layer, node))
+                                    || (object.stick.is_none() && r.contains(object.x, object.y))
+                            }
+                        }
                 })
                 .collect();
-            inside.sort_by_key(|&i| objects[i].1);
+            inside.sort_by_key(|&i| objects[i].0.y);
             for i in inside {
                 drawn[i] = true;
-                order.push(match objects[i].2 {
+                order.push(match objects[i].1 {
                     DrawItem::Other { index, .. } => DrawItem::Other { index, layer },
                     DrawItem::Free { index, .. } => DrawItem::Free { index, layer },
                     DrawItem::Node { layer, index } => DrawItem::Node { layer, index },
@@ -1002,7 +1073,7 @@ impl SceneView {
                         if region.blocked || region.decoration || !region.active {
                             continue;
                         }
-                        draw_in(&mut order, li, Some(region));
+                        draw_in(&mut order, li, Some((ni, region)));
                     }
                 }
             }
@@ -1020,11 +1091,19 @@ impl SceneView {
         list: &mut DrawList<'a>,
         camera: &Camera,
         others: &[Drawable<'a>],
+        free_stick: impl Fn(usize) -> Option<(usize, usize)>,
     ) {
         let scene = &self.scene;
-        let positions: Vec<(i32, i32)> = others.iter().map(|d| (d.x, d.y)).collect();
+        let positions: Vec<FreeObject> = others
+            .iter()
+            .map(|d| FreeObject {
+                x: d.x,
+                y: d.y,
+                stick: d.stick,
+            })
+            .collect();
         let mut current_layer = usize::MAX;
-        for item in self.draw_order(&positions) {
+        for item in self.draw_order(&positions, free_stick) {
             let layer = item.layer();
             if layer != current_layer {
                 current_layer = layer;
@@ -1074,6 +1153,7 @@ impl SceneView {
             frame: self.frame_of(r),
             scale: self.scene.entity_scale(entity),
             tint: self.scene.entity_tint(entity),
+            stick: None,
         })
     }
 }

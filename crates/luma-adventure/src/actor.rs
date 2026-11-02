@@ -664,6 +664,14 @@ impl Actor {
         self.current_regions.clear();
     }
 
+    /// Renumbers the regions the actor stands in, after a node was
+    /// inserted in or deleted from a layer.
+    pub(crate) fn remap_regions(&mut self, f: impl Fn((usize, usize)) -> (usize, usize)) {
+        for region in &mut self.current_regions {
+            *region = f(*region);
+        }
+    }
+
     /// Raises `ActorEntry` and `ActorLeave` for the regions of the main
     /// layer the actor entered and left (`CAdObject::AfterMove`).
     fn after_move(&mut self, scene: &Scene, events: &mut Vec<ActorEvent>) {
@@ -945,6 +953,7 @@ impl Actor {
             frame: self.frame_of(path),
             scale: self.scale(scene),
             tint: self.tint(scene),
+            stick: None,
         })
     }
 

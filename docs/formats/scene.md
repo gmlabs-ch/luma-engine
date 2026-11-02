@@ -358,6 +358,41 @@ nodes of a layer but belong to the scene's object list, like actors. The
 editor writes them after the layers under a `; ----- free entities`
 comment. Unlike layer entities they are scalable by default.
 
+## Scenes changed by scripts
+
+Scripts add to and take from a scene while it runs, as the original
+engine's `CAdScene` and `CAdLayer` allow:
+
+- `Scene.CreateEntity(name)` makes an empty free entity (scalable, no
+  sprite) and `Scene.LoadEntity(file)` loads an `.entity` file as a free
+  entity (its sprites, sound, region, properties and scripts set up as
+  for the scene's own; its `TEMPLATE` is not followed, as for entity
+  containers). `Scene.UnloadObject(entity)` removes a free entity, the
+  file's as well as a created one, ending its scripts.
+- `layer.AddEntity(name)`, `AddRegion(name)`, `InsertEntity(index,
+  name)` and `InsertRegion(index, name)` add a node to a layer, at the
+  end or before the node at `index` (an index past the end appends); a
+  new entity node is not scalable, like the file's. `DeleteNode(node)`,
+  by object or by index, removes one and ends its scripts.
+- `Scene.AddLayer(name)` and `InsertLayer(index, name)` add a layer the
+  size of the main layer; `DeleteLayer(layer)`, by object or by index,
+  removes one with its nodes, except the main layer.
+
+Handles are positional in Luma (a node is "node 3 of layer 1"), so
+inserting or deleting renumbers what follows: the handles scripts hold
+keep naming the same objects, as do the animation and sentence states
+and the regions the actors stand in. The scene is saved with its
+changes, so a saved game brings the created content back (see
+[saving.md](../saving.md)); the scene's persistent state notes the
+created entities by name like the file's, and ignores them when the
+scene reloads without them.
+
+`StickToRegion(region)` on an actor or a free entity (the region of the
+main layer by object or by name, `null` to unstick) draws the object
+in that region's slot of the drawing order whatever its position, until
+the scene changes; see [Drawing](#drawing). It answers `false` when the
+region is not found.
+
 ## Drawing
 
 For each active layer, in order:
@@ -369,6 +404,9 @@ For each active layer, in order:
    inside it and that have not been drawn yet, sorted by `Y`, so that an
    actor standing on the floor region is drawn between the background
    (before the region in the file) and the foreground props (after it).
+   A free object stuck to a region (`StickToRegion`) is drawn with that
+   region wherever it stands, and with no other
+   (`CAdScene::DisplayRegionContent`).
 3. After the nodes of the **main** layer, draw the remaining free objects
    (those inside no region), sorted by `Y`.
 

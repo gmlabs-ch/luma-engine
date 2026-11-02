@@ -232,6 +232,14 @@ impl World {
                 Return::null()
             }
             "Caption" => Return::value(self.caption_of(id, arg(0).get_int(self))),
+            "StickToRegion"
+                if matches!(
+                    self.objects.get(id).map(|n| &n.kind),
+                    Some(Kind::Actor | Kind::Entity(_))
+                ) =>
+            {
+                Return::value(self.stick_to_region(id, &arg(0)))
+            }
             "ForceTalkAnim" => {
                 // The sprite plays as the first stance of the next sentence
                 // (`CAdObject::ScCallMethod`).

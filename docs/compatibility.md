@@ -325,14 +325,14 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdScene.cpp
 - Hierarchy and Luma: CBObject → CAdScene; Luma: scene (`scene_call`, `scene_get`, `scene_set`, `scene_view.rs`)
-- Count: 47 done, 34 todo, 2 no-op
+- Count: 52 done, 29 todo, 2 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `LoadActor` | method | **done** | Loads a 2D actor into the scene. |
 | `LoadActor3D` | method | **todo** | Loads a 3D actor. 3D is not implemented. |
-| `LoadEntity` | method | **todo** | Loads an entity into the scene. Stubbed. |
-| `CreateEntity` | method | **todo** | Creates an empty entity in the scene. Stubbed. |
+| `LoadEntity` | method | **done** | Loads an entity file into the scene as a free entity (`TEMPLATE` is not followed). |
+| `CreateEntity` | method | **done** | Creates an empty free entity in the scene. |
 | `UnloadObject`, `UnloadActor`, `UnloadEntity`, `DeleteEntity` | method | **done** | Removes a runtime-loaded object. |
 | `UnloadActor3D` | method | **todo** | Removes a 3D actor. 3D is not implemented. |
 | `SkipTo` | method | **done** | Jumps the view to a position or object. |
@@ -352,7 +352,7 @@ How the list was made. For every class with a script interface, the names tested
 | `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `GetLightColor`, `GetLightPosition` | method | **todo** | Controls the lights of the scene's 3D geometry. |
 | `SetActiveCamera` | method | **todo** | Selects a camera of the 3D geometry. |
 | `SetViewport` | method | **todo** | Sets the scene's viewport rectangle. Stubbed. |
-| `AddLayer`, `InsertLayer`, `DeleteLayer` | method | **todo** | Adds, inserts or deletes a layer at runtime. Stubbed. |
+| `AddLayer`, `InsertLayer`, `DeleteLayer` | method | **done** | Adds, inserts or deletes a layer at runtime (the main layer cannot be deleted); handles to the other layers and nodes stay valid. |
 | `EnableFog`, `DisableFog` | method | **todo** | 3D fog (colour, start, end). |
 | `Type` | get | **done** | `scene`. |
 | `NumLayers`, `NumWaypointGroups`, `MainLayer`, `NumFreeNodes` | get | **done** | Counts and the main layer. |
@@ -375,13 +375,13 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdLayer.cpp
 - Hierarchy and Luma: CBObject → CAdLayer; Luma: layers (`layer_call`)
-- Count: 13 done, 5 todo, 0 no-op
+- Count: 18 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `GetNode` | method | **done** | Node by index or name. |
-| `AddRegion`, `InsertRegion`, `AddEntity`, `InsertEntity` | method | **todo** | Adds a new region / entity to the layer. Stubbed. |
-| `DeleteNode` | method | **todo** | Deletes a node. Stubbed. |
+| `AddRegion`, `InsertRegion`, `AddEntity`, `InsertEntity` | method | **done** | Adds a new region / entity to the layer, at the end or at an index. |
+| `DeleteNode` | method | **done** | Deletes a node (by object or index), ending its scripts. |
 | `Type` | get | **done** | `layer`. |
 | `NumNodes` | get | **done** | Number of nodes. |
 | `Width`, `Height` | get/set | **done** | Layer size. |
@@ -435,7 +435,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdObject.cpp
 - Hierarchy and Luma: CBObject → CAdObject → CAdTalkHolder / CAdObject3D; Luma: entities, actors (`entity_call`, `actor_call`)
-- Count: 33 done, 8 todo, 0 no-op
+- Count: 34 done, 7 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -445,7 +445,7 @@ How the list was made. For every class with a script interface, the names tested
 | `StopTalk`, `StopTalking` | method | **done** | Cuts the current sentence. |
 | `ForceTalkAnim` | method | **done** | Plays a sprite file as the first stance of the next sentence. |
 | `Talk`, `TalkAsync` | method | **done** | Says a sentence (text, sound, duration, stances, align). |
-| `StickToRegion` | method | **todo** | Constrains a free object to move only inside a region. Stubbed. |
+| `StickToRegion` | method | **done** | Draws a free object in the slot of a region of the main layer (by object or name) whatever its position; null unsticks. |
 | `SetFont`, `GetFont` | method | **done** | Sets / reads the font used for the object's speech. |
 | `TakeItem`, `DropItem`, `GetItem`, `HasItem` | method | **done** | Inventory handling (shared inventory in Luma). |
 | `CreateParticleEmitter` | method | **todo** | Creates a particle emitter attached to the object. Particles are not implemented. |
@@ -1034,12 +1034,12 @@ How the list was made. For every class with a script interface, the names tested
 | CBGame | 90 | 58 | 17 | 165 |
 | CAdGame | 56 | 9 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
-| CAdScene | 47 | 34 | 2 | 83 |
-| CAdLayer | 13 | 5 | 0 | 18 |
+| CAdScene | 52 | 29 | 2 | 83 |
+| CAdLayer | 18 | 0 | 0 | 18 |
 | CBRegion | 11 | 0 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
 | CAdWaypointGroup | 3 | 0 | 0 | 3 |
-| CAdObject | 33 | 8 | 0 | 41 |
+| CAdObject | 34 | 7 | 0 | 41 |
 | CAdTalkHolder | 7 | 0 | 0 | 7 |
 | CAdActor | 23 | 0 | 0 | 23 |
 | CAdEntity | 14 | 6 | 0 | 20 |
@@ -1070,9 +1070,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **587** | **540** | **29** | **1156** |
+| **All** | **598** | **529** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 572 done, 531 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 583 done, 520 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1106,7 +1106,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 |-------|-----:|----------------|
 | Game services | 46 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
 | Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
-| Object model (2D) | 19 | Runtime creation of scene content (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`), `StickToRegion`, attachments, per-object inventories. Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions. |
+| Object model (2D) | 8 | Game-level entities (`Game.CreateEntity`, `Game.LoadEntity`), attachments, per-object inventories. Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene content created at run time, `StickToRegion`. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Sprites and frames | 48 | Frame and sub-frame objects (`GetFrame`, `AddFrame`, `Delay`, `MoveX`, hotspots...), runtime-built sprites, frame events. Reads on the sprite format already exist in `luma-formats`. |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
@@ -1116,7 +1116,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **540** | |
+| **All** | **529** | |
 
 ## Members in Luma that WME 1.x does not define
 

@@ -53,6 +53,7 @@ pub mod objects;
 pub mod path;
 pub mod responses;
 pub mod save;
+mod scene_edit;
 pub mod scene_state;
 pub mod scene_view;
 pub mod settings;

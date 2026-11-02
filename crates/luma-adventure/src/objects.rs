@@ -92,6 +92,9 @@ pub struct ObjectState {
     pub forced_talk_anim: Option<String>,
     /// See `forced_talk_anim`.
     pub forced_talk_used: bool,
+    /// The region of the main layer a free object draws in
+    /// (`StickToRegion`), by handle; `None` draws it by its position.
+    pub stick_region: Option<NativeId>,
 }
 
 impl Default for ObjectState {
@@ -103,6 +106,7 @@ impl Default for ObjectState {
             captions: BTreeMap::new(),
             forced_talk_anim: None,
             forced_talk_used: false,
+            stick_region: None,
         }
     }
 }
@@ -214,6 +218,27 @@ impl Objects {
             .filter_map(|(i, (generation, native))| {
                 native.as_ref().map(|n| (encode(i as u32, *generation), n))
             })
+    }
+
+    /// Every live object with its handle, mutable.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (NativeId, &mut Native)> {
+        self.slots
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, (generation, native))| {
+                native.as_mut().map(|n| (encode(i as u32, *generation), n))
+            })
+    }
+
+    /// Rewrites the kind of every live object, for renumbering the
+    /// positional kinds (layers, nodes, free entities) after an
+    /// insertion or a deletion; handles do not change.
+    pub fn remap_kinds(&mut self, f: impl Fn(&Kind) -> Kind) {
+        for (_, slot) in &mut self.slots {
+            if let Some(native) = slot {
+                native.kind = f(&native.kind);
+            }
+        }
     }
 
     /// The handle of the first object matching the predicate.
