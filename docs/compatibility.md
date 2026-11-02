@@ -1115,3 +1115,5 @@ These are accepted by Luma and not counted above; some come from later WME versi
 ## Maintenance
 
 Update this file in the same commit as any change to `natives*.rs`, to the `*_STUBS` lists or to the built-ins of `luma-script`: flip the row to **done**, and delete its stub entry. Then recount the summary tables: the per-class numbers are computed from the rows (a name counts once, a `get/set` row twice).
+
+The test `crates/luma-adventure/tests/compatibility_doc.rs` enforces this: it recomputes the counts of every section, the summary table, the `Of the total` sentence and the total of the groups table from the rows, and fails when a number written here differs or a row has a state other than **done**, **todo** or **no-op**.
