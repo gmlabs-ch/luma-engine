@@ -53,7 +53,11 @@ A saved game holds:
   modes, sentence, and their model's animation channels by set name, as
   WME's `CAdActor3DX::Persist` and `CXModel::Persist` keep them; the
   models are read again from the actor file, the files `MergeAnims`
-  added merged again and the sets `UnloadAnim` removed again) and the
+  added merged again and the sets `UnloadAnim` removed again), their
+  attachments (script object, name, bone, model file, offset and their
+  model's animation channels; the model is read again), the textures
+  set by script on their materials and the bone of their particle
+  emitter, and the
   scene's 3D side (the geometry file, the waypoint height, the active
   camera, the lights' flags and colours and the nodes' flags by name,
   the fog; the geometry is read again); the game's `MaxShadowType` and
@@ -297,7 +301,10 @@ objects (which cursor of the game, an item or an object they stand
 for) and added the items' hover image objects, `TextRTL` and
 `SuspendedRendering`. Version 13, after 12, added the 3D actors, the
 scene's 3D side and the game's shadow settings (the lists are empty and
-the side absent in a 2D game).
+the side absent in a 2D game). Version 14, after 13, added the 3D
+actors' attachments, material overrides and bone emitters, and the
+shadow image and light position every object keeps (`SetShadowImage`,
+`SetLightPosition`).
 
 ## Checking a game
 

@@ -110,7 +110,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BObject.cpp
 - Hierarchy and Luma: CBScriptHolder → CBObject; Luma: game, entities, actors (sound, position, flags); controls, regions, layers have their own subsets
-- Count: 69 done, 3 todo, 0 no-op
+- Count: 72 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -128,8 +128,8 @@ How the list was made. For every class with a script interface, the names tested
 | `StopSound`, `PauseSound`, `ResumeSound`, `IsSoundPlaying` | method | **done** | Controls the object's sound effect. |
 | `SetSoundPosition`, `GetSoundPosition` | method | **done** | Seeks / reads the sound's position in milliseconds. |
 | `SetSoundVolume`, `GetSoundVolume` | method | **done** | Sets / reads the sound's volume (percent). |
-| `SetShadowImage`, `GetShadowImage` | method | **todo** | Sets / reads the image used for the object's 3D simple shadow. Done on the game and on 3D actors (the only objects whose shadow uses it); a 2D object has no such method yet. |
-| `SetLightPosition` | method | **todo** | Sets the position of the light attached to a 3D object. Done on 3D actors; a 2D object has no such method yet. |
+| `SetShadowImage`, `GetShadowImage` | method | **done** | Sets / reads the image used for the object's 3D simple shadow; `null` clears it, a missing file fails. On every object, kept in its state and saved; only a 3D actor's shadow (and the game's default) uses it. |
+| `SetLightPosition` | method | **done** | Sets the position of the shadow light relative to the object. On every object; only a 3D actor's shadow uses it. |
 | `SoundFXNone` | method | **done** | Removes the effect from the object's sounds. |
 | `SoundFXEcho`, `SoundFXReverb` | method | **done** | Applies an echo / reverb effect to the object's sounds, now and next, with the engine's parameters mapped onto Kira's delay and reverb (`docs/audio.md`); an approximation of the DirectSound effects. |
 | `Type` | get | **done** | Class name of the object. |
@@ -957,7 +957,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 
 - WME source: src/engine_core/wme_ad/AdActor3DX.cpp
 - Hierarchy and Luma: CAdObject3D → CAdActor3DX; Luma: `Actor3d` (`actor3d.rs`, `natives_actor3d.rs`, the `3d` feature; see `docs/3d-actors.md`)
-- Count: 54 done, 8 todo, 5 no-op
+- Count: 62 done, 0 todo, 5 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -965,20 +965,20 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | `StopAnim` | method | **done** | Stops channel 0 with a transition time (the stop transition time by default). |
 | `StopAnimChannel`, `PlayAnimChannel`, `PlayAnimChannelAsync` | method | **done** | Controls animations on numbered blend channels 0..9 (`StopAnimChannel` defaults to no transition). |
 | `IsAnimPlaying`, `IsAnimChannelPlaying` | method | **done** | True when an animation (on a channel) plays, by name or any. |
-| `AddAttachment`, `RemoveAttachment`, `GetAttachment` | method | **todo** | Attaches another model to a bone, removes it, or returns it. The calls fail (`false` / `null`) and log once. |
-| `AddMesh`, `RemoveMesh` | method | **todo** | Obsolete aliases of the attachment methods; fail like them. |
+| `AddAttachment`, `RemoveAttachment`, `GetAttachment` | method | **done** | Attaches another `.x` model to a bone (`file, name, bone`; a runtime error and `false` when the bone or the file is missing; the same name replaces), removes it by name, or returns the attachment object (by name; Luma also accepts an index). See `docs/3d-actors.md` section 8.6. |
+| `AddMesh`, `RemoveMesh` | method | **done** | Obsolete aliases of the attachment methods; they log the original's warning. |
 | `GoTo3D`, `GoTo3DAsync`, `GoTo`, `GoToAsync`, `GoToObject`, `GoToObjectAsync` | method | **done** | Walking orders (3D point, floor point with the tolerant conversion, entity's walk-to point and direction); `GoTo` is skipped within `GoToTolerance`. |
 | `TurnTo`, `TurnToAsync`, `TurnToAngle`, `TurnToAngleAsync` | method | **done** | Turning orders: a direction constant, an object (its 2D position converted to 3D) or an angle, the shorter way. |
 | `IsWalking` | method | **done** | True while following a path. |
 | `DirectWalk`, `DirectWalkBack`, `DirectWalkStop`, `DirectTurnLeft`, `DirectTurnRight`, `DirectTurnStop` | method | **done** | Free walking / turning, stopped by the geometry (or the 2D floor in a `2D_PATHFINDING` scene). |
-| `SetTexture` | method | **todo** | Replaces a material's texture. Fails (`false`) until the material scripting of the 3D pass. |
-| `SetTheoraTexture` | method | **todo** | Uses a playing video as a material's texture. Fails (`false`). |
+| `SetTexture` | method | **done** | Replaces a material's texture by an image or a `.sprite`, by material name; `false` when the file is missing (a material no mesh has is accepted, as in WME). Kept on the actor and handed to the drawing step (`docs/3d-actors.md` section 10.5). |
+| `SetTheoraTexture` | method | **done** | Uses a looping Theora video as a material's texture; recorded like `SetTexture`, the drawing step plays the video. |
 | `SetEffect`, `RemoveEffect` | method | **no-op** | Applies / removes an HLSL shader effect on a material; not planned (see `docs/3d-actors.md` section 13), the calls return `false` as WME does when an effect fails to compile. |
 | `SetEffectParam`, `SetEffectParamVector`, `SetEffectParamColor` | method | **no-op** | Sets shader effect parameters; not planned, `false`. |
 | `MergeAnims` | method | **done** | Merges animation sets from another `.x` file, with its `.anim` sidecar. |
 | `UnloadAnim` | method | **done** | Unloads a named animation set (and stops it on its channels). |
 | `SetAnimTransitionTime`, `GetAnimTransitionTime` | method | **done** | Sets / reads the blend time between two animations (`-1` for an unset pair; a negative time removes the pair). |
-| `CreateParticleEmitterBone` | method | **todo** | Creates a particle emitter attached to a bone. Returns `null` and logs once. |
+| `CreateParticleEmitterBone` | method | **done** | Creates (or re-aims) the actor's particle emitter so that it follows the projected position of a bone plus an offset; returns the emitter. `CreateParticleEmitter` forgets the bone. |
 | `Type` | get | **done** | `actor3dx`. |
 | `TalkAnimName`, `TalkAnimChannel`, `WalkAnimName`, `IdleAnimName`, `TurnLeftAnimName`, `TurnRightAnimName` | get/set | **done** | Animation names / channel for talk, walk, idle, turn; `null` restores a default name. |
 | `DirectionAngle`, `DirAngle`, `Direction` | get/set | **done** | Facing angle (normalised on set) and its eight-sector direction code. |
@@ -988,13 +988,13 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 ### CAdAttach3DX (model attached to a 3D actor bone)
 
 - WME source: src/engine_core/wme_ad/AdAttach3DX.cpp
-- Hierarchy and Luma: CAdObject3D → CAdAttach3DX; Luma: absent
-- Count: 0 done, 7 todo, 0 no-op
+- Hierarchy and Luma: CAdObject3D → CAdAttach3DX; Luma: `Attachment3d` (`actor3d.rs`, `natives_actor3d.rs`, the `3d` feature; see `docs/3d-actors.md` sections 8.6 and 11.3)
+- Count: 7 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `PlayAnim`, `PlayAnimAsync`, `StopAnim`, `StopAnimChannel`, `PlayAnimChannel`, `PlayAnimChannelAsync` | method | **todo** | Animation control of the attached model. |
-| `Type` | get | **todo** | `attachment`. |
+| `PlayAnim`, `PlayAnimAsync`, `StopAnim`, `StopAnimChannel`, `PlayAnimChannel`, `PlayAnimChannelAsync` | method | **done** | Animation control of the attached model: restarted, no stop transition, the owner actor's transition table when the channel plays something; the blocking forms return at the next tick (the attachment is always ready, as in WME). |
+| `Type` | get | **done** | `attachment`. The `CAdObject3D` part it inherits answers `PosX`, `PosY`, `PosZ`, `Angle`, `Scale`, `Active`, `DrawBackfaces`, `SkipTo3D`, `GetBonePosition2D`, `GetBonePosition3D`. |
 
 ## 11. Events
 
@@ -1032,7 +1032,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Global variables | 5 | 0 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
-| CBObject | 69 | 3 | 0 | 72 |
+| CBObject | 72 | 0 | 0 | 72 |
 | CBGame | 146 | 0 | 19 | 165 |
 | CAdGame | 65 | 0 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
@@ -1069,12 +1069,12 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CPartEmitter | 79 | 0 | 0 | 79 |
 | CAdObject3D | 38 | 0 | 0 | 38 |
 | CAdActor3D | 0 | 0 | 40 | 40 |
-| CAdActor3DX | 54 | 8 | 5 | 67 |
-| CAdAttach3DX | 0 | 7 | 0 | 7 |
+| CAdActor3DX | 62 | 0 | 5 | 67 |
+| CAdAttach3DX | 7 | 0 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **1058** | **18** | **77** | **1153** |
+| **All** | **1076** | **0** | **77** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1037 done, 18 todo, 77 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1055 done, 0 todo, 77 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1084,7 +1084,6 @@ These classes have no done member in Luma: the object does not exist for scripts
 |-------|-----------|-------------------:|
 | `CBFrame` | A frame of a sprite (delay, sound, move, sub-frames, events) | 21 |
 | `CBSubFrame` | The image part of a frame (hotspot, mirror, alpha) | 20 |
-| `CAdAttach3DX` | Model attached to a bone of a 3D actor | 7 |
 
 Classes that exist in WME 1.x with a script interface but that are no-op by design: `CSXTcpClient` (unfinished in WME itself), `CAdActor3D` (the legacy Milkshape 3D actor WME deprecated in 1.6; `LoadActor3D` refuses its files with a clear error), `CSXPluginObject` (Windows DLL plugins), `CUIMarkup` (never instantiated), the Windows-only parts of `CSXDirectory` (`GetDrives`, the working directory) and `CSXMemBuffer`, and the AVI side of `Game.PlayVideo` (DirectShow).
 
@@ -1092,12 +1091,11 @@ WME classes with no script interface of their own (nothing to port; scripts reac
 
 ## Groups the work falls into
 
-Counts are the todo members (no-op excluded). Everything outside 3D is done: the script library (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory`, `new Object`, `new Actor`, `new Entity`, the HSL colour helpers), the game services (private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`, `TextRTL`, `SuspendedRendering`, `Scene.SetViewport`, the game's and the items' cursor objects, the items' hover image objects), the 2D object model (per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories) and the rendering features (rotation, per-axis scale, blend modes, scene-only fades; see `docs/rendering.md`).
+Counts are the todo members (no-op excluded). Everything is done: the script library (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory`, `new Object`, `new Actor`, `new Entity`, the HSL colour helpers), the game services (private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`, `TextRTL`, `SuspendedRendering`, `Scene.SetViewport`, the game's and the items' cursor objects, the items' hover image objects), the 2D object model (per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories) the rendering features (rotation, per-axis scale, blend modes, scene-only fades; see `docs/rendering.md`) and the 3D side (the scene geometry, the 3D actor (`CAdObject3D`, `CAdActor3DX`), its walking, turning, animation and scripting, its attachments (`CAdAttach3DX`) and bone emitter, the textures set by script on its materials, the scene's lights, nodes, cameras and fog, the game's shadow settings and the shadow members of every object; `docs/3d-actors.md`, the `3d` feature). The drawing of the models and their shadows is the 3D pass, not a script member.
 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
-| 3D | 18 | The attachments (`CAdAttach3DX`, `AddAttachment` and its kin, `CreateParticleEmitterBone`), the textures set by script on 3D models (`SetTexture`, `SetTheoraTexture`) and the shadow image and light position of 2D objects. Done: the scene geometry, the 3D actor (`CAdObject3D`, `CAdActor3DX`), its walking, turning, animation and scripting, the scene's lights, nodes, cameras and fog, the game's shadow settings (`docs/3d-actors.md`, the `3d` feature); the drawing of the models and their shadows is the 3D pass, not a script member. |
-| **All** | **18** | |
+| **All** | **0** | |
 
 ## Members in Luma that WME 1.x does not define
 
@@ -1110,6 +1108,8 @@ These are accepted by Luma and not counted above; some come from later WME versi
 | Game | `FocusedWindow`, `CursorHidden`, `AutoSaveOnExit`, `AutoSaveSlot`, `Platform`, `DeviceType` | Properties Luma reads that WME 1.x does not define in its script interface (some come from later WME versions or from Luma itself). |
 | `new Actor`, `new Entity` | a file argument | `new Actor(file)` and `new Entity(file)` load the file, as `Game.LoadActor` and `Game.LoadEntity` do; WME's constructors take no argument. |
 | Actor | `SetStopOnBlocked`, `GetStopOnBlocked`, `ActorIsBlocked` | Stop-on-blocked behaviour and the matching event / property. |
+| 3D actor | `NumAttachments`, `GetAttachment(index)` | The bone attachments counted and found by index; WME's `GetAttachment` on a 3D actor takes a name, and its inherited `NumAttachments` counts the 2D attachments of `CAdObject`, always 0 on a 3D actor. |
+| Attachment of a 3D actor | `Bone`, `Filename` | The parent bone and the model file, which WME keeps private. |
 | Sprite | `Filename` | The file the sprite was loaded from. |
 
 ## Maintenance

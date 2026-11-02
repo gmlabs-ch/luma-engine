@@ -10,10 +10,16 @@
 //! angular velocity, and asks its model for the idle, walk and turn
 //! animations on channel 0 as its state says.
 //!
+//! An actor may carry [`Attachment3d`]s, models of their own attached to
+//! a bone (`AddAttachment`), and textures scripts put on its materials
+//! ([`MaterialOverride`], `SetTexture`); both are handed to the drawing
+//! step with the actor ([`Actor3dDraw`]).
+//!
 //! Written with reference to `AdActor3DX.cpp`, `AdObject3D.cpp`,
-//! `AdActor3D.cpp` (`CreateFromFile`), `AdObject.cpp` and `BObject.cpp`
-//! (`GetMatrix`) of Wintermute Engine 1.x (MIT License, Copyright (c)
-//! 2003-2013 Jan Nedoma); see `NOTICE`.
+//! `AdAttach3DX.cpp`, `AdActor3D.cpp` (`CreateFromFile`), `AdObject.cpp`,
+//! `BObject.cpp` (`GetMatrix`) and `XModel.cpp` (`SetMaterialSprite`,
+//! `SetMaterialTheora`) of Wintermute Engine 1.x (MIT License, Copyright
+//! (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
 use luma_3d::actor3d::AnimationDef;
 use luma_3d::math::{deg_to_rad, rad_to_deg};
@@ -113,6 +119,180 @@ impl<'de> Deserialize<'de> for ModelSlot {
     }
 }
 
+/// A texture a script put on a material of the model (`CXModelMatSprite`,
+/// section 10.5 of `docs/3d-actors.md`). The drawing step loads it: an
+/// image or `.sprite` file whose current frame textures the material, or
+/// a Theora video played in a loop whose frame does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MaterialTexture {
+    /// `SetTexture(material, file)`: an image or a `.sprite`.
+    Sprite(String),
+    /// `SetTheoraTexture(material, file)`: a looping video.
+    Theora(String),
+}
+
+/// A material's texture replaced by script, by material name (the texture
+/// file name without path and extension, `Material::name`), compared
+/// ignoring ASCII case. The model's data is not changed: the drawing step
+/// applies the override to every mesh material of that name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaterialOverride {
+    /// The material name.
+    pub material: String,
+    /// What textures it now.
+    pub texture: MaterialTexture,
+}
+
+/// A model attached to a bone of an actor (`CAdAttach3DX`, a `CAdObject3D`
+/// owned by the actor, section 8.6 of `docs/3d-actors.md`). It animates
+/// on its own channels, its events go to the actor, and it is drawn with
+/// `own matrix * bone combined matrix * actor world matrix`: its position,
+/// angle and scale offset it from the bone.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Attachment3d {
+    /// The script object (`GetAttachment`).
+    pub id: NativeId,
+    /// `NAME` as given to `AddAttachment`; the same name replaces.
+    pub name: String,
+    /// The frame of the actor's model it follows (`m_ParentBone`).
+    pub bone: String,
+    /// The `.x` file of the model, read again after a saved game.
+    pub model_file: String,
+    /// The model and its animation state.
+    pub model: ModelSlot,
+    /// `Active`: updated and drawn.
+    pub active: bool,
+    /// `PosX`, `PosY`, `PosZ`: the offset from the bone.
+    pub position: Vec3,
+    /// `Angle`: the rotation about Y relative to the bone, degrees.
+    pub angle: f32,
+    /// `Scale`: uniform, `/ 100` of the script value.
+    pub scale: f32,
+    /// `DrawBackfaces`.
+    pub draw_backfaces: bool,
+    /// The full matrix of the last update: own, bone, actor.
+    #[serde(skip)]
+    world_matrix: Mat4,
+    /// The projected bounding rectangle of the last update, in scene
+    /// pixels (left, top, right, bottom).
+    #[serde(skip)]
+    bounding_rect: Option<(i32, i32, i32, i32)>,
+}
+
+impl Attachment3d {
+    /// The model, once loaded.
+    pub fn model(&self) -> Option<&AnimatedModel> {
+        self.model.model.as_ref()
+    }
+
+    /// The model, mutable.
+    pub fn model_mut(&mut self) -> Option<&mut AnimatedModel> {
+        self.model.model.as_mut()
+    }
+
+    /// The matrix the attachment is drawn with: its own `GetMatrix` times
+    /// the bone's combined matrix times the actor's world matrix, as of
+    /// the last update of the actor.
+    pub fn world_matrix(&self) -> Mat4 {
+        self.world_matrix
+    }
+
+    /// The projected bounding rectangle of the last update, `None` before
+    /// the first.
+    pub fn bounding_rect(&self) -> Option<(i32, i32, i32, i32)> {
+        self.bounding_rect
+    }
+
+    /// Plays an animation as the attachment's scripts ask
+    /// (`CAdAttach3DX::ScCallMethod`, `PlayAnim(channel, name, 0, true)`):
+    /// restarted, with no stop transition; when the channel already plays
+    /// something, the actor's transition table and default decide the
+    /// transition time, as the model's owner does in the original.
+    /// `false` when the model has no such set.
+    pub fn play_anim(&mut self, owner: &AnimatedModel, channel: usize, name: &str) -> bool {
+        let Some(model) = self.model.model.as_mut() else {
+            return false;
+        };
+        let transition = model
+            .current_animation(channel)
+            .map_or(0, |current| owner.transition_time(current, name));
+        model.play_with(channel, name, transition, 0, true)
+    }
+
+    /// Stops a channel at once (`StopAnim`, `StopAnimChannel`).
+    pub fn stop_anim(&mut self, channel: usize) -> bool {
+        self.model
+            .model
+            .as_mut()
+            .is_some_and(|model| model.stop(channel, 0))
+    }
+
+    /// One frame (`CAdAttach3DX::Update`): the full matrix from the
+    /// bone's combined matrix and the actor's world matrix, the model's
+    /// animation, the projected rectangle. Returns the animation events
+    /// crossed, which the actor raises.
+    fn update(
+        &mut self,
+        owner_world: Mat4,
+        bone: &Mat4,
+        projection: &Projection,
+        delta_ms: u32,
+    ) -> Vec<String> {
+        self.world_matrix =
+            world_matrix(self.position, self.angle, self.scale) * *bone * owner_world;
+        let Some(model) = self.model.model.as_mut() else {
+            return Vec::new();
+        };
+        let events = model.update(delta_ms);
+        self.bounding_rect = project_box(model, self.world_matrix, projection);
+        events
+    }
+
+    /// Whether a scene pixel misses the attachment's triangles (the
+    /// actor's `IsTransparentAt` through its attachments).
+    fn is_transparent_at(&self, projection: &Projection, x: i32, y: i32) -> bool {
+        let Some(model) = self.model.model.as_ref() else {
+            return true;
+        };
+        let Some(inverse) = self.world_matrix.inverse() else {
+            return true;
+        };
+        let ray = projection.pick_ray(x, y);
+        model
+            .pick(
+                inverse.transform_coord(ray.origin),
+                inverse.transform_normal(ray.direction),
+            )
+            .is_none()
+    }
+
+    /// The world position of a bone of the attachment's own model
+    /// (`GetBonePosition3D` on the attachment), through its full matrix.
+    pub fn bone_position(&self, bone: &str, offset: Vec3) -> Option<Vec3> {
+        let model = self.model.model.as_ref()?;
+        let matrix = *model.bone_matrix(bone)? * self.world_matrix;
+        Some(matrix.transform_coord(offset))
+    }
+}
+
+/// Projects the eight corners of a model's box through a matrix into
+/// scene pixels (`CXModel::UpdateBoundingRect`).
+fn project_box(
+    model: &AnimatedModel,
+    matrix: Mat4,
+    projection: &Projection,
+) -> Option<(i32, i32, i32, i32)> {
+    let mut rect: Option<(i32, i32, i32, i32)> = None;
+    for corner in model.bounding_box().corners() {
+        let (x, y) = projection.project(matrix.transform_coord(corner));
+        rect = Some(match rect {
+            None => (x, y, x, y),
+            Some((l, t, r, b)) => (l.min(x), t.min(y), r.max(x), b.max(y)),
+        });
+    }
+    rect
+}
+
 /// A loaded 3D actor and its state (`CAdActor3DX` with its `CAdObject3D`
 /// and `CAdObject` parts).
 #[derive(Debug, Serialize, Deserialize)]
@@ -157,6 +337,17 @@ pub struct Actor3d {
     pub shadow_model_file: Option<String>,
     /// The model and its animation state.
     pub model: ModelSlot,
+    /// The models attached to bones (`AddAttachment`), in order.
+    pub attachments: Vec<Attachment3d>,
+    /// The textures scripts put on materials (`SetTexture`,
+    /// `SetTheoraTexture`), one per material name.
+    pub materials: Vec<MaterialOverride>,
+    /// The bone the particle emitter follows (`CreateParticleEmitterBone`),
+    /// with `part_offset`; `None` when the emitter follows the actor's
+    /// 2D position as any object's does.
+    pub part_bone: Option<String>,
+    /// The offset from that bone, in the bone's space.
+    pub part_offset: Vec3,
     /// Position in world units (`PosX`, `PosY`, `PosZ`).
     pub position: Vec3,
     /// The position the 2D position was last computed from.
@@ -438,6 +629,10 @@ impl Actor3d {
                 model: Some(AnimatedModel::new(model)),
                 pending: None,
             },
+            attachments: Vec::new(),
+            materials: Vec::new(),
+            part_bone: None,
+            part_offset: Vec3::ZERO,
             position,
             // Forces the first update to compute the 2D position.
             last_position: Vec3::new(f32::NAN, 0.0, 0.0),
@@ -534,7 +729,136 @@ impl Actor3d {
             animated.restore(&state);
         }
         self.model.model = Some(animated);
+        for attachment in &mut self.attachments {
+            if attachment.model.model.is_some() {
+                continue;
+            }
+            let model = vfs
+                .read(&attachment.model_file)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| {
+                    Model::parse(&bytes, &attachment.model_file).map_err(|e| e.to_string())
+                });
+            match model {
+                Ok(model) => {
+                    let mut animated = AnimatedModel::new(model);
+                    if let Some(state) = attachment.model.pending.take() {
+                        animated.restore(&state);
+                    }
+                    attachment.model.model = Some(animated);
+                }
+                Err(err) => warnings.push(format!(
+                    "Error loading attachment '{}' of '{}' from '{}': {err}",
+                    attachment.name, self.name, attachment.model_file
+                )),
+            }
+        }
         Ok(warnings)
+    }
+
+    /// Attaches a model to a bone (`AddAttachment`, `CAdAttach3DX::Init`):
+    /// the bone must be a frame of the actor's model, the file a model.
+    /// An attachment of the same name (ignoring ASCII case) is replaced in
+    /// place; the new one is given `id` as its script object. Returns the
+    /// handle of the attachment replaced, if any, so the caller can drop
+    /// it. Errors are the original's runtime error texts.
+    pub fn add_attachment(
+        &mut self,
+        vfs: &Vfs,
+        id: NativeId,
+        file: &str,
+        name: &str,
+        bone: &str,
+    ) -> Result<Option<NativeId>, String> {
+        let Some(model) = self.model.model.as_ref() else {
+            return Err("Error adding attachment".to_string());
+        };
+        if model.bone_matrix(bone).is_none() {
+            return Err(format!("Bone '{bone}' cannot be found"));
+        }
+        let model = vfs
+            .read(file)
+            .ok()
+            .and_then(|bytes| Model::parse(&bytes, file).ok())
+            .ok_or_else(|| "Error adding attachment".to_string())?;
+        let attachment = Attachment3d {
+            id,
+            name: name.to_string(),
+            bone: bone.to_string(),
+            model_file: file.to_string(),
+            model: ModelSlot {
+                model: Some(AnimatedModel::new(model)),
+                pending: None,
+            },
+            active: true,
+            position: Vec3::ZERO,
+            angle: 0.0,
+            scale: 1.0,
+            draw_backfaces: false,
+            world_matrix: self.world_matrix,
+            bounding_rect: None,
+        };
+        match self
+            .attachments
+            .iter()
+            .position(|a| a.name.eq_ignore_ascii_case(name))
+        {
+            Some(index) => {
+                let old = std::mem::replace(&mut self.attachments[index], attachment);
+                Ok(Some(old.id))
+            }
+            None => {
+                self.attachments.push(attachment);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Removes an attachment by name (`RemoveAttachment`); the handle of
+    /// its script object, for the caller to drop, or `None` when there
+    /// is no such attachment.
+    pub fn remove_attachment(&mut self, name: &str) -> Option<NativeId> {
+        let index = self
+            .attachments
+            .iter()
+            .position(|a| a.name.eq_ignore_ascii_case(name))?;
+        Some(self.attachments.remove(index).id)
+    }
+
+    /// An attachment by name, ignoring ASCII case (`GetAttachment`).
+    pub fn attachment(&self, name: &str) -> Option<&Attachment3d> {
+        self.attachments
+            .iter()
+            .find(|a| a.name.eq_ignore_ascii_case(name))
+    }
+
+    /// An attachment by script object.
+    pub fn attachment_by_id(&self, id: NativeId) -> Option<&Attachment3d> {
+        self.attachments.iter().find(|a| a.id == id)
+    }
+
+    /// An attachment by script object, mutable.
+    pub fn attachment_by_id_mut(&mut self, id: NativeId) -> Option<&mut Attachment3d> {
+        self.attachments.iter_mut().find(|a| a.id == id)
+    }
+
+    /// Puts a texture on a material (`SetTexture`, `SetTheoraTexture`,
+    /// `CXModel::SetMaterialSprite/Theora`): the override of that
+    /// material name is replaced, or added. The original does not check
+    /// that the model has the material; a name no mesh uses has no
+    /// effect.
+    pub fn set_material_texture(&mut self, material: &str, texture: MaterialTexture) {
+        match self
+            .materials
+            .iter_mut()
+            .find(|m| m.material.eq_ignore_ascii_case(material))
+        {
+            Some(existing) => existing.texture = texture,
+            None => self.materials.push(MaterialOverride {
+                material: material.to_string(),
+                texture,
+            }),
+        }
     }
 
     /// Merges the animation sets of an `.x` file into a model, then the
@@ -1052,11 +1376,26 @@ impl Actor3d {
             }
         }
 
-        let anim_events = match self.model.model.as_mut() {
-            Some(model) => model.update(ctx.delta_ms.min(u64::from(u32::MAX)) as u32),
+        let delta_ms = ctx.delta_ms.min(u64::from(u32::MAX)) as u32;
+        let mut anim_events = match self.model.model.as_mut() {
+            Some(model) => model.update(delta_ms),
             None => Vec::new(),
         };
         self.update_bounding_rect(ctx.projection);
+        // `UpdateAttachments`: the active attachments animate, their events
+        // go to the actor; one whose bone is gone keeps its last matrix.
+        if let Some(model) = self.model.model.as_ref() {
+            let owner_world = self.world_matrix;
+            for attachment in &mut self.attachments {
+                if !attachment.active {
+                    continue;
+                }
+                let Some(bone) = model.bone_matrix(&attachment.bone) else {
+                    continue;
+                };
+                anim_events.extend(attachment.update(owner_world, bone, ctx.projection, delta_ms));
+            }
+        }
         anim_events
     }
 
@@ -1066,15 +1405,7 @@ impl Actor3d {
         let Some(model) = self.model.model.as_ref() else {
             return;
         };
-        let mut rect: Option<(i32, i32, i32, i32)> = None;
-        for corner in model.bounding_box().corners() {
-            let (x, y) = projection.project(self.world_matrix.transform_coord(corner));
-            rect = Some(match rect {
-                None => (x, y, x, y),
-                Some((l, t, r, b)) => (l.min(x), t.min(y), r.max(x), b.max(y)),
-            });
-        }
-        self.bounding_rect = rect;
+        self.bounding_rect = project_box(model, self.world_matrix, projection);
     }
 
     /// The direct-control step (section 8.4 of `docs/3d-actors.md`):
@@ -1337,13 +1668,37 @@ impl Actor3d {
         let Some(model) = self.model.model.as_ref() else {
             return true;
         };
-        let Some(inverse) = self.world_matrix.inverse() else {
-            return true;
-        };
-        let ray = projection.pick_ray(x, y);
-        let origin = inverse.transform_coord(ray.origin);
-        let direction = inverse.transform_normal(ray.direction);
-        model.pick(origin, direction).is_none()
+        let hits_model = self.world_matrix.inverse().is_some_and(|inverse| {
+            let ray = projection.pick_ray(x, y);
+            let origin = inverse.transform_coord(ray.origin);
+            let direction = inverse.transform_normal(ray.direction);
+            model.pick(origin, direction).is_some()
+        });
+        if hits_model {
+            return false;
+        }
+        // The actor is clickable through its attachments (section 8.6).
+        !self.attachments.iter().any(|a| {
+            a.active
+                && a.bounding_rect
+                    .is_some_and(|(l, t, r, b)| (l..=r).contains(&x) && (t..=b).contains(&y))
+                && !a.is_transparent_at(projection, x, y)
+        })
+    }
+
+    /// The projected rectangles the actor is clickable in: its model's
+    /// and its active attachments' (`CAdAttach3DX::Display` registers the
+    /// owner), in that order; none before the first update.
+    pub fn hit_rects(&self) -> Vec<(i32, i32, i32, i32)> {
+        self.bounding_rect
+            .into_iter()
+            .chain(
+                self.attachments
+                    .iter()
+                    .filter(|a| a.active)
+                    .filter_map(|a| a.bounding_rect),
+            )
+            .collect()
     }
 
     /// The world position of a bone (`GetBonePosition3D`): the origin
@@ -1416,6 +1771,33 @@ pub struct Actor3dDraw<'a> {
     pub tint: Option<Rgba>,
     /// See `tint`.
     pub blend_mode: BlendMode,
+    /// The textures scripts put on the model's materials, by material
+    /// name (section 10.5): the drawing step textures every mesh material
+    /// of that name with the file's current frame instead of the `.x`
+    /// texture.
+    pub materials: &'a [MaterialOverride],
+    /// The active attachments whose bone exists, in order (section 8.6):
+    /// drawn after the model with their own matrices, lit as the actor,
+    /// and part of its stencil shadow volume (10.4). Nothing else is
+    /// needed from the actor to draw them.
+    pub attachments: Vec<AttachmentDraw<'a>>,
+}
+
+/// What the drawing step needs for one attachment of a 3D actor.
+pub struct AttachmentDraw<'a> {
+    /// The attachment's script object.
+    pub id: NativeId,
+    /// Its name.
+    pub name: &'a str,
+    /// The bone it follows.
+    pub bone: &'a str,
+    /// The posed, skinned model.
+    pub model: &'a AnimatedModel,
+    /// The full matrix: the attachment's own, the bone's combined matrix,
+    /// the actor's world matrix. Used as the actor's `world` is.
+    pub world: Mat4,
+    /// Whether both sides of the triangles are drawn.
+    pub draw_backfaces: bool,
 }
 
 /// What the drawing step needs for the scene this frame.
@@ -1592,8 +1974,9 @@ impl World {
         }
     }
 
-    /// The hit area of a 3D actor: its projected bounding rectangle,
-    /// confirmed at test time by a pick into the model (section 10.3).
+    /// The hit areas of a 3D actor: its projected bounding rectangle and
+    /// its attachments', confirmed at test time by a pick into the models
+    /// (section 10.3).
     pub(crate) fn actor3d_hits(
         &self,
         id: NativeId,
@@ -1606,12 +1989,8 @@ impl World {
         if !actor.interactive || (actor.ignore_items && self.selected_item.is_some()) {
             return;
         }
-        if let Some((left, top, right, bottom)) = actor.bounding_rect() {
-            hits.push(HitArea::model3d(
-                id,
-                layer_offset,
-                (left, top, right, bottom),
-            ));
+        for rect in actor.hit_rects() {
+            hits.push(HitArea::model3d(id, layer_offset, rect));
         }
     }
 
@@ -1689,9 +2068,105 @@ impl World {
                     .or(self.shadow_image.as_deref()),
                 tint: actor.tint,
                 blend_mode: actor.blend_mode,
+                materials: &actor.materials,
+                attachments: actor
+                    .attachments
+                    .iter()
+                    .filter(|a| a.active && model.bone_matrix(&a.bone).is_some())
+                    .filter_map(|a| {
+                        Some(AttachmentDraw {
+                            id: a.id,
+                            name: &a.name,
+                            bone: &a.bone,
+                            model: a.model()?,
+                            world: a.world_matrix(),
+                            draw_backfaces: a.draw_backfaces,
+                        })
+                    })
+                    .collect(),
             });
         }
         Some((frame, draws))
+    }
+
+    /// Attaches a model to a bone of a 3D actor (`AddAttachment`): the
+    /// attachment gets a script object of its own; the one it replaces
+    /// loses its handle, as the original deletes it. Errors are the
+    /// original's runtime error texts, for the caller to raise.
+    pub fn add_attachment3d(
+        &mut self,
+        id: NativeId,
+        file: &str,
+        name: &str,
+        bone: &str,
+    ) -> Result<(), String> {
+        if self.actor3d(id).is_none() {
+            return Err("Error adding attachment".to_string());
+        }
+        let handle = self.objects.insert(Kind::Attachment3D(id));
+        let vfs = &self.vfs;
+        let result = self
+            .actors3d
+            .iter_mut()
+            .find(|(i, _)| *i == id)
+            .map(|(_, a)| a.add_attachment(vfs, handle, file, name, bone))
+            .unwrap_or_else(|| Err("Error adding attachment".to_string()));
+        match result {
+            Ok(replaced) => {
+                if let Some(old) = replaced {
+                    self.objects.remove(old);
+                }
+                Ok(())
+            }
+            Err(err) => {
+                self.objects.remove(handle);
+                Err(err)
+            }
+        }
+    }
+
+    /// Removes an attachment of a 3D actor by name (`RemoveAttachment`),
+    /// with its script object; whether there was one.
+    pub fn remove_attachment3d(&mut self, id: NativeId, name: &str) -> bool {
+        match self.actor3d_mut(id).and_then(|a| a.remove_attachment(name)) {
+            Some(handle) => {
+                self.objects.remove(handle);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The attachment a script object stands for, with its owner.
+    pub fn attachment3d(&self, handle: NativeId) -> Option<(NativeId, &Attachment3d)> {
+        let Kind::Attachment3D(owner) = self.native(handle)?.kind else {
+            return None;
+        };
+        let attachment = self.actor3d(owner)?.attachment_by_id(handle)?;
+        Some((owner, attachment))
+    }
+
+    /// The attachment a script object stands for, mutable.
+    pub(crate) fn attachment3d_mut(&mut self, handle: NativeId) -> Option<&mut Attachment3d> {
+        let Kind::Attachment3D(owner) = self.native(handle)?.kind else {
+            return None;
+        };
+        self.actor3d_mut(owner)?.attachment_by_id_mut(handle)
+    }
+
+    /// Where a 3D actor's particle emitter goes when it follows a bone
+    /// (`CAdActor3DX::UpdatePartEmitter` with `m_PartBone`): the bone's
+    /// position, offset, projected to scene pixels; `None` when the actor
+    /// has no bone emitter, the bone is unknown or there is no camera.
+    pub(crate) fn actor3d_bone_emitter_position(&self, id: NativeId) -> Option<(i32, i32)> {
+        let actor = self.actor3d(id)?;
+        let bone = actor.part_bone.as_deref()?;
+        let position = actor.bone_position(bone, actor.part_offset)?;
+        let projection = self
+            .scene3d()
+            .and_then(|s| s.projection().cloned())
+            .or_else(|| self.projection_3d())?;
+        Some(projection.project(position))
     }
 
     /// Walks a 3D actor to an entity (`GoToObject`): to its `WALK_TO`

@@ -3,14 +3,15 @@
 //!
 //! Written with reference to the `ScGetProperty`, `ScSetProperty` and
 //! `ScCallMethod` methods of `AdActor3DX.cpp`, `AdObject3D.cpp`,
-//! `AdObject.cpp` and `BObject.cpp` of Wintermute Engine 1.x (MIT License,
-//! Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
+//! `AdAttach3DX.cpp`, `AdObject.cpp` and `BObject.cpp` of Wintermute
+//! Engine 1.x (MIT License, Copyright (c) 2003-2013 Jan Nedoma); see
+//! `NOTICE`.
 
 use luma_3d::{ShadowType, Vec3};
 use luma_formats::BlendMode;
 use luma_script::{Context, Effect, NativeId, Properties, Return, Value, rgba};
 
-use crate::actor3d::{dir_to_angle, normalize_angle};
+use crate::actor3d::{MaterialTexture, dir_to_angle, normalize_angle};
 use crate::objects::Kind;
 use crate::world::World;
 
@@ -102,6 +103,10 @@ impl World {
             "SubtitlesPosXCenter" => Value::Bool(actor.subtitles.x_center),
             "NumItems" => Value::Int(self.taken_items_of(id).len() as i32),
             "ParticleEmitter" => self.emitter_of(id).map_or(Value::Null, Value::Native),
+            // The original's `NumAttachments` counts the 2D attachments of
+            // `CAdObject`, which a 3D actor never has; Luma counts the
+            // bone attachments (see `docs/compatibility.md`).
+            "NumAttachments" => Value::Int(actor.attachments.len() as i32),
             "Item" => Value::Null,
             _ => return None,
         })
@@ -580,19 +585,84 @@ impl World {
                 return Some(self.inventory_call(id, name, args));
             }
             "CreateParticleEmitter" | "DeleteParticleEmitter" => {
+                // `CAdActor3DX::CreateParticleEmitter` forgets the bone.
+                if let Some(actor) = self.actor3d_mut(id) {
+                    actor.part_bone = None;
+                }
                 self.emitter_owner_call(id, name, args)
             }
-            // Attachments and bone emitters (task 17), textures and
-            // effects on materials (task 20, effects not planned): the
-            // calls fail as the original's do when the file or the
-            // material is missing.
-            "AddAttachment"
-            | "AddMesh"
-            | "RemoveAttachment"
-            | "RemoveMesh"
-            | "SetTexture"
-            | "SetTheoraTexture"
-            | "SetEffect"
+            "CreateParticleEmitterBone" => {
+                let bone = arg(0).get_string(self);
+                let offset = Vec3::new(
+                    arg(1).get_float(self) as f32,
+                    arg(2).get_float(self) as f32,
+                    arg(3).get_float(self) as f32,
+                );
+                if let Some(actor) = self.actor3d_mut(id) {
+                    actor.part_bone = Some(bone);
+                    actor.part_offset = offset;
+                }
+                let emitter = self.create_particle_emitter(id, true, 0, 0);
+                Return::value(Value::Native(emitter))
+            }
+            "AddAttachment" | "AddMesh" => {
+                if name == "AddMesh" {
+                    self.log("Warning: AddMesh is now obsolete, use AddAttachment");
+                }
+                let file = arg(0).get_string(self);
+                let attach_name = arg(1).get_string(self);
+                let bone = arg(2).get_string(self);
+                match self.add_attachment3d(id, &file, &attach_name, &bone) {
+                    Ok(()) => Return::value(true),
+                    Err(err) => {
+                        self.runtime_error(&ctx, &err);
+                        Return::value(false)
+                    }
+                }
+            }
+            "RemoveAttachment" | "RemoveMesh" => {
+                if name == "RemoveMesh" {
+                    self.log("Warning: RemoveMesh is now obsolete, use RemoveAttachment");
+                }
+                let attach_name = arg(0).get_string(self);
+                Return::value(self.remove_attachment3d(id, &attach_name))
+            }
+            "GetAttachment" => {
+                // By name as the original; by index as a Luma extension.
+                let attachment = match arg(0) {
+                    Value::Int(index) => usize::try_from(index)
+                        .ok()
+                        .and_then(|i| self.actor3d(id)?.attachments.get(i)),
+                    v => {
+                        let attach_name = v.get_string(self);
+                        self.actor3d(id).and_then(|a| a.attachment(&attach_name))
+                    }
+                };
+                Return::value(attachment.map_or(Value::Null, |a| Value::Native(a.id)))
+            }
+            "SetTexture" | "SetTheoraTexture" => {
+                // `CXModel::SetMaterialSprite/Theora`: the file must load;
+                // the material need not exist.
+                let material = arg(0).get_string(self);
+                let file = arg(1).get_string(self);
+                let ok =
+                    self.vfs.exists(&file) && self.actor3d(id).is_some_and(|a| a.model().is_some());
+                if ok {
+                    let texture = if name == "SetTexture" {
+                        MaterialTexture::Sprite(file)
+                    } else {
+                        MaterialTexture::Theora(file)
+                    };
+                    if let Some(actor) = self.actor3d_mut(id) {
+                        actor.set_material_texture(&material, texture);
+                    }
+                }
+                Return::value(ok)
+            }
+            // Effects on materials are not planned (`docs/3d-actors.md`,
+            // section 13): the calls fail as the original's do when an
+            // effect does not compile.
+            "SetEffect"
             | "RemoveEffect"
             | "SetEffectParam"
             | "SetEffectParamVector"
@@ -600,9 +670,143 @@ impl World {
                 self.stub(&format!("Actor3D.{name}"));
                 Return::value(false)
             }
-            "GetAttachment" | "CreateParticleEmitterBone" => {
-                self.stub(&format!("Actor3D.{name}"));
+            _ => return None,
+        })
+    }
+
+    /// A property of an attachment (`CAdAttach3DX::ScGetProperty` and the
+    /// `CAdObject3D` part it inherits); `Bone` is a Luma extension.
+    pub(crate) fn attachment3d_get(&self, id: NativeId, name: &str) -> Option<Value> {
+        let (_, attachment) = self.attachment3d(id)?;
+        Some(match name {
+            "Type" => Value::from("attachment"),
+            "Name" => Value::from(attachment.name.clone()),
+            "Bone" => Value::from(attachment.bone.clone()),
+            "Filename" => Value::from(attachment.model_file.clone()),
+            "Active" => Value::Bool(attachment.active),
+            // The original never clears an attachment's `Ready`.
+            "Ready" => Value::Bool(true),
+            "PosX" => Value::Float(f64::from(attachment.position.x)),
+            "PosY" => Value::Float(f64::from(attachment.position.y)),
+            "PosZ" => Value::Float(f64::from(attachment.position.z)),
+            "Angle" | "DirectionAngle" | "DirAngle" => Value::Float(f64::from(attachment.angle)),
+            "Scale" => Value::Float(f64::from(attachment.scale * 100.0)),
+            "DrawBackfaces" => Value::Bool(attachment.draw_backfaces),
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn attachment3d_set(&mut self, id: NativeId, name: &str, value: &Value) -> bool {
+        let (text, flag, float) = (
+            value.get_string(self),
+            value.get_bool(self),
+            value.get_float(self) as f32,
+        );
+        let Some(attachment) = self.attachment3d_mut(id) else {
+            return false;
+        };
+        match name {
+            "Name" => attachment.name = text,
+            "Active" => attachment.active = flag,
+            "PosX" => attachment.position.x = float,
+            "PosY" => attachment.position.y = float,
+            "PosZ" => attachment.position.z = float,
+            "Angle" => attachment.angle = float,
+            "DirectionAngle" | "DirAngle" => attachment.angle = normalize_angle(float),
+            "Scale" => attachment.scale = float / 100.0,
+            "DrawBackfaces" => attachment.draw_backfaces = flag,
+            _ => return false,
+        }
+        true
+    }
+
+    /// A method of an attachment (`CAdAttach3DX::ScCallMethod`): its
+    /// animations, restarted and with the owner's transition table; the
+    /// blocking forms wait for the attachment, which is always ready, so
+    /// they return on the next tick. `SkipTo3D` and `GetBonePosition*` of
+    /// `CAdObject3D` work on the attachment's own offset and model.
+    pub(crate) fn attachment3d_call(
+        &mut self,
+        id: NativeId,
+        name: &str,
+        args: &[Value],
+    ) -> Option<Return> {
+        let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
+        let (owner, _) = self.attachment3d(id)?;
+        Some(match name {
+            "PlayAnim" | "PlayAnimAsync" | "PlayAnimChannel" | "PlayAnimChannelAsync" => {
+                let (channel, anim) = if name.starts_with("PlayAnimChannel") {
+                    (
+                        usize::try_from(arg(0).get_int(self)).ok(),
+                        arg(1).get_string(self),
+                    )
+                } else {
+                    (Some(0), arg(0).get_string(self))
+                };
+                let Some(actor) = self.actor3d_mut(owner) else {
+                    return Some(Return::value(false));
+                };
+                let crate::actor3d::Actor3d {
+                    model, attachments, ..
+                } = actor;
+                let started = match (model.model.as_ref(), channel) {
+                    (Some(owner_model), Some(channel)) => attachments
+                        .iter_mut()
+                        .find(|a| a.id == id)
+                        .is_some_and(|a| a.play_anim(owner_model, channel, &anim)),
+                    _ => false,
+                };
+                if started && !name.ends_with("Async") {
+                    Return {
+                        value: Value::Bool(true),
+                        effect: Effect::WaitFor(id),
+                    }
+                } else {
+                    Return::value(started)
+                }
+            }
+            "StopAnim" | "StopAnimChannel" => {
+                let channel = if name == "StopAnim" {
+                    Some(0)
+                } else {
+                    usize::try_from(arg(0).get_int(self)).ok()
+                };
+                Return::value(channel.is_some_and(|channel| {
+                    self.attachment3d_mut(id)
+                        .is_some_and(|a| a.stop_anim(channel))
+                }))
+            }
+            "SkipTo3D" => {
+                let position = Vec3::new(
+                    arg(0).get_float(self) as f32,
+                    arg(1).get_float(self) as f32,
+                    arg(2).get_float(self) as f32,
+                );
+                if let Some(attachment) = self.attachment3d_mut(id) {
+                    attachment.position = position;
+                }
                 Return::null()
+            }
+            "GetBonePosition2D" => {
+                let bone = arg(0).get_string(self);
+                let projection = self.projection_3d();
+                let point = self
+                    .attachment3d(id)
+                    .and_then(|(_, a)| a.bone_position(&bone, Vec3::ZERO))
+                    .zip(projection)
+                    .map(|(p, projection)| {
+                        let (x, y) = projection.project(p);
+                        (f64::from(x), f64::from(y), None)
+                    });
+                Return::value(point_object(point))
+            }
+            "GetBonePosition3D" => {
+                let bone = arg(0).get_string(self);
+                let point = self
+                    .attachment3d(id)
+                    .and_then(|(_, a)| a.bone_position(&bone, Vec3::ZERO))
+                    .map(|p| (f64::from(p.x), f64::from(p.y), Some(f64::from(p.z))));
+                Return::value(point_object(point))
             }
             _ => return None,
         })

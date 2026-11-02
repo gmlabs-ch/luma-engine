@@ -114,6 +114,9 @@ no code copied):
   docs/formats/actor3d.md
   crates/luma-3d/src/actor3d.rs
   crates/luma-3d/src/animation.rs
+  crates/luma-adventure/src/actor3d.rs
+  crates/luma-adventure/src/natives_actor3d.rs
+  crates/luma-adventure/src/scene3d.rs
 
 -------------------------------------------------------------------------------
 Dependencies under the Mozilla Public License 2.0

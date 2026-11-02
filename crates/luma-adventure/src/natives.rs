@@ -114,8 +114,10 @@ impl World {
             Kind::Actor => self.actor_get(id, name),
             #[cfg(feature = "3d")]
             Kind::Actor3D => self.actor3d_get(id, name),
+            #[cfg(feature = "3d")]
+            Kind::Attachment3D(_) => self.attachment3d_get(id, name),
             #[cfg(not(feature = "3d"))]
-            Kind::Actor3D => None,
+            Kind::Actor3D | Kind::Attachment3D(_) => None,
             Kind::Control => self.control_get(id, name),
             Kind::Item => self.item_get(id, name),
             Kind::Emitter(_) => self.emitter_get(id, name),
@@ -175,8 +177,10 @@ impl World {
             Kind::Actor => self.actor_set(id, name, value),
             #[cfg(feature = "3d")]
             Kind::Actor3D => self.actor3d_set(id, name, value),
+            #[cfg(feature = "3d")]
+            Kind::Attachment3D(_) => self.attachment3d_set(id, name, value),
             #[cfg(not(feature = "3d"))]
-            Kind::Actor3D => false,
+            Kind::Actor3D | Kind::Attachment3D(_) => false,
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
             Kind::Emitter(_) => self.emitter_set(id, name, value),
@@ -249,8 +253,10 @@ impl World {
             Kind::Actor => self.actor_call(id, name, args, ctx),
             #[cfg(feature = "3d")]
             Kind::Actor3D => self.actor3d_call(id, name, args, ctx),
+            #[cfg(feature = "3d")]
+            Kind::Attachment3D(_) => self.attachment3d_call(id, name, args),
             #[cfg(not(feature = "3d"))]
-            Kind::Actor3D => None,
+            Kind::Actor3D | Kind::Attachment3D(_) => None,
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
             Kind::Emitter(_) => self.emitter_call(id, name, args),

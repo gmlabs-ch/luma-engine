@@ -96,11 +96,17 @@ impl World {
                 Some((actor.x, actor.y, scale_x, scale_y))
             }
             // A 3D actor's emitter follows its projected position, unscaled
-            // (`CAdActor3DX::UpdatePartEmitter` without a bone).
+            // (`CAdActor3DX::UpdatePartEmitter` without a bone), or the
+            // projected position of the bone `CreateParticleEmitterBone`
+            // named; an unknown bone leaves it at the actor's position
+            // (the original moves it to an uninitialised point).
             #[cfg(feature = "3d")]
             Kind::Actor3D => {
                 let actor = self.actor3d(owner)?;
-                Some((actor.x, actor.y, 100.0, 100.0))
+                let (x, y) = self
+                    .actor3d_bone_emitter_position(owner)
+                    .unwrap_or((actor.x, actor.y));
+                Some((x, y, 100.0, 100.0))
             }
             Kind::Entity(r) => {
                 let entity = self.entity_def(*r)?;
