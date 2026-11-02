@@ -52,7 +52,7 @@ Luma Engine reads the same game data with a new engine built for today:
 | `luma-video` | Ogg Theora videos decoded to frames | `ogg`, `oxideav-theora`, `oxideav-core` |
 | `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six core crates, `fontdue`, `serde`, `postcard`, `flate2` |
 | `luma-lumen` | Lumen, the scenario format for games made for Luma: parser, checker, text runner | nothing |
-| `luma-3d` | 3D characters on painted backgrounds: `.3ds` scene geometry, the camera mapping, the Direct3D maths conventions | `luma-formats` |
+| `luma-3d` | 3D characters on painted backgrounds: `.3ds` scene geometry, the camera mapping, `.x` models with their skin and animations, the Direct3D maths conventions | `luma-formats` |
 | `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen`, `luma-3d` with `3d` |
 | `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script`, `luma` (feature `lumen`) |
 | `luma-player` | The desktop player | `luma` (features `adventure`, `audio-device`) |

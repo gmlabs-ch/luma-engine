@@ -94,6 +94,7 @@ no code copied):
   crates/luma-3d/src/camera.rs
   docs/formats/xfile.md
   crates/luma-3d/src/xfile.rs
+  crates/luma-3d/src/model.rs
 
 -------------------------------------------------------------------------------
 Dependencies under the Mozilla Public License 2.0
