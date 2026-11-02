@@ -18,6 +18,7 @@ luma-audio.workspace = true
 luma-video.workspace = true
 luma-adventure = { workspace = true, optional = true }
 luma-lumen = { workspace = true, optional = true }
+luma-3d = { workspace = true, optional = true }
 
 [features]
 default = ["adventure"]
@@ -27,6 +28,10 @@ adventure = ["dep:luma-adventure"]
 ## Lumen, the scenario format for games made for Luma: parser, checker
 ## and text runner (`luma::lumen`).
 lumen = ["dep:luma-lumen"]
+## 3D characters on painted backgrounds: scene geometry, camera mapping
+## and the Direct3D conventions of Wintermute's 3D actors
+## (`luma::three_d`).
+3d = ["dep:luma-3d"]
 ## Sound output on the default device (needs ALSA on Linux); without it
 ## the sounds run silently on the game clock.
 audio-device = ["luma-audio/device"]

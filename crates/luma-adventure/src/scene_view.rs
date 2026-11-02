@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use luma_archive::Vfs;
 use luma_formats::scene::{Entity, EntityKind, Layer, Region, SceneNode};
-use luma_formats::{Rgb, Rgba, Scene, Sprite, SubFrame};
+use luma_formats::{Frame, Rgb, Rgba, Scene, Sprite, SubFrame};
 use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
 
 use crate::error::{Error, Result};
@@ -21,6 +21,11 @@ use crate::talk::{Sentence, SubtitleMods};
 pub struct LoadedSprite {
     /// The sprite definition.
     pub sprite: Sprite,
+    /// Whether a script changed the definition since it was loaded
+    /// (frames added, a delay or a hotspot changed...). An edited sprite
+    /// is written to a saved game instead of being read again from its
+    /// file.
+    pub edited: bool,
 }
 
 /// The part of the scene shown on screen: the size of the view and the
@@ -228,12 +233,56 @@ impl Mask {
 
 /// Sprites loaded from the game and the textures of their images, keyed
 /// by path without regard to case or separator.
-#[derive(Debug, Default)]
+///
+/// A saved game keeps only the sprites scripts edited (see
+/// [`LoadedSprite::edited`]); the others are read again from their files
+/// when the game loads, like the textures.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SpriteBank {
+    #[serde(
+        serialize_with = "serialize_edited",
+        deserialize_with = "deserialize_edited"
+    )]
     sprites: HashMap<String, LoadedSprite>,
+    #[serde(skip)]
     textures: HashMap<String, Texture>,
+    #[serde(skip)]
     masks: HashMap<String, Mask>,
+    #[serde(skip)]
     missing: Vec<(String, String)>,
+}
+
+/// Writes the edited sprites of a bank, by key.
+fn serialize_edited<S: serde::Serializer>(
+    sprites: &HashMap<String, LoadedSprite>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    let mut edited: Vec<(&String, &Sprite)> = sprites
+        .iter()
+        .filter(|(_, s)| s.edited)
+        .map(|(k, s)| (k, &s.sprite))
+        .collect();
+    edited.sort_by(|a, b| a.0.cmp(b.0));
+    serde::Serialize::serialize(&edited, serializer)
+}
+
+/// Reads the edited sprites of a bank written by [`serialize_edited`].
+fn deserialize_edited<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<HashMap<String, LoadedSprite>, D::Error> {
+    let edited: Vec<(String, Sprite)> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(edited
+        .into_iter()
+        .map(|(k, sprite)| {
+            (
+                k,
+                LoadedSprite {
+                    sprite,
+                    edited: true,
+                },
+            )
+        })
+        .collect())
 }
 
 /// Case-insensitive key of a game path.
@@ -283,7 +332,13 @@ impl SpriteBank {
                 }
             }
         };
-        self.sprites.insert(k, LoadedSprite { sprite });
+        self.sprites.insert(
+            k,
+            LoadedSprite {
+                sprite,
+                edited: false,
+            },
+        );
         true
     }
 
@@ -320,12 +375,26 @@ impl SpriteBank {
     /// Adds an already parsed sprite under a path, replacing any loaded
     /// one.
     pub fn insert(&mut self, path: &str, sprite: Sprite) {
-        self.sprites.insert(key(path), LoadedSprite { sprite });
+        self.sprites.insert(
+            key(path),
+            LoadedSprite {
+                sprite,
+                edited: false,
+            },
+        );
     }
 
     /// The loaded sprite of a path, if it loaded.
     pub fn sprite(&self, path: &str) -> Option<&LoadedSprite> {
         self.sprites.get(&key(path))
+    }
+
+    /// The definition of a loaded sprite, for a script to change it; the
+    /// sprite is then kept in saved games (see [`LoadedSprite::edited`]).
+    pub fn edit_sprite(&mut self, path: &str) -> Option<&mut Sprite> {
+        let loaded = self.sprites.get_mut(&key(path))?;
+        loaded.edited = true;
+        Some(&mut loaded.sprite)
     }
 
     /// The opaque pixels of an image, decoded on first request (no GPU
@@ -448,8 +517,7 @@ pub struct SceneView {
     /// Path the scene was loaded from.
     pub path: String,
     /// The sprites of the scene's entities; loaded again after a saved
-    /// game.
-    #[serde(skip)]
+    /// game, except those scripts edited.
     pub bank: SpriteBank,
     anims: HashMap<EntityRef, AnimState>,
     talks: HashMap<EntityRef, EntityTalk>,
@@ -458,6 +526,11 @@ pub struct SceneView {
     playing: HashMap<EntityRef, String>,
     /// The subtitle placement of entities scripts changed it on.
     pub subtitles: HashMap<EntityRef, SubtitleMods>,
+    /// The frames that became current at the last [`SceneView::advance`]:
+    /// the entity, its sprite's key and the frame's index. The world takes
+    /// them to play the frames' sounds and raise their events.
+    #[serde(skip)]
+    shown: Vec<(EntityRef, String, usize)>,
 }
 
 impl SceneView {
@@ -479,6 +552,7 @@ impl SceneView {
             talks: HashMap::new(),
             playing: HashMap::new(),
             subtitles: HashMap::new(),
+            shown: Vec::new(),
         };
         let paths: Vec<String> = view
             .scene
@@ -833,7 +907,7 @@ impl SceneView {
             let Some(sprite_key) = self.anim_mut(r).map(|s| s.sprite.clone()) else {
                 continue;
             };
-            let (changed, move_x, move_y) = {
+            let (changed, frame, move_x, move_y) = {
                 let Some(loaded) = self.bank.sprites.get(&sprite_key) else {
                     continue;
                 };
@@ -841,12 +915,15 @@ impl SceneView {
                     continue;
                 };
                 let changed = state.step(&loaded.sprite, timer);
-                (changed, state.move_x, state.move_y)
+                (changed, state.current_frame, state.move_x, state.move_y)
             };
-            if changed && (move_x != 0 || move_y != 0) {
-                if let Some(entity) = self.entity_mut(r) {
-                    entity.x += move_x;
-                    entity.y += move_y;
+            if changed {
+                self.shown.push((r, sprite_key, frame));
+                if move_x != 0 || move_y != 0 {
+                    if let Some(entity) = self.entity_mut(r) {
+                        entity.x += move_x;
+                        entity.y += move_y;
+                    }
                 }
             }
             // A played sprite that reached its end gives the entity back
@@ -867,6 +944,13 @@ impl SceneView {
     /// The frame an entity shows.
     pub fn frame_of(&self, r: EntityRef) -> usize {
         self.anims.get(&r).map_or(0, |a| a.current_frame)
+    }
+
+    /// Takes the frames that became current since the last call: the
+    /// entity, its sprite's key and the frame's index, in the order they
+    /// changed (see [`SceneView::advance`]).
+    pub fn take_shown(&mut self) -> Vec<(EntityRef, String, usize)> {
+        std::mem::take(&mut self.shown)
     }
 
     /// Fills a draw list with the scene as seen by `camera`, showing the
@@ -1028,6 +1112,20 @@ pub fn regions_at(scene: &Scene, x: i32, y: i32) -> Vec<(usize, usize)> {
         .collect()
 }
 
+/// Whether a sub-frame is drawn and hit-tested (`CBFrame::Draw`): the
+/// engine's `2D_ONLY` sub-frames are for its software renderer and its
+/// `3D_ONLY` ones for its accelerated renderer. Luma always draws with
+/// the GPU, so a `2D_ONLY` sub-frame is never drawn and a `3D_ONLY` one
+/// always is.
+pub fn is_drawn(sub: &SubFrame) -> bool {
+    !sub.only_2d
+}
+
+/// The sub-frames of a frame that are drawn, see [`is_drawn`].
+pub fn drawn_subframes(frame: &Frame) -> impl Iterator<Item = &SubFrame> {
+    frame.subframes.iter().filter(|sub| is_drawn(sub))
+}
+
 /// Draws an object's current frame.
 pub fn draw_object<'a>(list: &mut DrawList<'a>, d: &Drawable<'a>) {
     let Some(loaded) = d.sprite else { return };
@@ -1035,7 +1133,7 @@ pub fn draw_object<'a>(list: &mut DrawList<'a>, d: &Drawable<'a>) {
         return;
     }
     let frame = d.frame.min(loaded.sprite.frames.len() - 1);
-    for sub in &loaded.sprite.frames[frame].subframes {
+    for sub in drawn_subframes(&loaded.sprite.frames[frame]) {
         let Some(image) = &sub.image else { continue };
         let Some(texture) = d.bank.texture(image, sub.color_key) else {
             continue;

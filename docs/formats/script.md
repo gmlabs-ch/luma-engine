@@ -207,6 +207,12 @@ stops that script.
 - **`this`.** A method call pushes the object onto the `this` stack
   (`PUSH_THIS` or `PUSH_THIS_FROM_STACK`) for the duration of the call and
   pops it with `POP_THIS` afterwards.
+- **`new`.** `new Class(args)` is `CREATE_OBJECT`, `PUSH_THIS_FROM_STACK`,
+  the arguments and their count, `EXTERNAL_CALL Class` (or `CALL` for a
+  script function used as a constructor), `POP_THIS` and `POP_EMPTY`: the
+  constructor fills the placeholder object through `this`, its own result
+  is discarded and the object stays on the stack. `new Object()` goes
+  through the same sequence, with nothing to add to the placeholder.
 - **Includes.** `#include` is resolved by the compiler, so a compiled
   script contains everything its includes declared: a game whose scripts
   all include the same file of `global` declarations repeats those

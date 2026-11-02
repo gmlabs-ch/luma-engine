@@ -974,6 +974,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 name = "luma"
 version = "0.0.1"
 dependencies = [
+ "luma-3d",
  "luma-adventure",
  "luma-archive",
  "luma-audio",
@@ -985,9 +986,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "luma-3d"
+version = "0.0.1"
+dependencies = [
+ "luma-formats",
+]
+
+[[package]]
 name = "luma-adventure"
 version = "0.0.1"
 dependencies = [
+ "crc32fast",
  "flate2",
  "fontdue",
  "luma-archive",

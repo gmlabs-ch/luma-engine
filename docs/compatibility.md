@@ -4,7 +4,7 @@ This is the checklist for porting the whole of the scripting interface of Winter
 
 Reference: the MIT-licensed Wintermute Engine 1.x sources (https://github.com/MnemonicWME/wintermute-engine), under `src/engine_core/` (`wme_base`, `wme_ad`). Source paths of the form `src/engine_core/...` are relative to the root of that repository; paths starting with `luma-` are in `crates/` of this repository. No GPL code was consulted (clean-room rule in `CLAUDE.md`).
 
-How the list was made. For every class with a script interface, the names tested by `strcmp(Name, "...")` in `ScCallMethod`, `ScGetProperty` and `ScSetProperty` were extracted (code inside comments excluded, since WME 1.x leaves some dead blocks in `SXFile`, `SXMemBuffer`, `SXTcpClient`, `AdTalkHolder`, `AdRegion` and others). The global functions and constructors come from `CBGame::ExternalCall` and `CAdGame::ExternalCall`, the extra window method from `CAdGame::WindowScriptMethodHook`. Luma was then read: the match arms of `crates/luma-adventure/src/natives*.rs`, the `*_STUBS` lists (names accepted, logged once as "not implemented" and ignored), the built-ins of `crates/luma-script/src/engine.rs`, and `World::call_function`. Luma state as of commit `c35949d`.
+How the list was made. For every class with a script interface, the names tested by `strcmp(Name, "...")` in `ScCallMethod`, `ScGetProperty` and `ScSetProperty` were extracted (code inside comments excluded, since WME 1.x leaves some dead blocks in `SXFile`, `SXMemBuffer`, `SXTcpClient`, `AdTalkHolder`, `AdRegion` and others). The global functions and constructors come from `CBGame::ExternalCall` and `CAdGame::ExternalCall`, the extra window method from `CAdGame::WindowScriptMethodHook`. Luma was then read: the match arms of `crates/luma-adventure/src/natives*.rs`, the `*_STUBS` lists (names accepted, logged once as "not implemented" and ignored), the built-ins of `crates/luma-script/src/engine.rs`, and `World::call_function`. Luma state as of the current commit (recounted at each merge).
 
 ## States
 
@@ -46,20 +46,20 @@ How the list was made. For every class with a script interface, the names tested
 ### Constructors (`new X(...)`)
 
 - WME source: src/engine_core/wme_base/BGame.cpp, src/engine_core/wme_ad/AdGame.cpp (CAdGame::ExternalCall)
-- Hierarchy and Luma: luma-adventure/src/world.rs (`call_function` returns an inert object)
-- Count: 0 done, 8 todo, 1 no-op
+- Hierarchy and Luma: luma-adventure/src/world.rs (`call_function`: the library classes become `Kind::Class` objects answered by `luma-script/src/classes/`; `Object`, `Actor` and `Entity` leave the placeholder object the compiler creates for `new`)
+- Count: 5 done, 3 todo, 1 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Object` | constructor | **todo** | Generic object, optionally with script files to attach as arguments. Luma returns an inert property bag: properties work, the attached scripts and the CBObject members do not. |
-| `String` | constructor | **todo** | `new String(text)`: string object with methods (see CSXString). Luma returns an inert object. |
-| `Array` | constructor | **todo** | `new Array(...)`: array object (see CSXArray). Luma returns an inert object. |
-| `Date` | constructor | **todo** | `new Date()`: date/time object (see CSXDate). Luma returns an inert object. |
-| `File` | constructor | **todo** | `new File(name)`: file access object (see CSXFile). Luma returns an inert object. |
-| `MemBuffer` | constructor | **todo** | `new MemBuffer(size)`: raw byte buffer (see CSXMemBuffer). Luma returns an inert object. |
+| `Object` | constructor | **todo** | Generic object, optionally with script files to attach as arguments. Luma keeps the plain object the compiler creates: properties work, the attached scripts and the CBObject members do not. |
+| `String` | constructor | **done** | `new String(text)`: string object with methods (see CSXString). `new String()` holds `[null]`, `new String(n)` an empty text of capacity n, as in WME. |
+| `Array` | constructor | **done** | `new Array(...)`: array object (see CSXArray). Empty, n unset elements, or the arguments. |
+| `Date` | constructor | **done** | `new Date()`: date/time object (see CSXDate). The current time is the host's clock, UTC in the adventure layer. |
+| `File` | constructor | **done** | `new File(name)`: file access object (see CSXFile). |
+| `MemBuffer` | constructor | **done** | `new MemBuffer(size)`: raw byte buffer (see CSXMemBuffer). |
 | `TcpClient` | constructor | **no-op** | Network client; the class is an unfinished stub in WME 1.x itself (its methods are commented out), and games cannot rely on it. |
-| `Actor` | constructor | **todo** | `new Actor()`: creates an empty 2D actor not yet in a scene. Luma returns an inert object; actors only come from `LoadActor`. |
-| `Entity` | constructor | **todo** | `new Entity()`: creates an empty entity. Luma returns an inert object; entities only come from the scene files. |
+| `Actor` | constructor | **todo** | `new Actor()`: creates an empty 2D actor not yet in a scene. Luma leaves the placeholder object; actors only come from `LoadActor`. |
+| `Entity` | constructor | **todo** | `new Entity()`: creates an empty entity. Luma leaves the placeholder object; entities only come from the scene files. |
 
 ### Global variables
 
@@ -161,17 +161,17 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp
 - Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`)
-- Count: 90 done, 58 todo, 17 no-op
+- Count: 123 done, 24 todo, 18 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `LOG` | method | **done** | Writes to the log (same as the global `LOG`). |
-| `Caption` | method | **todo** | Inherited CBObject.Caption plus refreshes the window title. Not handled on `Game` in Luma (the `Caption` property exists). |
-| `Msg` | method | **todo** | Shows a short on-screen debug message. Luma only writes it to the log. |
-| `RunScript` | method | **todo** | Obsolete alias of `AttachScript` on the game (logs a warning). |
+| `Caption` | method | **done** | Returns the caption (CBObject.Caption; the game has one). WME also refreshes the window title; Luma's player sets the title once at start. |
+| `Msg` | method | **done** | Shows a short on-screen message for three seconds in the system font (and logs it). |
+| `RunScript` | method | **done** | Obsolete alias of `AttachScript` on the game (logs a warning). |
 | `LoadStringTable` | method | **done** | Loads a string table, optionally keeping the old strings. |
 | `ValidObject` | method | **done** | True when a handle still refers to a live object. |
-| `Reset` | method | **todo** | Resets all game content (scene, objects, scripts, inventory) to the startup state. Stubbed. |
+| `Reset` | method | **done** | `ResetContent`: clears the dialogue branches, the inventory, the scene states and the "once" responses, reloads the items, resets the non-native globals; the current scene stays and is not remembered when left. |
 | `UnloadObject` | method | **done** | Unloads an object created at runtime. |
 | `LoadWindow` | method | **done** | Loads a window definition and returns the window. |
 | `ExpandString` | method | **done** | Expands `/string-id/` references through the string table. |
@@ -184,12 +184,12 @@ How the list was made. For every class with a script interface, the names tested
 | `MusicCrossfade` | method | **done** | Crossfades between two music channels over a duration. |
 | `GetSoundLength` | method | **done** | Duration in milliseconds of a sound file. |
 | `SetMousePos` | method | **done** | Moves the mouse cursor. |
-| `LockMouseRect` | method | **todo** | Confines the mouse to a rectangle. Stubbed. |
+| `LockMouseRect` | method | **done** | Confines the mouse to a rectangle (edges put in order; applies while all four are non-zero, as in WME). Luma clamps the position the game sees and does not move the system cursor. |
 | `PlayVideo` | method | **todo** | Deprecated AVI player (DirectShow). Luma aliases it to `PlayTheora`; AVI files cannot play. |
 | `PlayTheora` | method | **done** | Plays an Ogg Theora video full-frame (file, type, x, y, freeze music, drop frames, subtitles). |
 | `QuitGame` | method | **done** | Ends the game. |
-| `RegWriteNumber`, `RegWriteString` | method | **todo** | Stores a value in the game's private settings (the `PrivateSettings` section of `wme.ini` in WME). Logged and ignored. |
-| `RegReadNumber`, `RegReadString` | method | **todo** | Reads a stored private setting, with a default. Luma returns the type's zero value, never the stored one. |
+| `RegWriteNumber`, `RegWriteString` | method | **done** | Stores a value in the game's private settings: the `PrivateSettings` section of `wme.ini` in WME, of `settings.ini` in the save directory in Luma (see `docs/saving.md`). |
+| `RegReadNumber`, `RegReadString` | method | **done** | Reads a stored private setting, with a default; the number is the leading integer of the stored text, as `GetPrivateProfileInt` reads it. |
 | `SaveGame` | method | **done** | Saves to a slot (slot, description, quick save); the script resumes after loading. |
 | `LoadGame` | method | **done** | Loads a slot at the start of the next frame. |
 | `IsSaveSlotUsed`, `GetSaveSlotDescription`, `EmptySaveSlot` | method | **done** | Inspects / clears a save slot. |
@@ -201,50 +201,50 @@ How the list was made. For every class with a script interface, the names tested
 | `FadeOut`, `FadeOutAsync`, `FadeIn`, `FadeInAsync` | method | **done** | Fades the game view to / from a colour; `Async` does not wait. |
 | `SystemFadeOut`, `SystemFadeOutAsync`, `SystemFadeIn`, `SystemFadeInAsync` | method | **done** | Same, but the fade also covers system windows and keeps running while the game is frozen. |
 | `GetFadeColor` | method | **done** | Colour of the last fade. |
-| `Screenshot`, `ScreenshotEx` | method | **todo** | Saves the screen to an image file (ScreenshotEx: with size and format). Stubbed. |
+| `Screenshot`, `ScreenshotEx` | method | **done** | Saves the screen to an image file (ScreenshotEx: at a size). Luma writes the next frame the front-end renders, not the screen at the call, and returns `true` once the request is recorded (see `docs/saving.md`). |
 | `CreateWindow` | method | **done** | Creates an empty window at runtime. |
 | `DeleteWindow` | method | **done** | Destroys a window created by `CreateWindow` or `LoadWindow`. |
-| `OpenDocument` | method | **todo** | Opens a file or URL with the system's default application. Stubbed. |
+| `OpenDocument` | method | **done** | Opens a file or URL with the system's default application (`open`, `xdg-open`, `start`). WME also minimizes a fullscreen window first. |
 | `DEBUG_DumpClassRegistry` | method | **no-op** | Writes the class registry to the log; debugging aid. |
-| `SetLoadingScreen` | method | **todo** | Sets the image shown while a scene loads (file, x, y). Stubbed. |
-| `SetSavingScreen` | method | **todo** | Sets the image shown while saving (file, x, y). Stubbed. |
+| `SetLoadingScreen` | method | **done** | Sets the image shown while a saved game loads (file, x, y; `null` removes it). Luma draws it over black in the frame between `LoadGame` and the load (see `docs/saving.md`). |
+| `SetSavingScreen` | method | **no-op** | Sets the image shown while saving (file, x, y). Luma keeps and saves the value, but a save completes inside the frame that asks for it, so no frame can show the image. |
 | `SetWaitCursor`, `RemoveWaitCursor`, `GetWaitCursor` | method | **done** | Sets, removes, reads the cursor shown while the game is not interactive. |
 | `GetWaitCursorObject` | method | **todo** | Returns the wait cursor as a sprite object. Stubbed. |
 | `ClearScriptCache` | method | **no-op** | Empties the compiled-script cache; Luma keeps no cache and accepts the call. |
-| `DisplayLoadingIcon` | method | **todo** | Shows a loading icon sprite (file, x, y, persistent). Stubbed. |
-| `HideLoadingIcon` | method | **todo** | Hides the loading icon. Stubbed. |
+| `DisplayLoadingIcon` | method | **done** | Shows a loading icon sprite (file, x, y, persistent) over the frame: one frame, or until hidden when persistent. |
+| `HideLoadingIcon` | method | **done** | Hides the loading icon. |
 | `DumpTextureStats` | method | **no-op** | Writes texture memory statistics to a file (D3D only); debugging aid. |
 | `AccOutputText` | method | **todo** | Speaks text through the accessibility text-to-speech. Stubbed. |
 | `IsShadowTypeSupported` | method | **todo** | True when the renderer supports a 3D shadow type. |
-| `StoreSaveThumbnail`, `DeleteSaveThumbnail` | method | **todo** | Captures / discards the screenshot stored in the next save file. Stubbed. |
-| `GetFileChecksum` | method | **todo** | CRC-32 of a file in the virtual file system, as integer or hex string. |
+| `StoreSaveThumbnail`, `DeleteSaveThumbnail` | method | **done** | Captures / discards the screenshot stored in the next save file (size from `THUMBNAIL_WIDTH/HEIGHT`). The capture is the next frame rendered; a save without a stored thumbnail carries none, where WME takes one at save time. |
+| `GetFileChecksum` | method | **done** | CRC-32 of a file in the virtual file system, as integer or hex string; `null` for a missing file. |
 | `EnableScriptProfiling`, `DisableScriptProfiling` | method | **no-op** | Turns the script profiler on / off; Luma has no profiler and accepts the calls. |
 | `Type` | get | **done** | `game`. |
 | `Name` | get/set | **done** | Game name. |
 | `Hwnd` | get | **no-op** | Windows window handle (HWND); meaningless outside Windows. |
 | `CurrentTime` | get | **done** | Game timer in milliseconds (stops while frozen). |
-| `WindowsTime` | get | **todo** | Real-time clock in milliseconds (timeGetTime). Luma returns the game timer, which stops while frozen. |
-| `WindowedMode` | get | **todo** | True when running windowed. Luma always reads false. |
+| `WindowsTime` | get | **done** | Real-time clock in milliseconds (timeGetTime). Luma returns the wall clock since the game started, which runs while frozen. |
+| `WindowedMode` | get | **done** | True when running windowed: the front-end says so (`World::set_windowed`); the player does, headless runs read false. |
 | `MouseX`, `MouseY` | get/set | **done** | Mouse position in game coordinates. |
 | `MainObject` | get/set | **done** | The object the player controls and the camera follows. |
 | `ActiveObject` | get | **done** | The object under the mouse. |
 | `ScreenWidth`, `ScreenHeight` | get | **done** | Game resolution. |
 | `Interactive` | get/set | **done** | Whether the player can interact (false in cutscenes). |
 | `DebugMode` | get | **no-op** | True in debug mode (`-debug`); Luma has none and reads false. |
-| `SoundAvailable` | get | **todo** | True when a sound device is present. Luma always reads false. |
-| `SFXVolume`, `SpeechVolume`, `MusicVolume`, `MasterVolume` | get/set | **todo** | Global volumes (percent), the property form of the `SetGlobal...Volume` methods. Luma reads 100 and ignores the set. |
+| `SoundAvailable` | get | **done** | True when a sound device is present (an audio device was opened). |
+| `SFXVolume`, `SpeechVolume`, `MusicVolume`, `MasterVolume` | get/set | **done** | Global volumes (percent), the property form of the `SetGlobal...Volume` methods. WME logs an "obsolete" warning at every access; Luma once, on write. |
 | `Keyboard` | get | **done** | The keyboard state object. |
 | `Subtitles` | get/set | **done** | Show subtitles for speech. |
 | `SubtitlesSpeed` | get/set | **done** | Subtitle reading speed (characters per second basis). |
 | `VideoSubtitles` | get/set | **done** | Show subtitles during videos. |
-| `FPS` | get | **todo** | Current frame rate. Luma reads 0. |
+| `FPS` | get | **done** | Frames of the last whole second, counted as WME does (0 during the first second). |
 | `Shadows` | get/set | **todo** | Enables real-time 3D shadows (3D renderer). |
 | `SimpleShadows` | get/set | **todo** | Enables simple blob shadows for 3D objects. |
 | `SupportsRealTimeShadows` | get | **todo** | True when the renderer can draw 3D real-time shadows. |
 | `MaxShadowType` | get/set | **todo** | Highest shadow quality allowed (none, simple, flat, stencil). |
 | `AcceleratedMode` | get | **done** | True when GPU accelerated; Luma reads true. |
-| `Accelerated` | get | **todo** | Alias of `AcceleratedMode`. |
-| `TextEncoding` | get/set | **todo** | Text encoding of the game (ANSI code page / UTF-8). Luma reads 0 and draws UTF-8 tables as Latin-1. |
+| `Accelerated` | get | **done** | Alias of `AcceleratedMode`. |
+| `TextEncoding` | get/set | **done** | Text encoding of the game: 0 ANSI, 1 UTF-8, set by each string table loaded (byte order mark) and by the script, clamped as WME does. The fonts still draw text as Latin-1 whatever the value (see `docs/rendering.md`). |
 | `TextRTL` | get/set | **todo** | Right-to-left text layout. Luma reads false, ignores the set. |
 | `SoundBufferSize` | get/set | **no-op** | DirectSound buffer length in seconds; the audio backend manages its buffers. |
 | `SuspendedRendering` | get/set | **todo** | Pauses drawing (used around heavy loading). Luma reads false, ignores the set. |
@@ -264,7 +264,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdGame.cpp
 - Hierarchy and Luma: CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `responses.rs`, `inventory.rs`)
-- Count: 56 done, 9 todo, 0 no-op
+- Count: 59 done, 6 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -288,7 +288,7 @@ How the list was made. For every class with a script interface, the names tested
 | `GetInventoryWindow` | method | **done** | Returns the inventory window. |
 | `GetResponsesWindow`, `GetResponseWindow` | method | **done** | Returns the dialogue responses window. |
 | `LoadResponseBox` | method | **done** | Loads a different responses window definition. |
-| `LoadInventoryBox` | method | **todo** | Loads a different inventory window definition at runtime. Stubbed (the one named in `default.game` is loaded at startup). |
+| `LoadInventoryBox` | method | **done** | Loads a different inventory box definition at runtime, replacing the current box and its window. |
 | `LoadItems` | method | **done** | Loads an items file, replacing or merging. |
 | `AddSpeechDir`, `RemoveSpeechDir` | method | **done** | Adds / removes a folder searched for speech files. |
 | `SetSceneViewport` | method | **done** | Sets the rectangle where the scene is drawn. |
@@ -307,7 +307,7 @@ How the list was made. For every class with a script interface, the names tested
 | `TalkSkipButton` | get/set | **done** | Mouse button that skips speech. |
 | `VideoSkipButton` | get/set | **done** | Mouse button that skips videos. |
 | `ChangingScene` | get | **done** | True while a scene change is pending. |
-| `StartupScene` | get/set | **todo** | Scene loaded at startup (from `default.game`). |
+| `StartupScene` | get/set | **done** | Scene loaded at startup (from `default.game`); `null` when none, settable, saved with the game. |
 
 ### Window hook defined in CAdGame (`CAdGame::WindowScriptMethodHook`)
 
@@ -541,21 +541,20 @@ How the list was made. For every class with a script interface, the names tested
 ### CBSprite (animated sprite)
 
 - WME source: src/engine_core/wme_base/BSprite.cpp
-- Hierarchy and Luma: CBScriptHolder → CBSprite; Luma: the sprite of an entity or control only (`sprite_call`)
-- Count: 13 done, 5 todo, 0 no-op
+- Hierarchy and Luma: CBScriptHolder → CBSprite; Luma: the sprite of an entity, in a scene or in an entity container (`natives_sprite.rs`); the sprite objects of actors, items and controls are in their classes' groups
+- Count: 18 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `GetFrame` | method | **todo** | Returns a frame object by index. Stubbed. |
-| `DeleteFrame` | method | **todo** | Deletes a frame. Stubbed. |
-| `AddFrame`, `InsertFrame` | method | **todo** | Adds / inserts a frame from an image file. Stubbed. |
+| `GetFrame` | method | **done** | Returns a frame object by index; out of range logs a runtime error and returns `null`. |
+| `DeleteFrame` | method | **done** | Deletes a frame, by index or by frame object; the other frame objects follow their frames. WME 1.x only deletes when given a frame object and merely checks an index; Luma deletes in both cases. |
+| `AddFrame`, `InsertFrame` | method | **done** | Adds / inserts a frame from an image file (no sub-frame without a file, or when it is missing), and returns its object. |
 | `Reset` | method | **done** | Restarts the animation. |
 | `Pause`, `Play` | method | **done** | Pauses / resumes the animation. |
 | `Type` | get | **done** | `sprite`. |
 | `NumFrames` | get | **done** | Number of frames. |
 | `CurrentFrame` | get/set | **done** | Current frame index. |
-| `PixelPerfect` | get | **done** | Whether clicks test the sprite's pixels. |
-| `PixelPerfect` | set | **todo** | Switches pixel-perfect hit tests. Luma ignores the set. |
+| `PixelPerfect` | get/set | **done** | Whether clicks test the sprite's pixels. |
 | `Looping` | get/set | **done** | Whether the animation loops. |
 | `Owner` | get | **done** | The object the sprite belongs to. |
 | `Finished` | get | **done** | True when a non-looping animation reached its end. |
@@ -564,39 +563,41 @@ How the list was made. For every class with a script interface, the names tested
 ### CBFrame (sprite frame)
 
 - WME source: src/engine_core/wme_base/BFrame.cpp
-- Hierarchy and Luma: CBScriptable → CBFrame; Luma: absent (frames are not script objects)
-- Count: 0 done, 21 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CBFrame; Luma: the frame objects of a sprite object (`natives_sprite.rs`), handles by position that follow their frame when others are inserted or deleted
+- Count: 21 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `GetSound`, `SetSound` | method | **todo** | Reads / sets the sound played when the frame shows. |
-| `GetSubframe` | method | **todo** | Returns a sub-frame by index. |
-| `DeleteSubframe` | method | **todo** | Deletes a sub-frame. |
-| `AddSubframe`, `InsertSubframe` | method | **todo** | Adds / inserts a sub-frame from an image. |
-| `AddEvent`, `DeleteEvent` | method | **todo** | Adds / removes a script event raised when the frame shows. |
-| `Type` | get | **todo** | `frame`. |
-| `Delay` | get/set | **todo** | Frame duration in milliseconds. |
-| `Keyframe` | get/set | **todo** | Marks the frame as a keyframe (movement / talk sync). |
-| `KillSounds` | get/set | **todo** | Stops running sounds when the frame shows. |
-| `MoveX`, `MoveY` | get/set | **todo** | Movement applied to the owner when the frame shows. |
-| `NumSubframes`, `NumEvents` | get | **todo** | Counts. |
+| `GetSound`, `SetSound` | method | **done** | Reads / sets the sound played when the frame shows; `SetSound` returns `false` and leaves no sound when the file cannot be loaded. |
+| `GetSubframe` | method | **done** | Returns a sub-frame by index; out of range logs a runtime error and returns `null`. |
+| `DeleteSubframe` | method | **done** | Deletes a sub-frame, by index or by object (WME 1.x only deletes by object, see `DeleteFrame`). |
+| `AddSubframe`, `InsertSubframe` | method | **done** | Adds / inserts a sub-frame from an image (added even when the image is missing, as in WME). |
+| `AddEvent`, `DeleteEvent` | method | **done** | Adds / removes a script event raised when the frame shows (names compared ignoring case, no duplicates). |
+| `Type` | get | **done** | `frame`. |
+| `Delay` | get/set | **done** | Frame duration in milliseconds. |
+| `Keyframe` | get/set | **done** | Marks the frame as a keyframe (movement / talk sync). |
+| `KillSounds` | get/set | **done** | Stops running sounds when the frame shows. |
+| `MoveX`, `MoveY` | get/set | **done** | Movement applied to the owner when the frame shows. |
+| `NumSubframes`, `NumEvents` | get | **done** | Counts. |
+
+A frame with a single sub-frame answers that sub-frame's properties and methods too (`frame.MirrorX`, `frame.SetImage`), as in WME.
 
 ### CBSubFrame (image part of a frame)
 
 - WME source: src/engine_core/wme_base/BSubFrame.cpp
-- Hierarchy and Luma: CBScriptable → CBSubFrame; Luma: absent
-- Count: 0 done, 20 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CBSubFrame; Luma: the sub-frame objects of a frame object (`natives_sprite.rs`)
+- Count: 20 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `GetImage`, `SetImage` | method | **todo** | Reads / replaces the image file. |
-| `Type` | get | **todo** | `subframe`. |
-| `AlphaColor` | get/set | **todo** | Tint and alpha. |
-| `TransparentColor` | get | **todo** | Colour key. |
-| `Is2DOnly`, `Is3DOnly` | get/set | **todo** | Restricts the sub-frame to 2D / 3D rendering. |
-| `MirrorX`, `MirrorY` | get/set | **todo** | Flips the image. |
-| `Decoration` | get/set | **todo** | Ignored for mouse hits. |
-| `HotspotX`, `HotspotY` | get/set | **todo** | Hotspot (draw origin). |
+| `GetImage`, `SetImage` | method | **done** | Reads / replaces the image file (`null` removes it); a new image shows whole. `SetImage` returns `false` when the file is missing. |
+| `Type` | get | **done** | `subframe`. |
+| `AlphaColor` | get/set | **done** | Tint and alpha, `0xAARRGGBB`. |
+| `TransparentColor` | get | **done** | Colour key, `0xFFRRGGBB`. |
+| `Is2DOnly`, `Is3DOnly` | get/set | **done** | Which renderer draws the sub-frame; Luma never draws `2D_ONLY` ones (see `docs/formats/sprite.md`). |
+| `MirrorX`, `MirrorY` | get/set | **done** | Flips the image. |
+| `Decoration` | get/set | **done** | Ignored for mouse hits. |
+| `HotspotX`, `HotspotY` | get/set | **done** | Hotspot (draw origin). |
 
 ## 6. Windows and controls
 
@@ -759,64 +760,64 @@ How the list was made. For every class with a script interface, the names tested
 ### CSXString (`new String`)
 
 - WME source: src/engine_core/wme_base/SXString.cpp
-- Hierarchy and Luma: CBScriptable → CSXString; Luma: inert object
-- Count: 0 done, 10 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CSXString; Luma: Kind::Class (luma-script/src/classes/string.rs)
+- Count: 10 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Substring`, `Substr` | method | **todo** | Part of the string by (start, end) or (start, length). |
-| `ToUpperCase`, `ToLowerCase` | method | **todo** | Case conversion. |
-| `IndexOf` | method | **todo** | Position of a substring from an index. |
-| `Split` | method | **todo** | Splits on a separator and returns an array. |
-| `Type` | get | **todo** | `string`. |
-| `Length` | get | **todo** | Length of the string object. (Length of a plain string value is done; see Script values.) |
-| `Capacity` | get/set | **todo** | Allocated buffer size. |
+| `Substring`, `Substr` | method | **done** | Part of the string by (start, end) or (start, length), with WME's clamping and swapping; positions count characters. |
+| `ToUpperCase`, `ToLowerCase` | method | **done** | Case conversion (Unicode simple mapping; WME uses the C locale). |
+| `IndexOf` | method | **done** | Position of a substring from an index, -1 when absent. |
+| `Split` | method | **done** | Splits on any of the separator characters and returns an array. |
+| `Type` | get | **done** | `string`. |
+| `Length` | get | **done** | Length of the string object, in characters. |
+| `Capacity` | get/set | **done** | Allocated buffer size; cannot shrink below the text (warning logged). |
 
 ### CSXArray (`new Array`)
 
 - WME source: src/engine_core/wme_base/SXArray.cpp
-- Hierarchy and Luma: CBScriptable → CSXArray; Luma: inert object (numeric properties work as a bag, no `Length` tracking)
-- Count: 0 done, 5 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CSXArray; Luma: Kind::Class (luma-script/src/classes/array.rs)
+- Count: 5 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Push` | method | **todo** | Appends one or more values; returns the new length. |
-| `Pop` | method | **todo** | Removes and returns the last value. |
-| `Type` | get | **todo** | `array`. |
-| `Length` | get/set | **todo** | Number of elements; setting it truncates. Element access `a[n]` is a numeric property. |
+| `Push` | method | **done** | Appends one or more values; returns the new length. |
+| `Pop` | method | **done** | Removes and returns the last value, `null` when empty. |
+| `Type` | get | **done** | `array`. |
+| `Length` | get/set | **done** | Number of elements; setting it truncates. Element access `a[n]` is a numeric property (digits only, as WME's `ValidNumber`). |
 
 ### CSXDate (`new Date`)
 
 - WME source: src/engine_core/wme_base/SXDate.cpp
-- Hierarchy and Luma: CBScriptable → CSXDate; Luma: inert object
-- Count: 0 done, 15 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CSXDate; Luma: Kind::Class (luma-script/src/classes/date.rs)
+- Count: 15 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `GetYear`, `GetMonth`, `GetDate`, `GetHours`, `GetMinutes`, `GetSeconds`, `GetWeekday` | method | **todo** | Reads a field of the date (local time). |
-| `SetYear`, `SetMonth`, `SetDate`, `SetHours`, `SetMinutes`, `SetSeconds` | method | **todo** | Writes a field of the date. |
-| `SetCurrentTime` | method | **todo** | Sets the object to the current date and time. |
-| `Type` | get | **todo** | `date`. |
+| `GetYear`, `GetMonth`, `GetDate`, `GetHours`, `GetMinutes`, `GetSeconds`, `GetWeekday` | method | **done** | Reads a field of the date. |
+| `SetYear`, `SetMonth`, `SetDate`, `SetHours`, `SetMinutes`, `SetSeconds` | method | **done** | Writes a field of the date, normalised as `mktime` does. |
+| `SetCurrentTime` | method | **done** | Sets the object to the current date and time (the host's clock: UTC in the adventure layer, where WME uses local time). |
+| `Type` | get | **done** | `date`. |
 
 ### CSXFile (`new File`)
 
 - WME source: src/engine_core/wme_base/SXFile.cpp
-- Hierarchy and Luma: CBScriptable → CSXFile; Luma: inert object. Needs a policy for where scripts may read and write (saves, settings).
-- Count: 0 done, 33 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CSXFile; Luma: Kind::Class (luma-script/src/classes/file.rs). Reads come from files scripts wrote, then the game's files; writes, deletions and copies stay under the save directory.
+- Count: 33 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `SetFilename` | method | **todo** | Sets the file name. |
-| `OpenAsText`, `OpenAsBinary` | method | **todo** | Opens the file for read / write / append as text or binary. |
-| `Close` | method | **todo** | Closes the file. |
-| `SetPosition` | method | **todo** | Seeks. |
-| `Delete`, `Copy` | method | **todo** | Deletes the file / copies it to a new name. |
-| `ReadLine`, `ReadText` | method | **todo** | Reads a line / N characters of text. |
-| `WriteLine`, `WriteText` | method | **todo** | Writes text with / without a line break. |
-| `ReadBool`, `ReadByte`, `ReadShort`, `ReadInt`, `ReadLong`, `ReadFloat`, `ReadDouble`, `ReadString` | method | **todo** | Reads a binary value. |
-| `WriteBool`, `WriteByte`, `WriteShort`, `WriteInt`, `WriteLong`, `WriteFloat`, `WriteDouble`, `WriteString` | method | **todo** | Writes a binary value. |
-| `Type` | get | **todo** | `file`. |
-| `Filename`, `Position`, `Length`, `TextMode`, `AccessMode` | get | **todo** | Current file state. |
+| `SetFilename` | method | **done** | Sets the file name (and closes the file). |
+| `OpenAsText`, `OpenAsBinary` | method | **done** | Opens the file for read / write / append as text or binary. |
+| `Close` | method | **done** | Closes the file. |
+| `SetPosition` | method | **done** | Seeks. |
+| `Delete`, `Copy` | method | **done** | Deletes the file / copies it to a new name, under the save directory. |
+| `ReadLine`, `ReadText` | method | **done** | Reads a line / N characters of text (`\r` skipped). |
+| `WriteLine`, `WriteText` | method | **done** | Writes text with / without a line break (`\n`; WME on Windows wrote `\r\n`). |
+| `ReadBool`, `ReadByte`, `ReadShort`, `ReadInt`, `ReadLong`, `ReadFloat`, `ReadDouble`, `ReadString` | method | **done** | Reads a binary value, little-endian; `ReadShort` is 65536 plus the signed value, as in WME. |
+| `WriteBool`, `WriteByte`, `WriteShort`, `WriteInt`, `WriteLong`, `WriteFloat`, `WriteDouble`, `WriteString` | method | **done** | Writes a binary value. |
+| `Type` | get | **done** | `file`. |
+| `Filename`, `Position`, `Length`, `TextMode`, `AccessMode` | get | **done** | Current file state. |
 
 ### CSXDirectory (the global `Directory`)
 
@@ -837,18 +838,18 @@ How the list was made. For every class with a script interface, the names tested
 ### CSXMemBuffer (`new MemBuffer`)
 
 - WME source: src/engine_core/wme_base/SXMemBuffer.cpp
-- Hierarchy and Luma: CBScriptable → CSXMemBuffer; Luma: inert object
-- Count: 0 done, 19 todo, 3 no-op
+- Hierarchy and Luma: CBScriptable → CSXMemBuffer; Luma: Kind::Class (luma-script/src/classes/membuffer.rs)
+- Count: 19 done, 0 todo, 3 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `SetSize` | method | **todo** | Resizes the buffer. |
-| `GetBool`, `GetByte`, `GetShort`, `GetInt`, `GetLong`, `GetFloat`, `GetDouble`, `GetString` | method | **todo** | Reads a value at a byte offset. |
-| `SetBool`, `SetByte`, `SetShort`, `SetInt`, `SetLong`, `SetFloat`, `SetDouble`, `SetString` | method | **todo** | Writes a value at a byte offset. |
-| `GetPointer`, `SetPointer` | method | **no-op** | Reads / writes a raw memory address, for calling Windows DLL functions. |
-| `DEBUG_Dump` | method | **no-op** | Dumps the buffer to the log; debugging aid. |
-| `Type` | get | **todo** | `membuffer`. |
-| `Size` | get | **todo** | Buffer size in bytes. |
+| `SetSize` | method | **done** | Resizes the buffer, zero-filling growth. |
+| `GetBool`, `GetByte`, `GetShort`, `GetInt`, `GetLong`, `GetFloat`, `GetDouble`, `GetString` | method | **done** | Reads a value at a byte offset (little-endian; `GetShort` is 65536 plus the signed value, as in WME); out of bounds is a runtime error and `null`. |
+| `SetBool`, `SetByte`, `SetShort`, `SetInt`, `SetLong`, `SetFloat`, `SetDouble`, `SetString` | method | **done** | Writes a value at a byte offset; out of bounds is a runtime error and `false`. |
+| `GetPointer`, `SetPointer` | method | **no-op** | Reads / writes a raw memory address, for calling Windows DLL functions. Luma logs a runtime error and yields `null` / `false`. |
+| `DEBUG_Dump` | method | **no-op** | Dumps the buffer to a file on drive C; debugging aid. Luma yields `null`. |
+| `Type` | get | **done** | `membuffer`. |
+| `Size` | get | **done** | Buffer size in bytes. |
 
 ### CSXTcpClient (`new TcpClient`)
 
@@ -1000,7 +1001,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp, wme_ad/AdGame.cpp, wme_ad/AdObject.cpp, wme_base/UIButton.cpp, wme_base/BSprite.cpp (search `ApplyEvent("`)
 - Hierarchy and Luma: luma-adventure/src/world.rs (`mouse_event`, `key_down`), ui.rs, scene_state.rs
-- Count: 15 done, 9 todo, 0 no-op
+- Count: 15 done, 6 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -1017,8 +1018,8 @@ How the list was made. For every class with a script interface, the names tested
 | `BeforeSave`, `AfterLoad` | event | **done** | Around saving and loading (unbreakable). |
 | `ActorEntry`, `ActorLeave` | event | **done** | An actor enters / leaves a region of the main layer (raised on the region). |
 | (sound event name) | event | **done** | The name given to `PlaySoundEvent`, raised on the object when the sound ends. |
-| `FrameChanged` | event | **todo** | Raised on a sprite when its current frame changes. |
-| (frame event names) | event | **todo** | Events attached to a frame (`APPLY_EVENT` in sprite files, `AddEvent`), raised on the sprite's owner when the frame shows. The sprite loader reads them; the adventure layer does not raise them. |
+| `FrameChanged` | event | **done** | Raised on a sprite object when its current frame changes (the sprite of an entity, an actor or a control); only scripts attached to the sprite object with `AttachScript` can handle it, since Luma does not attach a sprite file's own `SCRIPT`s yet. |
+| (frame event names) | event | **done** | Events attached to a frame (`APPLY_EVENT` in sprite files, `AddEvent`), raised on the sprite's owner (entity, actor, control) when the frame becomes current; the frame's `SOUND` plays and `KILL_SOUND` stops the sprite's earlier frame sounds at the same time. |
 | (emit event name) | event | **todo** | The particle emitter's `EmitEvent`, raised on its owner at each emission. |
 
 ## Summary per class
@@ -1026,13 +1027,13 @@ How the list was made. For every class with a script interface, the names tested
 | Class | done | todo | no-op | total |
 |-------|-----:|-----:|------:|------:|
 | Global functions | 16 | 4 | 1 | 21 |
-| Constructors | 0 | 8 | 1 | 9 |
+| Constructors | 5 | 3 | 1 | 9 |
 | Global variables | 4 | 1 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 45 | 27 | 0 | 72 |
-| CBGame | 90 | 58 | 17 | 165 |
-| CAdGame | 56 | 9 | 0 | 65 |
+| CBGame | 123 | 24 | 18 | 165 |
+| CAdGame | 59 | 6 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
 | CAdScene | 46 | 35 | 2 | 83 |
 | CAdLayer | 13 | 5 | 0 | 18 |
@@ -1044,9 +1045,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor | 23 | 0 | 0 | 23 |
 | CAdEntity | 11 | 9 | 0 | 20 |
 | CAdItem | 23 | 3 | 0 | 26 |
-| CBSprite | 13 | 5 | 0 | 18 |
-| CBFrame | 0 | 21 | 0 | 21 |
-| CBSubFrame | 0 | 20 | 0 | 20 |
+| CBSprite | 18 | 0 | 0 | 18 |
+| CBFrame | 21 | 0 | 0 | 21 |
+| CBSubFrame | 20 | 0 | 0 | 20 |
 | CUIObject | 27 | 0 | 0 | 27 |
 | CUIWindow | 37 | 3 | 0 | 40 |
 | CUIButton | 22 | 4 | 0 | 26 |
@@ -1056,12 +1057,12 @@ How the list was made. For every class with a script interface, the names tested
 | CUIMarkup | 0 | 0 | 1 | 1 |
 | CBKeyboardState | 8 | 0 | 0 | 8 |
 | CSXMath | 22 | 0 | 0 | 22 |
-| CSXString | 0 | 10 | 0 | 10 |
-| CSXArray | 0 | 5 | 0 | 5 |
-| CSXDate | 0 | 15 | 0 | 15 |
-| CSXFile | 0 | 33 | 0 | 33 |
+| CSXString | 10 | 0 | 0 | 10 |
+| CSXArray | 5 | 0 | 0 | 5 |
+| CSXDate | 15 | 0 | 0 | 15 |
+| CSXFile | 33 | 0 | 0 | 33 |
 | CSXDirectory | 0 | 9 | 1 | 10 |
-| CSXMemBuffer | 0 | 19 | 3 | 22 |
+| CSXMemBuffer | 19 | 0 | 3 | 22 |
 | CSXTcpClient | 0 | 0 | 1 | 1 |
 | CSXPluginObject | 0 | 0 | 1 | 1 |
 | CPartEmitter | 0 | 79 | 0 | 79 |
@@ -1069,10 +1070,10 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3D | 0 | 40 | 0 | 40 |
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
-| Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **559** | **568** | **29** | **1156** |
+| Events raised on objects | 15 | 6 | 0 | 21 |
+| **All** | **728** | **395** | **30** | **1153** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 544 done, 559 todo, 29 no-op, 1132 in all.
+Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 713 done, 389 todo, 30 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1083,12 +1084,7 @@ These classes have no done member in Luma: the object does not exist for scripts
 | `CAdWaypointGroup` | A waypoint group of a scene (`Scene.GetWaypointGroup`) | 3 |
 | `CBFrame` | A frame of a sprite (delay, sound, move, sub-frames, events) | 21 |
 | `CBSubFrame` | The image part of a frame (hotspot, mirror, alpha) | 20 |
-| `CSXString` | `new String` | 10 |
-| `CSXArray` | `new Array` | 5 |
-| `CSXDate` | `new Date` | 15 |
-| `CSXFile` | `new File` | 33 |
 | `CSXDirectory` | `Directory` | 9 |
-| `CSXMemBuffer` | `new MemBuffer` | 19 |
 | `CPartEmitter` | Particle emitter | 79 |
 | `CAdObject3D` | Base of 3D objects: position, velocity, shadows, bones, ignored lights | 38 |
 | `CAdActor3D` | Legacy 3D actor (MS3D/3DS models) | 40 |
@@ -1105,19 +1101,18 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
-| Game services | 46 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
-| Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
+| Game services | 8 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
+| Script library | 16 | The `Directory` object, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. (`String`, `Array`, `Date`, `File` and `MemBuffer` are done.) |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
-| Sprites and frames | 48 | Frame and sub-frame objects (`GetFrame`, `AddFrame`, `Delay`, `MoveX`, hotspots...), runtime-built sprites, frame events. Reads on the sprite format already exist in `luma-formats`. |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
 | Video | 7 | Entity-bound Theora video (`PlayTheora` on an entity and its pause/stop family), AVI for the deprecated `PlayVideo`. |
 | Sound effects | 2 | `SoundFXEcho`, `SoundFXReverb` (also listed in `docs/audio.md`). |
-| Input and system events | 6 | Wheel, middle and right-double-click events, the `QuitGame` event, sprite frame events. |
+| Input and system events | 6 | Wheel, middle and right-double-click events, the `QuitGame` event. |
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **568** | |
+| **All** | **395** | |
 
 ## Members in Luma that WME 1.x does not define
 
@@ -1129,6 +1124,7 @@ These are accepted by Luma and not counted above; some come from later WME versi
 | Game | `IsVideoPlaying`, `StopVideo` | Query / stop the running video (`StopVideo` is an alias of `StopTheora`). |
 | Game | `FocusedWindow`, `CursorHidden`, `AutoSaveOnExit`, `AutoSaveSlot`, `Platform`, `DeviceType` | Properties Luma reads that WME 1.x does not define in its script interface (some come from later WME versions or from Luma itself). |
 | Actor | `SetStopOnBlocked`, `GetStopOnBlocked`, `ActorIsBlocked` | Stop-on-blocked behaviour and the matching event / property. |
+| Sprite | `Filename` | The file the sprite was loaded from. |
 
 ## Maintenance
 

@@ -39,6 +39,23 @@ pub struct GameFile {
     pub personal_savegames: bool,
     /// `LOCAL_SAVE_DIR`: where saved games go.
     pub local_save_dir: Option<String>,
+    /// `THUMBNAIL_WIDTH`: width of the thumbnail stored in saved games;
+    /// `0` (the default) for none.
+    pub thumbnail_width: i32,
+    /// `THUMBNAIL_HEIGHT`: see `thumbnail_width`.
+    pub thumbnail_height: i32,
+    /// `SAVE_IMAGE`: the image shown while the game saves.
+    pub save_image: Option<String>,
+    /// `SAVE_IMAGE_X`, `SAVE_IMAGE_Y`: where it is drawn.
+    pub save_image_x: i32,
+    /// See `save_image_x`.
+    pub save_image_y: i32,
+    /// `LOAD_IMAGE`: the image shown while a saved game loads.
+    pub load_image: Option<String>,
+    /// `LOAD_IMAGE_X`, `LOAD_IMAGE_Y`: where it is drawn.
+    pub load_image_x: i32,
+    /// See `load_image_x`.
+    pub load_image_y: i32,
     /// `PROPERTY` blocks: script properties of the game object.
     pub properties: Vec<Property>,
     /// `AD_GAME`'s `RESPONSE_BOX`: the dialogue choices definition.
@@ -76,6 +93,14 @@ impl Default for GameFile {
             video_subtitles: false,
             personal_savegames: false,
             local_save_dir: None,
+            thumbnail_width: 0,
+            thumbnail_height: 0,
+            save_image: None,
+            save_image_x: 0,
+            save_image_y: 0,
+            load_image: None,
+            load_image_x: 0,
+            load_image_y: 0,
             properties: Vec::new(),
             response_box: None,
             inventory_box: None,
@@ -124,6 +149,18 @@ impl GameFile {
                     game.personal_savegames = node.as_bool().unwrap_or(false);
                 }
                 "LOCAL_SAVE_DIR" => game.local_save_dir = text(node),
+                "THUMBNAIL_WIDTH" => {
+                    game.thumbnail_width = node.as_int().unwrap_or(0) as i32;
+                }
+                "THUMBNAIL_HEIGHT" => {
+                    game.thumbnail_height = node.as_int().unwrap_or(0) as i32;
+                }
+                "SAVE_IMAGE" => game.save_image = text(node),
+                "SAVE_IMAGE_X" => game.save_image_x = node.as_int().unwrap_or(0) as i32,
+                "SAVE_IMAGE_Y" => game.save_image_y = node.as_int().unwrap_or(0) as i32,
+                "LOAD_IMAGE" => game.load_image = text(node),
+                "LOAD_IMAGE_X" => game.load_image_x = node.as_int().unwrap_or(0) as i32,
+                "LOAD_IMAGE_Y" => game.load_image_y = node.as_int().unwrap_or(0) as i32,
                 "PROPERTY" => game.properties.extend(Property::from_node(node)?),
                 _ => {}
             }
@@ -173,6 +210,12 @@ GAME {
   VIDEO_SUBTITLES=TRUE
   SUBTITLES_SPEED=100
   STRING_TABLE="string.tab"
+  THUMBNAIL_WIDTH=200
+  THUMBNAIL_HEIGHT=150
+  SAVE_IMAGE="interface\saving.png"
+  SAVE_IMAGE_X=10
+  SAVE_IMAGE_Y=20
+  LOAD_IMAGE="interface\loading.png"
   PROPERTY { NAME="Difficulty" VALUE="2" }
 }
 AD_GAME {
@@ -204,6 +247,11 @@ AD_GAME {
         assert!(game.subtitles && game.video_subtitles);
         assert_eq!(game.subtitles_speed, 100);
         assert!(!game.personal_savegames);
+        assert_eq!((game.thumbnail_width, game.thumbnail_height), (200, 150));
+        assert_eq!(game.save_image.as_deref(), Some("interface\\saving.png"));
+        assert_eq!((game.save_image_x, game.save_image_y), (10, 20));
+        assert_eq!(game.load_image.as_deref(), Some("interface\\loading.png"));
+        assert_eq!((game.load_image_x, game.load_image_y), (0, 0));
         assert_eq!(game.properties.len(), 1);
         assert_eq!(game.properties[0].name, "Difficulty");
         assert_eq!(

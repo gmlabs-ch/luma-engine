@@ -53,16 +53,17 @@ Luma Engine reads the same game data with a new engine built for today:
 | `luma-video` | Ogg Theora videos decoded to frames | `ogg`, `oxideav-theora`, `oxideav-core` |
 | `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six run-time core crates, `fontdue`, `serde`, `postcard`, `flate2` |
 | `luma-lumen` | Lumen, the scenario format for games made for Luma: parser, checker, text runner | nothing |
-| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six run-time core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen` |
+| `luma-3d` | 3D characters on painted backgrounds: `.3ds` scene geometry, the camera mapping, the Direct3D maths conventions | `luma-formats` |
+| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen`, `luma-3d` with `3d` |
 | `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script`, `luma-compiler`, `luma` (feature `lumen`) |
 | `luma-player` | The desktop player | `luma` (features `adventure`, `audio-device`) |
 
-The first seven are the core (`luma-compiler` is a build tool: games ship
-compiled scripts, so `luma` does not re-export it); `luma-adventure` and
-`luma-lumen` are the optional modules. A game or a front-end depends on
-`luma` and enables the modules it needs through its features (`adventure`
-is on by default, `lumen` is off, `audio-device` plays the sounds, `serde`
-serializes the core); see [docs/modules.md](docs/modules.md).
+The first six are the run-time core and `luma-compiler` a build tool (games
+ship compiled scripts, so `luma` does not re-export it); `luma-adventure`,
+`luma-lumen` and `luma-3d` are the optional modules. A game or a front-end depends on `luma` and
+enables the modules it needs through its features (`adventure` is on by
+default, `lumen` and `3d` are off, `audio-device` plays the sounds,
+`serde` serializes the core); see [docs/modules.md](docs/modules.md).
 
 ## Building
 

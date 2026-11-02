@@ -172,8 +172,13 @@ impl World {
         &self.mouse
     }
 
-    /// Moves the mouse to a point in game pixels.
+    /// Moves the mouse to a point in game pixels, kept inside the lock
+    /// rectangle when one applies (`CBGame::GetMousePos`).
     pub fn set_mouse(&mut self, x: i32, y: i32) {
+        let (x, y) = match self.mouse_lock() {
+            Some((left, top, right, bottom)) => (x.clamp(left, right), y.clamp(top, bottom)),
+            None => (x, y),
+        };
         self.mouse.x = x;
         self.mouse.y = y;
     }
@@ -352,7 +357,7 @@ impl World {
         let Some(frame) = loaded.sprite.frames.get(frame) else {
             return;
         };
-        for sub in &frame.subframes {
+        for sub in crate::scene_view::drawn_subframes(frame) {
             let Some(image) = &sub.image else { continue };
             let Some(texture) = self.cursors.bank.texture(image, sub.color_key) else {
                 continue;
@@ -447,7 +452,7 @@ impl World {
         else {
             return;
         };
-        for sub in &frame.subframes {
+        for sub in crate::scene_view::drawn_subframes(frame) {
             let Some(image) = &sub.image else { continue };
             if sub.decoration {
                 continue;

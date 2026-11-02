@@ -1,0 +1,16 @@
+[package]
+name = "luma-3d"
+description = "3D characters on painted backgrounds for Luma Engine: scene geometry, camera mapping and the Direct3D conventions of Wintermute's 3D actors."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+luma-formats.workspace = true
+
+[lints]
+workspace = true

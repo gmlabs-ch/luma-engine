@@ -86,6 +86,10 @@ pub struct Sounds {
     pub(crate) crossfade: Option<Crossfade>,
     /// Directories searched for speech files, with a trailing separator.
     pub speech_dirs: Vec<String>,
+    /// The sounds of sprite frames playing (`CBFrame::m_Sound`), by the
+    /// object showing the sprite; beside the object's own sound, dropped
+    /// when they end, and not kept in saved games.
+    pub(crate) frame_sounds: HashMap<NativeId, Vec<SoundId>>,
 }
 
 impl Sounds {
@@ -99,6 +103,7 @@ impl Sounds {
             music_start_time: vec![0; MUSIC_CHANNELS],
             crossfade: None,
             speech_dirs: vec!["speech\\".to_string()],
+            frame_sounds: HashMap::new(),
         }
     }
 
@@ -380,6 +385,7 @@ impl World {
             .sounds
             .objects
             .keys()
+            .chain(self.sounds.frame_sounds.keys())
             .copied()
             .filter(|id| !self.objects.contains(*id))
             .collect();
@@ -389,14 +395,85 @@ impl World {
                     self.sounds.audio.remove(sound.id);
                 }
             }
+            self.kill_frame_sounds(owner);
         }
     }
 
+    /// The pan of an object's sounds when it pans them (`SoundPanning`):
+    /// that of its position on screen; `None` when it does not.
+    fn sound_pan_of(&self, owner: NativeId) -> Option<f32> {
+        let x = match self.objects.get(owner).map(|n| n.kind.clone()) {
+            Some(Kind::Actor) => self
+                .actor(owner)
+                .filter(|a| a.def.active && a.def.sound_panning)
+                .map(|a| a.x),
+            Some(Kind::Entity(r)) => self
+                .scene()
+                .and_then(|v| v.entity(r))
+                .filter(|e| e.active && e.sound_panning)
+                .map(|e| e.x),
+            _ => None,
+        }?;
+        Some(Sounds::pos_to_pan(
+            x - self.offset_x,
+            self.settings.width as i32,
+        ))
+    }
+
+    /// Plays the sound of a sprite frame that became current
+    /// (`CBFrame::OneTimeDisplay`): a sound of its own beside the
+    /// object's `PlaySound` one, panned with the object when it pans its
+    /// sounds (`CBObject::UpdateOneSound`), dropped when it ends.
+    pub(crate) fn play_frame_sound(&mut self, owner: NativeId, file: &str) {
+        let Some((clip, _)) = self.load_clip(file) else {
+            return;
+        };
+        let id = self.sounds.audio.add(clip, SoundType::Sfx, 100);
+        if let Some(pan) = self.sound_pan_of(owner) {
+            self.sounds.audio.set_pan(id, pan);
+        }
+        self.sounds.audio.play(id, false);
+        self.sounds.frame_sounds.entry(owner).or_default().push(id);
+    }
+
+    /// Stops the frame sounds of an object's sprite
+    /// (`CBSprite::KillAllSounds`): on `Reset`, and when a frame marked
+    /// `KILL_SOUND` becomes current.
+    pub(crate) fn kill_frame_sounds(&mut self, owner: NativeId) {
+        for id in self.sounds.frame_sounds.remove(&owner).unwrap_or_default() {
+            self.sounds.audio.remove(id);
+        }
+    }
+
+    /// The frame sounds of an object still playing.
+    pub fn frame_sounds_of(&self, owner: NativeId) -> usize {
+        self.sounds
+            .frame_sounds
+            .get(&owner)
+            .map_or(0, |ids| ids.len())
+    }
+
+    /// Forgets the frame sounds that ended.
+    fn drop_ended_frame_sounds(&mut self) {
+        let audio = &mut self.sounds.audio;
+        self.sounds.frame_sounds.retain(|_, ids| {
+            ids.retain(|id| {
+                if audio.is_playing(*id) {
+                    true
+                } else {
+                    audio.remove(*id);
+                    false
+                }
+            });
+            !ids.is_empty()
+        });
+    }
+
     /// One frame of the objects' sounds (`CBObject::UpdateSounds`): a
-    /// sound event fires when its sound ended, and the sounds of the
-    /// objects that pan follow their position on screen.
+    /// sound event fires when its sound ended, the sounds of the objects
+    /// that pan follow their position on screen, and the frame sounds
+    /// that ended are forgotten.
     pub fn update_sounds(&mut self) {
-        let (ox, width) = (self.offset_x, self.settings.width as i32);
         let owners: Vec<NativeId> = self.sounds.objects.keys().copied().collect();
         for owner in owners {
             let Some(sound) = self.sfx_of(owner).cloned() else {
@@ -416,24 +493,11 @@ impl World {
                     self.queue_event(owner, event);
                 }
             }
-            let panned = match self.objects.get(owner).map(|n| n.kind.clone()) {
-                Some(Kind::Actor) => self
-                    .actor(owner)
-                    .filter(|a| a.def.active && a.def.sound_panning)
-                    .map(|a| a.x),
-                Some(Kind::Entity(r)) => self
-                    .scene()
-                    .and_then(|v| v.entity(r))
-                    .filter(|e| e.active && e.sound_panning)
-                    .map(|e| e.x),
-                _ => None,
-            };
-            if let Some(x) = panned {
-                self.sounds
-                    .audio
-                    .set_pan(sound.id, Sounds::pos_to_pan(x - ox, width));
+            if let Some(pan) = self.sound_pan_of(owner) {
+                self.sounds.audio.set_pan(sound.id, pan);
             }
         }
+        self.drop_ended_frame_sounds();
         self.update_crossfade();
     }
 
