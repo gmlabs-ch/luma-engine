@@ -1503,5 +1503,9 @@ impl World {
                 }
             }
         }
+        // `CBSprite::Reset` stops the sprite's frame sounds.
+        if let Some(owner) = self.node_id(r) {
+            self.kill_frame_sounds(owner);
+        }
     }
 }

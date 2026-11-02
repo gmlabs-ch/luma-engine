@@ -108,8 +108,12 @@ The engine keeps a current frame and the time it was entered. When the
 frame's `DELAY` has elapsed it moves to the next frame; after the last
 one it either restarts (`LOOPING`) or stops and marks the sprite finished.
 A delay of `0` advances on every update. When the current frame changes,
-its `MOVE` offset is applied to the owner, its `SOUND` is played and its
-`APPLY_EVENT`s are raised.
+its `MOVE` offset is applied to the owner, its `SOUND` is played (after
+the sprite's earlier frame sounds are stopped when `KILL_SOUND` is set),
+`FrameChanged` is raised on the sprite and its `APPLY_EVENT`s are raised
+on the owner. A looping sprite with a single frame counts as changed on
+every update (`CBSprite::GetCurrentFrame`), so its sound and events
+repeat each frame. The first frame shown counts as a change too.
 
 ## Images
 

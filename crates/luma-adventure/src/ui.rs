@@ -1576,10 +1576,13 @@ impl World {
         }
     }
 
-    /// Advances the animation of a container's entity sprite.
+    /// Advances the animation of a container's entity sprite; a frame
+    /// that becomes current plays its sound and raises its events on the
+    /// entity.
     fn step_ui_entity_anim(&mut self, index: Option<usize>) {
         let timer = self.timer();
-        let Some(entity) = index.and_then(|i| self.ui_entities.get_mut(i)) else {
+        let Some(index) = index else { return };
+        let Some(entity) = self.ui_entities.get_mut(index) else {
             return;
         };
         let Some(path) = entity.def.sprite.clone() else {
@@ -1593,10 +1596,16 @@ impl World {
         if anim.sprite != crate::scene_view::key(&path) {
             *anim = AnimState::new(&path);
         }
-        anim.step(&loaded.sprite, timer);
+        if anim.step(&loaded.sprite, timer) {
+            let frame = loaded.sprite.frames.get(anim.current_frame).cloned();
+            if let (Some(frame), Some(owner)) = (frame, self.node_id(EntityRef::Ui(index))) {
+                self.frame_shown(owner, &frame);
+            }
+        }
     }
 
-    /// Advances the animation of a control's image.
+    /// Advances the animation of a control's image; a frame that becomes
+    /// current plays its sound and raises its events on the control.
     fn step_control_anim(&mut self, id: NativeId) {
         let timer = self.timer();
         let Some(control) = self.ui.controls.get_mut(&id) else {
@@ -1613,7 +1622,11 @@ impl World {
         if anim.sprite != crate::scene_view::key(&path) {
             *anim = AnimState::new(&path);
         }
-        anim.step(&loaded.sprite, timer);
+        if anim.step(&loaded.sprite, timer) {
+            if let Some(frame) = loaded.sprite.frames.get(anim.current_frame).cloned() {
+                self.frame_shown(id, &frame);
+            }
+        }
     }
 
     /// The font a control draws its text with: its own, else the system

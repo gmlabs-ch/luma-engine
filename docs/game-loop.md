@@ -22,6 +22,10 @@ in this order (`Runtime::tick`):
 3. speech sounds that ended end their sentences; the fader advances;
 4. the scripts run (`Engine::tick`);
 5. the scene's entities animate and talk; the actors walk, turn, talk;
+   a sprite frame that becomes current plays its `SOUND`, stops the
+   sprite's earlier frame sounds when marked `KILL_SOUND`, raises
+   `FrameChanged` on the sprite object and its `APPLY_EVENT`s on the
+   object showing the sprite;
 6. the view scrolls towards the main object; the objects' sounds follow
    them;
 7. the object under the mouse is found and becomes the **active

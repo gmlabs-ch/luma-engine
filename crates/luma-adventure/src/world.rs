@@ -621,6 +621,16 @@ impl World {
         for event in events {
             match event {
                 ActorEvent::OnActor(name) => self.pending_events.push((owner, name.to_string())),
+                ActorEvent::FrameShown { sprite, frame } => {
+                    let frame = self
+                        .actor(owner)
+                        .and_then(|a| a.bank.sprite(&sprite))
+                        .and_then(|l| l.sprite.frames.get(frame))
+                        .cloned();
+                    if let Some(frame) = frame {
+                        self.frame_shown(owner, &frame);
+                    }
+                }
                 ActorEvent::OnRegion {
                     layer,
                     index,
@@ -638,6 +648,28 @@ impl World {
     /// [`World::apply_pending_events`].
     pub(crate) fn queue_event(&mut self, owner: NativeId, event: String) {
         self.pending_events.push((owner, event));
+    }
+
+    /// A frame of an object's sprite became current (`CBSprite::Display`
+    /// with `m_Changed`): a `KILL_SOUND` frame stops the sprite's earlier
+    /// frame sounds, `FrameChanged` is raised on the sprite object when a
+    /// script holds one, then the frame's `SOUND` plays and its
+    /// `APPLY_EVENT`s are raised on the object
+    /// (`CBFrame::OneTimeDisplay`). The events reach their scripts with
+    /// the others raised during the frame.
+    pub(crate) fn frame_shown(&mut self, owner: NativeId, frame: &luma_formats::Frame) {
+        if frame.kill_sound {
+            self.kill_frame_sounds(owner);
+        }
+        if let Some(sprite) = self.objects.find(|k| *k == Kind::Sprite(owner)) {
+            self.queue_event(sprite, "FrameChanged".to_string());
+        }
+        if let Some(file) = &frame.sound {
+            self.play_frame_sound(owner, file);
+        }
+        for event in &frame.apply_events {
+            self.queue_event(owner, event.clone());
+        }
     }
 
     /// One frame of every active actor (`CAdScene::UpdateFreeObjects`):
@@ -675,12 +707,25 @@ impl World {
         self.collect_sentences();
     }
 
-    /// One frame of the scene's entities: animations and sentences.
+    /// One frame of the scene's entities: animations and sentences; the
+    /// frames that became current play their sounds and raise their
+    /// events (see [`World::frame_shown`]).
     pub fn update_scene(&mut self) {
         let timer = self.timer;
         let random = self.next_random();
-        if let Some(view) = self.scene.as_mut() {
-            view.advance_with(timer, random);
+        let Some(view) = self.scene.as_mut() else {
+            return;
+        };
+        view.advance_with(timer, random);
+        for (r, sprite, index) in view.take_shown() {
+            let frame = self
+                .scene()
+                .and_then(|v| v.sprite(&sprite))
+                .and_then(|l| l.sprite.frames.get(index))
+                .cloned();
+            if let (Some(frame), Some(owner)) = (frame, self.node_id(r)) {
+                self.frame_shown(owner, &frame);
+            }
         }
     }
 

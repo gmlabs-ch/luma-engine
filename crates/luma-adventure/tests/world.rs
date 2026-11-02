@@ -807,6 +807,29 @@ fn sprite_edit_script() -> Vec<u8> {
     a.build()
 }
 
+/// Notes the frame events of a sprite (`APPLY_EVENT`) and `FrameChanged`.
+fn cue_script() -> Vec<u8> {
+    let mut a = Assembler::new("cue.script");
+    let end = a.label();
+    a.jmp(end);
+    for (event, key) in [
+        ("Tick", "tick"),
+        ("Tock", "tock"),
+        ("Step", "step"),
+        ("FrameChanged", "frameChanged"),
+    ] {
+        a.event(event);
+        a.emit(Instruction::Scope);
+        a.def_glob_var("result");
+        get(&mut a, "this", "Type");
+        store(&mut a, key);
+        a.emit(Instruction::RetEvent);
+    }
+    a.bind(end);
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
 /// Fades the screen out and reads the colour.
 fn fade_script() -> Vec<u8> {
     let mut a = Assembler::new("fade.script");
@@ -1093,6 +1116,11 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     );
     pkg.add_file("walk.script", walk_script());
     pkg.add_file("sprite_edit.script", sprite_edit_script());
+    pkg.add_file("cue.script", cue_script());
+    pkg.add_file(
+        "art\\cue.sprite",
+        b"SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" SOUND=\"audio\\beep.wav\" APPLY_EVENT=\"Tick\" } FRAME { DELAY=50 IMAGE=\"art\\green.png\" KILL_SOUND=TRUE APPLY_EVENT=\"Tock\" } }".to_vec(),
+    );
     pkg.add_file("save.script", save_script());
     pkg.add_file(
         "art\\prop.sprite",
@@ -1104,7 +1132,7 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     );
     pkg.add_file(
         "art\\stand.sprite",
-        b"SPRITE { LOOPING=TRUE FRAME { DELAY=100 IMAGE=\"art\\green.png\" HOTSPOT {0,8} } }"
+        b"SPRITE { LOOPING=TRUE FRAME { DELAY=100 IMAGE=\"art\\green.png\" HOTSPOT {0,8} APPLY_EVENT=\"Step\" } }"
             .to_vec(),
     );
     pkg.add_file(
@@ -1438,6 +1466,79 @@ fn frames_and_subframes_are_script_objects_and_survive_a_saved_game() {
     loaded.load_game(8).unwrap();
     loaded.tick(16);
     check(&loaded);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn frames_play_their_sounds_and_raise_their_events() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    // The prop shows cue.sprite: frame 0 (50 ms) plays a sound and raises
+    // "Tick", frame 1 kills the sound and raises "Tock".
+    let prop_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    let files = Vfs::open_game(&dir).unwrap();
+    {
+        let view = runtime.world.scene_mut().unwrap();
+        assert!(view.add_sprite(&files, "art\\cue.sprite"));
+        let e = view.entity_mut(prop_ref).unwrap();
+        e.active = true;
+        e.sprite = Some("art\\cue.sprite".to_string());
+        view.reset_anim(prop_ref);
+    }
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    let sprite = runtime.world.sprite_object_id(prop).unwrap();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, prop, "cue.script")
+    );
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, sprite, "cue.script")
+    );
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.frame_sounds_of(prop),
+        1,
+        "frame 0's sound plays"
+    );
+    assert_eq!(result(&runtime, "tock"), Value::Null);
+    runtime.tick(16);
+    assert_eq!(
+        result(&runtime, "tick"),
+        Value::from("entity"),
+        "APPLY_EVENT is raised on the owner"
+    );
+    assert_eq!(
+        result(&runtime, "frameChanged"),
+        Value::from("sprite"),
+        "FrameChanged is raised on the sprite object"
+    );
+    for _ in 0..4 {
+        runtime.tick(16);
+    }
+    assert_eq!(result(&runtime, "tock"), Value::from("entity"));
+    assert_eq!(
+        runtime.world.frame_sounds_of(prop),
+        0,
+        "a KILL_SOUND frame stops the sprite's sounds"
+    );
+
+    // An actor's sprite raises its frame events on the actor.
+    let bob = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\bob.actor", false)
+        .unwrap();
+    assert!(runtime.world.attach(&mut runtime.engine, bob, "cue.script"));
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "step"), Value::from("actor"));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

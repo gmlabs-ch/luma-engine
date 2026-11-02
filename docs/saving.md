@@ -56,6 +56,8 @@ What a saved game does **not** hold, and what happens to it:
   while a video plays loads without it;
 - the speech sound of a sentence: the sentence goes on with its text,
   silently, for the time it had left;
+- the sounds of sprite frames that were playing (a frame's `SOUND`):
+  the next frame that becomes current plays its own;
 - the string table: the one loaded by the running game stays (the
   original engine does not save it either; a game picks its language
   before loading);

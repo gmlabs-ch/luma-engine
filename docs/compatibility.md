@@ -1000,8 +1000,8 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 ### Events raised on objects (`on "Name" { ... }` handlers)
 
 - WME source: src/engine_core/wme_base/BGame.cpp, wme_ad/AdGame.cpp, wme_ad/AdObject.cpp, wme_base/UIButton.cpp, wme_base/BSprite.cpp (search `ApplyEvent("`)
-- Hierarchy and Luma: luma-adventure/src/world.rs (`mouse_event`, `key_down`), ui.rs, scene_state.rs
-- Count: 15 done, 9 todo, 0 no-op
+- Hierarchy and Luma: luma-adventure/src/world.rs (`mouse_event`, `key_down`, `frame_shown`), ui.rs, scene_state.rs
+- Count: 17 done, 7 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -1018,8 +1018,8 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | `BeforeSave`, `AfterLoad` | event | **done** | Around saving and loading (unbreakable). |
 | `ActorEntry`, `ActorLeave` | event | **done** | An actor enters / leaves a region of the main layer (raised on the region). |
 | (sound event name) | event | **done** | The name given to `PlaySoundEvent`, raised on the object when the sound ends. |
-| `FrameChanged` | event | **todo** | Raised on a sprite when its current frame changes. |
-| (frame event names) | event | **todo** | Events attached to a frame (`APPLY_EVENT` in sprite files, `AddEvent`), raised on the sprite's owner when the frame shows. The sprite loader reads them; the adventure layer does not raise them. |
+| `FrameChanged` | event | **done** | Raised on a sprite object when its current frame changes (the sprite of an entity, an actor or a control); only scripts attached to the sprite object with `AttachScript` can handle it, since Luma does not attach a sprite file's own `SCRIPT`s yet. |
+| (frame event names) | event | **done** | Events attached to a frame (`APPLY_EVENT` in sprite files, `AddEvent`), raised on the sprite's owner (entity, actor, control) when the frame becomes current; the frame's `SOUND` plays and `KILL_SOUND` stops the sprite's earlier frame sounds at the same time. |
 | (emit event name) | event | **todo** | The particle emitter's `EmitEvent`, raised on its owner at each emission. |
 
 ## Summary per class
@@ -1070,10 +1070,10 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3D | 0 | 40 | 0 | 40 |
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
-| Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **605** | **522** | **29** | **1156** |
+| Events raised on objects | 17 | 7 | 0 | 24 |
+| **All** | **607** | **520** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 590 done, 513 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (17 done, 7 todo) and the rest are methods, properties, functions, constructors and global variables: 590 done, 513 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1108,7 +1108,6 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
-| Sprites and frames | 2 | The frame events (`FrameChanged`, the frames' `APPLY_EVENT` names); the frame and sub-frame objects are done. |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
 | Video | 7 | Entity-bound Theora video (`PlayTheora` on an entity and its pause/stop family), AVI for the deprecated `PlayVideo`. |
 | Sound effects | 2 | `SoundFXEcho`, `SoundFXReverb` (also listed in `docs/audio.md`). |
@@ -1116,7 +1115,9 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **522** | |
+| **All** | **520** | |
+
+The sprite, frame and sub-frame objects and the frame events (the former "Sprites and frames" group) are done.
 
 ## Members in Luma that WME 1.x does not define
 

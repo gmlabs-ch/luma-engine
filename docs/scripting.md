@@ -162,6 +162,13 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | Sub-frames (`Frame.GetSubframe`, `AddSubframe`, `InsertSubframe`) | `HotspotX`, `HotspotY`, `MirrorX`, `MirrorY`, `Decoration`, `AlphaColor`, `TransparentColor` (read only), `Is2DOnly`, `Is3DOnly` | `GetImage`, `SetImage` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
 
+When a frame of an object's sprite becomes current, its `SOUND` plays,
+`FrameChanged` is raised on the sprite object (a script attached to it
+with `AttachScript` can handle it) and the frame's `APPLY_EVENT`s are
+raised on the object showing the sprite: an entity, an actor or a
+control; the handlers run on the next frame with the other events
+([docs/game-loop.md](game-loop.md#a-frame)).
+
 Sprite, frame and sub-frame objects are handles into the sprite
 definition the owner shows (see [docs/formats/sprite.md](formats/sprite.md)):
 what a script changes through them, a frame's delay, a sub-frame's

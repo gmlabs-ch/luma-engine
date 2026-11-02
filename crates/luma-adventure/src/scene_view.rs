@@ -526,6 +526,11 @@ pub struct SceneView {
     playing: HashMap<EntityRef, String>,
     /// The subtitle placement of entities scripts changed it on.
     pub subtitles: HashMap<EntityRef, SubtitleMods>,
+    /// The frames that became current at the last [`SceneView::advance`]:
+    /// the entity, its sprite's key and the frame's index. The world takes
+    /// them to play the frames' sounds and raise their events.
+    #[serde(skip)]
+    shown: Vec<(EntityRef, String, usize)>,
 }
 
 impl SceneView {
@@ -547,6 +552,7 @@ impl SceneView {
             talks: HashMap::new(),
             playing: HashMap::new(),
             subtitles: HashMap::new(),
+            shown: Vec::new(),
         };
         let paths: Vec<String> = view
             .scene
@@ -901,7 +907,7 @@ impl SceneView {
             let Some(sprite_key) = self.anim_mut(r).map(|s| s.sprite.clone()) else {
                 continue;
             };
-            let (changed, move_x, move_y) = {
+            let (changed, frame, move_x, move_y) = {
                 let Some(loaded) = self.bank.sprites.get(&sprite_key) else {
                     continue;
                 };
@@ -909,12 +915,15 @@ impl SceneView {
                     continue;
                 };
                 let changed = state.step(&loaded.sprite, timer);
-                (changed, state.move_x, state.move_y)
+                (changed, state.current_frame, state.move_x, state.move_y)
             };
-            if changed && (move_x != 0 || move_y != 0) {
-                if let Some(entity) = self.entity_mut(r) {
-                    entity.x += move_x;
-                    entity.y += move_y;
+            if changed {
+                self.shown.push((r, sprite_key, frame));
+                if move_x != 0 || move_y != 0 {
+                    if let Some(entity) = self.entity_mut(r) {
+                        entity.x += move_x;
+                        entity.y += move_y;
+                    }
                 }
             }
             // A played sprite that reached its end gives the entity back
@@ -935,6 +944,13 @@ impl SceneView {
     /// The frame an entity shows.
     pub fn frame_of(&self, r: EntityRef) -> usize {
         self.anims.get(&r).map_or(0, |a| a.current_frame)
+    }
+
+    /// Takes the frames that became current since the last call: the
+    /// entity, its sprite's key and the frame's index, in the order they
+    /// changed (see [`SceneView::advance`]).
+    pub fn take_shown(&mut self) -> Vec<(EntityRef, String, usize)> {
+        std::mem::take(&mut self.shown)
     }
 
     /// Fills a draw list with the scene as seen by `camera`, showing the
