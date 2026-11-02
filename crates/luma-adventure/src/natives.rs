@@ -23,7 +23,7 @@ use crate::world::World;
 use luma_formats::font::TextAlign;
 
 /// `AlphaColor`: the engine's `0xAARRGGBB` integer.
-fn color_int(c: Rgba) -> i32 {
+pub(crate) fn color_int(c: Rgba) -> i32 {
     rgba(
         i32::from(c.r),
         i32::from(c.g),
@@ -32,7 +32,7 @@ fn color_int(c: Rgba) -> i32 {
     )
 }
 
-fn color_of(v: i32) -> Rgba {
+pub(crate) fn color_of(v: i32) -> Rgba {
     Rgba {
         r: ((v >> 16) & 0xff) as u8,
         g: ((v >> 8) & 0xff) as u8,
@@ -124,7 +124,9 @@ impl World {
             Kind::Layer(index) => self.layer_get(index, name),
             Kind::Entity(r) => self.entity_get(r, name),
             Kind::Region { layer, index } => self.region_get(layer, index, name),
-            Kind::Sprite(owner) => self.sprite_get(owner, name),
+            Kind::Sprite(owner) => self.sprite_get(id, owner, name),
+            Kind::Frame { .. } => self.frame_get(id, name),
+            Kind::SubFrame { .. } => self.subframe_get(id, name),
             Kind::Actor => self.actor_get(id, name),
             Kind::Control => self.control_get(id, name),
             Kind::Item => self.item_get(id, name),
@@ -149,7 +151,9 @@ impl World {
             Kind::Layer(index) => self.layer_set(index, name, value),
             Kind::Entity(r) => self.entity_set(r, name, value),
             Kind::Region { layer, index } => self.region_set(layer, index, name, value),
-            Kind::Sprite(owner) => self.sprite_set(owner, name, value),
+            Kind::Sprite(owner) => self.sprite_set(id, owner, name, value),
+            Kind::Frame { .. } => self.frame_set(id, name, value),
+            Kind::SubFrame { .. } => self.subframe_set(id, name, value),
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
@@ -192,7 +196,9 @@ impl World {
             Kind::Layer(index) => self.layer_call(index, name, args),
             Kind::Entity(r) => self.entity_call(id, r, name, args),
             Kind::Region { layer, index } => self.region_call(layer, index, name, args),
-            Kind::Sprite(owner) => self.sprite_call(owner, name),
+            Kind::Sprite(owner) => self.sprite_call(id, owner, name, args, &ctx),
+            Kind::Frame { .. } => self.frame_call(id, name, args, &ctx),
+            Kind::SubFrame { .. } => self.subframe_call(id, name, args),
             Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
@@ -1436,87 +1442,6 @@ impl World {
             _ => return None,
         })
     }
-
-    // ----------------------------------------------------------------
-    // Sprites
-    // ----------------------------------------------------------------
-
-    fn sprite_get(&self, owner: NativeId, name: &str) -> Option<Value> {
-        let Kind::Entity(r) = self.native(owner)?.kind else {
-            return None;
-        };
-        let view = self.scene()?;
-        let entity = view.entity(r)?;
-        let loaded = entity.sprite.as_deref().and_then(|p| view.sprite(p));
-        let frames = loaded.map_or(0, |l| l.sprite.frames.len());
-        let anim = view.anim(r);
-        Some(match name {
-            "Type" => Value::from("sprite"),
-            "Filename" => entity.sprite.clone().map_or(Value::Null, Value::from),
-            "NumFrames" => Value::Int(frames as i32),
-            "CurrentFrame" => Value::Int(if frames == 0 {
-                -1
-            } else {
-                anim.map_or(0, |a| a.current_frame.min(frames - 1) as i32)
-            }),
-            "PixelPerfect" => Value::Bool(loaded.is_some_and(|l| l.sprite.precise)),
-            "Looping" => Value::Bool(
-                anim.and_then(|a| a.looping)
-                    .unwrap_or_else(|| loaded.is_some_and(|l| l.sprite.looping)),
-            ),
-            "Owner" => Value::Native(owner),
-            "Finished" => Value::Bool(anim.is_some_and(|a| a.finished)),
-            "Paused" => Value::Bool(anim.is_some_and(|a| a.paused)),
-            _ => return None,
-        })
-    }
-
-    fn sprite_set(&mut self, owner: NativeId, name: &str, value: &Value) -> bool {
-        let Some(Kind::Entity(r)) = self.native(owner).map(|n| n.kind.clone()) else {
-            return false;
-        };
-        let (int, flag) = (value.get_int(self), value.get_bool(self));
-        let Some(anim) = self.scene_mut().and_then(|v| v.anim_mut(r)) else {
-            return false;
-        };
-        match name {
-            "CurrentFrame" => {
-                anim.current_frame = int.max(0) as usize;
-                anim.last_frame_time = 0;
-                anim.finished = false;
-            }
-            "Looping" => anim.looping = Some(flag),
-            "PixelPerfect" => {}
-            _ => return false,
-        }
-        true
-    }
-
-    fn sprite_call(&mut self, owner: NativeId, name: &str) -> Option<Return> {
-        let Some(Kind::Entity(r)) = self.native(owner).map(|n| n.kind.clone()) else {
-            return None;
-        };
-        Some(match name {
-            "Reset" => {
-                if let Some(view) = self.scene_mut() {
-                    view.reset_anim(r);
-                }
-                Return::null()
-            }
-            "Pause" | "Play" => {
-                let paused = name == "Pause";
-                if let Some(anim) = self.scene_mut().and_then(|v| v.anim_mut(r)) {
-                    anim.paused = paused;
-                }
-                Return::null()
-            }
-            "GetFrame" | "DeleteFrame" | "AddFrame" | "InsertFrame" => {
-                self.stub(&format!("Sprite.{name}"));
-                Return::null()
-            }
-            _ => return None,
-        })
-    }
 }
 
 /// The `Math` object's methods (`SXMath`): every one takes floats and
@@ -1565,7 +1490,7 @@ impl World {
     }
 
     /// Restarts the animation of an entity's sprite (`SetSprite`, `Reset`).
-    fn reset_entity_anim(&mut self, r: EntityRef) {
+    pub(crate) fn reset_entity_anim(&mut self, r: EntityRef) {
         match r {
             EntityRef::Ui(i) => {
                 if let Some(entity) = self.ui_entities.get_mut(i) {

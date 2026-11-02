@@ -541,21 +541,20 @@ How the list was made. For every class with a script interface, the names tested
 ### CBSprite (animated sprite)
 
 - WME source: src/engine_core/wme_base/BSprite.cpp
-- Hierarchy and Luma: CBScriptHolder → CBSprite; Luma: the sprite of an entity or control only (`sprite_call`)
-- Count: 13 done, 5 todo, 0 no-op
+- Hierarchy and Luma: CBScriptHolder → CBSprite; Luma: the sprite of an entity, in a scene or in an entity container (`natives_sprite.rs`); the sprite objects of actors, items and controls are in their classes' groups
+- Count: 18 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `GetFrame` | method | **todo** | Returns a frame object by index. Stubbed. |
-| `DeleteFrame` | method | **todo** | Deletes a frame. Stubbed. |
-| `AddFrame`, `InsertFrame` | method | **todo** | Adds / inserts a frame from an image file. Stubbed. |
+| `GetFrame` | method | **done** | Returns a frame object by index; out of range logs a runtime error and returns `null`. |
+| `DeleteFrame` | method | **done** | Deletes a frame, by index or by frame object; the other frame objects follow their frames. WME 1.x only deletes when given a frame object and merely checks an index; Luma deletes in both cases. |
+| `AddFrame`, `InsertFrame` | method | **done** | Adds / inserts a frame from an image file (no sub-frame without a file, or when it is missing), and returns its object. |
 | `Reset` | method | **done** | Restarts the animation. |
 | `Pause`, `Play` | method | **done** | Pauses / resumes the animation. |
 | `Type` | get | **done** | `sprite`. |
 | `NumFrames` | get | **done** | Number of frames. |
 | `CurrentFrame` | get/set | **done** | Current frame index. |
-| `PixelPerfect` | get | **done** | Whether clicks test the sprite's pixels. |
-| `PixelPerfect` | set | **todo** | Switches pixel-perfect hit tests. Luma ignores the set. |
+| `PixelPerfect` | get/set | **done** | Whether clicks test the sprite's pixels. |
 | `Looping` | get/set | **done** | Whether the animation loops. |
 | `Owner` | get | **done** | The object the sprite belongs to. |
 | `Finished` | get | **done** | True when a non-looping animation reached its end. |
@@ -564,39 +563,41 @@ How the list was made. For every class with a script interface, the names tested
 ### CBFrame (sprite frame)
 
 - WME source: src/engine_core/wme_base/BFrame.cpp
-- Hierarchy and Luma: CBScriptable → CBFrame; Luma: absent (frames are not script objects)
-- Count: 0 done, 21 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CBFrame; Luma: the frame objects of a sprite object (`natives_sprite.rs`), handles by position that follow their frame when others are inserted or deleted
+- Count: 21 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `GetSound`, `SetSound` | method | **todo** | Reads / sets the sound played when the frame shows. |
-| `GetSubframe` | method | **todo** | Returns a sub-frame by index. |
-| `DeleteSubframe` | method | **todo** | Deletes a sub-frame. |
-| `AddSubframe`, `InsertSubframe` | method | **todo** | Adds / inserts a sub-frame from an image. |
-| `AddEvent`, `DeleteEvent` | method | **todo** | Adds / removes a script event raised when the frame shows. |
-| `Type` | get | **todo** | `frame`. |
-| `Delay` | get/set | **todo** | Frame duration in milliseconds. |
-| `Keyframe` | get/set | **todo** | Marks the frame as a keyframe (movement / talk sync). |
-| `KillSounds` | get/set | **todo** | Stops running sounds when the frame shows. |
-| `MoveX`, `MoveY` | get/set | **todo** | Movement applied to the owner when the frame shows. |
-| `NumSubframes`, `NumEvents` | get | **todo** | Counts. |
+| `GetSound`, `SetSound` | method | **done** | Reads / sets the sound played when the frame shows; `SetSound` returns `false` and leaves no sound when the file cannot be loaded. |
+| `GetSubframe` | method | **done** | Returns a sub-frame by index; out of range logs a runtime error and returns `null`. |
+| `DeleteSubframe` | method | **done** | Deletes a sub-frame, by index or by object (WME 1.x only deletes by object, see `DeleteFrame`). |
+| `AddSubframe`, `InsertSubframe` | method | **done** | Adds / inserts a sub-frame from an image (added even when the image is missing, as in WME). |
+| `AddEvent`, `DeleteEvent` | method | **done** | Adds / removes a script event raised when the frame shows (names compared ignoring case, no duplicates). |
+| `Type` | get | **done** | `frame`. |
+| `Delay` | get/set | **done** | Frame duration in milliseconds. |
+| `Keyframe` | get/set | **done** | Marks the frame as a keyframe (movement / talk sync). |
+| `KillSounds` | get/set | **done** | Stops running sounds when the frame shows. |
+| `MoveX`, `MoveY` | get/set | **done** | Movement applied to the owner when the frame shows. |
+| `NumSubframes`, `NumEvents` | get | **done** | Counts. |
+
+A frame with a single sub-frame answers that sub-frame's properties and methods too (`frame.MirrorX`, `frame.SetImage`), as in WME.
 
 ### CBSubFrame (image part of a frame)
 
 - WME source: src/engine_core/wme_base/BSubFrame.cpp
-- Hierarchy and Luma: CBScriptable → CBSubFrame; Luma: absent
-- Count: 0 done, 20 todo, 0 no-op
+- Hierarchy and Luma: CBScriptable → CBSubFrame; Luma: the sub-frame objects of a frame object (`natives_sprite.rs`)
+- Count: 20 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `GetImage`, `SetImage` | method | **todo** | Reads / replaces the image file. |
-| `Type` | get | **todo** | `subframe`. |
-| `AlphaColor` | get/set | **todo** | Tint and alpha. |
-| `TransparentColor` | get | **todo** | Colour key. |
-| `Is2DOnly`, `Is3DOnly` | get/set | **todo** | Restricts the sub-frame to 2D / 3D rendering. |
-| `MirrorX`, `MirrorY` | get/set | **todo** | Flips the image. |
-| `Decoration` | get/set | **todo** | Ignored for mouse hits. |
-| `HotspotX`, `HotspotY` | get/set | **todo** | Hotspot (draw origin). |
+| `GetImage`, `SetImage` | method | **done** | Reads / replaces the image file (`null` removes it); a new image shows whole. `SetImage` returns `false` when the file is missing. |
+| `Type` | get | **done** | `subframe`. |
+| `AlphaColor` | get/set | **done** | Tint and alpha, `0xAARRGGBB`. |
+| `TransparentColor` | get | **done** | Colour key, `0xFFRRGGBB`. |
+| `Is2DOnly`, `Is3DOnly` | get/set | **done** | Which renderer draws the sub-frame; Luma never draws `2D_ONLY` ones (see `docs/formats/sprite.md`). |
+| `MirrorX`, `MirrorY` | get/set | **done** | Flips the image. |
+| `Decoration` | get/set | **done** | Ignored for mouse hits. |
+| `HotspotX`, `HotspotY` | get/set | **done** | Hotspot (draw origin). |
 
 ## 6. Windows and controls
 
@@ -1044,9 +1045,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor | 23 | 0 | 0 | 23 |
 | CAdEntity | 11 | 9 | 0 | 20 |
 | CAdItem | 23 | 3 | 0 | 26 |
-| CBSprite | 13 | 5 | 0 | 18 |
-| CBFrame | 0 | 21 | 0 | 21 |
-| CBSubFrame | 0 | 20 | 0 | 20 |
+| CBSprite | 18 | 0 | 0 | 18 |
+| CBFrame | 21 | 0 | 0 | 21 |
+| CBSubFrame | 20 | 0 | 0 | 20 |
 | CUIObject | 27 | 0 | 0 | 27 |
 | CUIWindow | 37 | 3 | 0 | 40 |
 | CUIButton | 22 | 4 | 0 | 26 |
@@ -1070,9 +1071,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **559** | **568** | **29** | **1156** |
+| **All** | **605** | **522** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 544 done, 559 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 590 done, 513 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1081,8 +1082,6 @@ These classes have no done member in Luma: the object does not exist for scripts
 | Class | What it is | Members still todo |
 |-------|-----------|-------------------:|
 | `CAdWaypointGroup` | A waypoint group of a scene (`Scene.GetWaypointGroup`) | 3 |
-| `CBFrame` | A frame of a sprite (delay, sound, move, sub-frames, events) | 21 |
-| `CBSubFrame` | The image part of a frame (hotspot, mirror, alpha) | 20 |
 | `CSXString` | `new String` | 10 |
 | `CSXArray` | `new Array` | 5 |
 | `CSXDate` | `new Date` | 15 |
@@ -1109,15 +1108,15 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
-| Sprites and frames | 48 | Frame and sub-frame objects (`GetFrame`, `AddFrame`, `Delay`, `MoveX`, hotspots...), runtime-built sprites, frame events. Reads on the sprite format already exist in `luma-formats`. |
+| Sprites and frames | 2 | The frame events (`FrameChanged`, the frames' `APPLY_EVENT` names); the frame and sub-frame objects are done. |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
 | Video | 7 | Entity-bound Theora video (`PlayTheora` on an entity and its pause/stop family), AVI for the deprecated `PlayVideo`. |
 | Sound effects | 2 | `SoundFXEcho`, `SoundFXReverb` (also listed in `docs/audio.md`). |
-| Input and system events | 6 | Wheel, middle and right-double-click events, the `QuitGame` event, sprite frame events. |
+| Input and system events | 6 | Wheel, middle and right-double-click events, the `QuitGame` event. |
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **568** | |
+| **All** | **522** | |
 
 ## Members in Luma that WME 1.x does not define
 
@@ -1129,6 +1128,7 @@ These are accepted by Luma and not counted above; some come from later WME versi
 | Game | `IsVideoPlaying`, `StopVideo` | Query / stop the running video (`StopVideo` is an alias of `StopTheora`). |
 | Game | `FocusedWindow`, `CursorHidden`, `AutoSaveOnExit`, `AutoSaveSlot`, `Platform`, `DeviceType` | Properties Luma reads that WME 1.x does not define in its script interface (some come from later WME versions or from Luma itself). |
 | Actor | `SetStopOnBlocked`, `GetStopOnBlocked`, `ActorIsBlocked` | Stop-on-blocked behaviour and the matching event / property. |
+| Sprite | `Filename` | The file the sprite was loaded from. |
 
 ## Maintenance
 

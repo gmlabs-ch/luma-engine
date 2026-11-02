@@ -87,8 +87,7 @@ pub struct Actor {
     /// The state to return to when the current one ends.
     pub next_state: ActorState,
     /// The actor's sprites and textures; loaded again after a saved
-    /// game.
-    #[serde(skip)]
+    /// game, except the sprites scripts edited.
     pub bank: SpriteBank,
     /// Whether the last walk stopped on a block (`ActorIsBlocked`).
     pub actor_is_blocked: bool,

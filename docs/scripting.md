@@ -157,8 +157,25 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | `Game`, videos | `VideoSubtitles`, `VideoSkipButton` | `PlayTheora`, `PlayVideo`, `StopTheora`, `StopVideo`, `IsVideoPlaying` |
 | `Game`, actors and entities, inventory | `Game.SelectedItem`, `InventoryVisible`, `InventoryScrollOffset`, `NumItems`, `TotalNumItems`, `SmartItemCursor` | `TakeItem`, `DropItem`, `HasItem`, `GetItem`, `Game.IsItemTaken`, `Game.QueryItem`, `Game.GetInventoryWindow` |
 | Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
-| Sprite objects | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner` | `Reset`, `Pause`, `Play` |
+| Sprite objects (`GetSpriteObject` of an entity, in a scene or in an entity container) | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner`, `Filename` | `Reset`, `Pause`, `Play`, `GetFrame`, `AddFrame`, `InsertFrame`, `DeleteFrame` (by index or by frame object) |
+| Frames (`Sprite.GetFrame`, `AddFrame`, `InsertFrame`) | `Delay`, `Keyframe`, `KillSounds`, `MoveX`, `MoveY`, `NumSubframes`, `NumEvents` | `GetSound`, `SetSound`, `GetSubframe`, `AddSubframe`, `InsertSubframe`, `DeleteSubframe`, `AddEvent`, `DeleteEvent`; a frame with a single sub-frame answers for it (`frame.MirrorX`, `frame.SetImage(...)`) |
+| Sub-frames (`Frame.GetSubframe`, `AddSubframe`, `InsertSubframe`) | `HotspotX`, `HotspotY`, `MirrorX`, `MirrorY`, `Decoration`, `AlphaColor`, `TransparentColor` (read only), `Is2DOnly`, `Is3DOnly` | `GetImage`, `SetImage` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
+
+Sprite, frame and sub-frame objects are handles into the sprite
+definition the owner shows (see [docs/formats/sprite.md](formats/sprite.md)):
+what a script changes through them, a frame's delay, a sub-frame's
+hotspot or mirroring, a frame added with an image, is drawn from the
+next frame on, and an edited sprite is kept in saved games
+([docs/saving.md](saving.md)). A frame object keeps pointing at its frame
+when frames before it are inserted or deleted; the object of a deleted
+frame or sub-frame is invalid, like the engine's pointer to it. Two
+differences from the original engine: a sprite file shown by several
+entities of the same scene (or several controls) is one definition in
+Luma, so an edit through one entity's sprite object shows on all of them,
+where the engine gives each object its own copy; and
+`DeleteFrame(index)` / `DeleteSubframe(index)` delete, where WME 1.x only
+checks the index and deletes with a frame or sub-frame object.
 
 Scripts are attached by the `SCRIPT` keys of `default.game`, `.scene`,
 `.entity`, layers and regions, and by `AttachScript`. Changing scene

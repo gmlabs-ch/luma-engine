@@ -467,6 +467,8 @@ impl World {
             Some(Kind::Math) => "math".to_string(),
             Some(Kind::ResponseBox) => "response box".to_string(),
             Some(Kind::Sprite(_)) => "sprite".to_string(),
+            Some(Kind::Frame { .. }) => "frame".to_string(),
+            Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Fader) => "fader".to_string(),
             Some(Kind::Actor) => self
                 .actor(id)
@@ -825,21 +827,29 @@ impl World {
             .filter(|(_, a)| a.scene_bound)
             .map(|(id, _)| *id)
             .collect();
+        // The windows' container entities live outside the scene.
+        let is_scene_entity = |id: NativeId| {
+            matches!(
+                self.objects.get(id).map(|n| &n.kind),
+                Some(Kind::Entity(r)) if !matches!(r, crate::scene_view::EntityRef::Ui(_))
+            )
+        };
         let gone: Vec<NativeId> = self
             .objects
             .iter()
-            .filter(|(id, n)| {
-                // The windows' container entities live outside the scene.
-                let scene_entity = matches!(
-                    n.kind,
-                    Kind::Entity(r) if !matches!(r, crate::scene_view::EntityRef::Ui(_))
-                );
-                scene_entity
-                    || matches!(
-                        n.kind,
-                        Kind::Layer(_) | Kind::Region { .. } | Kind::Sprite(_)
-                    )
-                    || scene_actors.contains(id)
+            .filter(|(id, n)| match n.kind {
+                Kind::Layer(_) | Kind::Region { .. } => true,
+                Kind::Entity(_) => is_scene_entity(*id),
+                // The sprite objects of the scene's entities, their frames
+                // and sub-frames go with them.
+                Kind::Sprite(owner) => is_scene_entity(owner),
+                Kind::Frame { sprite, .. } | Kind::SubFrame { sprite, .. } => {
+                    match self.objects.get(sprite).map(|n| &n.kind) {
+                        Some(Kind::Sprite(owner)) => is_scene_entity(*owner),
+                        _ => true,
+                    }
+                }
+                _ => scene_actors.contains(id),
             })
             .map(|(id, _)| id)
             .collect();
@@ -1419,7 +1429,7 @@ impl World {
         let Kind::Entity(r) = self.objects.get(owner)?.kind else {
             return None;
         };
-        self.scene.as_ref()?.entity(r)?.sprite.as_ref()?;
+        self.entity_def(r)?.sprite.as_ref()?;
         if let Some(id) = self.objects.find(|k| *k == Kind::Sprite(owner)) {
             return Some(id);
         }
@@ -1488,6 +1498,8 @@ impl Natives for World {
             Some(Kind::Entity(_)) => "entity".to_string(),
             Some(Kind::Region { .. }) => "region".to_string(),
             Some(Kind::Sprite(_)) => "sprite".to_string(),
+            Some(Kind::Frame { .. }) => "frame".to_string(),
+            Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
             Some(Kind::Fader) => "fader".to_string(),
             Some(Kind::Control) => self
@@ -1508,6 +1520,9 @@ impl Natives for World {
             }
             Some(Kind::Actor) => "[actor object]".to_string(),
             Some(Kind::Control | Kind::Item) => format!("[{}]", self.describe(id)),
+            Some(Kind::Sprite(_)) => "[sprite]".to_string(),
+            Some(Kind::Frame { .. }) => "[frame]".to_string(),
+            Some(Kind::SubFrame { .. }) => "[subframe]".to_string(),
             Some(_) => "[native object]".to_string(),
             None => "[invalid object]".to_string(),
         }

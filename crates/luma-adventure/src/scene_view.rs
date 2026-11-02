@@ -21,6 +21,11 @@ use crate::talk::{Sentence, SubtitleMods};
 pub struct LoadedSprite {
     /// The sprite definition.
     pub sprite: Sprite,
+    /// Whether a script changed the definition since it was loaded
+    /// (frames added, a delay or a hotspot changed...). An edited sprite
+    /// is written to a saved game instead of being read again from its
+    /// file.
+    pub edited: bool,
 }
 
 /// The part of the scene shown on screen: the size of the view and the
@@ -228,12 +233,56 @@ impl Mask {
 
 /// Sprites loaded from the game and the textures of their images, keyed
 /// by path without regard to case or separator.
-#[derive(Debug, Default)]
+///
+/// A saved game keeps only the sprites scripts edited (see
+/// [`LoadedSprite::edited`]); the others are read again from their files
+/// when the game loads, like the textures.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SpriteBank {
+    #[serde(
+        serialize_with = "serialize_edited",
+        deserialize_with = "deserialize_edited"
+    )]
     sprites: HashMap<String, LoadedSprite>,
+    #[serde(skip)]
     textures: HashMap<String, Texture>,
+    #[serde(skip)]
     masks: HashMap<String, Mask>,
+    #[serde(skip)]
     missing: Vec<(String, String)>,
+}
+
+/// Writes the edited sprites of a bank, by key.
+fn serialize_edited<S: serde::Serializer>(
+    sprites: &HashMap<String, LoadedSprite>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    let mut edited: Vec<(&String, &Sprite)> = sprites
+        .iter()
+        .filter(|(_, s)| s.edited)
+        .map(|(k, s)| (k, &s.sprite))
+        .collect();
+    edited.sort_by(|a, b| a.0.cmp(b.0));
+    serde::Serialize::serialize(&edited, serializer)
+}
+
+/// Reads the edited sprites of a bank written by [`serialize_edited`].
+fn deserialize_edited<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<HashMap<String, LoadedSprite>, D::Error> {
+    let edited: Vec<(String, Sprite)> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(edited
+        .into_iter()
+        .map(|(k, sprite)| {
+            (
+                k,
+                LoadedSprite {
+                    sprite,
+                    edited: true,
+                },
+            )
+        })
+        .collect())
 }
 
 /// Case-insensitive key of a game path.
@@ -283,7 +332,13 @@ impl SpriteBank {
                 }
             }
         };
-        self.sprites.insert(k, LoadedSprite { sprite });
+        self.sprites.insert(
+            k,
+            LoadedSprite {
+                sprite,
+                edited: false,
+            },
+        );
         true
     }
 
@@ -320,12 +375,26 @@ impl SpriteBank {
     /// Adds an already parsed sprite under a path, replacing any loaded
     /// one.
     pub fn insert(&mut self, path: &str, sprite: Sprite) {
-        self.sprites.insert(key(path), LoadedSprite { sprite });
+        self.sprites.insert(
+            key(path),
+            LoadedSprite {
+                sprite,
+                edited: false,
+            },
+        );
     }
 
     /// The loaded sprite of a path, if it loaded.
     pub fn sprite(&self, path: &str) -> Option<&LoadedSprite> {
         self.sprites.get(&key(path))
+    }
+
+    /// The definition of a loaded sprite, for a script to change it; the
+    /// sprite is then kept in saved games (see [`LoadedSprite::edited`]).
+    pub fn edit_sprite(&mut self, path: &str) -> Option<&mut Sprite> {
+        let loaded = self.sprites.get_mut(&key(path))?;
+        loaded.edited = true;
+        Some(&mut loaded.sprite)
     }
 
     /// The opaque pixels of an image, decoded on first request (no GPU
@@ -448,8 +517,7 @@ pub struct SceneView {
     /// Path the scene was loaded from.
     pub path: String,
     /// The sprites of the scene's entities; loaded again after a saved
-    /// game.
-    #[serde(skip)]
+    /// game, except those scripts edited.
     pub bank: SpriteBank,
     anims: HashMap<EntityRef, AnimState>,
     talks: HashMap<EntityRef, EntityTalk>,

@@ -37,6 +37,7 @@ enum Arg {
     Int(i32),
     Str(&'static str),
     Var(&'static str),
+    Null,
 }
 
 fn push_arg(a: &mut Assembler, arg: &Arg) {
@@ -44,6 +45,7 @@ fn push_arg(a: &mut Assembler, arg: &Arg) {
         Arg::Int(i) => a.push_int(*i),
         Arg::Str(s) => a.push_string(s),
         Arg::Var(v) => a.push_var(v),
+        Arg::Null => a.emit(Instruction::PushNull),
     }
 }
 
@@ -697,6 +699,114 @@ fn prop_script() -> Vec<u8> {
     a.build()
 }
 
+/// Edits the prop's sprite through its frame and sub-frame objects.
+fn sprite_edit_script() -> Vec<u8> {
+    let mut a = Assembler::new("sprite_edit.script");
+    a.def_glob_var("result");
+    a.def_glob_var("Scene");
+    get(&mut a, "Game", "Scene");
+    a.pop_var("Scene");
+    // var p = Scene.GetNode("prop"); var s = p.GetSpriteObject();
+    a.def_var("p");
+    call(&mut a, "Scene", "GetNode", &[Arg::Str("prop")]);
+    a.pop_var("p");
+    a.def_var("s");
+    call(&mut a, "p", "GetSpriteObject", &[]);
+    a.pop_var("s");
+    // var f = s.GetFrame(0); result.frameType = f.Type; ...
+    a.def_var("f");
+    call(&mut a, "s", "GetFrame", &[Arg::Int(0)]);
+    a.pop_var("f");
+    get(&mut a, "f", "Type");
+    store(&mut a, "frameType");
+    get(&mut a, "f", "Delay");
+    store(&mut a, "delayBefore");
+    a.push_int(30);
+    set(&mut a, "f", "Delay");
+    get(&mut a, "f", "Delay");
+    store(&mut a, "delayAfter");
+    get(&mut a, "f", "NumSubframes");
+    store(&mut a, "numSub");
+    // var sub = f.GetSubframe(0); sub.MirrorX = true; f.HotspotY = 7
+    // (a frame with one sub-frame answers for it).
+    a.def_var("sub");
+    call(&mut a, "f", "GetSubframe", &[Arg::Int(0)]);
+    a.pop_var("sub");
+    get(&mut a, "sub", "Type");
+    store(&mut a, "subType");
+    a.push_bool(true);
+    set(&mut a, "sub", "MirrorX");
+    get(&mut a, "f", "MirrorX");
+    store(&mut a, "mirror");
+    a.push_int(7);
+    set(&mut a, "f", "HotspotY");
+    get(&mut a, "sub", "HotspotY");
+    store(&mut a, "hotY");
+    call(&mut a, "sub", "GetImage", &[]);
+    store(&mut a, "image");
+    get(&mut a, "sub", "TransparentColor");
+    store(&mut a, "transparent");
+    a.push_int(0x00ff_0000);
+    set(&mut a, "sub", "AlphaColor");
+    get(&mut a, "sub", "AlphaColor");
+    store(&mut a, "alpha");
+    // var added = s.AddFrame("art\green.png"); added.Delay = 40;
+    a.def_var("added");
+    call(&mut a, "s", "AddFrame", &[Arg::Str("art\\green.png")]);
+    a.pop_var("added");
+    a.push_int(40);
+    set(&mut a, "added", "Delay");
+    get(&mut a, "s", "NumFrames");
+    store(&mut a, "numFrames");
+    call(&mut a, "s", "GetFrame", &[Arg::Int(9)]);
+    store(&mut a, "outOfRange");
+    // Events and sounds of a frame.
+    call(&mut a, "f", "AddEvent", &[Arg::Str("Blink")]);
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "f", "AddEvent", &[Arg::Str("blink")]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "f", "NumEvents");
+    store(&mut a, "numEvents");
+    call(&mut a, "f", "SetSound", &[Arg::Str("audio\\beep.wav")]);
+    store(&mut a, "soundOk");
+    call(&mut a, "f", "GetSound", &[]);
+    store(&mut a, "sound");
+    call(&mut a, "f", "SetSound", &[Arg::Str("audio\\nope.wav")]);
+    store(&mut a, "soundBad");
+    call(&mut a, "f", "GetSound", &[]);
+    store(&mut a, "soundAfter");
+    // s.DeleteFrame(1): the added frame's handle follows its frame.
+    call(&mut a, "s", "DeleteFrame", &[Arg::Int(1)]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "s", "NumFrames");
+    store(&mut a, "numAfterDelete");
+    get(&mut a, "added", "Delay");
+    store(&mut a, "addedDelay");
+    // s.InsertFrame(0, null): an empty frame first; f is now frame 1.
+    call(&mut a, "s", "InsertFrame", &[Arg::Int(0), Arg::Null]);
+    store(&mut a, "inserted");
+    get(&mut a, "s", "NumFrames");
+    store(&mut a, "numAfterInsert");
+    get(&mut a, "f", "Delay");
+    store(&mut a, "fDelay");
+    a.def_var("first");
+    call(&mut a, "s", "GetFrame", &[Arg::Int(0)]);
+    a.pop_var("first");
+    get(&mut a, "first", "NumSubframes");
+    store(&mut a, "firstSub");
+    // s.DeleteFrame(first): by object.
+    call(&mut a, "s", "DeleteFrame", &[Arg::Var("first")]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "s", "NumFrames");
+    store(&mut a, "numAtEnd");
+    get(&mut a, "f", "Delay");
+    store(&mut a, "fDelayAtEnd");
+    a.push_bool(true);
+    store(&mut a, "done");
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
 /// Fades the screen out and reads the colour.
 fn fade_script() -> Vec<u8> {
     let mut a = Assembler::new("fade.script");
@@ -982,6 +1092,7 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
         b"SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" } FRAME { DELAY=50 IMAGE=\"art\\green.png\" } }".to_vec(),
     );
     pkg.add_file("walk.script", walk_script());
+    pkg.add_file("sprite_edit.script", sprite_edit_script());
     pkg.add_file("save.script", save_script());
     pkg.add_file(
         "art\\prop.sprite",
@@ -1207,6 +1318,126 @@ fn sprite_objects_follow_the_animation() {
         runtime.world.get_property(sprite, "Owner"),
         Some(Value::Native(prop))
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn frames_and_subframes_are_script_objects_and_survive_a_saved_game() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    let game_id = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game_id, "sprite_edit.script")
+    );
+    let mut log = Vec::new();
+    for _ in 0..20 {
+        log.extend(runtime.tick(16));
+        if result(&runtime, "done") == Value::Bool(true) {
+            break;
+        }
+    }
+    assert_eq!(result(&runtime, "done"), Value::Bool(true), "{log:?}");
+    assert_eq!(result(&runtime, "frameType"), Value::from("frame"));
+    assert_eq!(result(&runtime, "delayBefore"), Value::Int(100));
+    assert_eq!(result(&runtime, "delayAfter"), Value::Int(30));
+    assert_eq!(result(&runtime, "numSub"), Value::Int(1));
+    assert_eq!(result(&runtime, "subType"), Value::from("subframe"));
+    assert_eq!(
+        result(&runtime, "mirror"),
+        Value::Bool(true),
+        "a frame with one sub-frame answers for it"
+    );
+    assert_eq!(result(&runtime, "hotY"), Value::Int(7));
+    assert_eq!(result(&runtime, "image"), Value::from("art\\red.png"));
+    assert_eq!(
+        result(&runtime, "transparent"),
+        Value::Int(0xffff_00ffu32 as i32),
+        "the default colour key, opaque magenta"
+    );
+    assert_eq!(result(&runtime, "alpha"), Value::Int(0x00ff_0000));
+    assert_eq!(result(&runtime, "numFrames"), Value::Int(3));
+    assert_eq!(result(&runtime, "outOfRange"), Value::Null);
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Sprite.GetFrame: Frame index 9 is out of range")),
+        "{log:?}"
+    );
+    assert_eq!(
+        result(&runtime, "numEvents"),
+        Value::Int(1),
+        "no duplicates"
+    );
+    assert_eq!(result(&runtime, "soundOk"), Value::Bool(true));
+    assert_eq!(result(&runtime, "sound"), Value::from("audio\\beep.wav"));
+    assert_eq!(result(&runtime, "soundBad"), Value::Bool(false));
+    assert_eq!(result(&runtime, "soundAfter"), Value::Null);
+    assert_eq!(result(&runtime, "numAfterDelete"), Value::Int(2));
+    assert_eq!(
+        result(&runtime, "addedDelay"),
+        Value::Int(40),
+        "a handle follows its frame when one before it is deleted"
+    );
+    let Value::Native(inserted) = result(&runtime, "inserted") else {
+        panic!("InsertFrame returned {:?}", result(&runtime, "inserted"));
+    };
+    assert_eq!(
+        runtime.world.get_property(inserted, "Type"),
+        None,
+        "the handle of a deleted frame is invalid"
+    );
+    assert_eq!(result(&runtime, "numAfterInsert"), Value::Int(3));
+    assert_eq!(result(&runtime, "fDelay"), Value::Int(30));
+    assert_eq!(
+        result(&runtime, "firstSub"),
+        Value::Int(0),
+        "no image: no sub-frame"
+    );
+    assert_eq!(result(&runtime, "numAtEnd"), Value::Int(2));
+    assert_eq!(result(&runtime, "fDelayAtEnd"), Value::Int(30));
+
+    // The edits are in the sprite that is drawn.
+    let check = |runtime: &Runtime| {
+        let loaded = runtime
+            .world
+            .scene()
+            .unwrap()
+            .sprite("art\\prop.sprite")
+            .unwrap();
+        assert!(loaded.edited);
+        let frames = &loaded.sprite.frames;
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].delay_ms, 30);
+        assert_eq!(frames[0].apply_events, ["Blink"]);
+        assert_eq!(frames[0].sound, None);
+        let sub = &frames[0].subframes[0];
+        assert!(sub.mirror_x && !sub.mirror_y);
+        assert_eq!(sub.hotspot_y, 7);
+        assert_eq!(sub.tint.r, 255);
+        assert_eq!((sub.tint.g, sub.tint.b, sub.tint.a), (0, 0, 0));
+        assert_eq!(frames[1].delay_ms, 40);
+        assert_eq!(
+            frames[1].subframes[0].image.as_deref(),
+            Some("art\\green.png")
+        );
+    };
+    check(&runtime);
+
+    // A saved game keeps the edited sprite; the others load from their
+    // files again.
+    runtime.save_game(8, "edited", false).unwrap();
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(8).unwrap();
+    loaded.tick(16);
+    check(&loaded);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

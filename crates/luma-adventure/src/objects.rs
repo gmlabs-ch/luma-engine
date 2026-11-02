@@ -34,6 +34,25 @@ pub enum Kind {
     },
     /// The sprite object of an entity (`GetSpriteObject`).
     Sprite(NativeId),
+    /// A frame of a sprite object (`Sprite.GetFrame`, `AddFrame`), by
+    /// position; the position follows the frame when others are added or
+    /// deleted before it.
+    Frame {
+        /// The sprite object.
+        sprite: NativeId,
+        /// The frame's position in the sprite.
+        index: usize,
+    },
+    /// A sub-frame of a frame of a sprite object (`Frame.GetSubframe`),
+    /// by position.
+    SubFrame {
+        /// The sprite object.
+        sprite: NativeId,
+        /// The frame's position in the sprite.
+        frame: usize,
+        /// The sub-frame's position in the frame.
+        index: usize,
+    },
     /// An actor (`Game.LoadActor`, `Scene.LoadActor`); its state lives in
     /// the world's actor list.
     Actor,

@@ -30,6 +30,11 @@ A saved game holds:
   scene's name, a scene change asked and not done yet, and the states
   remembered of the persistent scenes (see
   [game-loop.md](game-loop.md#scene-state-between-visits));
+- the sprites scripts edited through their sprite, frame and sub-frame
+  objects (a delay, a hotspot, a frame added...), whole, in the bank
+  they belong to: the scene's, an actor's or the windows'. The original
+  engine writes every sprite of every object (`CBSprite::Persist`); Luma
+  writes only the edited ones and reads the others from their files;
 - the view: scroll offset, target, auto-scroll settings;
 - the actors with their position, direction, state, path, animation and
   sentence;
@@ -54,9 +59,10 @@ What a saved game does **not** hold, and what happens to it:
 - the string table: the one loaded by the running game stays (the
   original engine does not save it either; a game picks its language
   before loading);
-- the caches: sprites, images, textures, fonts and cursors are loaded
-  again from the files the state names, like the original engine's
-  `InitAfterLoad`. A file that disappeared is logged, as at any load.
+- the caches: sprites (except the edited ones), images, textures, fonts
+  and cursors are loaded again from the files the state names, like the
+  original engine's `InitAfterLoad`. A file that disappeared is logged,
+  as at any load.
 
 ## Saving
 
@@ -123,7 +129,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `2` today |
+| 4 | layout version, little-endian; `3` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |

@@ -456,8 +456,8 @@ pub struct Ui {
     pub windows: Vec<NativeId>,
     /// The window the keys go to.
     pub focused_window: Option<NativeId>,
-    /// The sprites of the controls; loaded again after a saved game.
-    #[serde(skip)]
+    /// The sprites of the controls; loaded again after a saved game,
+    /// except those scripts edited.
     pub bank: SpriteBank,
     /// The object the left button went down on (`m_CapturedObject`).
     pub captured: Option<NativeId>,

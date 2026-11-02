@@ -11,6 +11,7 @@ use crate::image::{Rgb, Rgba};
 
 /// An animated image: frames shown in sequence.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sprite {
     /// Name used by scripts.
     pub name: String,
@@ -32,6 +33,7 @@ pub struct Sprite {
 
 /// One frame of a sprite.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Frame {
     /// Time on screen, in milliseconds.
     pub delay_ms: u32,
@@ -85,6 +87,7 @@ impl Rect {
 
 /// An image, or part of one, drawn at an offset.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SubFrame {
     /// Image file, relative to the game root; `None` draws nothing.
     pub image: Option<String>,
