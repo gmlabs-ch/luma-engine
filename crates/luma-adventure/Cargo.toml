@@ -22,5 +22,8 @@ flate2.workspace = true
 postcard.workspace = true
 serde.workspace = true
 
+[dev-dependencies]
+luma-compiler.workspace = true
+
 [lints]
 workspace = true

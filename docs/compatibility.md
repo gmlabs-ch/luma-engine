@@ -65,14 +65,14 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp (RegisterExternals, ExtDefineVariable)
 - Hierarchy and Luma: luma-script/src/engine.rs, luma-adventure/src/world.rs (Runtime::with_audio)
-- Count: 4 done, 1 todo, 0 no-op
+- Count: 5 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `Game` | var | **done** | The game object (CAdGame). |
 | `Math` | var | **done** | The math object (CSXMath). |
 | `self`, `this` | var | **done** | The object owning the running script / the current method's target. |
-| `Directory` | var | **todo** | The directory object (CSXDirectory); not published to scripts in Luma. |
+| `Directory` | var | **done** | The directory object (CSXDirectory). |
 
 ### Script values (CScValue)
 
@@ -822,18 +822,19 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 ### CSXDirectory (the global `Directory`)
 
 - WME source: src/engine_core/wme_base/SXDirectory.cpp
-- Hierarchy and Luma: CBScriptable → CSXDirectory; Luma: not published
-- Count: 0 done, 9 todo, 1 no-op
+- Hierarchy and Luma: CBScriptable → CSXDirectory; Luma: Kind::Class (luma-script/src/classes/directory.rs), one object published as the global. Paths resolve under the save directory, as `File`'s do; listings add the game's packaged and loose files.
+- Count: 8 done, 0 todo, 2 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Create`, `Delete` | method | **todo** | Creates / deletes a directory. |
-| `GetFiles`, `GetDirectories` | method | **todo** | Lists files / sub-directories matching a pattern. |
-| `GetDrives` | method | **no-op** | Lists Windows drive letters; no meaning on macOS. |
-| `Type` | get | **todo** | `directory`. |
-| `PathSeparator` | get | **todo** | The path separator character. |
-| `CurrentDirectory` | get/set | **todo** | Working directory. |
-| `TempDirectory` | get | **todo** | Temporary files directory. |
+| `Create`, `Delete` | method | **done** | Creates every level of a directory / deletes an empty one, under the save directory. `Create` answers whether the directory exists afterwards; WME's second `mkdir` of the path it just created answers false unless the path ends with a separator. |
+| `GetFiles`, `GetDirectories` | method | **done** | Lists the files / sub-directories matching a Windows wildcard mask (`*.*` by default, without case): the save directory's, then the game's own under the same path. Names, not paths, sorted; directories starting with `.` skipped as in WME. |
+| `GetDrives` | method | **no-op** | Lists Windows drive letters; no meaning on macOS. Answers an empty array. |
+| `Type` | get | **done** | `directory`. |
+| `PathSeparator` | get | **done** | `\`, as in WME; every file name in Luma accepts it along with `/`. |
+| `CurrentDirectory` | get | **done** | The save directory, the root every path a script gives resolves under (WME: the process's working directory). |
+| `CurrentDirectory` | set | **no-op** | Changes the process's working directory in WME; Luma's scripts cannot leave the save directory, so the set is accepted and ignored. |
+| `TempDirectory` | get | **done** | `temp` under the save directory, created on demand, with a trailing separator as `GetTempPath` gives (WME: the system's temporary directory). |
 
 ### CSXMemBuffer (`new MemBuffer`)
 
@@ -1028,7 +1029,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 |-------|-----:|-----:|------:|------:|
 | Global functions | 20 | 0 | 1 | 21 |
 | Constructors | 5 | 3 | 1 | 9 |
-| Global variables | 4 | 1 | 0 | 5 |
+| Global variables | 5 | 0 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 45 | 27 | 0 | 72 |
@@ -1061,7 +1062,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CSXArray | 5 | 0 | 0 | 5 |
 | CSXDate | 15 | 0 | 0 | 15 |
 | CSXFile | 33 | 0 | 0 | 33 |
-| CSXDirectory | 0 | 9 | 1 | 10 |
+| CSXDirectory | 8 | 0 | 2 | 10 |
 | CSXMemBuffer | 19 | 0 | 3 | 22 |
 | CSXTcpClient | 0 | 0 | 1 | 1 |
 | CSXPluginObject | 0 | 0 | 1 | 1 |
@@ -1071,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 6 | 0 | 21 |
-| **All** | **732** | **391** | **30** | **1153** |
+| **All** | **741** | **381** | **31** | **1153** |
 
-Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 717 done, 385 todo, 30 no-op.
+Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 726 done, 375 todo, 31 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1084,14 +1085,13 @@ These classes have no done member in Luma: the object does not exist for scripts
 | `CAdWaypointGroup` | A waypoint group of a scene (`Scene.GetWaypointGroup`) | 3 |
 | `CBFrame` | A frame of a sprite (delay, sound, move, sub-frames, events) | 21 |
 | `CBSubFrame` | The image part of a frame (hotspot, mirror, alpha) | 20 |
-| `CSXDirectory` | `Directory` | 9 |
 | `CPartEmitter` | Particle emitter | 79 |
 | `CAdObject3D` | Base of 3D objects: position, velocity, shadows, bones, ignored lights | 38 |
 | `CAdActor3D` | Legacy 3D actor (MS3D/3DS models) | 40 |
 | `CAdActor3DX` | 3D actor with X-file models and skeletal animation, effects, attachments | 67 |
 | `CAdAttach3DX` | Model attached to a bone of a 3D actor | 7 |
 
-Classes that exist in WME 1.x with a script interface but that are no-op by design: `CSXTcpClient` (unfinished in WME itself), `CSXPluginObject` (Windows DLL plugins), `CUIMarkup` (never instantiated), and the Windows-only parts of `CSXDirectory`/`CSXMemBuffer`.
+Classes that exist in WME 1.x with a script interface but that are no-op by design: `CSXTcpClient` (unfinished in WME itself), `CSXPluginObject` (Windows DLL plugins), `CUIMarkup` (never instantiated), and the Windows-only parts of `CSXDirectory` (`GetDrives`, the working directory) and `CSXMemBuffer`.
 
 WME classes with no script interface of their own (nothing to port; scripts reach them only through the owner's methods): `CBSound`, `CBFont`/`CBFontBitmap`/`CBFontTT`, `CAdInventory`, `CAdInventoryBox`, `CAdResponseBox`, `CAdResponse`, `CAdSceneNode`, `CAdSentence`, `CAdSpriteSet`, `CAdTalkDef`, `CAdScaleLevel`, `CAdRotLevel`, `CAdWalkplane`, `CAdBlock`, `CAdGeneric`, `CBViewport`, `CBFader`, `CUITiledImage`, `CBPersistMgr`, `CBEventSet`, the video players (`VidTheoraPlayer`), `C3DLight`, `C3DModel`. The inventory, responses, fader and viewport are driven through `Game` methods and properties (`GetInventoryWindow`, `AddResponse`, `FadeOut`, `SetSceneViewport`), which the tables above cover.
 
@@ -1102,7 +1102,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
 | Game services | 8 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
-| Script library | 12 | The `Directory` object, `new Object` with scripts, `new Actor` and `new Entity`. (`String`, `Array`, `Date`, `File`, `MemBuffer` and the HSL colour helpers are done.) |
+| Script library | 3 | `new Object` with scripts, `new Actor` and `new Entity`. (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory` and the HSL colour helpers are done.) |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
@@ -1112,7 +1112,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **391** | |
+| **All** | **381** | |
 
 ## Members in Luma that WME 1.x does not define
 

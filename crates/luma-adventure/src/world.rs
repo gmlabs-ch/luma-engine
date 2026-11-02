@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use luma_archive::Vfs;
 use luma_formats::{Entity, Rgba};
 use luma_formats::{GameFile, Scene, StringTable};
-use luma_script::classes::{ClassHost, ClassObject, relative_path};
+use luma_script::classes::{ClassHost, ClassObject, DirEntry, relative_path};
 use luma_script::{Context, Engine, Host, NativeId, Natives, Return, State, Value};
 
 use crate::actor::{Actor, ActorEvent, WalkContext, scene_obstacles};
@@ -93,6 +93,9 @@ pub struct World {
     pub(crate) keyboard_id: NativeId,
     /// The `Math` object scripts see as a global.
     pub(crate) math_id: NativeId,
+    /// The `Directory` object scripts see as a global (`CSXDirectory`);
+    /// a saved game brings its own back with the engine's globals.
+    pub(crate) directory_id: NativeId,
     /// `SCENE_VIEWPORT` of the game file or `Game.SetSceneViewport`:
     /// `(x, y, width, height)` on the screen; `None` is the whole screen.
     pub(crate) scene_viewport: Option<(i32, i32, i32, i32)>,
@@ -218,6 +221,7 @@ impl World {
         let game_id = objects.insert(Kind::Game);
         let keyboard_id = objects.insert(Kind::Keyboard);
         let math_id = objects.insert(Kind::Math);
+        let directory_id = objects.insert(Kind::Class(ClassObject::directory()));
         let response_box_id = objects.insert(Kind::ResponseBox);
         let scene_id = objects.insert(Kind::Scene);
         let fader_id = objects.insert(Kind::Fader);
@@ -235,6 +239,7 @@ impl World {
             game_id,
             keyboard_id,
             math_id,
+            directory_id,
             scene_viewport,
             scene_id,
             scene: None,
@@ -1980,6 +1985,25 @@ impl World {
     }
 }
 
+/// A file name a script gives, made relative to the save directory when
+/// it is spelled as an absolute path inside it (`Game.SaveDirectory +
+/// "\\file"`): the prefix is dropped, in either separator, without
+/// regard to case.
+fn strip_root(name: &str, root: &std::path::Path) -> String {
+    let root = root.to_string_lossy().replace('\\', "/");
+    let root = root.trim_end_matches('/');
+    let normalized = name.replace('\\', "/");
+    if root.is_empty() || normalized.len() < root.len() {
+        return name.to_string();
+    }
+    let (head, tail) = normalized.split_at(root.len());
+    if head.eq_ignore_ascii_case(root) && (tail.is_empty() || tail.starts_with('/')) {
+        tail.trim_start_matches('/').to_string()
+    } else {
+        name.to_string()
+    }
+}
+
 impl Natives for World {
     fn class_name(&self, id: NativeId) -> String {
         match self.objects.get(id).map(|n| &n.kind) {
@@ -2086,10 +2110,70 @@ impl ClassHost for World {
     }
 
     /// Under the save directory (the game's, or the user's own when the
-    /// game's is not writable), never outside it.
+    /// game's is not writable), never outside it. A name spelled from
+    /// the save directory itself (`Game.SaveDirectory + "\\notes.txt"`,
+    /// `Directory.TempDirectory + "x"`) is taken relative to it.
     fn writable_path(&mut self, name: &str) -> Option<PathBuf> {
-        let relative = relative_path(name)?;
-        Some(self.checked_save_directory().join(relative))
+        let root = self.checked_save_directory();
+        let relative = relative_path(&strip_root(name, &root))?;
+        Some(root.join(relative))
+    }
+
+    fn writable_root(&self) -> PathBuf {
+        self.save_directory()
+    }
+
+    /// The save directory itself for an empty name or its own path, else
+    /// a directory under it.
+    fn writable_dir(&mut self, name: &str) -> Option<PathBuf> {
+        let root = self.checked_save_directory();
+        let name = strip_root(name, &root);
+        if name.trim_matches(['\\', '/', ' ']).is_empty() || name == "." {
+            Some(root)
+        } else {
+            self.writable_path(&name)
+        }
+    }
+
+    /// The files and sub-directories of the game's packages and loose
+    /// directories under `dir` (the game's root for an empty name).
+    fn game_entries(&mut self, dir: &str) -> Vec<DirEntry> {
+        let root = self.save_directory();
+        let dir = strip_root(dir, &root);
+        let prefix = relative_path(&dir)
+            .map(|p| format!("{}/", p.to_string_lossy()).to_ascii_uppercase())
+            .unwrap_or_default();
+        let mut entries: Vec<DirEntry> = Vec::new();
+        let mut add = |name: String, is_dir: bool| {
+            if !entries.iter().any(|e| e.name.eq_ignore_ascii_case(&name)) {
+                entries.push(DirEntry { name, is_dir });
+            }
+        };
+        for loose in self.vfs.directories() {
+            let path = match relative_path(&dir) {
+                Some(relative) => loose.join(relative),
+                None => loose.clone(),
+            };
+            if let Ok(read) = std::fs::read_dir(path) {
+                for entry in read.flatten() {
+                    let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+                    add(entry.file_name().to_string_lossy().into_owned(), is_dir);
+                }
+            }
+        }
+        for file in self.vfs.packaged_files() {
+            let Some(rest) = file.entry.key().strip_prefix(&prefix) else {
+                continue;
+            };
+            // The entry's own spelling, after the directory part.
+            let name = file.entry.path_name();
+            let name = &name[name.len() - rest.len()..];
+            match name.split_once('/') {
+                Some((sub, _)) => add(sub.to_string(), true),
+                None => add(name.to_string(), false),
+            }
+        }
+        entries
     }
 
     fn create_object(&mut self, object: ClassObject) -> NativeId {
@@ -2213,6 +2297,7 @@ impl Runtime {
         // The engine publishes the game object to every script.
         engine.set_global("Game", Value::Native(world.game_id));
         engine.set_global("Math", Value::Native(world.math_id));
+        engine.set_global("Directory", Value::Native(world.directory_id));
         Ok(Runtime { engine, world })
     }
 

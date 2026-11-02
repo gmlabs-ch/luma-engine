@@ -63,6 +63,7 @@ no code copied):
   crates/luma-script/src/classes/date.rs
   crates/luma-script/src/classes/file.rs
   crates/luma-script/src/classes/membuffer.rs
+  crates/luma-script/src/classes/directory.rs
   crates/luma-adventure/src/world.rs
   crates/luma-adventure/src/natives.rs
   crates/luma-adventure/src/natives_actor.rs

@@ -212,7 +212,10 @@ fn scripts_use_the_library_classes() {
         .iter()
         .filter(|(_, n)| matches!(n.kind, Kind::Class(_)))
         .count();
-    assert_eq!(classes, 6, "s, parts (the split array), d, m, r, w");
+    assert_eq!(
+        classes, 7,
+        "s, parts (the split array), d, m, r, w, and the Directory global"
+    );
 
     // The objects are saved with the game and work after a load.
     runtime.save_game(5, "classes", false).unwrap();

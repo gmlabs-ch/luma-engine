@@ -17,7 +17,7 @@ behave as their authors saw them.
 | `Script` | One execution: instruction pointer, value stack, `this` stack, scopes, call stack, state. A thread is a `Script` too. |
 | `Engine` | Loads programs, keeps the scripts and the engine-wide globals, runs a tick. |
 | `Host` | What the embedding program provides: files, time, logging, native objects and their methods, global functions, and a hook after each native call. |
-| `ClassHost` | What the script library classes (`new String`, `Array`, `Date`, `File`, `MemBuffer`) need from the program: files to read and a place to write, the clock, new handles. |
+| `ClassHost` | What the script library classes (`new String`, `Array`, `Date`, `File`, `MemBuffer`, the global `Directory`) need from the program: files to read, a place to write and its listing, the clock, new handles. |
 
 ## Values and variables
 
@@ -161,6 +161,7 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | `Game`, actors and entities, sound | `SoundPanning` | `LoadSound`, `PlaySound`, `PlaySoundEvent`, `StopSound`, `PauseSound`, `ResumeSound`, `IsSoundPlaying`, `SetSoundPosition`, `GetSoundPosition`, `SetSoundVolume`, `GetSoundVolume` |
 | `Game`, input and fades | `Keyboard.KeyCode`, `Key`, `Printable`, `IsShift`, `IsAlt`, `IsControl` | `Keyboard.IsKeyDown`, `SetMousePos`, `FadeOut`, `FadeIn` (and their `Async` and `System` forms), `GetFadeColor`, `SetActiveCursor`, `RemoveActiveCursor`, `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`, `GetActiveCursor`, `GetWaitCursor`, `HideCursor`, `ShowCursor` |
 | `Math` (a global) | `PI` | `Abs`, `Acos`, `Asin`, `Atan`, `Atan2`, `Ceil`, `Cos`, `Cosh`, `Exp`, `Floor`, `Log`, `Log10`, `Pow`, `Sin`, `Sinh`, `Tan`, `Tanh`, `Sqrt`, `DegToRad`, `RadToDeg`; every one returns a float, `Floor` and `Ceil` included, as in the original engine |
+| `Directory` (a global) | see [Script library classes](#script-library-classes) | |
 | `Game`, music and volumes | | `PlayMusic`, `PlayMusicChannel`, `StopMusic`, `StopMusicChannel`, `PauseMusic`, `ResumeMusic`, `GetMusic`, `SetMusicPosition`, `GetMusicPosition`, `IsMusicPlaying`, `SetMusicVolume`, `GetMusicVolume` (and their `...Channel` forms), `MusicCrossfade`, `GetSoundLength`, `SetGlobalSFXVolume`, `SetGlobalSpeechVolume`, `SetGlobalMusicVolume`, `SetGlobalMasterVolume` and their getters, `AddSpeechDir`, `RemoveSpeechDir` |
 | Windows (`Game.LoadWindow`, `Game.CreateWindow`) | `Name`, `X`, `Y`, `Width`, `Height`, `Visible`, `Disabled`, `Text`, `Parent`, `ParentNotify`, `NumControls`, `Exclusive`, `SystemExclusive`, `Menu`, `InGame`, `PauseMusic`, `Transparent`, `FadeColor`, `NextSibling`, `PrevSibling` | `GetWidget`, `GetControl`, `Close`, `GoExclusive`, `GoSystemExclusive`, `Center`, `Focus`, `LoadFromFile`, `SetImage`, `GetImage`, `SetFont`, `SetInactiveImage`, `SetInactiveFont`, `CreateButton`, `CreateStatic`, `CreateEditor`, `CreateWindow`, `DeleteControl`, `MoveAfter`, `MoveBefore`, `MoveToTop`, `MoveToBottom` |
 | Buttons | The controls' properties, plus `TextAlign`, `Focusable`, `Pressed`, `PixelPerfect` | `Press`, `SetHoverImage`, `SetPressedImage`, `SetDisabledImage`, `SetFocusedImage` and their getters, `SetHoverFont`, `SetPressedFont`, `SetDisabledFont`, `SetFocusedFont` |
@@ -281,12 +282,14 @@ implemented": transitions.
 `new String(...)`, `new Array(...)`, `new Date(...)`, `new File(...)` and
 `new MemBuffer(...)` create the objects of the script library,
 implemented in `luma_script::classes` after WME 1.x's `SXString`,
-`SXArray`, `SXDate`, `SXFile` and `SXMemBuffer`. The host owns them like
-its other natives (the adventure layer keeps them in its object table,
-so they are saved with the game and never freed, where the original
-frees them by reference count) and forwards property reads, writes and
-method calls to the class; what the classes need from the program is the
-`ClassHost` trait. Like every native they convert to `0`, `0.0` and
+`SXArray`, `SXDate`, `SXFile` and `SXMemBuffer`; the global `Directory`
+(`SXDirectory`) is one more object of the library, made once by the host
+and published like `Math`. The host owns them like its other natives
+(the adventure layer keeps them in its object table, so they are saved
+with the game and never freed, where the original frees them by
+reference count) and forwards property reads, writes and method calls to
+the class; what the classes need from the program is the `ClassHost`
+trait. Like every native they convert to `0`, `0.0` and
 `false` (so `if (obj)` is false and `obj + 1` is `1.000000`); objects of
 different classes compare by class name. Assigning a plain value to a
 variable holding one replaces the object, as `POP_VAR` does in the
@@ -304,6 +307,7 @@ and written to files is Latin-1, as the engine reads the game's files.
 | `Array` | `Type` (`array`), `Length` (settable: truncates, or grows with unset elements), `[index]` (a name of digits only: `a["007"]` is `a[7]`; `a[1.0]` or `a[-1]` is nothing) | `Push(...)` (returns the new length), `Pop()` (`null` when empty) | `new Array()`; `new Array(n)`, `n` unset elements, any single argument being a length; `new Array(a, b, ...)` holds the arguments. Elements are copies. The string form joins the elements with commas, an unset element printing nothing and a `null` one `[null]`. Unknown properties are not kept. |
 | `Date` | `Type` (`date`) | `GetYear`, `GetMonth` (1 to 12), `GetDate`, `GetHours`, `GetMinutes`, `GetSeconds`, `GetWeekday` (0 is Sunday), the matching setters, `SetCurrentTime` | `new Date(y, m, d, h, mi, s)`, a missing field being 0 and every field normalised as `mktime` does, so `new Date(2020)` is 30 November 2019 and `SetMonth(13)` moves to January of the next year; `new Date()` is the host's clock. Dates compare by time. The string form is `asctime`'s, trailing newline included: `Wed Dec 31 13:30:25 2003\n`. |
 | `File` | `Type` (`file`), `Filename`, `Position`, `Length`, `TextMode`, `AccessMode` (0 closed, 1 read, 2 write, 3 append); other properties are kept | `SetFilename`, `OpenAsText(mode)`, `OpenAsBinary(mode)` (mode 1 when missing; another value logs an error and reads), `Close`, `SetPosition`, `Delete`, `Copy(dest, overwrite = true)`, `ReadLine`, `ReadText(n)`, `WriteLine`, `WriteText`, `ReadBool`, `ReadByte`, `ReadShort`, `ReadInt`, `ReadLong`, `ReadFloat`, `ReadDouble`, `ReadString` and the matching `Write...` | Reading finds a file a script wrote first, then the game's files (packages and loose files); writing, deleting and copying happen under the save directory, whose sub-directories are created as needed, and a name leaving it (`..`, an absolute path) fails. A method used in the wrong mode logs a runtime error and yields `null` (reads) or `false` (writes); reading past the end yields `null`. Text is Latin-1, `\r` is dropped when reading and lines are written with `\n`; binary values are little-endian, `ReadString`/`WriteString` a 32-bit length then the bytes, and `ReadShort` is 65536 plus the signed value, as in the original. The string form is the file name, `[file object]` without one. |
+| `Directory` | `Type` (`directory`), `PathSeparator` (`\`, which every file name in the engine accepts along with `/`), `CurrentDirectory` (the save directory; the set is accepted and ignored), `TempDirectory` (`temp` under the save directory, created on demand, with a trailing separator as `GetTempPath` gives); other properties are kept | `Create(path)` (every level; true when the directory exists afterwards), `Delete(path)` (an empty directory only, as `rmdir`), `GetFiles(path, mask)`, `GetDirectories(path, mask)` (an `Array` of names, not paths, sorted without regard to case; the mask is a Windows wildcard, `*.*` by default, compared without case; directories whose name starts with `.` are skipped, as the original skips `.` and `..`), `GetDrives` (an empty `Array`: no drive letters outside Windows) | Paths resolve under the save directory, an empty path or the save directory's own path naming it, and a path leaving it fails or lists nothing. A listing gives what the save directory holds, then the game's own files and directories under the same path (packages and loose files), a name once. The string form is `[native object]`. |
 | `MemBuffer` | `Type` (`membuffer`), `Size`; other properties are kept | `SetSize`, `GetBool`, `GetByte`, `GetShort` (65536 plus the signed value, as in the original), `GetInt`, `GetLong`, `GetFloat`, `GetDouble`, `GetString(pos, length)` (to the terminating zero without a length; the text stops at a zero either way), the matching setters (`SetString` writes the zero too), `GetPointer`, `SetPointer`, `DEBUG_Dump` | `new MemBuffer(n)` is `n` zero bytes, little-endian. An access outside the buffer logs `Set/Get method call is out of bounds` and yields `null` or `false`; an empty buffer has room for nothing (the original reads past its zero-length allocation). `GetPointer` and `SetPointer` deal in raw addresses for DLL plugins: they log a runtime error and yield `null` and `false`. `DEBUG_Dump` does nothing. |
 
 Deliberate differences from the original:
@@ -314,7 +318,15 @@ Deliberate differences from the original:
   keep a character whose mapping is several characters (`ß`); the
   original uses the C library's locale.
 - Files are written with `\n` line ends; the original, on Windows, wrote
-  `\r\n` in text mode. Writes stay under the save directory.
+  `\r\n` in text mode. Writes stay under the save directory, and a name
+  spelled from `Game.SaveDirectory` or `Directory.TempDirectory` is
+  taken relative to it.
+- `Directory` works inside the save directory, where the original works
+  on the whole file system: `CurrentDirectory` is that directory and
+  cannot be changed, `TempDirectory` is a sub-directory of it, and
+  `Create` answers whether the directory exists afterwards, where the
+  original's second `mkdir` of a path it just created answers false
+  unless the path ends with a separator.
 - An array's string form is not capped at 32 KB, and `new Array(n)` with
   a negative `n` is empty where the original keeps the negative length.
 

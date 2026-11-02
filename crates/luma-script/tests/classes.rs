@@ -91,7 +91,7 @@ impl Natives for ClassesHost {
     fn get_property(&self, id: NativeId, name: &str) -> Option<Value> {
         let (object, props) = self.objects.get(&id)?;
         object
-            .get_property(name)
+            .get_property(name, self)
             .or_else(|| props.get(name).cloned())
     }
 
@@ -128,6 +128,10 @@ impl ClassHost for ClassesHost {
 
     fn writable_path(&mut self, name: &str) -> Option<PathBuf> {
         relative_path(name).map(|p| self.dir.join(p))
+    }
+
+    fn writable_root(&self) -> PathBuf {
+        self.dir.clone()
     }
 
     fn local_time(&self) -> i64 {
@@ -326,17 +330,17 @@ impl Script {
 
     /// Runs the script once and returns `result` with the host.
     fn run(mut self) -> (BTreeMap<String, Value>, ClassesHost) {
-        self.run_with(|_| {})
+        self.run_with(|_, _| {})
     }
 
     fn run_with(
         &mut self,
-        setup: impl FnOnce(&mut ClassesHost),
+        setup: impl FnOnce(&mut ClassesHost, &mut Engine),
     ) -> (BTreeMap<String, Value>, ClassesHost) {
         self.0.emit(Instruction::Ret);
         let mut host = ClassesHost::new(self.0.clone().build());
-        setup(&mut host);
         let mut engine = Engine::new();
+        setup(&mut host, &mut engine);
         engine.run_script(&mut host, "main.script", None).unwrap();
         engine.tick(&mut host);
         let result = engine
@@ -862,7 +866,7 @@ fn text_files_read_from_the_game() {
     p.get_store("h", Arg::Str("custom"), "hcustom");
     p.call_store("h", "SetFilename", &[Arg::Str("other.txt")], "setName2");
     p.get_store("h", Arg::Str("AccessMode"), "hmodeAfterRename");
-    let (result, host) = p.run_with(|host| {
+    let (result, host) = p.run_with(|host, _| {
         host.files
             .insert("notes.txt".to_string(), b"first\r\nsecond\n\nlast".to_vec());
     });
@@ -1245,7 +1249,7 @@ fn class_objects_survive_a_snapshot() {
     p.var_new("d", "Date", &[Arg::Int(2001), Arg::Int(2), Arg::Int(3)]);
     p.var_new("m", "MemBuffer", &[Arg::Int(2)]);
     p.var_new("s", "String", &[Arg::Str("text")]);
-    let (_, host) = p.run_with(|host| {
+    let (_, host) = p.run_with(|host, _| {
         host.files
             .insert("notes.txt".to_string(), b"one\ntwo\n".to_vec());
     });
@@ -1272,5 +1276,93 @@ fn class_objects_survive_a_snapshot() {
         restored.push(back);
     }
     assert_eq!(restored.len(), 6);
+    std::fs::remove_dir_all(&host.dir).ok();
+}
+
+#[test]
+fn the_directory_object_works_under_the_writable_root() {
+    let mut p = Script::new();
+    // result.created = Directory.Create("sub\\deep");
+    p.call_store("Directory", "Create", &[Arg::Str("sub\\deep")], "created");
+    // Files are listed with what the writable directory holds...
+    p.var_new("f", "File", &[Arg::Str("sub\\A.txt")]);
+    p.call_drop("f", "OpenAsText", &[Arg::Int(2)]);
+    p.call_drop("f", "WriteLine", &[Arg::Str("x")]);
+    p.call_drop("f", "Close", &[]);
+    p.0.def_var("files");
+    p.call(
+        "Directory",
+        "GetFiles",
+        &[Arg::Str("sub"), Arg::Str("*.TXT")],
+    );
+    p.0.pop_var("files");
+    p.get_store("files", Arg::Str("Length"), "files");
+    p.get("files", Arg::Int(0));
+    p.store("first");
+    p.0.def_var("none");
+    p.call(
+        "Directory",
+        "GetFiles",
+        &[Arg::Str("sub"), Arg::Str("*.png")],
+    );
+    p.0.pop_var("none");
+    p.get_store("none", Arg::Str("Length"), "none");
+    // ... and the directories without the mask, `*.*` by default.
+    p.0.def_var("dirs");
+    p.call("Directory", "GetDirectories", &[Arg::Str("sub"), Arg::Null]);
+    p.0.pop_var("dirs");
+    p.get_store("dirs", Arg::Str("Length"), "dirs");
+    p.get("dirs", Arg::Int(0));
+    p.store("firstDir");
+    p.call_store("Directory", "Delete", &[Arg::Str("sub\\deep")], "deleted");
+    p.call_store("Directory", "Delete", &[Arg::Str("sub")], "deletedFull");
+    p.call_store("Directory", "Create", &[Arg::Str("..\\escape")], "escaped");
+    p.0.def_var("drives");
+    p.call("Directory", "GetDrives", &[]);
+    p.0.pop_var("drives");
+    p.get_store("drives", Arg::Str("Length"), "drives");
+    p.get_store("Directory", Arg::Str("Type"), "type");
+    p.get_store("Directory", Arg::Str("PathSeparator"), "sep");
+    p.get_store("Directory", Arg::Str("CurrentDirectory"), "cwd");
+    p.get_store("Directory", Arg::Str("TempDirectory"), "temp");
+    p.set(
+        "Directory",
+        Arg::Str("CurrentDirectory"),
+        Arg::Str("C:\\elsewhere"),
+    );
+    p.get_store("Directory", Arg::Str("CurrentDirectory"), "cwdAfter");
+    p.set("Directory", Arg::Str("note"), Arg::Int(7));
+    p.get_store("Directory", Arg::Str("note"), "note");
+    p.text("Directory", "text");
+    let (result, host) = p.run_with(|host, engine| {
+        let id = host.create_object(ClassObject::directory());
+        engine.set_global("Directory", Value::Native(id));
+    });
+    assert_eq!(host.errors(), Vec::<&str>::new());
+    assert_eq!(result["created"], Value::Bool(true));
+    assert!(host.dir.join("sub").is_dir());
+    assert!(!host.dir.join("sub/deep").exists(), "deleted later");
+    assert_eq!(result["files"], i(1));
+    assert_eq!(result["first"], s("A.txt"), "the name, not the path");
+    assert_eq!(result["none"], i(0));
+    assert_eq!(result["dirs"], i(1));
+    assert_eq!(result["firstDir"], s("deep"));
+    assert_eq!(result["deleted"], Value::Bool(true));
+    assert_eq!(
+        result["deletedFull"],
+        Value::Bool(false),
+        "only an empty directory goes"
+    );
+    assert_eq!(result["escaped"], Value::Bool(false));
+    assert_eq!(result["drives"], i(0));
+    assert_eq!(result["type"], s("directory"));
+    assert_eq!(result["sep"], s("\\"));
+    let root = host.dir.to_string_lossy().into_owned();
+    assert_eq!(result["cwd"].get_string(&host), format!("{root}/"));
+    assert_eq!(result["temp"].get_string(&host), format!("{root}/temp/"));
+    assert!(host.dir.join("temp").is_dir(), "created on demand");
+    assert_eq!(result["cwdAfter"], result["cwd"], "the set is ignored");
+    assert_eq!(result["note"], i(7), "other properties are kept");
+    assert_eq!(result["text"], s("[native object]"));
     std::fs::remove_dir_all(&host.dir).ok();
 }

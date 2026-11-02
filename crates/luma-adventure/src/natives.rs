@@ -81,7 +81,7 @@ impl World {
     pub(crate) fn native_get(&self, id: NativeId, name: &str) -> Option<Value> {
         // The library objects answer in place: no copy of their contents.
         if let Kind::Class(object) = &self.native(id)?.kind {
-            return object.get_property(name);
+            return object.get_property(name, self);
         }
         let kind = self.native(id)?.kind.clone();
         match kind {
