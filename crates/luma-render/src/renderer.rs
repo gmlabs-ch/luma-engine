@@ -3,8 +3,10 @@
 //!
 //! The rotation of a quad around its pivot, the blend factors of each
 //! mode and the 3D render state (depth test, alpha test, lighting)
-//! follow `BRenderD3D.cpp` of Wintermute Engine 1.x (MIT License,
-//! Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
+//! follow `BRenderD3D.cpp` of Wintermute Engine 1.x, the stencil states
+//! of the shadow volumes `3DShadowVolume.cpp` and the depth-only
+//! receivers `AdSceneGeometry.cpp` (MIT License, Copyright (c) 2003-2013
+//! Jan Nedoma); see `NOTICE`.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -13,7 +15,8 @@ use luma_formats::Rgba;
 use wgpu::util::DeviceExt;
 
 use crate::draw::{
-    Attributes, BlendMode, DrawList, Light, MAX_LIGHTS, MeshDraw, MeshHandle, MeshVertex, Quad,
+    Attributes, BlendMode, Draw3d, DrawList, Light, MAX_LIGHTS, Matrix, MeshDraw, MeshHandle,
+    MeshVertex, Quad, multiply,
 };
 use crate::error::{Error, Result};
 use crate::gpu::Gpu;
@@ -68,6 +71,50 @@ struct MeshUniforms {
     fog_color: [f32; 4],
     fog_params: [f32; 4],
     lights: [GpuLight; MAX_LIGHTS],
+}
+
+/// The uniforms of one position-only draw; see `shadow.wgsl`.
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+struct SimpleUniforms {
+    mvp: [[f32; 4]; 4],
+    color: [f32; 4],
+}
+
+/// The position-only pipelines of the stencil shadows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SimpleKind {
+    /// A shadow volume's faces turned toward the camera: the stencil is
+    /// incremented where they pass the depth test.
+    VolumeIncrement,
+    /// The faces turned away: decremented.
+    VolumeDecrement,
+    /// A mesh written to the depth buffer only.
+    DepthOnly,
+    /// The fill where the stencil count is one or more.
+    Fill,
+}
+
+/// The mesh pipeline variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct MeshVariant {
+    format: wgpu::TextureFormat,
+    blend: BlendMode,
+    cull: bool,
+    depth_write: bool,
+    stencil_once: bool,
+}
+
+impl MeshVariant {
+    fn of(format: wgpu::TextureFormat, draw: &MeshDraw<'_>) -> MeshVariant {
+        MeshVariant {
+            format,
+            blend: draw.blend,
+            cull: draw.cull_backfaces,
+            depth_write: draw.depth_write,
+            stencil_once: draw.stencil_once.is_some(),
+        }
+    }
 }
 
 /// A texture or surface to render into.
@@ -125,8 +172,9 @@ pub struct Renderer {
 
     mesh_shader: wgpu::ShaderModule,
     mesh_pipeline_layout: wgpu::PipelineLayout,
-    /// One mesh pipeline per target format, blend mode and culling.
-    mesh_pipelines: RefCell<HashMap<(wgpu::TextureFormat, BlendMode, bool), wgpu::RenderPipeline>>,
+    /// One mesh pipeline per target format, blend mode, culling, depth
+    /// write and stencil variant.
+    mesh_pipelines: RefCell<HashMap<MeshVariant, wgpu::RenderPipeline>>,
     mesh_uniform_layout: wgpu::BindGroupLayout,
     /// The uniforms of every mesh draw of the frame, one aligned slot
     /// each, bound with a dynamic offset.
@@ -137,6 +185,18 @@ pub struct Renderer {
     mesh_bind_groups: RefCell<HashMap<u64, wgpu::BindGroup>>,
     meshes: RefCell<HashMap<u64, GpuMesh>>,
     next_mesh: Cell<u64>,
+
+    simple_shader: wgpu::ShaderModule,
+    simple_pipeline_layout: wgpu::PipelineLayout,
+    /// The position-only pipelines, per target format and kind.
+    simple_pipelines: RefCell<HashMap<(wgpu::TextureFormat, SimpleKind), wgpu::RenderPipeline>>,
+    simple_uniform_layout: wgpu::BindGroupLayout,
+    /// The uniforms of every position-only draw of the frame, one
+    /// aligned slot each.
+    simple_uniforms: RefCell<(wgpu::Buffer, wgpu::BindGroup)>,
+    simple_uniform_stride: u64,
+    /// The vertices of the frame's shadow volumes, concatenated.
+    volume_vertices: RefCell<wgpu::Buffer>,
 }
 
 impl Renderer {
@@ -150,6 +210,10 @@ impl Renderer {
         let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mesh shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()),
+        });
+        let simple_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shadow shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shadow.wgsl").into()),
         });
         let globals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("globals layout"),
@@ -211,6 +275,28 @@ impl Renderer {
             bind_group_layouts: &[Some(&mesh_uniform_layout), Some(&texture_layout)],
             immediate_size: 0,
         });
+        let simple_uniform_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("shadow uniforms layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(
+                            std::mem::size_of::<SimpleUniforms>() as u64,
+                        ),
+                    },
+                    count: None,
+                }],
+            });
+        let simple_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("shadow pipeline layout"),
+                bind_group_layouts: &[Some(&simple_uniform_layout)],
+                immediate_size: 0,
+            });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("bilinear clamp"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -259,6 +345,22 @@ impl Renderer {
             (std::mem::size_of::<MeshUniforms>() as u64).div_ceil(alignment) * alignment;
         let mesh_uniforms =
             mesh_uniform_buffer(device, &mesh_uniform_layout, mesh_uniform_stride, 16);
+        let simple_uniform_stride =
+            (std::mem::size_of::<SimpleUniforms>() as u64).div_ceil(alignment) * alignment;
+        let simple_uniforms = uniform_buffer(
+            device,
+            "shadow uniforms",
+            &simple_uniform_layout,
+            simple_uniform_stride,
+            std::mem::size_of::<SimpleUniforms>() as u64,
+            16,
+        );
+        let volume_vertices = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shadow volume vertices"),
+            size: 12 * 1024,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let white = Texture::white(&gpu);
         Renderer {
             gpu,
@@ -284,6 +386,13 @@ impl Renderer {
             mesh_bind_groups: RefCell::new(HashMap::new()),
             meshes: RefCell::new(HashMap::new()),
             next_mesh: Cell::new(1),
+            simple_shader,
+            simple_pipeline_layout,
+            simple_pipelines: RefCell::new(HashMap::new()),
+            simple_uniform_layout,
+            simple_uniforms: RefCell::new(simple_uniforms),
+            simple_uniform_stride,
+            volume_vertices: RefCell::new(volume_vertices),
         }
     }
 
@@ -426,29 +535,105 @@ impl Renderer {
         for attributes in list.attributes() {
             self.ensure_pipeline(target.format, attributes.blend);
         }
-        let mesh_draws = list.meshes();
-        self.ensure_mesh_uniform_capacity(mesh_draws.len());
+        let draws_3d = list.draws_3d();
+        // The uniform slot of each 3D draw: meshes in the mesh buffer,
+        // the position-only draws in the other; the volumes' vertices
+        // in one buffer, each with its range.
+        let mut mesh_slots = 0usize;
+        let mut simple_slots = 0usize;
+        let mut volume_vertices: Vec<[f32; 3]> = Vec::new();
+        let mut volume_ranges: Vec<std::ops::Range<u32>> = Vec::new();
+        for placed in draws_3d {
+            match &placed.draw {
+                Draw3d::Mesh(_) => mesh_slots += 1,
+                Draw3d::ShadowVolume(volume) => {
+                    simple_slots += 1;
+                    let start = volume_vertices.len() as u32;
+                    volume_vertices.extend_from_slice(&volume.vertices);
+                    volume_ranges.push(start..volume_vertices.len() as u32);
+                }
+                Draw3d::DepthOnly(_) | Draw3d::StencilFill(_) => simple_slots += 1,
+            }
+        }
+        self.ensure_mesh_uniform_capacity(mesh_slots);
+        self.ensure_simple_uniform_capacity(simple_slots);
+        self.ensure_volume_capacity(volume_vertices.len());
         {
             let meshes = self.meshes.borrow();
-            let mut uniforms = vec![0u8; mesh_draws.len() * self.mesh_uniform_stride as usize];
-            for (i, placed) in mesh_draws.iter().enumerate() {
-                let draw = &placed.draw;
-                if !meshes.contains_key(&draw.mesh.0) {
-                    return Err(Error::Render {
-                        reason: format!("unknown mesh {}", draw.mesh.0),
-                    });
-                }
-                self.ensure_mesh_bind_group(draw.texture.unwrap_or(&self.white));
-                self.ensure_mesh_pipeline(target.format, draw.blend, draw.cull_backfaces);
-                let start = i * self.mesh_uniform_stride as usize;
-                let slot = mesh_uniforms(draw);
+            let mut uniforms = vec![0u8; mesh_slots * self.mesh_uniform_stride as usize];
+            let mut simple = vec![0u8; simple_slots * self.simple_uniform_stride as usize];
+            let (mut mesh_index, mut simple_index) = (0usize, 0usize);
+            let mut write_simple = |index: usize, slot: SimpleUniforms| {
+                let start = index * self.simple_uniform_stride as usize;
                 let bytes = bytemuck::bytes_of(&slot);
-                uniforms[start..start + bytes.len()].copy_from_slice(bytes);
+                simple[start..start + bytes.len()].copy_from_slice(bytes);
+            };
+            for placed in draws_3d {
+                match &placed.draw {
+                    Draw3d::Mesh(draw) => {
+                        if !meshes.contains_key(&draw.mesh.0) {
+                            return Err(Error::Render {
+                                reason: format!("unknown mesh {}", draw.mesh.0),
+                            });
+                        }
+                        self.ensure_mesh_bind_group(draw.texture.unwrap_or(&self.white));
+                        self.ensure_mesh_pipeline(MeshVariant::of(target.format, draw));
+                        let start = mesh_index * self.mesh_uniform_stride as usize;
+                        let slot = mesh_uniforms(draw);
+                        let bytes = bytemuck::bytes_of(&slot);
+                        uniforms[start..start + bytes.len()].copy_from_slice(bytes);
+                        mesh_index += 1;
+                    }
+                    Draw3d::ShadowVolume(volume) => {
+                        self.ensure_simple_pipeline(target.format, SimpleKind::VolumeIncrement);
+                        self.ensure_simple_pipeline(target.format, SimpleKind::VolumeDecrement);
+                        write_simple(
+                            simple_index,
+                            simple_uniforms(&volume.view_projection, &volume.world, [0.0; 4]),
+                        );
+                        simple_index += 1;
+                    }
+                    Draw3d::DepthOnly(draw) => {
+                        if !meshes.contains_key(&draw.mesh.0) {
+                            return Err(Error::Render {
+                                reason: format!("unknown mesh {}", draw.mesh.0),
+                            });
+                        }
+                        self.ensure_simple_pipeline(target.format, SimpleKind::DepthOnly);
+                        write_simple(
+                            simple_index,
+                            simple_uniforms(&draw.view_projection, &draw.world, [0.0; 4]),
+                        );
+                        simple_index += 1;
+                    }
+                    Draw3d::StencilFill(fill) => {
+                        self.ensure_simple_pipeline(target.format, SimpleKind::Fill);
+                        let c = fill.color;
+                        let color = [c.r, c.g, c.b, c.a].map(|v| f32::from(v) / 255.0);
+                        write_simple(
+                            simple_index,
+                            simple_uniforms(&crate::draw::IDENTITY, &crate::draw::IDENTITY, color),
+                        );
+                        simple_index += 1;
+                    }
+                }
             }
             if !uniforms.is_empty() {
                 self.gpu
                     .queue
                     .write_buffer(&self.mesh_uniforms.borrow().0, 0, &uniforms);
+            }
+            if !simple.is_empty() {
+                self.gpu
+                    .queue
+                    .write_buffer(&self.simple_uniforms.borrow().0, 0, &simple);
+            }
+            if !volume_vertices.is_empty() {
+                self.gpu.queue.write_buffer(
+                    &self.volume_vertices.borrow(),
+                    0,
+                    bytemuck::cast_slice(&volume_vertices),
+                );
             }
         }
         self.ensure_depth(target.width, target.height);
@@ -457,6 +642,9 @@ impl Renderer {
         let mesh_pipelines = self.mesh_pipelines.borrow();
         let mesh_bind_groups = self.mesh_bind_groups.borrow();
         let mesh_uniforms = self.mesh_uniforms.borrow();
+        let simple_pipelines = self.simple_pipelines.borrow();
+        let simple_uniforms = self.simple_uniforms.borrow();
+        let volume_buffer = self.volume_vertices.borrow();
         let meshes = self.meshes.borrow();
         let depth = self.depth.borrow();
         let depth_view = &depth.as_ref().expect("depth buffer created above").view;
@@ -505,45 +693,98 @@ impl Renderer {
             let quads = list.quads();
             let attributes = list.attributes();
             let blend_of = |i: usize| attributes.get(i).map_or(BlendMode::Normal, |a| a.blend);
-            // The quad state; `None` after meshes were drawn, so that it
-            // is set again before the next batch.
+            // The quad state; `None` after 3D items were drawn, so that
+            // it is set again before the next batch.
             let mut quad_state: Option<BlendMode> = None;
-            let mut next_mesh = 0;
+            let mut next_3d = 0;
+            let (mut mesh_index, mut simple_index, mut volume_index) = (0usize, 0usize, 0usize);
             let mut first = 0;
             loop {
-                // The meshes due before the quad `first` (all the remaining
-                // ones once the quads are done).
-                while next_mesh < mesh_draws.len() && mesh_draws[next_mesh].before_quad <= first {
-                    let draw = &mesh_draws[next_mesh].draw;
-                    let mesh = &meshes[&draw.mesh.0];
-                    pass.set_pipeline(
-                        &mesh_pipelines[&(target.format, draw.blend, draw.cull_backfaces)],
-                    );
-                    let offset = (next_mesh as u64 * self.mesh_uniform_stride) as u32;
-                    pass.set_bind_group(0, &mesh_uniforms.1, &[offset]);
-                    let texture = draw.texture.unwrap_or(&self.white);
-                    pass.set_bind_group(1, &mesh_bind_groups[&texture.id], &[]);
-                    pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                    pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    let range = match &draw.indices {
-                        Some(range) => {
-                            range.start.min(mesh.index_count)..range.end.min(mesh.index_count)
+                // The 3D items due before the quad `first` (all the
+                // remaining ones once the quads are done).
+                while next_3d < draws_3d.len() && draws_3d[next_3d].before_quad <= first {
+                    match &draws_3d[next_3d].draw {
+                        Draw3d::Mesh(draw) => {
+                            let mesh = &meshes[&draw.mesh.0];
+                            pass.set_pipeline(
+                                &mesh_pipelines[&MeshVariant::of(target.format, draw)],
+                            );
+                            let offset = (mesh_index as u64 * self.mesh_uniform_stride) as u32;
+                            pass.set_bind_group(0, &mesh_uniforms.1, &[offset]);
+                            let texture = draw.texture.unwrap_or(&self.white);
+                            pass.set_bind_group(1, &mesh_bind_groups[&texture.id], &[]);
+                            pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                            pass.set_index_buffer(
+                                mesh.indices.slice(..),
+                                wgpu::IndexFormat::Uint32,
+                            );
+                            if let Some(reference) = draw.stencil_once {
+                                pass.set_stencil_reference(u32::from(reference));
+                            }
+                            let range = match &draw.indices {
+                                Some(range) => {
+                                    range.start.min(mesh.index_count)
+                                        ..range.end.min(mesh.index_count)
+                                }
+                                None => 0..mesh.index_count,
+                            };
+                            if !range.is_empty() {
+                                pass.draw_indexed(range, 0, 0..1);
+                            }
+                            mesh_index += 1;
                         }
-                        None => 0..mesh.index_count,
-                    };
-                    if !range.is_empty() {
-                        pass.draw_indexed(range, 0, 0..1);
+                        Draw3d::ShadowVolume(_) => {
+                            let offset = (simple_index as u64 * self.simple_uniform_stride) as u32;
+                            let range = volume_ranges[volume_index].clone();
+                            if !range.is_empty() {
+                                pass.set_bind_group(0, &simple_uniforms.1, &[offset]);
+                                pass.set_vertex_buffer(0, volume_buffer.slice(..));
+                                for kind in
+                                    [SimpleKind::VolumeIncrement, SimpleKind::VolumeDecrement]
+                                {
+                                    pass.set_pipeline(&simple_pipelines[&(target.format, kind)]);
+                                    pass.draw(range.clone(), 0..1);
+                                }
+                            }
+                            simple_index += 1;
+                            volume_index += 1;
+                        }
+                        Draw3d::DepthOnly(draw) => {
+                            let mesh = &meshes[&draw.mesh.0];
+                            let offset = (simple_index as u64 * self.simple_uniform_stride) as u32;
+                            pass.set_pipeline(
+                                &simple_pipelines[&(target.format, SimpleKind::DepthOnly)],
+                            );
+                            pass.set_bind_group(0, &simple_uniforms.1, &[offset]);
+                            pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                            pass.set_index_buffer(
+                                mesh.indices.slice(..),
+                                wgpu::IndexFormat::Uint32,
+                            );
+                            pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                            simple_index += 1;
+                        }
+                        Draw3d::StencilFill(_) => {
+                            let offset = (simple_index as u64 * self.simple_uniform_stride) as u32;
+                            pass.set_pipeline(
+                                &simple_pipelines[&(target.format, SimpleKind::Fill)],
+                            );
+                            pass.set_bind_group(0, &simple_uniforms.1, &[offset]);
+                            pass.set_stencil_reference(1);
+                            pass.draw(0..3, 0..1);
+                            simple_index += 1;
+                        }
                     }
                     quad_state = None;
-                    next_mesh += 1;
+                    next_3d += 1;
                 }
                 if first >= quads.len() {
                     break;
                 }
                 // A batch of quads with one texture and blend mode, ending
-                // before the next mesh.
-                let limit = mesh_draws
-                    .get(next_mesh)
+                // before the next 3D item.
+                let limit = draws_3d
+                    .get(next_3d)
                     .map_or(quads.len(), |m| m.before_quad.min(quads.len()));
                 let texture = quads[first].texture;
                 let batch_blend = blend_of(first);
@@ -607,6 +848,34 @@ impl Renderer {
                 self.mesh_uniform_stride,
                 draws.next_power_of_two(),
             );
+        }
+    }
+
+    fn ensure_simple_uniform_capacity(&self, draws: usize) {
+        let needed = draws.max(1) as u64 * self.simple_uniform_stride;
+        let mut uniforms = self.simple_uniforms.borrow_mut();
+        if uniforms.0.size() < needed {
+            *uniforms = uniform_buffer(
+                &self.gpu.device,
+                "shadow uniforms",
+                &self.simple_uniform_layout,
+                self.simple_uniform_stride,
+                std::mem::size_of::<SimpleUniforms>() as u64,
+                draws.next_power_of_two(),
+            );
+        }
+    }
+
+    fn ensure_volume_capacity(&self, vertices: usize) {
+        let needed = (vertices.max(1) * std::mem::size_of::<[f32; 3]>()) as u64;
+        let mut buffer = self.volume_vertices.borrow_mut();
+        if buffer.size() < needed {
+            *buffer = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("shadow volume vertices"),
+                size: needed.next_power_of_two(),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
         }
     }
 
@@ -734,14 +1003,35 @@ impl Renderer {
             .insert((format, blend), pipeline);
     }
 
-    fn ensure_mesh_pipeline(&self, format: wgpu::TextureFormat, blend: BlendMode, cull: bool) {
-        if self
-            .mesh_pipelines
-            .borrow()
-            .contains_key(&(format, blend, cull))
-        {
+    fn ensure_mesh_pipeline(&self, variant: MeshVariant) {
+        if self.mesh_pipelines.borrow().contains_key(&variant) {
             return;
         }
+        let MeshVariant {
+            format,
+            blend,
+            cull,
+            depth_write,
+            stencil_once,
+        } = variant;
+        // `stencil_once`: draw where the stencil differs from the
+        // reference and set it to the reference.
+        let stencil = if stencil_once {
+            let face = wgpu::StencilFaceState {
+                compare: wgpu::CompareFunction::NotEqual,
+                fail_op: wgpu::StencilOperation::Keep,
+                depth_fail_op: wgpu::StencilOperation::Keep,
+                pass_op: wgpu::StencilOperation::Replace,
+            };
+            wgpu::StencilState {
+                front: face,
+                back: face,
+                read_mask: 0xff,
+                write_mask: 0xff,
+            }
+        } else {
+            wgpu::StencilState::default()
+        };
         let pipeline = self
             .gpu
             .device
@@ -767,12 +1057,13 @@ impl Renderer {
                     cull_mode: cull.then_some(wgpu::Face::Back),
                     ..Default::default()
                 },
-                // `Setup3D`: depth test `<=` with writes.
+                // `Setup3D`: depth test `<=` with writes (the floor
+                // shadows turn the writes off).
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(true),
+                    depth_write_enabled: Some(depth_write),
                     depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                    stencil: wgpu::StencilState::default(),
+                    stencil,
                     bias: wgpu::DepthBiasState::default(),
                 }),
                 multisample: wgpu::MultisampleState::default(),
@@ -789,9 +1080,135 @@ impl Renderer {
                 multiview_mask: None,
                 cache: None,
             });
-        self.mesh_pipelines
+        self.mesh_pipelines.borrow_mut().insert(variant, pipeline);
+    }
+
+    /// The position-only pipelines of the stencil shadows
+    /// (`C3DShadowVolume::RenderToStencilBuffer`, `RenderToScene`,
+    /// `CAdSceneGeometry::RenderShadowGeometry`).
+    fn ensure_simple_pipeline(&self, format: wgpu::TextureFormat, kind: SimpleKind) {
+        if self.simple_pipelines.borrow().contains_key(&(format, kind)) {
+            return;
+        }
+        let keep = wgpu::StencilOperation::Keep;
+        let count = |pass_op| wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Always,
+            fail_op: keep,
+            depth_fail_op: keep,
+            pass_op,
+        };
+        let (face, cull, depth_compare, depth_write, color_writes, blend, entry) = match kind {
+            // The faces toward the camera are the clockwise ones
+            // (`D3DCULL_CCW` keeps them): count up on depth pass.
+            SimpleKind::VolumeIncrement => (
+                count(wgpu::StencilOperation::IncrementClamp),
+                Some(wgpu::Face::Back),
+                wgpu::CompareFunction::LessEqual,
+                false,
+                wgpu::ColorWrites::empty(),
+                None,
+                "vs_main",
+            ),
+            SimpleKind::VolumeDecrement => (
+                count(wgpu::StencilOperation::DecrementClamp),
+                Some(wgpu::Face::Front),
+                wgpu::CompareFunction::LessEqual,
+                false,
+                wgpu::ColorWrites::empty(),
+                None,
+                "vs_main",
+            ),
+            // The receivers: depth only, back faces culled as the original
+            // sets `D3DCULL_CCW` for them.
+            SimpleKind::DepthOnly => (
+                wgpu::StencilFaceState::IGNORE,
+                Some(wgpu::Face::Back),
+                wgpu::CompareFunction::LessEqual,
+                true,
+                wgpu::ColorWrites::empty(),
+                None,
+                "vs_main",
+            ),
+            // Where `1 <= stencil`, blended, no depth test; the stencil is
+            // zeroed where the fill passes.
+            SimpleKind::Fill => (
+                wgpu::StencilFaceState {
+                    compare: wgpu::CompareFunction::LessEqual,
+                    fail_op: keep,
+                    depth_fail_op: keep,
+                    pass_op: wgpu::StencilOperation::Zero,
+                },
+                None,
+                wgpu::CompareFunction::Always,
+                false,
+                wgpu::ColorWrites::ALL,
+                Some(wgpu::BlendState::ALPHA_BLENDING),
+                "vs_fill",
+            ),
+        };
+        // A shadow volume's `[f32; 3]` vertices, or the position at the
+        // start of a `MeshVertex`.
+        let buffers = [Some(wgpu::VertexBufferLayout {
+            array_stride: if kind == SimpleKind::DepthOnly {
+                std::mem::size_of::<MeshVertex>() as u64
+            } else {
+                std::mem::size_of::<[f32; 3]>() as u64
+            },
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+        })];
+        let pipeline = self
+            .gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("shadow"),
+                layout: Some(&self.simple_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &self.simple_shader,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    buffers: if kind == SimpleKind::Fill {
+                        &[]
+                    } else {
+                        &buffers
+                    },
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Cw,
+                    cull_mode: cull,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(depth_write),
+                    depth_compare: Some(depth_compare),
+                    stencil: wgpu::StencilState {
+                        front: face,
+                        back: face,
+                        read_mask: 0xff,
+                        write_mask: 0xff,
+                    },
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.simple_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend,
+                        write_mask: color_writes,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+        self.simple_pipelines
             .borrow_mut()
-            .insert((format, blend, cull), pipeline);
+            .insert((format, kind), pipeline);
     }
 }
 
@@ -802,25 +1219,54 @@ fn mesh_uniform_buffer(
     stride: u64,
     slots: usize,
 ) -> (wgpu::Buffer, wgpu::BindGroup) {
+    uniform_buffer(
+        device,
+        "mesh uniforms",
+        layout,
+        stride,
+        std::mem::size_of::<MeshUniforms>() as u64,
+        slots,
+    )
+}
+
+/// A uniform buffer of `slots` aligned slots of `size` bytes, bound
+/// with a dynamic offset.
+fn uniform_buffer(
+    device: &wgpu::Device,
+    label: &str,
+    layout: &wgpu::BindGroupLayout,
+    stride: u64,
+    size: u64,
+    slots: usize,
+) -> (wgpu::Buffer, wgpu::BindGroup) {
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("mesh uniforms"),
+        label: Some(label),
         size: stride * slots.max(1) as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
     let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("mesh uniforms"),
+        label: Some(label),
         layout,
         entries: &[wgpu::BindGroupEntry {
             binding: 0,
             resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                 buffer: &buffer,
                 offset: 0,
-                size: wgpu::BufferSize::new(std::mem::size_of::<MeshUniforms>() as u64),
+                size: wgpu::BufferSize::new(size),
             }),
         }],
     });
     (buffer, group)
+}
+
+/// The uniforms of a position-only draw: the world matrix followed by
+/// the view-projection, and the fill colour.
+fn simple_uniforms(view_projection: &Matrix, world: &Matrix, color: [f32; 4]) -> SimpleUniforms {
+    SimpleUniforms {
+        mvp: multiply(view_projection, world),
+        color,
+    }
 }
 
 /// The uniforms of a mesh draw as the shader reads them.

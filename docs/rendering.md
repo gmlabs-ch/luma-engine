@@ -137,11 +137,12 @@ of its size, owned by the renderer and recreated when the size changes
 (`CBRenderD3D::Fill` clears target, depth and stencil together).
 Quads are drawn with the depth test off and no depth writes
 (`Setup2D`: `ZENABLE` false), so 2D drawing never touches the buffer;
-meshes test `<=` and write (`Setup3D`). The depth therefore only orders
-3D things among themselves in a frame: an actor behind another, later
-the shadow-receiving geometry; a 2D quad drawn after a mesh covers it
-regardless of depth, as a foreground layer must. The stencil is cleared
-to zero and unused so far; the stencil shadow volumes will use it.
+meshes test `<=` and write (`Setup3D`), unless the draw turns the
+writes off (`depth_write`, for the shadows laid on the floor). The
+depth therefore only orders 3D things among themselves in a frame: an
+actor behind another, the shadow-receiving geometry; a 2D quad drawn
+after a mesh covers it regardless of depth, as a foreground layer must.
+The stencil is cleared to zero for the shadow items below.
 
 **Meshes.** `Renderer::upload_mesh(vertices, indices)` returns a
 `MeshHandle`; `MeshVertex` is position, normal and one UV in model
@@ -231,18 +232,60 @@ false; by default both sides are drawn.
 **Uniforms.** Each mesh draw has a 720-byte slot (two matrices, five
 `vec4`s, eight lights of four `vec4`s) in one uniform buffer, bound with
 a dynamic offset at the device's alignment (256 bytes); the buffer grows
-with the number of draws in a frame.
+with the number of draws in a frame. The position-only draws below
+share a second buffer of 80-byte slots (one matrix and a colour).
 
-Not in the renderer: shadows (simple, flat and stencil, tasks 12a to
-12c of [3d-actors.md](3d-actors.md)) and the geometry debug overlay;
-they will be built on this pass.
+### Shadow items
+
+The stencil shadows of the 3D actors ([3d-actors.md](3d-actors.md),
+section 10.4) need three more kinds of item, all 3D items of the
+`DrawList` like the meshes (`Draw3d`, `push_3d`, and the helpers
+`push_shadow_volume`, `push_depth_only`, `push_stencil_fill`), drawn at
+their place in the order with a position-only shader (`shadow.wgsl`).
+The renderer knows nothing of actors: it counts triangles into the
+stencil and fills where the count says.
+
+- **`ShadowVolumeDraw`** (`C3DShadowVolume::RenderToStencilBuffer`):
+  triangles in model space (`Vec<[f32; 3]>`, built by the caller every
+  frame), a world and a view-projection matrix. Drawn twice with the
+  depth test `<=` against the depth buffer as it is and no depth or
+  colour writes: once culling the counter-clockwise faces (the faces
+  turned toward the camera remain) with stencil `IncrementClamp` on
+  depth pass, once culling the clockwise ones with `DecrementClamp`.
+  A pixel of a surface already in the depth buffer and inside the
+  volume ends with a count of one or more (its front face passes, its
+  back face fails); a pixel with nothing behind it, or outside the
+  volume, ends at zero. The vertices of a frame's volumes are
+  concatenated into one dynamic vertex buffer.
+- **`DepthOnlyDraw`** (`CAdSceneGeometry::RenderShadowGeometry`): an
+  uploaded mesh written to the depth buffer only (colour writes off,
+  depth writes on, test `<=`), its counter-clockwise faces culled when
+  asked, as the original sets `D3DCULL_CCW` for the receivers. The
+  shadow receivers of a scene go in before the actors so that the
+  volumes are tested against them; a receiver also hides the meshes
+  drawn later behind it, which authors use on purpose.
+- **`StencilFill`** (`RenderToScene`): a viewport-wide triangle of one
+  colour, alpha-blended, no depth test, drawn where `1 <= stencil`
+  (`D3DCMP_LESSEQUAL` with reference 1), whose stencil pass operation
+  is `Zero`: the stencil is cleared where the fill passed, as the
+  original clears it after each actor, without a clear call.
+
+Two options of `MeshDraw` serve the other shadow types: `depth_write`
+(off for the floor shadows, `ZWRITEENABLE` false in `C3DShadowGen`) and
+`stencil_once: Option<u8>`, which draws a fragment only where the
+stencil differs from the reference and sets it to the reference
+(`NotEqual` / `Replace`), so that the overlapping triangles of a
+translucent silhouette darken the floor once (the flat shadows).
+
+Not in the renderer: the geometry debug overlay (`Scene.ShowGeometry`,
+wireframe in the original), which needs a line pipeline.
 
 ## Not yet
 
 - Texture atlases: one texture per image is enough for the games of the
   era and keeps streaming simple; an atlas can come when draw-call counts
   matter.
-- Shadows of 3D actors and the geometry overlay (see above).
+- The geometry overlay of 3D scenes (see above).
 - Render-to-texture effects. Particles are quads pushed by
   `luma-adventure` with their rotation and their owner's blend mode (see
   [particles.md](particles.md)); they need no renderer feature of their

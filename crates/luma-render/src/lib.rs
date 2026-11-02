@@ -11,7 +11,8 @@
 //!   pixels, with a per-layer offset for scrolling and, per quad,
 //!   [`Attributes`]: a rotation around a pivot and a [`BlendMode`]; and,
 //!   between the quads, lit 3D meshes ([`MeshDraw`]) drawn in clip space
-//!   with a depth test among themselves.
+//!   with a depth test among themselves, and the items of the stencil
+//!   shadows ([`ShadowVolumeDraw`], [`DepthOnlyDraw`], [`StencilFill`]).
 //! - [`Renderer`]: draws a list into any [`Target`], batching consecutive
 //!   quads of the same texture and blend mode; owns the uploaded meshes
 //!   ([`MeshHandle`]) and the depth and stencil buffer.
@@ -36,8 +37,9 @@ pub mod texture;
 pub mod window;
 
 pub use draw::{
-    Attributes, BlendMode, DrawList, Fog, IDENTITY, Light, Lights, MAX_LIGHTS, Matrix, MeshDraw,
-    MeshHandle, MeshMaterial, MeshVertex, PlacedMesh, Quad, Rect, matrix,
+    Attributes, BlendMode, DepthOnlyDraw, Draw3d, DrawList, Fog, IDENTITY, Light, Lights,
+    MAX_LIGHTS, Matrix, MeshDraw, MeshHandle, MeshMaterial, MeshVertex, Placed3d, Quad, Rect,
+    ShadowVolumeDraw, StencilFill, matrix, multiply,
 };
 pub use error::{Error, Result};
 pub use gpu::Gpu;

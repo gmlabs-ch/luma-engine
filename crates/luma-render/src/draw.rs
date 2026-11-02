@@ -1,5 +1,10 @@
 //! The draw list: what to draw this frame, in order: textured quads and,
-//! between them, lit 3D meshes.
+//! between them, the 3D items: lit meshes, shadow volumes, depth-only
+//! receivers and the stencil-masked fill of the stencil shadows.
+//!
+//! The shadow items follow `3DShadowVolume.cpp`, `3DShadowGen.cpp` and
+//! `AdSceneGeometry.cpp` (`RenderShadowGeometry`) of Wintermute Engine
+//! 1.x (MIT License, Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
 use std::ops::Range;
 
@@ -20,6 +25,19 @@ pub fn matrix(cols: [f32; 16]) -> Matrix {
     let mut m = [[0.0; 4]; 4];
     for (c, column) in m.iter_mut().enumerate() {
         column.copy_from_slice(&cols[c * 4..c * 4 + 4]);
+    }
+    m
+}
+
+/// The product `a * b` of two column-major matrices: applied to a column
+/// vector, `b` first, then `a` (a world matrix followed by the camera's
+/// is `multiply(&view_projection, &world)`).
+pub fn multiply(a: &Matrix, b: &Matrix) -> Matrix {
+    let mut m = [[0.0; 4]; 4];
+    for (c, column) in m.iter_mut().enumerate() {
+        for (r, cell) in column.iter_mut().enumerate() {
+            *cell = (0..4).map(|k| a[k][r] * b[c][k]).sum();
+        }
     }
     m
 }
@@ -226,11 +244,22 @@ pub struct MeshDraw<'a> {
     pub cull_backfaces: bool,
     /// How the mesh is blended over what is under it.
     pub blend: BlendMode,
+    /// Write the depth of the fragments drawn. The shadows laid flat on
+    /// the floor are drawn with the depth test but without writes
+    /// (`ZWRITEENABLE` off in `C3DShadowGen`).
+    pub depth_write: bool,
+    /// Touch each pixel at most once per reference value: a fragment is
+    /// drawn only where the stencil holds another value, and sets it to
+    /// this one. A translucent silhouette whose triangles overlap on
+    /// screen (a flat shadow) then darkens evenly. `None` leaves the
+    /// stencil alone.
+    pub stencil_once: Option<u8>,
 }
 
 impl<'a> MeshDraw<'a> {
     /// A whole mesh with the default material, no texture, no light, no
-    /// fog, both faces, alpha blending, at the given matrices.
+    /// fog, both faces, alpha blending, depth writes, at the given
+    /// matrices.
     pub fn new(mesh: MeshHandle, world: Matrix, view_projection: Matrix) -> MeshDraw<'a> {
         MeshDraw {
             mesh,
@@ -244,19 +273,83 @@ impl<'a> MeshDraw<'a> {
             fog: None,
             cull_backfaces: false,
             blend: BlendMode::Normal,
+            depth_write: true,
+            stencil_once: None,
         }
     }
 }
 
-/// A mesh draw and its place in the order: it is drawn before the quad
+/// A shadow volume (`C3DShadowVolume`): triangles, in model space, that
+/// are counted into the stencil buffer and never coloured. Drawn twice
+/// with the depth test against what is in the depth buffer and no
+/// depth writes: the faces turned toward the camera (clockwise)
+/// increment the stencil where they pass the depth test, the others
+/// decrement it (`RenderToStencilBuffer`, both on depth pass). A pixel
+/// of a surface inside the volume ends with a count above zero; a
+/// [`StencilFill`] then darkens it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShadowVolumeDraw {
+    /// The triangles, three vertices each, in model space.
+    pub vertices: Vec<[f32; 3]>,
+    /// Model to world.
+    pub world: Matrix,
+    /// World to clip space.
+    pub view_projection: Matrix,
+}
+
+/// A mesh drawn into the depth buffer only (`RenderShadowGeometry`): the
+/// invisible shadow receivers of a scene, so that the shadow volumes
+/// are tested against them and the actors behind them are hidden.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DepthOnlyDraw {
+    /// The mesh.
+    pub mesh: MeshHandle,
+    /// Model to world.
+    pub world: Matrix,
+    /// World to clip space.
+    pub view_projection: Matrix,
+    /// Cull the counter-clockwise faces, as the original does for the
+    /// receivers (`D3DCULL_CCW`).
+    pub cull_backfaces: bool,
+}
+
+/// A fill of the whole viewport with a colour where the stencil count is
+/// one or more (`RenderToScene`): alpha-blended, without a depth test,
+/// and it zeroes the stencil where it passes, so that the next actor's
+/// volumes start from a clean buffer (the original clears the stencil
+/// after it).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StencilFill {
+    /// The colour and its opacity (the shadow colour).
+    pub color: Rgba,
+}
+
+/// A 3D item of the draw list.
+// A mesh draw carries its eight lights, so the variants differ in size;
+// a frame has a few dozen items, and a box per item would cost more
+// than the padding.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone)]
+pub enum Draw3d<'a> {
+    /// A lit mesh.
+    Mesh(MeshDraw<'a>),
+    /// A shadow volume counted into the stencil.
+    ShadowVolume(ShadowVolumeDraw),
+    /// A mesh written to the depth buffer only.
+    DepthOnly(DepthOnlyDraw),
+    /// The stencil-masked fill.
+    StencilFill(StencilFill),
+}
+
+/// A 3D draw and its place in the order: it is drawn before the quad
 /// with this index.
 #[derive(Debug, Clone)]
-pub struct PlacedMesh<'a> {
-    /// Index of the first quad drawn after the mesh (the number of quads
+pub struct Placed3d<'a> {
+    /// Index of the first quad drawn after the item (the number of quads
     /// pushed before it).
     pub before_quad: usize,
     /// The draw.
-    pub draw: MeshDraw<'a>,
+    pub draw: Draw3d<'a>,
 }
 
 /// An axis-aligned rectangle in logical pixels.
@@ -362,9 +455,9 @@ pub struct DrawList<'a> {
     quads: Vec<Quad<'a>>,
     /// One per quad.
     attributes: Vec<Attributes>,
-    /// The mesh draws, each before the quad whose index it carries;
+    /// The 3D draws, each before the quad whose index it carries;
     /// `before_quad` never decreases along the list.
-    meshes: Vec<PlacedMesh<'a>>,
+    draws_3d: Vec<Placed3d<'a>>,
 }
 
 impl<'a> DrawList<'a> {
@@ -377,15 +470,15 @@ impl<'a> DrawList<'a> {
             offset: (0.0, 0.0),
             quads: Vec::new(),
             attributes: Vec::new(),
-            meshes: Vec::new(),
+            draws_3d: Vec::new(),
         }
     }
 
-    /// Removes every quad and mesh, keeping the size and offset.
+    /// Removes every quad and 3D draw, keeping the size and offset.
     pub fn clear(&mut self) {
         self.quads.clear();
         self.attributes.clear();
-        self.meshes.clear();
+        self.draws_3d.clear();
     }
 
     /// The quads, in drawing order.
@@ -399,10 +492,10 @@ impl<'a> DrawList<'a> {
         &self.attributes
     }
 
-    /// The mesh draws with their places among the quads, in drawing
+    /// The 3D draws with their places among the quads, in drawing
     /// order.
-    pub fn meshes(&self) -> &[PlacedMesh<'a>] {
-        &self.meshes
+    pub fn draws_3d(&self) -> &[Placed3d<'a>] {
+        &self.draws_3d
     }
 
     /// Sets the offset added to the following quads.
@@ -431,7 +524,30 @@ impl<'a> DrawList<'a> {
     /// does not apply: a mesh is placed by its matrices (the scroll of a
     /// 3D scene is in its camera, see `docs/3d-actors.md`).
     pub fn push_mesh(&mut self, draw: MeshDraw<'a>) {
-        self.meshes.push(PlacedMesh {
+        self.push_3d(Draw3d::Mesh(draw));
+    }
+
+    /// Appends a shadow volume at this place in the order (see
+    /// [`ShadowVolumeDraw`]).
+    pub fn push_shadow_volume(&mut self, draw: ShadowVolumeDraw) {
+        self.push_3d(Draw3d::ShadowVolume(draw));
+    }
+
+    /// Appends a depth-only mesh at this place in the order (see
+    /// [`DepthOnlyDraw`]).
+    pub fn push_depth_only(&mut self, draw: DepthOnlyDraw) {
+        self.push_3d(Draw3d::DepthOnly(draw));
+    }
+
+    /// Appends the stencil-masked fill at this place in the order (see
+    /// [`StencilFill`]).
+    pub fn push_stencil_fill(&mut self, fill: StencilFill) {
+        self.push_3d(Draw3d::StencilFill(fill));
+    }
+
+    /// Appends any 3D item at this place in the order.
+    pub fn push_3d(&mut self, draw: Draw3d<'a>) {
+        self.draws_3d.push(Placed3d {
             before_quad: self.quads.len(),
             draw,
         });
@@ -477,6 +593,22 @@ mod tests {
         let m = matrix(cols);
         assert_eq!(m[0], [0.0, 1.0, 2.0, 3.0]);
         assert_eq!(m[3], [12.0, 13.0, 14.0, 15.0]);
+    }
+
+    #[test]
+    fn multiply_applies_the_right_matrix_first() {
+        // A translation by (1, 2, 3) then a scale by 2.
+        let mut translation = IDENTITY;
+        translation[3] = [1.0, 2.0, 3.0, 1.0];
+        let mut scale = IDENTITY;
+        scale[0][0] = 2.0;
+        scale[1][1] = 2.0;
+        scale[2][2] = 2.0;
+        let m = multiply(&scale, &translation);
+        assert_eq!(m[3], [2.0, 4.0, 6.0, 1.0]);
+        assert_eq!(m[0], [2.0, 0.0, 0.0, 0.0]);
+        let m = multiply(&translation, &scale);
+        assert_eq!(m[3], [1.0, 2.0, 3.0, 1.0]);
     }
 
     #[test]
