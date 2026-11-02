@@ -14,7 +14,9 @@
 //! The [`Engine`] runs scripts: it executes their instructions, spawns
 //! threads for events and methods, and resolves sleeps and waits once per
 //! frame through the [`Host`] trait, which the embedding program
-//! implements. The rules are summarised in `docs/scripting.md`. With the
+//! implements. The rules are summarised in `docs/scripting.md`. The
+//! library classes scripts create with `new` (`String`, `Array`, `Date`,
+//! `File`, `MemBuffer`) are in [`classes`], for the host to own. With the
 //! `serde` feature, an [`EngineSnapshot`] captures every script and
 //! global for a saved game, and puts them back.
 //!
@@ -22,6 +24,7 @@
 //! `NOTICE`.
 
 pub mod asm;
+pub mod classes;
 mod engine;
 mod error;
 mod host;

@@ -194,3 +194,35 @@ impl World {
         })
     }
 }
+
+impl World {
+    /// The sound class of a volume property, `None` for the master volume.
+    fn volume_kind(name: &str) -> Option<SoundType> {
+        match name {
+            "SFXVolume" => Some(SoundType::Sfx),
+            "SpeechVolume" => Some(SoundType::Speech),
+            "MusicVolume" => Some(SoundType::Music),
+            _ => None,
+        }
+    }
+
+    /// `Game.SFXVolume`, `SpeechVolume`, `MusicVolume`, `MasterVolume`
+    /// read: the global volume in percent. The original engine warns at
+    /// every access that the property form is obsolete; Luma warns once,
+    /// when the property is written.
+    pub(crate) fn volume_property(&self, name: &str) -> Value {
+        Value::Int(match World::volume_kind(name) {
+            Some(kind) => self.sounds.audio.volume(kind),
+            None => self.sounds.audio.master_volume(),
+        })
+    }
+
+    /// The volume properties written.
+    pub(crate) fn set_volume_property(&mut self, name: &str, percent: i32) {
+        self.log_once(&format!("**Warning** The {name} attribute is obsolete"));
+        match World::volume_kind(name) {
+            Some(kind) => self.sounds.audio.set_volume(kind, percent),
+            None => self.sounds.audio.set_master_volume(percent),
+        }
+    }
+}

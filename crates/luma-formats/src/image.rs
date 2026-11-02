@@ -85,6 +85,56 @@ impl Image {
         Ok(out)
     }
 
+    /// Encodes the image as a 24-bit BMP file, the original engine's
+    /// screenshot format (`CBImage::SaveBMPFile`); the alpha channel is
+    /// dropped.
+    pub fn to_bmp(&self) -> Result<Vec<u8>> {
+        let rgb: Vec<u8> = self
+            .pixels
+            .chunks_exact(4)
+            .flat_map(|p| [p[0], p[1], p[2]])
+            .collect();
+        let mut out = Vec::new();
+        image::codecs::bmp::BmpEncoder::new(&mut out)
+            .write_image(
+                &rgb,
+                self.width,
+                self.height,
+                image::ExtendedColorType::Rgb8,
+            )
+            .map_err(|err| Error::Image {
+                reason: err.to_string(),
+            })?;
+        Ok(out)
+    }
+
+    /// The image scaled to a size, with a bilinear filter (for
+    /// thumbnails and scaled screenshots).
+    pub fn resized(&self, width: u32, height: u32) -> Image {
+        let (width, height) = (width.max(1), height.max(1));
+        let Some(source) = image::RgbaImage::from_raw(self.width, self.height, self.pixels.clone())
+        else {
+            return Image {
+                width,
+                height,
+                pixels: vec![0; (width * height * 4) as usize],
+                has_alpha_channel: self.has_alpha_channel,
+            };
+        };
+        let scaled = image::imageops::resize(
+            &source,
+            width,
+            height,
+            image::imageops::FilterType::Triangle,
+        );
+        Image {
+            width,
+            height,
+            pixels: scaled.into_raw(),
+            has_alpha_channel: self.has_alpha_channel,
+        }
+    }
+
     /// The pixel at `(x, y)`, or `None` outside the image.
     pub fn pixel(&self, x: u32, y: u32) -> Option<Rgba> {
         if x >= self.width || y >= self.height {

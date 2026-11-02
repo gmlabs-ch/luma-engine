@@ -17,6 +17,7 @@ behave as their authors saw them.
 | `Script` | One execution: instruction pointer, value stack, `this` stack, scopes, call stack, state. A thread is a `Script` too. |
 | `Engine` | Loads programs, keeps the scripts and the engine-wide globals, runs a tick. |
 | `Host` | What the embedding program provides: files, time, logging, native objects and their methods, global functions, and a hook after each native call. |
+| `ClassHost` | What the script library classes (`new String`, `Array`, `Date`, `File`, `MemBuffer`) need from the program: files to read and a place to write, the clock, new handles. |
 
 ## Values and variables
 
@@ -70,6 +71,16 @@ the engine's built-ins (`Sleep`, `WaitFor`, `Random`, `ToString`, `ToInt`,
 `GetRValue` and the like), otherwise a runtime error and `null`. A
 function listed in the script's externals table (a Windows DLL import) is
 logged as unsupported and yields `null`.
+
+`new Class(args)` compiles to `CREATE_OBJECT`, `PUSH_THIS_FROM_STACK`, the
+arguments and their count, `EXTERNAL_CALL Class`, `POP_THIS`, `POP_EMPTY`:
+a placeholder object is made `this`, the constructor fills it, and the
+call's own result is dropped, so that the object stays on the stack as
+the value of the expression. A constructor answers with
+`Return::constructed`, which writes the object into the `this` slot and
+yields `null`; `new Object()` is answered by the engine with nothing to
+add, the placeholder being the object. A constructor nobody knows is an
+undefined function: an error is logged and the placeholder stays.
 
 Script functions (`CALL`) are ordinary jumps with a return address; the
 callee opens a scope, fixes the argument count with `CORRECT_STACK`
@@ -155,12 +166,15 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | Items (`ITEMS` of `default.game`) | `Name`, `Caption`, `X`, `Y`, `Amount`, `DisplayAmount`, `AmountOffsetX`, `AmountOffsetY`, `AmountAlign`, `AmountString`, `CursorCombined` | `SetSprite`, `GetSprite`, `SetHoverSprite`, `GetHoverSprite`, `SetNormalCursor`, `GetNormalCursor`, `SetHoverCursor`, `GetHoverCursor`, `SetFont`, `GetFont`, `SetCaption` |
 | `Game`, dialogue | `ResponsesVisible`, `LastResponse`, `LastResponseOrig` | `AddResponse`, `AddResponseOnce`, `AddResponseOnceGame`, `GetResponse`, `GetNumResponses`, `ResetResponse`, `ClearResponses`, `StartDlgBranch`, `EndDlgBranch`, `GetCurrentDlgBranch`, `GetResponsesWindow`, `LoadResponseBox` (see [game-loop.md](game-loop.md#dialogue-responses)) |
 | `Game`, videos | `VideoSubtitles`, `VideoSkipButton` | `PlayTheora`, `PlayVideo`, `StopTheora`, `StopVideo`, `IsVideoPlaying` |
+| `Game`, system | `FPS`, `CurrentTime`, `WindowsTime`, `SoundAvailable`, `WindowedMode`, `AcceleratedMode`, `TextEncoding`, `SFXVolume`, `SpeechVolume`, `MusicVolume`, `MasterVolume`, `StartupScene` | `Caption`, `RunScript`, `GetFileChecksum`, `OpenDocument`, `Reset`, `LockMouseRect`, `LoadInventoryBox` (see [game-loop.md](game-loop.md#a-frame)) |
+| `Game`, saved games and settings | `SaveDirectory`, `MostRecentSaveSlot` | `SaveGame`, `LoadGame`, `IsSaveSlotUsed`, `GetSaveSlotDescription`, `EmptySaveSlot`, `StoreSaveThumbnail`, `DeleteSaveThumbnail`, `Screenshot`, `ScreenshotEx`, `SetLoadingScreen`, `SetSavingScreen`, `DisplayLoadingIcon`, `HideLoadingIcon`, `RegReadNumber`, `RegReadString`, `RegWriteNumber`, `RegWriteString` (see [saving.md](saving.md)) |
 | `Game`, actors and entities, inventory | `Game.SelectedItem`, `InventoryVisible`, `InventoryScrollOffset`, `NumItems`, `TotalNumItems`, `SmartItemCursor` | `TakeItem`, `DropItem`, `HasItem`, `GetItem`, `Game.IsItemTaken`, `Game.QueryItem`, `Game.GetInventoryWindow` |
 | Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
 | Sprite objects (`GetSpriteObject` of an entity, in a scene or in an entity container) | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner`, `Filename` | `Reset`, `Pause`, `Play`, `GetFrame`, `AddFrame`, `InsertFrame`, `DeleteFrame` (by index or by frame object) |
 | Frames (`Sprite.GetFrame`, `AddFrame`, `InsertFrame`) | `Delay`, `Keyframe`, `KillSounds`, `MoveX`, `MoveY`, `NumSubframes`, `NumEvents` | `GetSound`, `SetSound`, `GetSubframe`, `AddSubframe`, `InsertSubframe`, `DeleteSubframe`, `AddEvent`, `DeleteEvent`; a frame with a single sub-frame answers for it (`frame.MirrorX`, `frame.SetImage(...)`) |
 | Sub-frames (`Frame.GetSubframe`, `AddSubframe`, `InsertSubframe`) | `HotspotX`, `HotspotY`, `MirrorX`, `MirrorY`, `Decoration`, `AlphaColor`, `TransparentColor` (read only), `Is2DOnly`, `Is3DOnly` | `GetImage`, `SetImage` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
+| `String`, `Array`, `Date`, `File`, `MemBuffer` objects | see [Script library classes](#script-library-classes) | |
 
 When a frame of an object's sprite becomes current, its `SOUND` plays,
 `FrameChanged` is raised on the sprite object (a script attached to it
@@ -259,10 +273,50 @@ do this for any host.
 What later milestones implement is accepted and logged once as "not
 implemented": transitions.
 
+## Script library classes
+
+`new String(...)`, `new Array(...)`, `new Date(...)`, `new File(...)` and
+`new MemBuffer(...)` create the objects of the script library,
+implemented in `luma_script::classes` after WME 1.x's `SXString`,
+`SXArray`, `SXDate`, `SXFile` and `SXMemBuffer`. The host owns them like
+its other natives (the adventure layer keeps them in its object table,
+so they are saved with the game and never freed, where the original
+frees them by reference count) and forwards property reads, writes and
+method calls to the class; what the classes need from the program is the
+`ClassHost` trait. Like every native they convert to `0`, `0.0` and
+`false` (so `if (obj)` is false and `obj + 1` is `1.000000`); objects of
+different classes compare by class name. Assigning a plain value to a
+variable holding one replaces the object, as `POP_VAR` does in the
+original (it copies anything but a native), so `s = "text"` leaves a
+plain string.
+
+Strings are sequences of characters: every position, length and index
+counts characters, which is what the original does with a UTF-8 game
+and, each byte being one character, with a Latin-1 game. Text read from
+and written to files is Latin-1, as the engine reads the game's files.
+
+| Class | Properties | Methods | Notes |
+|-------|------------|---------|-------|
+| `String` | `Type` (`string`), `Length`, `Capacity` (settable, never below the text and its terminator: a warning is logged) | `Substring(start, end)` (inclusive positions, swapped when reversed, clamped to the text), `Substr(start, length)` (to the end without a length; empty for a length of 0 or less), `ToUpperCase`, `ToLowerCase`, `IndexOf(text, from)` (-1 when absent; an empty text is found at `from`), `Split(separators)` (every character of the argument separates, `,` by default; an empty text gives one empty part; returns an `Array`) | `new String(text)`; `new String()` holds `[null]`, the string form of its missing argument; `new String(n)` is empty with a capacity of `n`. The string form is the text, and two `String` objects compare by text. Unknown properties read `null` and are not kept. |
+| `Array` | `Type` (`array`), `Length` (settable: truncates, or grows with unset elements), `[index]` (a name of digits only: `a["007"]` is `a[7]`; `a[1.0]` or `a[-1]` is nothing) | `Push(...)` (returns the new length), `Pop()` (`null` when empty) | `new Array()`; `new Array(n)`, `n` unset elements, any single argument being a length; `new Array(a, b, ...)` holds the arguments. Elements are copies. The string form joins the elements with commas, an unset element printing nothing and a `null` one `[null]`. Unknown properties are not kept. |
+| `Date` | `Type` (`date`) | `GetYear`, `GetMonth` (1 to 12), `GetDate`, `GetHours`, `GetMinutes`, `GetSeconds`, `GetWeekday` (0 is Sunday), the matching setters, `SetCurrentTime` | `new Date(y, m, d, h, mi, s)`, a missing field being 0 and every field normalised as `mktime` does, so `new Date(2020)` is 30 November 2019 and `SetMonth(13)` moves to January of the next year; `new Date()` is the host's clock. Dates compare by time. The string form is `asctime`'s, trailing newline included: `Wed Dec 31 13:30:25 2003\n`. |
+| `File` | `Type` (`file`), `Filename`, `Position`, `Length`, `TextMode`, `AccessMode` (0 closed, 1 read, 2 write, 3 append); other properties are kept | `SetFilename`, `OpenAsText(mode)`, `OpenAsBinary(mode)` (mode 1 when missing; another value logs an error and reads), `Close`, `SetPosition`, `Delete`, `Copy(dest, overwrite = true)`, `ReadLine`, `ReadText(n)`, `WriteLine`, `WriteText`, `ReadBool`, `ReadByte`, `ReadShort`, `ReadInt`, `ReadLong`, `ReadFloat`, `ReadDouble`, `ReadString` and the matching `Write...` | Reading finds a file a script wrote first, then the game's files (packages and loose files); writing, deleting and copying happen under the save directory, whose sub-directories are created as needed, and a name leaving it (`..`, an absolute path) fails. A method used in the wrong mode logs a runtime error and yields `null` (reads) or `false` (writes); reading past the end yields `null`. Text is Latin-1, `\r` is dropped when reading and lines are written with `\n`; binary values are little-endian, `ReadString`/`WriteString` a 32-bit length then the bytes, and `ReadShort` is 65536 plus the signed value, as in the original. The string form is the file name, `[file object]` without one. |
+| `MemBuffer` | `Type` (`membuffer`), `Size`; other properties are kept | `SetSize`, `GetBool`, `GetByte`, `GetShort` (65536 plus the signed value, as in the original), `GetInt`, `GetLong`, `GetFloat`, `GetDouble`, `GetString(pos, length)` (to the terminating zero without a length; the text stops at a zero either way), the matching setters (`SetString` writes the zero too), `GetPointer`, `SetPointer`, `DEBUG_Dump` | `new MemBuffer(n)` is `n` zero bytes, little-endian. An access outside the buffer logs `Set/Get method call is out of bounds` and yields `null` or `false`; an empty buffer has room for nothing (the original reads past its zero-length allocation). `GetPointer` and `SetPointer` deal in raw addresses for DLL plugins: they log a runtime error and yield `null` and `false`. `DEBUG_Dump` does nothing. |
+
+Deliberate differences from the original:
+
+- `new Date()` and `SetCurrentTime` take the host's clock, which the
+  adventure layer gives in UTC: the engine carries no time-zone data.
+- `ToUpperCase` and `ToLowerCase` use Unicode's simple case mapping and
+  keep a character whose mapping is several characters (`ß`); the
+  original uses the C library's locale.
+- Files are written with `\n` line ends; the original, on Windows, wrote
+  `\r\n` in text mode. Writes stay under the save directory.
+- An array's string form is not capped at 32 KB, and `new Array(n)` with
+  a negative `n` is empty where the original keeps the negative length.
+
 ## Not yet
 
-- The `String`, `Array`, `Date`, `File` and `MemBuffer` classes: `new`
-  returns an inert object.
 - `Scene.GetWaypointGroup` and `WaypointGroup.Active`: every waypoint
   group of a scene is used.
 - `GetSpriteObject` on actors.

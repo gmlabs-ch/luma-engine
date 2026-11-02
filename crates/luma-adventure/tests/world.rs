@@ -925,6 +925,266 @@ fn save_script() -> Vec<u8> {
     a.build()
 }
 
+fn settings_script() -> Vec<u8> {
+    // Game.RegWriteNumber("Volume", 80); Game.RegWriteString("Lang", "fr");
+    // then reads them back, with defaults for a missing key.
+    let mut a = Assembler::new("settings.script");
+    a.def_glob_var("result");
+    call(
+        &mut a,
+        "Game",
+        "RegReadNumber",
+        &[Arg::Str("Volume"), Arg::Int(100)],
+    );
+    store(&mut a, "volumeBefore");
+    call(
+        &mut a,
+        "Game",
+        "RegWriteNumber",
+        &[Arg::Str("Volume"), Arg::Int(80)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "RegWriteString",
+        &[Arg::Str("Lang"), Arg::Str("fr")],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "RegReadNumber",
+        &[Arg::Str("volume"), Arg::Int(100)],
+    );
+    store(&mut a, "volume");
+    call(
+        &mut a,
+        "Game",
+        "RegReadString",
+        &[Arg::Str("Lang"), Arg::Str("en")],
+    );
+    store(&mut a, "lang");
+    call(
+        &mut a,
+        "Game",
+        "RegReadString",
+        &[Arg::Str("Missing"), Arg::Str("none")],
+    );
+    store(&mut a, "missing");
+    call(
+        &mut a,
+        "Game",
+        "RegReadNumber",
+        &[Arg::Str("Lang"), Arg::Int(7)],
+    );
+    store(&mut a, "langAsNumber");
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
+fn services_script() -> Vec<u8> {
+    // The game's system properties and services.
+    let mut a = Assembler::new("services.script");
+    a.def_glob_var("result");
+    get(&mut a, "Game", "FPS");
+    store(&mut a, "fps");
+    get(&mut a, "Game", "WindowsTime");
+    store(&mut a, "windowsTime");
+    get(&mut a, "Game", "CurrentTime");
+    store(&mut a, "currentTime");
+    get(&mut a, "Game", "SoundAvailable");
+    store(&mut a, "soundAvailable");
+    get(&mut a, "Game", "WindowedMode");
+    store(&mut a, "windowed");
+    get(&mut a, "Game", "Accelerated");
+    store(&mut a, "accelerated");
+    // Game.SFXVolume = 40; Game.MasterVolume = 70;
+    a.push_int(40);
+    set(&mut a, "Game", "SFXVolume");
+    a.push_int(70);
+    set(&mut a, "Game", "MasterVolume");
+    get(&mut a, "Game", "SFXVolume");
+    store(&mut a, "sfx");
+    get(&mut a, "Game", "MasterVolume");
+    store(&mut a, "master");
+    call(&mut a, "Game", "GetGlobalSFXVolume", &[]);
+    store(&mut a, "sfxMethod");
+    get(&mut a, "Game", "TextEncoding");
+    store(&mut a, "encoding");
+    a.push_int(5);
+    set(&mut a, "Game", "TextEncoding");
+    get(&mut a, "Game", "TextEncoding");
+    store(&mut a, "encodingClamped");
+    get(&mut a, "Game", "StartupScene");
+    store(&mut a, "startupBefore");
+    a.push_string("scenes\\hall.scene");
+    set(&mut a, "Game", "StartupScene");
+    get(&mut a, "Game", "StartupScene");
+    store(&mut a, "startup");
+    a.push_string("Hi");
+    set(&mut a, "Game", "Caption");
+    call(&mut a, "Game", "Caption", &[Arg::Int(0)]);
+    store(&mut a, "caption");
+    call(&mut a, "Game", "GetFileChecksum", &[Arg::Str("string.tab")]);
+    store(&mut a, "crc");
+    call(
+        &mut a,
+        "Game",
+        "GetFileChecksum",
+        &[Arg::Str("string.tab"), Arg::Int(1)],
+    );
+    store(&mut a, "crcHex");
+    call(&mut a, "Game", "GetFileChecksum", &[Arg::Str("nope.tab")]);
+    store(&mut a, "crcMissing");
+    call(&mut a, "Game", "OpenDocument", &[Arg::Str("")]);
+    store(&mut a, "openedNothing");
+    call(&mut a, "Game", "RunScript", &[Arg::Str("settings.script")]);
+    store(&mut a, "ran");
+    call(&mut a, "Game", "RunScript", &[Arg::Str("nope.script")]);
+    store(&mut a, "ranMissing");
+    a.emit(Instruction::Ret);
+    a.build()
+}
+
+fn misc_script() -> Vec<u8> {
+    // Game.Msg("Hello there"); Game.LockMouseRect(4, 4, 20, 20);
+    let mut a = Assembler::new("misc.script");
+    a.def_glob_var("result");
+    call(&mut a, "Game", "Msg", &[Arg::Str("Hello there")]);
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "LockMouseRect",
+        &[Arg::Int(20), Arg::Int(20), Arg::Int(4), Arg::Int(4)],
+    );
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::Ret);
+    // on "Unlock": Game.LockMouseRect();
+    a.event("Unlock");
+    a.emit(Instruction::Scope);
+    call(&mut a, "Game", "LockMouseRect", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    // on "DoReset": Game.Reset();
+    a.event("DoReset");
+    a.emit(Instruction::Scope);
+    call(&mut a, "Game", "Reset", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    // on "NewBox": result.box = Game.LoadInventoryBox("inv2.def");
+    // result.noBox = Game.LoadInventoryBox("nope.def");
+    a.event("NewBox");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(&mut a, "Game", "LoadInventoryBox", &[Arg::Str("inv2.def")]);
+    store(&mut a, "box");
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
+fn shots_script() -> Vec<u8> {
+    // Screenshots and the save thumbnail.
+    let mut a = Assembler::new("shots.script");
+    a.def_glob_var("result");
+    call(&mut a, "Game", "Screenshot", &[Arg::Str("shot")]);
+    store(&mut a, "shot1");
+    call(&mut a, "Game", "Screenshot", &[Arg::Str("shot")]);
+    store(&mut a, "shot2");
+    call(
+        &mut a,
+        "Game",
+        "ScreenshotEx",
+        &[Arg::Str("thumbs\\t.png"), Arg::Int(8), Arg::Int(4)],
+    );
+    store(&mut a, "shotEx");
+    call(&mut a, "Game", "StoreSaveThumbnail", &[]);
+    store(&mut a, "thumb");
+    a.emit(Instruction::Ret);
+    a.event("Store");
+    a.emit(Instruction::Scope);
+    call(&mut a, "Game", "StoreSaveThumbnail", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    a.event("Drop");
+    a.emit(Instruction::Scope);
+    call(&mut a, "Game", "DeleteSaveThumbnail", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    // on "SaveIt": result.saved = Game.SaveGame(6, "with thumb");
+    a.event("SaveIt");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(
+        &mut a,
+        "Game",
+        "SaveGame",
+        &[Arg::Int(6), Arg::Str("with thumb")],
+    );
+    store(&mut a, "saved");
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
+fn screens_script() -> Vec<u8> {
+    // The loading and saving screens and the loading icon.
+    let mut a = Assembler::new("screens.script");
+    call(
+        &mut a,
+        "Game",
+        "SetLoadingScreen",
+        &[Arg::Str("art\\green.png"), Arg::Int(2), Arg::Int(3)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "SetSavingScreen",
+        &[Arg::Str("art\\red.png"), Arg::Int(4), Arg::Int(5)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "DisplayLoadingIcon",
+        &[Arg::Str("art\\prop.sprite"), Arg::Int(6), Arg::Int(7)],
+    );
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::Ret);
+    // on "Persistent": Game.DisplayLoadingIcon("art\prop.sprite", 1, 1, true);
+    a.event("Persistent");
+    a.emit(Instruction::Scope);
+    a.push_bool(true);
+    a.push_int(1);
+    a.push_int(1);
+    a.push_string("art\\prop.sprite");
+    a.push_int(4);
+    a.push_var("Game");
+    a.push_string("DisplayLoadingIcon");
+    a.emit(Instruction::CallByExp);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    a.event("Hide");
+    a.emit(Instruction::Scope);
+    call(&mut a, "Game", "HideLoadingIcon", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    // on "ClearLoad": Game.SetLoadingScreen(null, 0, 0);
+    a.event("ClearLoad");
+    a.emit(Instruction::Scope);
+    a.push_int(0);
+    a.push_int(0);
+    a.emit(Instruction::PushNull);
+    a.push_int(3);
+    a.push_var("Game");
+    a.push_string("SetLoadingScreen");
+    a.emit(Instruction::CallByExp);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
 fn hall_init_script() -> Vec<u8> {
     // Records the state the hall's nodes arrive in, then changes it.
     let mut a = Assembler::new("scenes\\hall\\hall_init.script");
@@ -978,7 +1238,7 @@ fn game() -> std::path::PathBuf {
     );
     pkg.add_file(
         "default.game",
-        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" RESPONSE_BOX=\"responses.def\" }"
+        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" THUMBNAIL_WIDTH=8 THUMBNAIL_HEIGHT=4 } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" RESPONSE_BOX=\"responses.def\" }"
             .to_vec(),
     );
     pkg.add_file("art\\font.png", png(128, 128, [255, 255, 255, 255]));
@@ -1122,6 +1382,20 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
         b"SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" SOUND=\"audio\\beep.wav\" APPLY_EVENT=\"Tick\" } FRAME { DELAY=50 IMAGE=\"art\\green.png\" KILL_SOUND=TRUE APPLY_EVENT=\"Tock\" } }".to_vec(),
     );
     pkg.add_file("save.script", save_script());
+    pkg.add_file("settings.script", settings_script());
+    pkg.add_file("services.script", services_script());
+    pkg.add_file("misc.script", misc_script());
+    pkg.add_file("shots.script", shots_script());
+    pkg.add_file("screens.script", screens_script());
+    pkg.add_file(
+        "inv2.def",
+        b"INVENTORY_BOX {
+  ITEM_WIDTH=12 ITEM_HEIGHT=12 SPACING=0
+  AREA { 0, 0, 24, 12 }
+  WINDOW { X=0 Y=0 WIDTH=24 HEIGHT=12 }
+}"
+        .to_vec(),
+    );
     pkg.add_file(
         "art\\prop.sprite",
         b"SPRITE { LOOPING=FALSE FRAME { DELAY=100 IMAGE=\"art\\red.png\" } FRAME { DELAY=100 IMAGE=\"art\\green.png\" } }".to_vec(),
@@ -3038,4 +3312,405 @@ fn two_d_only_subframes_are_neither_drawn_nor_hit() {
         .collect();
     assert_eq!(drawn, [Some("art\\green.png".to_string())]);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn private_settings_persist_in_the_save_directory() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "settings.script")
+    );
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "volumeBefore"), Value::Int(100));
+    assert_eq!(result(&runtime, "volume"), Value::Int(80));
+    assert_eq!(result(&runtime, "lang"), Value::from("fr"));
+    assert_eq!(result(&runtime, "missing"), Value::from("none"));
+    assert_eq!(result(&runtime, "langAsNumber"), Value::Int(0));
+    let ini = std::fs::read_to_string(dir.join("saves").join("settings.ini")).unwrap();
+    assert_eq!(ini, "[PrivateSettings]\nVolume=80\nLang=fr\n");
+
+    // A second run of the game reads the values back.
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    assert_eq!(runtime.world.read_setting("volume").as_deref(), Some("80"));
+    assert_eq!(runtime.world.read_setting("Lang").as_deref(), Some("fr"));
+    assert_eq!(runtime.world.read_setting("Missing"), None);
+}
+
+#[test]
+fn system_properties_checksums_and_run_script() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    // 70 frames of 16 ms: the first whole second counted 63 frames.
+    for _ in 0..70 {
+        runtime.tick(16);
+    }
+    assert_eq!(runtime.world.fps(), 63);
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "services.script")
+    );
+    let log = runtime.tick(16);
+    assert_eq!(result(&runtime, "fps"), Value::Int(63));
+    assert_eq!(result(&runtime, "windowsTime"), Value::Int(71 * 16));
+    assert_eq!(result(&runtime, "currentTime"), Value::Int(71 * 16));
+    assert_eq!(result(&runtime, "soundAvailable"), Value::Bool(false));
+    assert_eq!(result(&runtime, "windowed"), Value::Bool(false));
+    assert_eq!(result(&runtime, "accelerated"), Value::Bool(true));
+    assert_eq!(result(&runtime, "sfx"), Value::Int(40));
+    assert_eq!(result(&runtime, "sfxMethod"), Value::Int(40));
+    assert_eq!(result(&runtime, "master"), Value::Int(70));
+    assert_eq!(runtime.world.audio().volume(luma_audio::SoundType::Sfx), 40);
+    assert_eq!(
+        log.iter()
+            .filter(|l| l.contains("SFXVolume attribute is obsolete"))
+            .count(),
+        1,
+        "{log:?}"
+    );
+    assert_eq!(result(&runtime, "encoding"), Value::Int(0));
+    assert_eq!(result(&runtime, "encodingClamped"), Value::Int(1));
+    assert_eq!(result(&runtime, "startupBefore"), Value::Null);
+    assert_eq!(
+        result(&runtime, "startup"),
+        Value::from("scenes\\hall.scene")
+    );
+    assert_eq!(runtime.world.startup_scene(), Some("scenes\\hall.scene"));
+    assert_eq!(result(&runtime, "caption"), Value::from("Hi"));
+    let crc = crc32fast::hash(b"GREET\tHello\r\n");
+    assert_eq!(result(&runtime, "crc"), Value::Int(crc as i32));
+    assert_eq!(result(&runtime, "crcHex"), Value::from(format!("{crc:x}")));
+    assert_eq!(result(&runtime, "crcMissing"), Value::Null);
+    assert_eq!(result(&runtime, "openedNothing"), Value::Bool(false));
+    assert_eq!(result(&runtime, "ran"), Value::Bool(true));
+    assert_eq!(result(&runtime, "ranMissing"), Value::Bool(false));
+    assert!(
+        log.iter()
+            .any(|l| l.contains("'RunScript' method is now obsolete")),
+        "{log:?}"
+    );
+    // The script RunScript attached ran on the game.
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "lang"), Value::from("fr"));
+
+    // A UTF-8 string table switches the encoding; the windowed flag is
+    // the front-end's to set.
+    runtime.world.set_windowed(true);
+    assert_eq!(
+        runtime.world.get_property(game, "WindowedMode"),
+        Some(Value::Bool(true))
+    );
+}
+
+#[test]
+fn quick_messages_mouse_lock_reset_and_inventory_box_reload() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "misc.script")
+    );
+    runtime.tick(16);
+
+    // Msg: on screen for three seconds of the game timer.
+    let messages = runtime.world.quick_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].text, "Hello there");
+    assert_eq!(
+        messages[0].height, 16,
+        "two lines of the system font on a 32-pixel screen"
+    );
+    for _ in 0..200 {
+        runtime.tick(16);
+    }
+    assert!(runtime.world.quick_messages().is_empty());
+
+    // LockMouseRect: the edges were given in the wrong order.
+    assert_eq!(runtime.world.mouse_lock(), Some((4, 4, 20, 20)));
+    runtime.mouse_move(0, 0);
+    assert_eq!((runtime.world.mouse().x, runtime.world.mouse().y), (4, 4));
+    runtime.mouse_move(30, 10);
+    assert_eq!((runtime.world.mouse().x, runtime.world.mouse().y), (20, 10));
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Unlock", false);
+    runtime.tick(16);
+    assert_eq!(runtime.world.mouse_lock(), None);
+    runtime.mouse_move(0, 0);
+    assert_eq!((runtime.world.mouse().x, runtime.world.mouse().y), (0, 0));
+
+    // LoadInventoryBox replaces the box and its window.
+    let old_window = runtime.world.inventory().window.unwrap();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "NewBox", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "box"), Value::Bool(true));
+    let inventory = runtime.world.inventory();
+    assert_eq!(inventory.def.as_ref().unwrap().item_width, 12);
+    assert_ne!(inventory.window, Some(old_window));
+    assert!(!runtime.world.objects().contains(old_window));
+
+    // Reset: the inventory, the remembered scenes, the globals go; the
+    // scene left next is not remembered.
+    assert!(runtime.world.take_item("key", None));
+    runtime.engine.set_global("flag", Value::Int(5));
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.tick(16);
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    assert!(
+        runtime
+            .world
+            .scene_states()
+            .contains_key("scenes\\hall.scene")
+    );
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.tick(16);
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "DoReset", false);
+    runtime.tick(16);
+    assert!(runtime.world.inventory().taken.is_empty());
+    assert_eq!(runtime.world.inventory().items.len(), 2, "items reloaded");
+    assert!(runtime.world.scene_states().is_empty());
+    assert_eq!(runtime.engine.global("flag"), Some(&Value::Null));
+    assert!(runtime.engine.global("Game").unwrap().is_native());
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Hall");
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    assert!(
+        runtime.world.scene_states().is_empty(),
+        "the hall was not noted"
+    );
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    assert!(
+        runtime
+            .world
+            .scene_states()
+            .contains_key("scenes\\hall.scene")
+    );
+}
+
+#[test]
+fn screenshots_and_save_thumbnails_come_from_the_next_frame() {
+    use luma_adventure::capture::Capture;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    assert!(!runtime.world.wants_frame());
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "shots.script")
+    );
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "shot1"), Value::Bool(true));
+    assert_eq!(result(&runtime, "shot2"), Value::Bool(true));
+    assert_eq!(result(&runtime, "shotEx"), Value::Bool(true));
+    assert_eq!(result(&runtime, "thumb"), Value::Bool(true));
+    assert!(runtime.world.wants_frame());
+    let captures = runtime.world.captures();
+    assert_eq!(captures.len(), 4);
+    assert_eq!(
+        captures[0],
+        Capture::Screenshot {
+            path: dir.join("shot000.bmp"),
+            size: None
+        }
+    );
+    assert_eq!(
+        captures[1],
+        Capture::Screenshot {
+            path: dir.join("shot001.bmp"),
+            size: None
+        }
+    );
+    assert_eq!(
+        captures[2],
+        Capture::Screenshot {
+            path: dir.join("thumbs/t.png"),
+            size: Some((8, 4))
+        }
+    );
+    assert_eq!(captures[3], Capture::Thumbnail);
+    assert!(runtime.world.save_thumbnail().is_none());
+
+    // The front-end renders a frame and hands it over.
+    let frame = Image {
+        width: 32,
+        height: 32,
+        pixels: [200u8, 10, 10, 255].repeat(32 * 32),
+        has_alpha_channel: true,
+    };
+    runtime.world.deliver_frame(&frame);
+    let log = runtime.world.take_log();
+    assert!(!runtime.world.wants_frame());
+    assert_eq!(
+        log.iter()
+            .filter(|l| l.starts_with("Screenshot written"))
+            .count(),
+        3,
+        "{log:?}"
+    );
+    let key = luma_formats::DEFAULT_COLOR_KEY;
+    let shot =
+        luma_formats::image::decode(&std::fs::read(dir.join("shot000.bmp")).unwrap(), key).unwrap();
+    assert_eq!((shot.width, shot.height), (32, 32));
+    let p = shot.pixel(3, 3).unwrap();
+    assert_eq!((p.r, p.g, p.b), (200, 10, 10));
+    assert!(dir.join("shot001.bmp").is_file());
+    let small = luma_formats::image::decode(
+        &std::fs::read(dir.join("thumbs").join("t.png")).unwrap(),
+        key,
+    )
+    .unwrap();
+    assert_eq!((small.width, small.height), (8, 4));
+    assert!(runtime.world.save_thumbnail().is_some());
+
+    // The next save carries the thumbnail, and only that one.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "SaveIt", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "saved"), Value::Bool(true));
+    let header = luma_adventure::read_save_header(&dir.join("saves").join("save006.dsv")).unwrap();
+    let thumb = luma_formats::image::decode(header.thumbnail.as_deref().unwrap(), key).unwrap();
+    assert_eq!((thumb.width, thumb.height), (8, 4));
+    let p = thumb.pixel(0, 0).unwrap();
+    assert_eq!((p.r, p.g, p.b), (200, 10, 10));
+    assert!(runtime.world.save_thumbnail().is_none());
+
+    // A thumbnail stored then deleted is not in the next save.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Store", false);
+    runtime.tick(16);
+    assert_eq!(runtime.world.captures(), [Capture::Thumbnail]);
+    runtime.world.deliver_frame(&frame);
+    assert!(runtime.world.save_thumbnail().is_some());
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Drop", false);
+    runtime.tick(16);
+    assert!(runtime.world.save_thumbnail().is_none());
+    runtime.save_game(7, "no thumb", false).unwrap();
+    let header = luma_adventure::read_save_header(&dir.join("saves").join("save007.dsv")).unwrap();
+    assert_eq!(header.thumbnail, None);
+}
+
+#[test]
+fn loading_screens_and_the_loading_icon() {
+    use luma_adventure::ScreenImage;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    assert_eq!(runtime.world.loading_screen(), None);
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "screens.script")
+    );
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.loading_screen(),
+        Some(&ScreenImage {
+            path: "art\\green.png".into(),
+            x: 2,
+            y: 3
+        })
+    );
+    assert_eq!(
+        runtime.world.saving_screen(),
+        Some(&ScreenImage {
+            path: "art\\red.png".into(),
+            x: 4,
+            y: 5
+        })
+    );
+    // The icon shows for the frame that follows the call, then goes.
+    let icon = runtime.world.loading_icon().unwrap();
+    assert_eq!((icon.x, icon.y, icon.persistent), (6, 7, false));
+    assert!(icon.shown);
+    runtime.tick(16);
+    assert!(runtime.world.loading_icon().is_none());
+
+    // A persistent icon stays and animates until hidden.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Persistent", false);
+    runtime.tick(16);
+    for _ in 0..10 {
+        runtime.tick(16);
+    }
+    let icon = runtime.world.loading_icon().unwrap();
+    assert!(icon.persistent);
+    assert_eq!(icon.anim.current_frame, 1, "the prop sprite's second frame");
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Hide", false);
+    runtime.tick(16);
+    assert!(runtime.world.loading_icon().is_none());
+
+    // The screens travel with a saved game; null removes one.
+    runtime.save_game(8, "screens", false).unwrap();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "ClearLoad", false);
+    runtime.tick(16);
+    assert_eq!(runtime.world.loading_screen(), None);
+    runtime.load_game(8).unwrap();
+    assert_eq!(
+        runtime.world.loading_screen().map(|s| s.path.as_str()),
+        Some("art\\green.png")
+    );
+
+    // A game file's own images are set at start.
+    let dir2 = temp_dir();
+    let mut pkg = PackageBuilder::new("data");
+    pkg.add_file(
+        "default.game",
+        b"GAME { NAME=\"T\" LOAD_IMAGE=\"a.png\" LOAD_IMAGE_X=5 LOAD_IMAGE_Y=6 SAVE_IMAGE=\"a.png\" }".to_vec(),
+    );
+    pkg.add_file("a.png", png(4, 4, [0, 0, 255, 255]));
+    std::fs::write(dir2.join("data.dcp"), pkg.build()).unwrap();
+    let runtime = Runtime::with_audio(Vfs::open_game(&dir2).unwrap(), Audio::null()).unwrap();
+    assert_eq!(
+        runtime.world.loading_screen(),
+        Some(&ScreenImage {
+            path: "a.png".into(),
+            x: 5,
+            y: 6
+        })
+    );
+    assert_eq!(
+        runtime.world.saving_screen().map(|s| (s.x, s.y)),
+        Some((0, 0))
+    );
 }

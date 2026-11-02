@@ -24,7 +24,10 @@ A saved game holds:
   its threads, and the engine-wide globals; programs are named by the
   file they were loaded from;
 - the native objects and their handles, which stay the same after a
-  load, so that every reference in a script is still good;
+  load, so that every reference in a script is still good; the script
+  library objects (`new String`, `Array`, `Date`, `File`, `MemBuffer`)
+  with their contents: a file open for reading keeps its content and
+  position, one open for writing is closed, as in the original;
 - the current scene as the scripts left it (its entities, regions and
   layers, the animation and the sentence of each entity), the previous
   scene's name, a scene change asked and not done yet, and the states
@@ -48,7 +51,10 @@ A saved game holds:
 - the fader, the cursors chosen, the mouse and the keyboard state;
 - the game's own settings a script may change: name, caption,
   subtitles, talk and video skip buttons, `Interactive`, the main
-  object; the game timer and the wall clock; the random generator.
+  object, `TextEncoding`, `StartupScene`, the mouse lock rectangle,
+  the loading and saving screens and whether `Game.Reset` asked not to
+  remember the scene left next; the game timer and the wall clock; the
+  random generator.
 
 What a saved game does **not** hold, and what happens to it:
 
@@ -122,6 +128,91 @@ file); `Game.EmptySaveSlot(slot)` deletes the file;
 in the save directory (the original engine keeps it in the registry),
 `-1` before any save.
 
+## Thumbnails
+
+`Game.StoreSaveThumbnail()` keeps a small picture of the screen for the
+next saved game, and `DeleteSaveThumbnail()` drops it; a game calls the
+first before opening its save menu, so that the menu is not in the
+picture. The size comes from `THUMBNAIL_WIDTH` and `THUMBNAIL_HEIGHT`
+of `default.game`; a game that sets none gets no thumbnail, as in the
+original engine. The picture goes into the header of the next save
+file only (`BPersistMgr::InitSave` destroys the cached one once used),
+as a PNG, where `read_save_header` returns it.
+
+The world does not draw by itself, so the picture is taken from the
+**next frame the front-end renders**: the call records the request,
+`World::wants_frame` tells the front-end to render that frame where it
+can be read back, and `World::deliver_frame` receives the pixels
+(`luma-player` renders the frame once more into an offscreen texture
+when a request is pending). The original engine reads the screen at
+the call instead, and takes a fresh picture at save time when none was
+stored; Luma cannot, so a save without `StoreSaveThumbnail` before it
+carries no thumbnail. A headless run renders nothing and fulfils no
+request.
+
+`Game.Screenshot(name)` and `Game.ScreenshotEx(file, width, height)`
+work the same way, writing the frame to a file: `Screenshot` to
+`<name>000.bmp` with the first free number (the game's name when no
+name is given), `ScreenshotEx` to the file named, scaled to the size
+given (the screen's when zero). A relative path is under the game's
+directory, the original engine's working directory; a `.png` name
+gives a PNG, any other a 24-bit BMP as the original engine writes.
+Both return `true` once the request is recorded; a file that cannot be
+written is logged when the frame comes.
+
+## Loading and saving screens, loading icon
+
+`Game.SetLoadingScreen(file, x, y)` names an image drawn while a saved
+game loads, `SetSavingScreen(file, x, y)` one drawn while the game
+saves; `null` removes it. The game file sets them first (`LOAD_IMAGE`,
+`LOAD_IMAGE_X`, `LOAD_IMAGE_Y`, `SAVE_IMAGE`, `SAVE_IMAGE_X`,
+`SAVE_IMAGE_Y`, see [formats/game.md](formats/game.md)), and both
+travel with a saved game, as in the original engine. The original
+engine draws them over black while it writes or reads the file, with
+its progress indicator (`INDICATOR_*`, which Luma reads and ignores).
+In Luma:
+
+- the **loading screen** is drawn over black in the frame between
+  `Game.LoadGame` and the load, which happens at the start of the next
+  frame: the player sees it for one frame, longer when the load takes
+  time;
+- the **saving screen** is never seen: a save completes inside the
+  frame that asks for it, with no frame drawn in between. The value is
+  kept, read back and saved all the same.
+
+`Game.DisplayLoadingIcon(sprite, x, y, persistent)` shows a sprite over
+everything else (after the fader, before the messages of `Game.Msg`),
+for the one frame that follows the call, or until
+`Game.HideLoadingIcon()` when `persistent` is true, animating
+meanwhile; the original engine deletes a non-persistent icon after its
+first display too. A sprite that does not load shows nothing. The icon
+is not part of a saved game.
+
+## Private settings
+
+`Game.RegWriteNumber(key, value)`, `RegWriteString(key, value)`,
+`RegReadNumber(key, default)` and `RegReadString(key, default)` keep
+values between runs of the game: its options, the language picked, a
+"seen the intro" flag. The original engine stores them in the
+`PrivateSettings` section of its `wme.ini`, or in the Windows registry
+under the game's key. Luma stores them in `settings.ini` in the save
+directory (the one of `Game.SaveDirectory`), in a `[PrivateSettings]`
+section, one `key=value` per line:
+
+```ini
+[PrivateSettings]
+Volume=80
+Lang=fr
+```
+
+Keys compare without case, as Windows reads them. A read of a key never
+written returns the default; `RegReadNumber` takes the leading integer
+of the stored text (`GetPrivateProfileInt`), `0` when there is none. A
+value is written to the file at once; a file that cannot be written is
+logged and the value is lost, as the original engine reports nothing
+to the script either. The section name is the original engine's, so a
+game's values can be copied from its `wme.ini` by hand.
+
 ## File format
 
 The format is Luma's own: the original engine's `.dsv` files serialize
@@ -131,7 +222,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `3` today |
+| 4 | layout version, little-endian; `6` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -142,8 +233,7 @@ of The White Chamber is a few kilobytes). The header is read alone by
 `GetSaveSlotDescription`, without decompressing the body. Because
 `postcard` is positional, the fields of the state are versioned by the
 layout version: a change of the state's shape bumps `VERSION`, and
-older files are then refused rather than misread. Thumbnails
-(`Game.StoreSaveThumbnail`) are not stored yet.
+older files are then refused rather than misread.
 
 ## Checking a game
 
@@ -164,9 +254,6 @@ button, a slot, "Save" again, type a name and click "OK".
 
 ## Not yet
 
-- Thumbnails in the save file (`StoreSaveThumbnail`,
-  `DeleteSaveThumbnail`, the `savegame:` images).
-- The saving and loading screens (`SetSavingScreen`,
-  `SetLoadingScreen`, `DisplayLoadingIcon`).
+- The `savegame:` images (a saved game's thumbnail shown by a window).
 - `Game.AutoSaveOnExit` and `AutoSaveSlot`.
 - A video being played is not kept.

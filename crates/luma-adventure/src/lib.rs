@@ -34,10 +34,15 @@
 //! - [`Runtime`]: a script engine and a world, driven once per frame.
 //! - [`save`]: saved games, the whole engine written to a slot and read
 //!   back (`Game.SaveGame`, `Game.LoadGame`).
+//! - [`registry`]: the private settings a game keeps between runs
+//!   (`Game.RegReadNumber`, `RegWriteString`...).
+//! - [`capture`]: screenshots and save thumbnails, captured from the
+//!   frame the front-end renders next.
 
 #![forbid(unsafe_code)]
 
 pub mod actor;
+pub mod capture;
 mod error;
 pub mod fader;
 pub mod input;
@@ -50,6 +55,7 @@ mod natives_sprite;
 mod natives_ui;
 pub mod objects;
 pub mod path;
+pub mod registry;
 pub mod responses;
 pub mod save;
 pub mod scene_state;
@@ -86,4 +92,4 @@ pub use ui::{
     WindowState,
 };
 pub use video::{Subtitle, Subtitler, VideoPlayback, VideoPlayer, parse_subtitles};
-pub use world::{Runtime, World};
+pub use world::{LoadingIcon, QuickMessage, Runtime, ScreenImage, World};

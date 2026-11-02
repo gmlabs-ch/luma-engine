@@ -172,8 +172,13 @@ impl World {
         &self.mouse
     }
 
-    /// Moves the mouse to a point in game pixels.
+    /// Moves the mouse to a point in game pixels, kept inside the lock
+    /// rectangle when one applies (`CBGame::GetMousePos`).
     pub fn set_mouse(&mut self, x: i32, y: i32) {
+        let (x, y) = match self.mouse_lock() {
+            Some((left, top, right, bottom)) => (x.clamp(left, right), y.clamp(top, bottom)),
+            None => (x, y),
+        };
         self.mouse.x = x;
         self.mouse.y = y;
     }

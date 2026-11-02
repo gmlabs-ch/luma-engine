@@ -7,11 +7,14 @@
 //! `BScriptHolder.cpp` of WME Lite (MIT License, Copyright (c) 2011 Jan
 //! Nedoma); see `NOTICE`.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
 
 use luma_archive::Vfs;
-use luma_formats::Entity;
+use luma_formats::{Entity, Rgba};
 use luma_formats::{GameFile, Scene, StringTable};
+use luma_script::classes::{ClassHost, ClassObject, relative_path};
 use luma_script::{Context, Engine, Host, NativeId, Natives, Return, State, Value};
 
 use crate::actor::{Actor, ActorEvent, WalkContext, scene_obstacles};
@@ -31,6 +34,53 @@ use crate::ui::{Control, Ui};
 use crate::video::VideoPlayer;
 use luma_audio::Audio;
 use luma_formats::font::TextAlign;
+
+/// A short on-screen message (`Game.Msg`, `CBGame::QuickMessage`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuickMessage {
+    /// The text shown.
+    pub text: String,
+    /// When it was posted, on the game timer.
+    pub start: u64,
+    /// Its height in the system font, over the screen's width.
+    pub height: i32,
+}
+
+/// An image shown while the game saves or loads (`SetSavingScreen`,
+/// `SetLoadingScreen`, `SAVE_IMAGE` and `LOAD_IMAGE` of the game file).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ScreenImage {
+    /// The image or sprite file.
+    pub path: String,
+    /// Where it is drawn.
+    pub x: i32,
+    /// See `x`.
+    pub y: i32,
+}
+
+/// The sprite `Game.DisplayLoadingIcon` shows (`m_LoadingIcon`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadingIcon {
+    /// The sprite file.
+    pub path: String,
+    /// Where it is drawn.
+    pub x: i32,
+    /// See `x`.
+    pub y: i32,
+    /// Whether it stays until `HideLoadingIcon`; else it shows for one
+    /// frame, as the original engine deletes it after its first display.
+    pub persistent: bool,
+    /// Whether a frame showed it since it was asked.
+    pub shown: bool,
+    /// Its animation.
+    pub anim: crate::scene_view::AnimState,
+}
+
+/// How long a quick message stays (`QUICK_MSG_DURATION`).
+pub const QUICK_MSG_MS: u64 = 3000;
+
+/// How many quick messages show at once (`MAX_QUICK_MSG`).
+pub const MAX_QUICK_MSGS: usize = 5;
 
 /// The game as scripts see it. Implements the script engine's [`Host`].
 pub struct World {
@@ -99,6 +149,38 @@ pub struct World {
     pub(crate) quit: bool,
     pub(crate) name: String,
     pub(crate) caption: String,
+    /// `Game.TextEncoding`: 0 for ANSI, 1 for UTF-8; set by the string
+    /// table loaded (a byte order mark means UTF-8) and by scripts.
+    pub(crate) text_encoding: i32,
+    /// `Game.StartupScene`, from `STARTUP_SCENE` of the game file.
+    pub(crate) startup_scene: Option<String>,
+    /// Whether the front-end runs the game in a window
+    /// (`Game.WindowedMode`); false without a window.
+    pub(crate) windowed: bool,
+    /// Frames drawn in the last whole second (`Game.FPS`), and the
+    /// counters behind it (`m_Fps`, `m_FpsTime`, `m_FramesRendered`).
+    pub(crate) fps: i32,
+    pub(crate) fps_time: u64,
+    pub(crate) fps_frames: i32,
+    /// The messages of `Game.Msg` on screen, oldest first.
+    pub(crate) quick_messages: Vec<QuickMessage>,
+    /// Screenshots and thumbnails asked for, done with the next frame.
+    pub(crate) captures: Vec<crate::capture::Capture>,
+    /// The image shown while a saved game loads (`m_LoadImageName`).
+    pub(crate) loading_screen: Option<ScreenImage>,
+    /// The image shown while the game saves (`m_SaveImageName`).
+    pub(crate) saving_screen: Option<ScreenImage>,
+    /// The loading icon shown over the frame.
+    pub(crate) loading_icon: Option<LoadingIcon>,
+    /// The thumbnail the next saved game carries (PNG), from
+    /// `Game.StoreSaveThumbnail`.
+    pub(crate) save_thumbnail: Option<Vec<u8>>,
+    /// `Game.LockMouseRect`: left, top, right, bottom; the mouse stays
+    /// inside while all four are non-zero (`m_MouseLockRect`).
+    pub(crate) mouse_lock: (i32, i32, i32, i32),
+    /// `Game.Reset` was called: the scene left next is not remembered
+    /// (`m_TempDisableSaveState`).
+    pub(crate) temp_disable_save_state: bool,
     pub(crate) timer: u64,
     pub(crate) clock: u64,
     log: Vec<String>,
@@ -140,6 +222,7 @@ impl World {
         let scene_id = objects.insert(Kind::Scene);
         let fader_id = objects.insert(Kind::Fader);
         let personal_savegames = game_file.personal_savegames;
+        let startup_scene = game_file.startup_scene.clone();
         let scene_viewport = game_file.scene_viewport.map(|[x, y, w, h]| (x, y, w, h));
         let mut world = World {
             vfs,
@@ -201,6 +284,20 @@ impl World {
             interactive: true,
             main_object: None,
             quit: false,
+            text_encoding: 0,
+            startup_scene,
+            windowed: false,
+            fps: 0,
+            fps_time: 0,
+            fps_frames: 0,
+            quick_messages: Vec::new(),
+            captures: Vec::new(),
+            loading_screen: None,
+            saving_screen: None,
+            loading_icon: None,
+            save_thumbnail: None,
+            mouse_lock: (0, 0, 0, 0),
+            temp_disable_save_state: false,
             timer: 0,
             clock: 0,
             log: Vec::new(),
@@ -245,6 +342,14 @@ impl World {
             .as_deref()
             .map_or(TalkSkipButton::Left, TalkSkipButton::parse);
         world.load_cursors();
+        let (load, save) = (
+            world.game_file.load_image.clone(),
+            world.game_file.save_image.clone(),
+        );
+        let (lx, ly) = (world.game_file.load_image_x, world.game_file.load_image_y);
+        let (sx, sy) = (world.game_file.save_image_x, world.game_file.save_image_y);
+        world.set_loading_screen(load.as_deref(), lx, ly);
+        world.set_saving_screen(save.as_deref(), sx, sy);
         Ok(world)
     }
 
@@ -364,12 +469,312 @@ impl World {
         self.timer
     }
 
-    /// Advances the clocks by `dt` milliseconds.
+    /// Advances the clocks by `dt` milliseconds, and counts the frame
+    /// for `Game.FPS`: the frames of each whole second (`InitLoop`).
     pub fn advance_time(&mut self, dt: u64) {
         if !self.ui.frozen {
             self.timer += dt;
         }
         self.clock += dt;
+        self.fps_time += dt;
+        self.fps_frames += 1;
+        if self.fps_time > 1000 {
+            self.fps = self.fps_frames;
+            self.fps_frames = 0;
+            self.fps_time = 0;
+        }
+    }
+
+    /// Frames drawn in the last whole second (`Game.FPS`).
+    pub fn fps(&self) -> i32 {
+        self.fps
+    }
+
+    /// Sets the image shown while a saved game loads
+    /// (`Game.SetLoadingScreen`); `None` removes it. It is drawn over
+    /// black during the frame between `Game.LoadGame` and the load.
+    pub fn set_loading_screen(&mut self, path: Option<&str>, x: i32, y: i32) {
+        self.loading_screen = path.map(|path| {
+            self.load_ui_image(path);
+            ScreenImage {
+                path: path.to_string(),
+                x,
+                y,
+            }
+        });
+    }
+
+    /// Sets the image shown while the game saves (`Game.SetSavingScreen`);
+    /// `None` removes it. A Luma save completes inside the frame that
+    /// asks for it, so the image is kept but never on screen.
+    pub fn set_saving_screen(&mut self, path: Option<&str>, x: i32, y: i32) {
+        self.saving_screen = path.map(|path| {
+            self.load_ui_image(path);
+            ScreenImage {
+                path: path.to_string(),
+                x,
+                y,
+            }
+        });
+    }
+
+    /// The loading screen, if set.
+    pub fn loading_screen(&self) -> Option<&ScreenImage> {
+        self.loading_screen.as_ref()
+    }
+
+    /// The saving screen, if set.
+    pub fn saving_screen(&self) -> Option<&ScreenImage> {
+        self.saving_screen.as_ref()
+    }
+
+    /// Shows a sprite over the frame (`Game.DisplayLoadingIcon`): for
+    /// one frame, or until [`World::hide_loading_icon`] when
+    /// `persistent`. Whether the sprite loaded.
+    pub fn display_loading_icon(&mut self, path: &str, x: i32, y: i32, persistent: bool) -> bool {
+        self.loading_icon = None;
+        if !self.load_ui_image(path) {
+            return false;
+        }
+        self.loading_icon = Some(LoadingIcon {
+            path: path.to_string(),
+            x,
+            y,
+            persistent,
+            shown: false,
+            anim: crate::scene_view::AnimState::new(path),
+        });
+        true
+    }
+
+    /// Removes the loading icon (`Game.HideLoadingIcon`).
+    pub fn hide_loading_icon(&mut self) {
+        self.loading_icon = None;
+    }
+
+    /// The loading icon shown, if any.
+    pub fn loading_icon(&self) -> Option<&LoadingIcon> {
+        self.loading_icon.as_ref()
+    }
+
+    /// Ends a frame for the loading icon: one that is not persistent
+    /// goes after the frame that showed it (`CAdGame::DisplayContent`
+    /// deletes it after its first display); a persistent one animates.
+    pub(crate) fn update_loading_icon(&mut self) {
+        let timer = self.timer;
+        let Some(icon) = self.loading_icon.as_mut() else {
+            return;
+        };
+        if icon.shown && !icon.persistent {
+            self.loading_icon = None;
+            return;
+        }
+        icon.shown = true;
+        if let Some(loaded) = self.ui.bank.sprite(&icon.path) {
+            icon.anim.step(&loaded.sprite, timer);
+        }
+    }
+
+    /// Draws the loading screen over black, when a load is scheduled
+    /// and the game has one (`DisplayIndicator`); whether it did.
+    fn draw_loading_screen<'a>(
+        &'a self,
+        list: &mut luma_render::DrawList<'a>,
+        white: Option<&'a luma_render::Texture>,
+    ) -> bool {
+        let (Some(screen), true) = (&self.loading_screen, self.scheduled_load.is_some()) else {
+            return false;
+        };
+        if let Some(white) = white {
+            list.fill(
+                white,
+                luma_render::Rect::new(0.0, 0.0, list.width, list.height),
+                Rgba {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+            );
+        }
+        self.draw_ui_image(
+            list,
+            &screen.path,
+            0,
+            screen.x,
+            screen.y,
+            Rgba::OPAQUE_WHITE,
+        );
+        true
+    }
+
+    /// Draws the loading icon at its current frame.
+    fn draw_loading_icon<'a>(&'a self, list: &mut luma_render::DrawList<'a>) {
+        if let Some(icon) = &self.loading_icon {
+            self.draw_ui_image(
+                list,
+                &icon.path,
+                icon.anim.current_frame,
+                icon.x,
+                icon.y,
+                Rgba::OPAQUE_WHITE,
+            );
+        }
+    }
+
+    /// Posts a short message drawn over the frame for three seconds
+    /// (`Game.Msg`, `CBGame::QuickMessage`); the oldest goes when five
+    /// are showing. Nothing shows without a system font, as in the
+    /// original engine.
+    pub fn quick_message(&mut self, text: &str) {
+        if self.quick_messages.len() >= MAX_QUICK_MSGS {
+            self.quick_messages.remove(0);
+        }
+        let width = self.settings.width as i32;
+        let height = self
+            .system_font
+            .clone()
+            .and_then(|path| self.fonts.get_mut(&path))
+            .map_or(0, |font| font.text_height(text, width));
+        self.quick_messages.push(QuickMessage {
+            text: text.to_string(),
+            start: self.timer,
+            height,
+        });
+    }
+
+    /// The quick messages on screen, oldest first.
+    pub fn quick_messages(&self) -> &[QuickMessage] {
+        &self.quick_messages
+    }
+
+    /// Drops the quick messages past their time and lays out the rest
+    /// (`DisplayQuickMsg`'s update half).
+    pub(crate) fn update_quick_messages(&mut self) {
+        let timer = self.timer;
+        self.quick_messages
+            .retain(|m| timer.saturating_sub(m.start) < QUICK_MSG_MS);
+        let width = self.settings.width as i32;
+        if let Some(font) = self
+            .system_font
+            .clone()
+            .and_then(|p| self.fonts.get_mut(&p))
+        {
+            for message in &self.quick_messages {
+                font.prepare(&message.text, width, TextAlign::Left, -1);
+            }
+        }
+    }
+
+    /// Draws the quick messages from `y` 20 down, in the system font,
+    /// over everything else (`DisplayQuickMsg`).
+    fn draw_quick_messages<'a>(&'a self, list: &mut luma_render::DrawList<'a>) {
+        let Some(font) = self.system_font.as_ref().and_then(|p| self.fonts.get(p)) else {
+            return;
+        };
+        let width = self.settings.width as i32;
+        let mut y = 20;
+        for message in &self.quick_messages {
+            font.draw(list, &message.text, 0, y, width, TextAlign::Left, -1);
+            y += message.height;
+        }
+    }
+
+    /// Confines the mouse to a rectangle (`Game.LockMouseRect`): the
+    /// edges are put in order, and a rectangle with a zero edge unlocks,
+    /// since the original engine applies the lock only while all four
+    /// are non-zero. The lock clamps the position the game sees; the
+    /// system cursor is not moved.
+    pub fn lock_mouse_rect(&mut self, left: i32, top: i32, right: i32, bottom: i32) {
+        let (left, right) = if right < left {
+            (right, left)
+        } else {
+            (left, right)
+        };
+        let (top, bottom) = if bottom < top {
+            (bottom, top)
+        } else {
+            (top, bottom)
+        };
+        self.mouse_lock = (left, top, right, bottom);
+    }
+
+    /// The mouse lock rectangle, if one applies.
+    pub fn mouse_lock(&self) -> Option<(i32, i32, i32, i32)> {
+        let (l, t, r, b) = self.mouse_lock;
+        (l != 0 && t != 0 && r != 0 && b != 0).then_some((l, t, r, b))
+    }
+
+    /// Puts the game back to its start (`Game.Reset`,
+    /// `CAdGame::ResetContent`): the dialogue branches, the inventory,
+    /// the remembered scene states and the "once" responses are
+    /// cleared, the items file is loaded again, the scene left next is
+    /// not remembered, and the script globals that are not natives go
+    /// back to `null`. The current scene stays, as in the original
+    /// engine.
+    pub fn reset_content(&mut self, engine: &mut Engine) {
+        self.responses.branches.clear();
+        self.inventory.taken.clear();
+        self.selected_item = None;
+        self.scene_states.clear();
+        self.responses.used_branch.clear();
+        self.responses.used_game.clear();
+        self.load_items(engine);
+        self.temp_disable_save_state = true;
+        engine.clear_globals(false);
+    }
+
+    /// Tells the world whether it runs in a window (`Game.WindowedMode`).
+    pub fn set_windowed(&mut self, windowed: bool) {
+        self.windowed = windowed;
+    }
+
+    /// The scene a start loads (`Game.StartupScene`).
+    pub fn startup_scene(&self) -> Option<&str> {
+        self.startup_scene.as_deref()
+    }
+
+    /// Opens a file or an address with the system's default application
+    /// (`Game.OpenDocument`, `ShellExecute("open")`): `open` on macOS,
+    /// `xdg-open` elsewhere, `start` on Windows. Whether it was launched.
+    pub fn open_document(&mut self, target: &str) -> bool {
+        use std::process::{Command, Stdio};
+        if target.trim().is_empty() {
+            return false;
+        }
+        let mut command = if cfg!(target_os = "macos") {
+            let mut c = Command::new("open");
+            c.arg(target);
+            c
+        } else if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "start", "", target]);
+            c
+        } else {
+            let mut c = Command::new("xdg-open");
+            c.arg(target);
+            c
+        };
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        match command.spawn() {
+            Ok(_) => true,
+            Err(err) => {
+                self.log(format!("cannot open document '{target}': {err}"));
+                false
+            }
+        }
+    }
+
+    /// The CRC-32 of a file of the game (`Game.GetFileChecksum`), `None`
+    /// when there is no such file.
+    pub fn file_checksum(&self, path: &str) -> Option<u32> {
+        self.vfs
+            .read(path)
+            .ok()
+            .map(|bytes| crc32fast::hash(&bytes))
     }
 
     /// The log lines written since the last call.
@@ -389,12 +794,23 @@ impl World {
         }
     }
 
+    /// Writes a log line the first time it comes up (the original engine
+    /// repeats some warnings at every call).
+    pub(crate) fn log_once(&mut self, message: &str) {
+        if self.stubs.insert(message.to_string()) {
+            self.log.push(message.to_string());
+        }
+    }
+
     /// Loads a string table (`Game.LoadStringTable`).
     pub fn load_string_table(&mut self, path: &str, clear_old: bool) -> bool {
         match self.vfs.read(path) {
             Ok(bytes) => {
                 let count = self.strings.load(&bytes, clear_old);
                 self.log(format!("string table '{path}': {count} strings"));
+                // A byte order mark switches the game to UTF-8 text
+                // (`CBStringTable::LoadFile`); any other table back to ANSI.
+                self.text_encoding = i32::from(self.strings.utf8);
                 true
             }
             Err(err) => {
@@ -480,6 +896,7 @@ impl World {
                 .map(|i| i.def.name.clone())
                 .unwrap_or_default(),
             Some(Kind::Inert(kind)) => kind.clone(),
+            Some(Kind::Class(object)) => object.type_name().to_string(),
             None => "invalid".to_string(),
         }
     }
@@ -813,6 +1230,9 @@ impl World {
         camera: &Camera,
         white: Option<&'a luma_render::Texture>,
     ) {
+        if self.draw_loading_screen(list, white) {
+            return;
+        }
         if self.is_video_playing() {
             // Only the video is drawn while it plays (`DisplayContent`).
             self.draw_video(list);
@@ -836,6 +1256,8 @@ impl World {
         if let Some(white) = white {
             self.draw_fade(list, white);
         }
+        self.draw_loading_icon(list);
+        self.draw_quick_messages(list);
     }
 
     /// Uploads the textures of the scene, of the actors, of the cursors
@@ -863,7 +1285,10 @@ impl World {
             engine.apply_event(self, scene_id, "SceneShutdown", true);
             self.prev_scene_name = name;
             self.prev_scene_filename = filename;
-            self.save_scene_state();
+            if !self.temp_disable_save_state {
+                self.save_scene_state();
+            }
+            self.temp_disable_save_state = false;
         }
         // Objects of the old scene, and the scripts attached to them.
         let scene_actors: Vec<NativeId> = self
@@ -1493,6 +1918,30 @@ impl World {
         self.objects.insert(Kind::Inert(kind.to_string()))
     }
 
+    /// Runs `f` on a library object with the world free for the call: the
+    /// object is taken out of its slot and put back afterwards. `None`
+    /// when the handle is not a library object.
+    pub(crate) fn with_class<T>(
+        &mut self,
+        id: NativeId,
+        f: impl FnOnce(&mut ClassObject, &mut World) -> T,
+    ) -> Option<T> {
+        let native = self.objects.get_mut(id)?;
+        if !matches!(native.kind, Kind::Class(_)) {
+            return None;
+        }
+        let Kind::Class(mut object) =
+            std::mem::replace(&mut native.kind, Kind::Inert(String::new()))
+        else {
+            return None;
+        };
+        let result = f(&mut object, self);
+        if let Some(native) = self.objects.get_mut(id) {
+            native.kind = Kind::Class(object);
+        }
+        Some(result)
+    }
+
     pub(crate) fn native(&self, id: NativeId) -> Option<&Native> {
         self.objects.get(id)
     }
@@ -1553,6 +2002,7 @@ impl Natives for World {
                 .to_string(),
             Some(Kind::Item) => "item".to_string(),
             Some(Kind::Inert(kind)) => kind.to_ascii_lowercase(),
+            Some(Kind::Class(object)) => object.type_name().to_string(),
             None => String::new(),
         }
     }
@@ -1560,6 +2010,7 @@ impl Natives for World {
     fn to_string(&self, id: NativeId) -> String {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Game) => "[game]".to_string(),
+            Some(Kind::Class(object)) => object.to_string(self),
             Some(Kind::Entity(_) | Kind::Region { .. } | Kind::Layer(_) | Kind::Scene) => {
                 format!("[{}]", self.describe(id))
             }
@@ -1574,7 +2025,22 @@ impl Natives for World {
     }
 
     fn to_bool(&self, id: NativeId) -> bool {
-        self.objects.contains(id)
+        match self.objects.get(id).map(|n| &n.kind) {
+            // The library classes keep the base class's `false`.
+            Some(Kind::Class(_)) => false,
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    fn compare(&self, a: NativeId, b: NativeId) -> Ordering {
+        match (self.objects.get(a), self.objects.get(b)) {
+            (Some(x), Some(y)) => match (&x.kind, &y.kind) {
+                (Kind::Class(p), Kind::Class(q)) => p.compare(q, a.cmp(&b)),
+                _ => a.cmp(&b),
+            },
+            _ => a.cmp(&b),
+        }
     }
 
     fn get_property(&self, id: NativeId, name: &str) -> Option<Value> {
@@ -1595,6 +2061,43 @@ impl Natives for World {
             native.props.insert(name.to_string(), value.clone());
         }
         true
+    }
+
+    fn assign_scalar(&mut self, id: NativeId, value: &Value) {
+        if let Some(Native {
+            kind: Kind::Class(object),
+            ..
+        }) = self.objects.get_mut(id)
+        {
+            object.assign_scalar(value);
+        }
+    }
+}
+
+impl ClassHost for World {
+    /// A file a script wrote first, then the game's files.
+    fn read_file(&mut self, name: &str) -> Option<Vec<u8>> {
+        if let Some(path) = self.writable_path(name) {
+            if path.is_file() {
+                return std::fs::read(path).ok();
+            }
+        }
+        self.vfs.read(name).ok()
+    }
+
+    /// Under the save directory (the game's, or the user's own when the
+    /// game's is not writable), never outside it.
+    fn writable_path(&mut self, name: &str) -> Option<PathBuf> {
+        let relative = relative_path(name)?;
+        Some(self.checked_save_directory().join(relative))
+    }
+
+    fn create_object(&mut self, object: ClassObject) -> NativeId {
+        self.objects.insert(Kind::Class(object))
+    }
+
+    fn log(&mut self, message: &str) {
+        self.log.push(message.to_string());
     }
 }
 
@@ -1648,13 +2151,19 @@ impl Host for World {
         (i64::from(from) + (value as i64).rem_euclid(span)) as i32
     }
 
-    fn call_function(&mut self, name: &str, _args: &[Value], _ctx: Context<'_>) -> Option<Return> {
+    fn call_function(&mut self, name: &str, args: &[Value], _ctx: Context<'_>) -> Option<Return> {
         match name {
-            // Constructors of the engine's script classes.
-            "Actor" | "Entity" | "String" | "Array" | "Date" | "File" | "MemBuffer" | "Object" => {
+            // The script library classes.
+            "String" | "Array" | "Date" | "File" | "MemBuffer" => {
+                let object = ClassObject::construct(name, args, self)?;
+                let id = self.objects.insert(Kind::Class(object));
+                Some(Return::constructed(Value::Native(id)))
+            }
+            // Not implemented: the placeholder object the compiler
+            // created for the `new` expression stays.
+            "Actor" | "Entity" => {
                 self.stub(&format!("new {name}()"));
-                let id = self.inert(name);
-                Some(Return::value(Value::Native(id)))
+                Some(Return::null())
             }
             _ => None,
         }
@@ -1711,7 +2220,7 @@ impl Runtime {
     /// run on the first tick. The startup scene, if the game names one,
     /// is scheduled first.
     pub fn start(&mut self) {
-        if let Some(scene) = self.world.game_file.startup_scene.clone() {
+        if let Some(scene) = self.world.startup_scene.clone() {
             self.world.schedule_scene(&scene, true);
         }
         self.world.load_items(&mut self.engine);
@@ -1808,6 +2317,8 @@ impl Runtime {
         self.world.update_ui(&mut self.engine);
         self.world.update_inventory(&mut self.engine);
         self.world.prepare_inventory_texts();
+        self.world.update_quick_messages();
+        self.world.update_loading_icon();
         self.world.update_cursor();
         self.world.update_item_cursor(&self.engine);
         self.world.apply_pending_events(&mut self.engine);

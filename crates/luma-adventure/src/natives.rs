@@ -47,24 +47,10 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 
 /// Methods the engine has that later milestones implement.
 const GAME_STUBS: &[&str] = &[
-    "LockMouseRect",
-    "RegWriteNumber",
-    "RegWriteString",
-    "Screenshot",
-    "ScreenshotEx",
-    "OpenDocument",
-    "SetLoadingScreen",
-    "SetSavingScreen",
-    "DisplayLoadingIcon",
-    "HideLoadingIcon",
-    "StoreSaveThumbnail",
-    "DeleteSaveThumbnail",
     "ShowStatusLine",
     "HideStatusLine",
-    "LoadInventoryBox",
     "LoadEntity",
     "CreateEntity",
-    "Reset",
     "AccOutputText",
     "DumpTextureStats",
     "EnableScriptProfiling",
@@ -93,6 +79,10 @@ const OBJECT_STUBS: &[&str] = &[
 impl World {
     /// A built-in property of a native, if the native defines it.
     pub(crate) fn native_get(&self, id: NativeId, name: &str) -> Option<Value> {
+        // The library objects answer in place: no copy of their contents.
+        if let Kind::Class(object) = &self.native(id)?.kind {
+            return object.get_property(name);
+        }
         let kind = self.native(id)?.kind.clone();
         match kind {
             Kind::Game => self.game_get(name),
@@ -135,12 +125,18 @@ impl World {
                 "Name" => Some(Value::from(kind)),
                 _ => None,
             },
+            Kind::Class(_) => None,
         }
     }
 
     /// Sets a built-in property; `false` when the native has no such
     /// property and it should be stored as a script property.
     pub(crate) fn native_set(&mut self, id: NativeId, name: &str, value: &Value) -> bool {
+        if matches!(self.native(id).map(|n| &n.kind), Some(Kind::Class(_))) {
+            return self
+                .with_class(id, |object, world| object.set_property(name, value, world))
+                .unwrap_or(false);
+        }
         let kind = match self.native(id) {
             Some(native) => native.kind.clone(),
             None => return false,
@@ -157,7 +153,12 @@ impl World {
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
-            Kind::Keyboard | Kind::Math | Kind::ResponseBox | Kind::Fader | Kind::Inert(_) => false,
+            Kind::Keyboard
+            | Kind::Math
+            | Kind::ResponseBox
+            | Kind::Fader
+            | Kind::Inert(_)
+            | Kind::Class(_) => false,
         }
     }
 
@@ -169,6 +170,13 @@ impl World {
         args: &[Value],
         ctx: Context<'_>,
     ) -> Option<Return> {
+        if matches!(self.native(id)?.kind, Kind::Class(_)) {
+            return self
+                .with_class(id, |object, world| {
+                    object.call_method(name, args, world, &ctx)
+                })
+                .flatten();
+        }
         let kind = self.native(id)?.kind.clone();
         let mut ctx = ctx;
         if let Some(ret) = self.holder_call(id, name, args, &mut ctx) {
@@ -202,6 +210,7 @@ impl World {
             Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
+            Kind::Class(_) => None,
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
                     let widget = self.inert("Widget");
@@ -337,7 +346,8 @@ impl World {
             "Name" => Value::from(self.name.clone()),
             "Caption" => Value::from(self.caption.clone()),
             "CurrentTime" => Value::Int(self.timer() as i32),
-            "WindowsTime" => Value::Int(self.timer() as i32),
+            // `timeGetTime`: a clock that runs while the game is frozen.
+            "WindowsTime" => Value::Int(self.clock as i32),
             "MainObject" => native_or_null(self.main_object),
             "MouseX" => Value::Int(self.mouse.x),
             "MouseY" => Value::Int(self.mouse.y),
@@ -365,18 +375,23 @@ impl World {
             "VideoSkipButton" => Value::Int(self.video_skip_button.code()),
             "Frozen" => Value::Bool(self.is_frozen()),
             "FocusedWindow" => native_or_null(self.focused_window()),
+            "WindowedMode" => Value::Bool(self.windowed),
+            "SoundAvailable" => Value::Bool(self.sounds.audio.device().is_some()),
             "DebugMode"
-            | "SoundAvailable"
-            | "WindowedMode"
             | "TextRTL"
             | "SuspendedRendering"
             | "SuppressScriptErrors"
             | "AutorunDisabled"
             | "AutoSaveOnExit"
             | "CursorHidden" => Value::Bool(false),
-            "AcceleratedMode" => Value::Bool(true),
-            "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => Value::Int(100),
-            "FPS" | "TextEncoding" | "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
+            "AcceleratedMode" | "Accelerated" => Value::Bool(true),
+            "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => {
+                return Some(self.volume_property(name));
+            }
+            "FPS" => Value::Int(self.fps),
+            "TextEncoding" => Value::Int(self.text_encoding),
+            "StartupScene" => self.startup_scene.clone().map_or(Value::Null, Value::from),
+            "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
             "SaveDirectory" => Value::from(self.save_directory().to_string_lossy().into_owned()),
             "MostRecentSaveSlot" => Value::Int(self.most_recent_save_slot()),
             "TalkSkipButton" => Value::Int(self.talk_skip_button.code()),
@@ -418,6 +433,20 @@ impl World {
             "VideoSubtitles" => self.video_subtitles = value.get_bool(self),
             "VideoSkipButton" => {
                 self.video_skip_button = TalkSkipButton::from_code(value.get_int(self));
+            }
+            "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => {
+                let percent = value.get_int(self);
+                self.set_volume_property(name, percent);
+            }
+            "TextEncoding" => {
+                // `NUM_TEXT_ENCODINGS` is 2: ANSI and UTF-8.
+                self.text_encoding = value.get_int(self).clamp(0, 1);
+            }
+            "StartupScene" => {
+                self.startup_scene = match value {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
             }
             _ => return false,
         }
@@ -636,12 +665,109 @@ impl World {
             "Msg" => {
                 let text = arg(0).get_string(self);
                 self.log(format!("msg: {text}"));
+                self.quick_message(&text);
                 Return::null()
+            }
+            "Screenshot" => {
+                let name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                self.request_screenshot(name.as_deref());
+                Return::value(true)
+            }
+            "ScreenshotEx" => {
+                let filename = arg(0).get_string(self);
+                let (width, height) = (self.settings.width as i32, self.settings.height as i32);
+                let w = match arg(1) {
+                    Value::Null => width,
+                    v => v.get_int(self),
+                };
+                let h = match arg(2) {
+                    Value::Null => height,
+                    v => v.get_int(self),
+                };
+                self.request_screenshot_sized(&filename, w, h);
+                Return::value(true)
+            }
+            "SetLoadingScreen" | "SetSavingScreen" => {
+                let path = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let (x, y) = (arg(1).get_int(self), arg(2).get_int(self));
+                if name == "SetLoadingScreen" {
+                    self.set_loading_screen(path.as_deref(), x, y);
+                } else {
+                    self.set_saving_screen(path.as_deref(), x, y);
+                }
+                Return::null()
+            }
+            "DisplayLoadingIcon" => {
+                let path = arg(0).get_string(self);
+                let (x, y) = (arg(1).get_int(self), arg(2).get_int(self));
+                let persistent = arg(3).get_bool(self);
+                self.display_loading_icon(&path, x, y, persistent);
+                Return::null()
+            }
+            "HideLoadingIcon" => {
+                self.hide_loading_icon();
+                Return::null()
+            }
+            "StoreSaveThumbnail" => Return::value(self.store_save_thumbnail()),
+            "DeleteSaveThumbnail" => {
+                self.delete_save_thumbnail();
+                Return::null()
+            }
+            "LockMouseRect" => {
+                let (l, t, r, b) = (
+                    arg(0).get_int(self),
+                    arg(1).get_int(self),
+                    arg(2).get_int(self),
+                    arg(3).get_int(self),
+                );
+                self.lock_mouse_rect(l, t, r, b);
+                Return::null()
+            }
+            "Reset" => {
+                self.reset_content(ctx.engine);
+                Return::null()
+            }
+            "LoadInventoryBox" => {
+                let path = arg(0).get_string(self);
+                Return::value(self.load_inventory_box_from(ctx.engine, &path))
             }
             "LOG" => {
                 let text = arg(0).get_string(self);
                 self.log(format!("sc: {text}"));
                 Return::null()
+            }
+            "Caption" => {
+                // `CBObject::GetCaption(n)`: the game has one caption; the
+                // original engine refreshes the window title here too.
+                Return::value(self.caption.clone())
+            }
+            "RunScript" => {
+                self.log(
+                    "**Warning** The 'RunScript' method is now obsolete. Use 'AttachScript' instead (same syntax)"
+                        .to_string(),
+                );
+                let path = arg(0).get_string(self);
+                let game = self.game_id;
+                Return::value(self.attach(ctx.engine, game, &path))
+            }
+            "GetFileChecksum" => {
+                let path = arg(0).get_string(self);
+                let as_hex = arg(1).get_bool(self);
+                Return::value(match self.file_checksum(&path) {
+                    Some(crc) if as_hex => Value::from(format!("{crc:x}")),
+                    Some(crc) => Value::Int(crc as i32),
+                    None => Value::Null,
+                })
+            }
+            "OpenDocument" => {
+                let target = arg(0).get_string(self);
+                Return::value(self.open_document(&target))
             }
             "FileExists" => Return::value(self.vfs().exists(&arg(0).get_string(self))),
             "ClearScriptCache" => Return::null(),
@@ -694,13 +820,28 @@ impl World {
                 self.stub(&format!("Game.{name}"));
                 Return::null()
             }
+            "RegWriteNumber" | "RegWriteString" => {
+                let key = arg(0).get_string(self);
+                let value = match name {
+                    "RegWriteNumber" => arg(1).get_int(self).to_string(),
+                    _ => arg(1).get_string(self),
+                };
+                self.write_setting(&key, &value);
+                Return::null()
+            }
             "RegReadString" => {
-                self.stub(&format!("Game.{name}"));
-                Return::value("")
+                let key = arg(0).get_string(self);
+                let default = arg(1).get_string(self);
+                Return::value(self.read_setting(&key).unwrap_or(default))
             }
             "RegReadNumber" => {
-                self.stub(&format!("Game.{name}"));
-                Return::value(0)
+                // `GetPrivateProfileInt`: the leading integer of the value.
+                let key = arg(0).get_string(self);
+                let default = arg(1).get_int(self);
+                Return::value(
+                    self.read_setting(&key)
+                        .map_or(default, |v| luma_script::atoi(&v)),
+                )
             }
             "AddResponse" | "AddResponseOnce" | "AddResponseOnceGame" => {
                 let kind = match name {

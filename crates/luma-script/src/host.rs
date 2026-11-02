@@ -17,6 +17,11 @@ pub enum Effect {
     /// Finish every script already waiting for the object, then wait for
     /// it (`WaitForExclusive`, used by `GoTo`, `Talk` and the like).
     WaitForExclusive(NativeId),
+    /// The call was a constructor (`new Class(...)`): the returned value
+    /// replaces the object on top of the `this` stack, the placeholder
+    /// the compiler created for the expression, and the call itself
+    /// yields `null`, as the engine's constructors do.
+    Construct,
 }
 
 /// The result of a native call: a value, and an optional effect.
@@ -49,6 +54,15 @@ impl Return {
             effect,
         }
     }
+
+    /// The result of a constructor: the new object, which takes the place
+    /// of the `this` object of the `new` expression.
+    pub fn constructed(value: impl Into<Value>) -> Return {
+        Return {
+            value: value.into(),
+            effect: Effect::Construct,
+        }
+    }
 }
 
 /// The calling script, handed to the host with every native call. The
@@ -64,6 +78,23 @@ pub struct Context<'a> {
     pub owner: Option<NativeId>,
     /// The source line being executed, for messages.
     pub line: u32,
+}
+
+impl Context<'_> {
+    /// A runtime error in the calling script, worded as the engine logs
+    /// its own (`Runtime error. Script '...', line N: message`), for the
+    /// host to log.
+    pub fn runtime_error(&self, message: &str) -> String {
+        let filename = self
+            .engine
+            .script(self.script)
+            .map(|s| s.filename().to_string())
+            .unwrap_or_default();
+        format!(
+            "Runtime error. Script '{filename}', line {}: {message}",
+            self.line
+        )
+    }
 }
 
 /// The program embedding the virtual machine: files, time, logging,
