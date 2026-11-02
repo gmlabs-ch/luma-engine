@@ -229,6 +229,49 @@ impl std::fmt::Debug for VideoPlayer {
 }
 
 impl VideoPlayer {
+    /// A player of a video used as a texture (`SetTheoraTexture`): loops,
+    /// has no sound, no placement and no subtitles.
+    #[cfg(feature = "3d")]
+    pub(crate) fn texture_loop(filename: &str, video: Video) -> VideoPlayer {
+        let info = video.info().clone();
+        VideoPlayer {
+            filename: filename.to_string(),
+            video,
+            info,
+            playback: VideoPlayback::Pos,
+            x: 0,
+            y: 0,
+            zoom: 100.0,
+            freeze_game: false,
+            dont_drop_frames: false,
+            looping: true,
+            paused: false,
+            time_offset_ms: 0,
+            alpha: None,
+            started: false,
+            start_clock: 0,
+            pause_started: None,
+            sound: None,
+            pending: None,
+            frame: None,
+            frame_serial: 0,
+            finished: false,
+            subtitler: None,
+            subtitle_height: 0,
+        }
+    }
+
+    /// Starts the video again from its first frame (`ResetStream`); an
+    /// error when the stream cannot be rewound.
+    #[cfg(feature = "3d")]
+    pub(crate) fn restart(&mut self) -> Result<(), String> {
+        self.video.rewind().map_err(|e| e.to_string())?;
+        self.started = false;
+        self.time_offset_ms = 0;
+        self.pending = None;
+        Ok(())
+    }
+
     /// Whether the video plays.
     pub fn is_playing(&self) -> bool {
         !self.finished
@@ -286,16 +329,16 @@ fn apply_alpha(frame: &mut Frame, mask: &Image) {
 /// late ones unless asked not to, starts the sound with the first frame
 /// and shows the frame that is due. `true` when the stream ended and
 /// nothing is left to show.
-fn step_player(
+pub(crate) fn step_player(
     player: &mut VideoPlayer,
-    audio: &mut Audio,
+    audio: Option<&mut Audio>,
     now: u64,
     log: &mut Vec<String>,
 ) -> bool {
     let sound_position = player
         .sound
         .filter(|_| player.started)
-        .map(|s| audio.position_ms(s));
+        .and_then(|s| audio.as_deref().map(|a| a.position_ms(s)));
     let movie_time = player.movie_time_ms(now, sound_position);
     let mut ended = false;
     // The frame ready to show (`DecodeTheora`): the first decoded whose
@@ -336,7 +379,7 @@ fn step_player(
     if !player.started {
         player.started = true;
         player.start_clock = now;
-        if let Some(sound) = player.sound {
+        if let (Some(sound), Some(audio)) = (player.sound, audio) {
             if player.time_offset_ms != 0 {
                 audio.set_position_ms(sound, player.time_offset_ms);
             }
@@ -364,7 +407,7 @@ fn step_player(
 
 /// Uploads the frame a player shows as `texture`, reusing it while the
 /// size does not change; `uploaded` remembers the frame uploaded.
-fn upload_frame(
+pub(crate) fn upload_frame(
     renderer: &luma_render::Renderer,
     player: &VideoPlayer,
     texture: &mut Option<Texture>,
@@ -565,7 +608,7 @@ impl World {
         if player.finished {
             return;
         }
-        let ended = step_player(player, &mut self.sounds.audio, clock, &mut self.log);
+        let ended = step_player(player, Some(&mut self.sounds.audio), clock, &mut self.log);
         if ended {
             player.finished = true;
             let sound = player.sound.take();
@@ -750,7 +793,7 @@ impl World {
         }
         let ended = step_player(
             &mut video.player,
-            &mut self.sounds.audio,
+            Some(&mut self.sounds.audio),
             timer,
             &mut self.log,
         );

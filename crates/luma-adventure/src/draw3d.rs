@@ -21,17 +21,19 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use luma_3d::math::deg_to_rad;
-use luma_3d::{Mat4, Mesh, Model, Plane, ShadowType, Vec3};
+use luma_3d::{AnimatedModel, Mat4, Material, Mesh, Model, Plane, ShadowType, Vec3};
 use luma_formats::image::DEFAULT_COLOR_KEY;
-use luma_formats::{Image, Rgba};
+use luma_formats::{Image, Rgb, Rgba, Sprite};
 use luma_render::{
     DepthOnlyDraw, Draw3d, Fog, Light, Lights, Matrix, MeshDraw, MeshHandle, MeshMaterial,
     MeshVertex, Renderer, ShadowVolumeDraw, StencilFill, Texture, matrix,
 };
 use luma_script::NativeId;
+use luma_video::Video;
 
-use crate::actor3d::{Actor3dDraw, ThreeDFrame};
-use crate::scene_view::Overlays;
+use crate::actor3d::{Actor3dDraw, AttachmentDraw, MaterialOverride, MaterialTexture, ThreeDFrame};
+use crate::scene_view::{AnimState, Overlays};
+use crate::video::{VideoPlayer, step_player, upload_frame};
 use crate::world::World;
 
 /// How far a shadow volume is extruded, as a multiple of the distance
@@ -330,49 +332,159 @@ struct Receivers {
     nodes: Vec<(usize, MeshHandle)>,
 }
 
+/// A texture a script put on a material (`MaterialOverride`), as the
+/// drawing step keeps it between frames.
+// A video player is large; there are a few of these per actor at most.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+enum ScriptTexture {
+    /// A still image, in `Render3d::textures`.
+    Still(String),
+    /// A `.sprite`: its frames' images are in `Render3d::textures` and
+    /// the state advances on the game timer, frame delays honoured
+    /// (`CXModel::SetMaterialSprite`).
+    Sprite {
+        file: String,
+        sprite: Sprite,
+        state: AnimState,
+    },
+    /// A Theora video played in a loop, without sound; each decoded
+    /// frame becomes the texture (`CXModel::SetMaterialTheora`).
+    Video {
+        file: String,
+        player: VideoPlayer,
+        texture: Option<Texture>,
+        uploaded: u64,
+    },
+    /// A file that could not be opened; not tried again.
+    Failed(String),
+}
+
+impl ScriptTexture {
+    fn file(&self) -> &str {
+        match self {
+            ScriptTexture::Still(file)
+            | ScriptTexture::Sprite { file, .. }
+            | ScriptTexture::Video { file, .. }
+            | ScriptTexture::Failed(file) => file,
+        }
+    }
+
+    /// Whether this is the texture `wanted` asks for.
+    fn is(&self, wanted: &MaterialTexture) -> bool {
+        match (self, wanted) {
+            (ScriptTexture::Video { file, .. }, MaterialTexture::Theora(f)) => file == f,
+            (ScriptTexture::Video { .. }, MaterialTexture::Sprite(_)) => false,
+            (
+                ScriptTexture::Still(_) | ScriptTexture::Sprite { .. },
+                MaterialTexture::Theora(_),
+            ) => false,
+            (other, MaterialTexture::Sprite(f) | MaterialTexture::Theora(f)) => other.file() == f,
+        }
+    }
+}
+
+/// A model drawn this frame: the actor's or an attachment's.
+struct ModelDraw<'a> {
+    id: NativeId,
+    model: &'a AnimatedModel,
+    world: Mat4,
+    draw_backfaces: bool,
+}
+
+impl<'a> ModelDraw<'a> {
+    fn of_actor(draw: &Actor3dDraw<'a>) -> ModelDraw<'a> {
+        ModelDraw {
+            id: draw.id,
+            model: draw.model,
+            world: draw.world,
+            draw_backfaces: draw.draw_backfaces,
+        }
+    }
+
+    fn of_attachment(attachment: &AttachmentDraw<'a>) -> ModelDraw<'a> {
+        ModelDraw {
+            id: attachment.id,
+            model: attachment.model,
+            world: attachment.world,
+            draw_backfaces: attachment.draw_backfaces,
+        }
+    }
+
+    /// The actor's model, then its attachments', as they are drawn
+    /// (`Display`, then `DisplayAttachments`) and cast shadows
+    /// (`RenderModel`, `DisplayShadowVolume`).
+    fn all(draw: &Actor3dDraw<'a>) -> Vec<ModelDraw<'a>> {
+        std::iter::once(ModelDraw::of_actor(draw))
+            .chain(draw.attachments.iter().map(ModelDraw::of_attachment))
+            .collect()
+    }
+}
+
 /// The GPU side of the 3D actors, kept by the world across frames.
 #[derive(Debug, Default)]
 pub struct Render3d {
+    /// By actor or attachment, and mesh index in its model.
     meshes: HashMap<(NativeId, usize), UploadedMesh>,
     adjacency: HashMap<(NativeId, usize), Adjacency>,
     /// By path; `None` when the file could not be read or decoded, so
     /// that it is not tried again every frame.
     textures: HashMap<String, Option<Texture>>,
+    /// The textures scripts put on materials, by actor and material name
+    /// in lower case.
+    overrides: HashMap<(NativeId, String), ScriptTexture>,
     receivers: Option<Receivers>,
     quad: Option<MeshHandle>,
     default_shadow: Option<Texture>,
+    /// What went wrong, for the world's log.
+    log: Vec<String>,
 }
 
 impl Render3d {
     /// Uploads and updates what the frame's 3D actors need: their meshes
-    /// with the pose of this frame, the textures of their materials and
-    /// shadow images, the scene's shadow receivers; frees the meshes of
-    /// the actors that are gone.
+    /// and their attachments' with the pose of this frame, the textures
+    /// of their materials, the textures scripts put on materials (a
+    /// sprite's frame of this moment, a video's), their shadow images,
+    /// the scene's shadow receivers; frees what belongs to actors that
+    /// are gone.
     pub(crate) fn upload(&mut self, world: &World, renderer: &Renderer) {
         let Some((frame, draws)) = world.three_d_draws() else {
-            self.free_actors(renderer, &[]);
+            self.free_gone(renderer, &[], &[]);
             return;
         };
-        let live: Vec<NativeId> = draws.iter().map(|d| d.id).collect();
-        self.free_actors(renderer, &live);
+        let live: Vec<NativeId> = draws
+            .iter()
+            .flat_map(|d| std::iter::once(d.id).chain(d.attachments.iter().map(|a| a.id)))
+            .collect();
+        let overrides: Vec<(NativeId, &MaterialOverride)> = draws
+            .iter()
+            .flat_map(|d| d.materials.iter().map(move |m| (d.id, m)))
+            .collect();
+        self.free_gone(renderer, &live, &overrides);
         let mut need_quad = false;
         for draw in &draws {
-            self.upload_model(renderer, draw.id, draw.model.model(), draw.model.meshes());
-            for mesh in &draw.model.model().meshes {
-                for material in &mesh.materials {
-                    if let Some(path) = material
-                        .texture_path
-                        .as_deref()
-                        .or(material.texture_filename.as_deref())
-                    {
-                        self.ensure_texture(world, renderer, path);
+            for model in ModelDraw::all(draw) {
+                self.upload_model(
+                    renderer,
+                    model.id,
+                    model.model.model(),
+                    model.model.meshes(),
+                );
+                for mesh in &model.model.model().meshes {
+                    for material in &mesh.materials {
+                        if let Some(path) = texture_path(material) {
+                            self.ensure_texture(world, renderer, path, DEFAULT_COLOR_KEY);
+                        }
                     }
                 }
+            }
+            for material in draw.materials {
+                self.update_override(world, renderer, draw.id, material);
             }
             if draw.shadow_type == ShadowType::Simple {
                 need_quad = true;
                 match draw.shadow_image {
-                    Some(path) => self.ensure_texture(world, renderer, path),
+                    Some(path) => self.ensure_texture(world, renderer, path, DEFAULT_COLOR_KEY),
                     None => {
                         if self.default_shadow.is_none() {
                             self.default_shadow =
@@ -391,8 +503,19 @@ impl Render3d {
         }
     }
 
-    /// Frees the meshes of the actors not in `live`.
-    fn free_actors(&mut self, renderer: &Renderer, live: &[NativeId]) {
+    /// What the upload logged, once.
+    pub(crate) fn take_log(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.log)
+    }
+
+    /// Frees the meshes of the models not in `live` and the script
+    /// textures no actor asks for any more.
+    fn free_gone(
+        &mut self,
+        renderer: &Renderer,
+        live: &[NativeId],
+        overrides: &[(NativeId, &MaterialOverride)],
+    ) {
         self.meshes.retain(|(id, _), mesh| {
             let keep = live.contains(id);
             if !keep {
@@ -401,6 +524,146 @@ impl Render3d {
             keep
         });
         self.adjacency.retain(|(id, _), _| live.contains(id));
+        self.overrides.retain(|(id, material), texture| {
+            let keep = overrides.iter().any(|(owner, o)| {
+                owner == id && o.material.eq_ignore_ascii_case(material) && texture.is(&o.texture)
+            });
+            if !keep {
+                if let ScriptTexture::Video {
+                    texture: Some(texture),
+                    ..
+                } = texture
+                {
+                    renderer.forget(texture);
+                }
+            }
+            keep
+        });
+    }
+
+    /// Opens a script texture when it is new, and advances it: the
+    /// sprite's frame on the game timer, the video's frames.
+    fn update_override(
+        &mut self,
+        world: &World,
+        renderer: &Renderer,
+        id: NativeId,
+        material: &MaterialOverride,
+    ) {
+        let key = (id, material.material.to_ascii_lowercase());
+        if !self.overrides.contains_key(&key) {
+            let texture = self.open_override(world, renderer, &material.texture);
+            self.overrides.insert(key.clone(), texture);
+        }
+        let Some(texture) = self.overrides.get_mut(&key) else {
+            return;
+        };
+        match texture {
+            ScriptTexture::Still(_) | ScriptTexture::Failed(_) => {}
+            ScriptTexture::Sprite { sprite, state, .. } => {
+                state.step(sprite, world.timer);
+            }
+            ScriptTexture::Video {
+                file,
+                player,
+                texture,
+                uploaded,
+            } => {
+                if !world.is_frozen() && step_player(player, None, world.timer, &mut self.log) {
+                    if let Err(err) = player.restart() {
+                        self.log
+                            .push(format!("Error restarting video '{file}': {err}"));
+                        if let Some(texture) = texture.take() {
+                            renderer.forget(&texture);
+                        }
+                        *self.overrides.get_mut(&key).expect("present") =
+                            ScriptTexture::Failed(file.clone());
+                        return;
+                    }
+                }
+                upload_frame(renderer, player, texture, uploaded);
+            }
+        }
+    }
+
+    /// Reads the file of a script texture: a `.sprite` with its frames'
+    /// images, a video, or a still image.
+    fn open_override(
+        &mut self,
+        world: &World,
+        renderer: &Renderer,
+        texture: &MaterialTexture,
+    ) -> ScriptTexture {
+        match texture {
+            MaterialTexture::Theora(file) => match world.vfs.read(file) {
+                Ok(bytes) => match Video::open(bytes) {
+                    Ok(video) => ScriptTexture::Video {
+                        file: file.clone(),
+                        player: VideoPlayer::texture_loop(file, video),
+                        texture: None,
+                        uploaded: 0,
+                    },
+                    Err(err) => {
+                        self.log
+                            .push(format!("Error opening video file '{file}': {err}"));
+                        ScriptTexture::Failed(file.clone())
+                    }
+                },
+                Err(err) => {
+                    self.log
+                        .push(format!("Error opening video file '{file}': {err}"));
+                    ScriptTexture::Failed(file.clone())
+                }
+            },
+            MaterialTexture::Sprite(file) if is_sprite_file(file) => {
+                let sprite = world
+                    .vfs
+                    .read(file)
+                    .map_err(|e| e.to_string())
+                    .and_then(|bytes| Sprite::parse(&bytes).map_err(|e| e.to_string()));
+                match sprite {
+                    Ok(sprite) => {
+                        for sub in sprite.frames.iter().flat_map(|f| f.subframes.iter()) {
+                            if let Some(image) = &sub.image {
+                                self.ensure_texture(world, renderer, image, sub.color_key);
+                            }
+                        }
+                        ScriptTexture::Sprite {
+                            file: file.clone(),
+                            sprite,
+                            state: AnimState::new(file),
+                        }
+                    }
+                    Err(err) => {
+                        self.log
+                            .push(format!("Error loading sprite '{file}': {err}"));
+                        ScriptTexture::Failed(file.clone())
+                    }
+                }
+            }
+            MaterialTexture::Sprite(file) => {
+                self.ensure_texture(world, renderer, file, DEFAULT_COLOR_KEY);
+                ScriptTexture::Still(file.clone())
+            }
+        }
+    }
+
+    /// The texture a script put on a material of an actor, if it shows
+    /// one this frame.
+    fn override_texture(&self, id: NativeId, material: &Material) -> Option<&Texture> {
+        let name = material.name.as_deref()?;
+        let texture = self.overrides.get(&(id, name.to_ascii_lowercase()))?;
+        match texture {
+            ScriptTexture::Still(file) => self.texture(file),
+            ScriptTexture::Sprite { sprite, state, .. } => sprite
+                .frames
+                .get(state.current_frame)
+                .and_then(|f| f.subframes.first())
+                .and_then(|s| s.image.as_deref())
+                .and_then(|image| self.texture(image)),
+            ScriptTexture::Video { texture, .. } => texture.as_ref(),
+            ScriptTexture::Failed(_) => None,
+        }
     }
 
     /// Uploads the meshes of a model once and writes the posed vertices
@@ -450,18 +713,25 @@ impl Render3d {
         }
     }
 
-    /// Decodes and uploads a texture once, with the engine's colour key
-    /// and a mipmap chain.
-    fn ensure_texture(&mut self, world: &World, renderer: &Renderer, path: &str) {
+    /// Decodes and uploads a texture once, with a colour key and a
+    /// mipmap chain.
+    fn ensure_texture(&mut self, world: &World, renderer: &Renderer, path: &str, key: Rgb) {
         if self.textures.contains_key(path) {
             return;
         }
-        let texture = world
+        let texture = match world
             .vfs
             .read(path)
-            .ok()
-            .and_then(|bytes| luma_formats::image::decode(&bytes, DEFAULT_COLOR_KEY).ok())
-            .map(|image| renderer.mesh_texture(path, &image));
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| luma_formats::image::decode(&bytes, key).map_err(|e| e.to_string()))
+        {
+            Ok(image) => Some(renderer.mesh_texture(path, &image)),
+            Err(err) => {
+                self.log
+                    .push(format!("Error loading texture '{path}': {err}"));
+                None
+            }
+        };
         self.textures.insert(path.to_string(), texture);
     }
 
@@ -533,7 +803,7 @@ impl Render3d {
 
     /// The 3D items of the frame: the receivers to draw before the main
     /// layer's nodes, and, per 3D actor (by its index among the free
-    /// objects), its shadow then its model.
+    /// objects), its shadow, then its model and its attachments.
     pub(crate) fn overlays<'a>(&'a self, world: &'a World, overlays: &mut Overlays<'a>) {
         let Some((frame, draws)) = world.three_d_draws() else {
             return;
@@ -570,7 +840,7 @@ impl Render3d {
     }
 
     /// The shadow of an actor, drawn before its model
-    /// (`CAdActor3DX::Display`).
+    /// (`CAdActor3DX::Display`); the attachments cast with it.
     fn shadow_items<'a>(
         &'a self,
         draw: &Actor3dDraw<'_>,
@@ -605,14 +875,14 @@ impl Render3d {
                 }));
             }
             ShadowType::Flat => {
-                // `C3DShadowGen::Render`: the model seen from the shadow
-                // light, in the shadow colour, laid on the plane of the
-                // actor's feet. Luma projects the posed triangles onto
-                // that plane instead of rendering them to a texture; the
-                // stencil keeps the overlapping triangles from darkening
-                // twice. The original modulates the silhouette texture by
-                // the floor quad's colour, both the shadow colour, hence
-                // the squared channels.
+                // `C3DShadowGen::Render`: the model and its attachments
+                // seen from the shadow light, in the shadow colour, laid
+                // on the plane of the actor's feet. Luma projects the
+                // posed triangles onto that plane instead of rendering
+                // them to a texture; the stencil keeps the overlapping
+                // triangles from darkening twice. The original modulates
+                // the silhouette texture by the floor quad's colour, both
+                // the shadow colour, hence the squared channels.
                 let color = rgba_of(draw.shadow_color);
                 let channel = |v: u8| (f32::from(v) / 255.0).powi(2);
                 let material = MeshMaterial {
@@ -623,54 +893,68 @@ impl Render3d {
                     normal: Vec3::new(0.0, 1.0, 0.0),
                     d: -draw.position.y,
                 };
-                let world = draw.world * shadow_matrix(plane, draw.shadow_light);
+                let flatten = shadow_matrix(plane, draw.shadow_light);
                 let reference = (draw.other_index % 255 + 1) as u8;
-                for index in 0..draw.model.model().meshes.len() {
-                    let Some(uploaded) = self.meshes.get(&(draw.id, index)) else {
-                        continue;
-                    };
-                    items.push(Draw3d::Mesh(MeshDraw {
-                        material,
-                        depth_write: false,
-                        stencil_once: Some(reference),
-                        ..MeshDraw::new(uploaded.handle, gpu_matrix(&world), view_projection)
-                    }));
+                for model in ModelDraw::all(draw) {
+                    let world = gpu_matrix(&(model.world * flatten));
+                    for index in 0..model.model.model().meshes.len() {
+                        let Some(uploaded) = self.meshes.get(&(model.id, index)) else {
+                            continue;
+                        };
+                        items.push(Draw3d::Mesh(MeshDraw {
+                            material,
+                            depth_write: false,
+                            stencil_once: Some(reference),
+                            ..MeshDraw::new(uploaded.handle, world, view_projection)
+                        }));
+                    }
                 }
             }
             ShadowType::Stencil => {
                 // `DisplayShadowVolume`: the silhouette edges of every
-                // posed mesh, extruded away from the light, counted into
-                // the stencil, then the fill in the shadow colour.
+                // posed mesh of the model and of the attachments, extruded
+                // away from the light in each model's space, counted into
+                // the stencil in world space, then the fill in the shadow
+                // colour.
                 let light_vector = draw.shadow_light - draw.position;
                 let depth = light_vector.length() * EXTRUSION_FACTOR;
-                let Some(inverse) = draw.world.inverse() else {
-                    return;
-                };
-                let light = inverse.transform_normal(light_vector.normalized());
+                let direction = light_vector.normalized();
                 let mut vertices = Vec::new();
-                for (index, (mesh, posed)) in draw
-                    .model
-                    .model()
-                    .meshes
-                    .iter()
-                    .zip(draw.model.meshes())
-                    .enumerate()
-                {
-                    let Some(adjacency) = self.adjacency.get(&(draw.id, index)) else {
+                for model in ModelDraw::all(draw) {
+                    let Some(inverse) = model.world.inverse() else {
                         continue;
                     };
-                    if !adjacency.fits(mesh) || posed.vertices.len() < mesh.vertices.len() {
-                        continue;
+                    let light = inverse.transform_normal(direction);
+                    let start = vertices.len();
+                    for (index, (mesh, posed)) in model
+                        .model
+                        .model()
+                        .meshes
+                        .iter()
+                        .zip(model.model.meshes())
+                        .enumerate()
+                    {
+                        let Some(adjacency) = self.adjacency.get(&(model.id, index)) else {
+                            continue;
+                        };
+                        if !adjacency.fits(mesh) || posed.vertices.len() < mesh.vertices.len() {
+                            continue;
+                        }
+                        let positions: Vec<Vec3> =
+                            posed.vertices.iter().map(|v| v.position).collect();
+                        add_shadow_volume(mesh, &positions, adjacency, light, depth, &mut vertices);
                     }
-                    let positions: Vec<Vec3> = posed.vertices.iter().map(|v| v.position).collect();
-                    add_shadow_volume(mesh, &positions, adjacency, light, depth, &mut vertices);
+                    for v in &mut vertices[start..] {
+                        let w = model.world.transform_coord(Vec3::new(v[0], v[1], v[2]));
+                        *v = [w.x, w.y, w.z];
+                    }
                 }
                 if vertices.is_empty() {
                     return;
                 }
                 items.push(Draw3d::ShadowVolume(ShadowVolumeDraw {
                     vertices,
-                    world: gpu_matrix(&draw.world),
+                    world: luma_render::IDENTITY,
                     view_projection,
                 }));
                 items.push(Draw3d::StencilFill(StencilFill {
@@ -680,8 +964,9 @@ impl Render3d {
         }
     }
 
-    /// The model of an actor: one draw per material of each mesh
-    /// (`CXMesh::Render`).
+    /// The model of an actor, then its attachments: one draw per material
+    /// of each mesh (`CXMesh::Render`), the attachments lit like the
+    /// actor (`DisplayAttachments`).
     fn model_items<'a>(
         &'a self,
         draw: &Actor3dDraw<'_>,
@@ -689,7 +974,6 @@ impl Render3d {
         fog: Option<Fog>,
         items: &mut Vec<Draw3d<'a>>,
     ) {
-        let world = gpu_matrix(&draw.world);
         let lights = Lights::from_slice(
             &draw
                 .lights
@@ -698,35 +982,59 @@ impl Render3d {
                 .collect::<Vec<_>>(),
         );
         let ambient = rgb_of(draw.ambient);
-        for (index, mesh) in draw.model.model().meshes.iter().enumerate() {
-            let Some(uploaded) = self.meshes.get(&(draw.id, index)) else {
-                continue;
-            };
-            for (material_index, range) in uploaded.ranges.iter().enumerate() {
-                if range.is_empty() {
+        for model in ModelDraw::all(draw) {
+            let world = gpu_matrix(&model.world);
+            // Only the actor's own materials can be replaced by script.
+            let overrides = model.id == draw.id;
+            for (index, mesh) in model.model.model().meshes.iter().enumerate() {
+                let Some(uploaded) = self.meshes.get(&(model.id, index)) else {
                     continue;
+                };
+                for (material_index, range) in uploaded.ranges.iter().enumerate() {
+                    if range.is_empty() {
+                        continue;
+                    }
+                    let material = mesh.materials.get(material_index);
+                    let texture = material.and_then(|m| {
+                        overrides
+                            .then(|| self.override_texture(draw.id, m))
+                            .flatten()
+                            .or_else(|| texture_path(m).and_then(|path| self.texture(path)))
+                    });
+                    items.push(Draw3d::Mesh(MeshDraw {
+                        indices: Some(range.clone()),
+                        texture,
+                        material: material.map_or_else(MeshMaterial::default, |m| MeshMaterial {
+                            diffuse: m.diffuse,
+                            emissive: m.emissive,
+                        }),
+                        ambient,
+                        lights,
+                        fog,
+                        cull_backfaces: !model.draw_backfaces,
+                        blend: draw.blend_mode,
+                        ..MeshDraw::new(uploaded.handle, world, view_projection)
+                    }));
                 }
-                let material = mesh.materials.get(material_index);
-                let texture = material
-                    .and_then(|m| m.texture_path.as_deref().or(m.texture_filename.as_deref()))
-                    .and_then(|path| self.texture(path));
-                items.push(Draw3d::Mesh(MeshDraw {
-                    indices: Some(range.clone()),
-                    texture,
-                    material: material.map_or_else(MeshMaterial::default, |m| MeshMaterial {
-                        diffuse: m.diffuse,
-                        emissive: m.emissive,
-                    }),
-                    ambient,
-                    lights,
-                    fog,
-                    cull_backfaces: !draw.draw_backfaces,
-                    blend: draw.blend_mode,
-                    ..MeshDraw::new(uploaded.handle, world, view_projection)
-                }));
             }
         }
     }
+}
+
+/// The texture file of a material: the path resolved against the model's
+/// directory, else the name as written.
+fn texture_path(material: &Material) -> Option<&str> {
+    material
+        .texture_path
+        .as_deref()
+        .or(material.texture_filename.as_deref())
+}
+
+/// Whether a script texture file is a `.sprite` rather than an image.
+fn is_sprite_file(file: &str) -> bool {
+    file.rsplit('.')
+        .next()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("sprite"))
 }
 
 impl World {
@@ -735,6 +1043,9 @@ impl World {
     pub(crate) fn upload_3d(&mut self, renderer: &Renderer) {
         let mut render = std::mem::take(&mut self.render3d);
         render.upload(self, renderer);
+        for message in render.take_log() {
+            self.log(message);
+        }
         self.render3d = render;
     }
 
