@@ -68,6 +68,10 @@ mirroring applied.
 
 While the game is not interactive there is no active object, so a
 click skips the sentences and nothing else (per `TALK_SKIP_BUTTON`).
+The exception is an object whose `NonIntMouseEvents` is on
+(`CBObject::m_NonIntMouseEvents`): the windows, their controls and the
+entities of entity containers start with it on, so that a menu works
+while the actors talk; any object may have it set by a script.
 
 ## Mouse events
 
@@ -107,6 +111,15 @@ restarts its animation. `Game.SetActiveCursor`, `RemoveActiveCursor`,
 `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`,
 `GetActiveCursor` and `GetWaitCursor` change and read them. The system
 cursor is hidden over the window.
+
+An object's own cursor comes from its `CURSOR` key, or from `SetCursor`
+on the object (entities, actors and controls; `false` when the sprite
+does not load, and the old cursor stays). `RemoveCursor` takes it off,
+`HasCursor` and `GetCursor` read it, and `GetCursorObject` returns it as
+a sprite object (frames, `CurrentFrame`, `Looping`, `Reset`, `Pause`,
+`Play`), sharing the animation the cursor shows. Scripts find the
+entity under the mouse change cursor from the next frame on, as in the
+original engine.
 
 While an inventory item is selected and the game is interactive, the
 item's `CURSOR` is drawn at the mouse, over the cursor above when the

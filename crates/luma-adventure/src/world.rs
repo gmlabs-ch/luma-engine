@@ -326,12 +326,12 @@ impl World {
 
     /// Whether an object takes mouse events while the game is not
     /// interactive (`m_NonIntMouseEvents`): the windows, their controls
-    /// and the containers' entities do, the scene's objects do not.
+    /// and the containers' entities do by default, the scene's objects
+    /// do not; scripts change it with `NonIntMouseEvents`.
     pub(crate) fn non_int_mouse_events(&self, id: NativeId) -> bool {
-        matches!(
-            self.objects.get(id).map(|n| &n.kind),
-            Some(Kind::Control | Kind::Entity(crate::scene_view::EntityRef::Ui(_)))
-        )
+        self.objects
+            .get(id)
+            .is_some_and(|n| n.state.non_int_mouse_events)
     }
 
     /// Whether a script asked to quit (`Game.QuitGame`).
@@ -466,7 +466,7 @@ impl World {
             Some(Kind::Keyboard) => "keyboard".to_string(),
             Some(Kind::Math) => "math".to_string(),
             Some(Kind::ResponseBox) => "response box".to_string(),
-            Some(Kind::Sprite(_)) => "sprite".to_string(),
+            Some(Kind::Sprite(_) | Kind::CursorSprite(_)) => "sprite".to_string(),
             Some(Kind::Fader) => "fader".to_string(),
             Some(Kind::Actor) => self
                 .actor(id)
@@ -565,6 +565,7 @@ impl World {
         if self.main_object == Some(id) {
             self.main_object = None;
         }
+        self.forget_owned(id);
         self.objects.remove(id);
         true
     }
@@ -825,7 +826,7 @@ impl World {
             .filter(|(_, a)| a.scene_bound)
             .map(|(id, _)| *id)
             .collect();
-        let gone: Vec<NativeId> = self
+        let mut gone: Vec<NativeId> = self
             .objects
             .iter()
             .filter(|(id, n)| {
@@ -835,14 +836,21 @@ impl World {
                     Kind::Entity(r) if !matches!(r, crate::scene_view::EntityRef::Ui(_))
                 );
                 scene_entity
-                    || matches!(
-                        n.kind,
-                        Kind::Layer(_) | Kind::Region { .. } | Kind::Sprite(_)
-                    )
+                    || matches!(n.kind, Kind::Layer(_) | Kind::Region { .. })
                     || scene_actors.contains(id)
             })
             .map(|(id, _)| id)
             .collect();
+        // The sprite objects standing for parts of those objects go too.
+        let owned: Vec<NativeId> = self
+            .objects
+            .iter()
+            .filter(|(_, n)| {
+                matches!(n.kind, Kind::Sprite(o) | Kind::CursorSprite(o) if gone.contains(&o))
+            })
+            .map(|(id, _)| id)
+            .collect();
+        gone.extend(owned);
         self.actors.retain(|(id, _)| !scene_actors.contains(id));
         if self
             .main_object
@@ -1189,7 +1197,9 @@ impl World {
                 .map_or((0, 0), |e| (e.x, e.y)),
             _ => (0, 0),
         };
-        if mods.relative {
+        // A scene-independent object is placed on the screen already.
+        let scene_independent = self.object_state(id).is_some_and(|s| s.scene_independent);
+        if mods.relative && !scene_independent {
             x -= self.offset_x;
             y -= self.offset_y;
         }
@@ -1487,7 +1497,7 @@ impl Natives for World {
             Some(Kind::Layer(_)) => "layer".to_string(),
             Some(Kind::Entity(_)) => "entity".to_string(),
             Some(Kind::Region { .. }) => "region".to_string(),
-            Some(Kind::Sprite(_)) => "sprite".to_string(),
+            Some(Kind::Sprite(_) | Kind::CursorSprite(_)) => "sprite".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
             Some(Kind::Fader) => "fader".to_string(),
             Some(Kind::Control) => self

@@ -17,14 +17,11 @@ const ACTOR_STUBS: &[&str] = &[
     "AddTalkSprite",
     "RemoveTalkSprite",
     "SetTalkSprite",
-    "SetCursor",
-    "RemoveCursor",
     "StickToRegion",
     "CreateParticleEmitter",
     "DeleteParticleEmitter",
     "AddAttachment",
     "RemoveAttachment",
-    "SetCaption",
 ];
 
 fn color_int(c: luma_formats::Rgba) -> i32 {
@@ -66,7 +63,6 @@ impl World {
             "TurnLeftAnimName" => Value::from(actor.turn_left_anim.clone()),
             "TurnRightAnimName" => Value::from(actor.turn_right_anim.clone()),
             "Active" => Value::Bool(actor.def.active),
-            "Movable" => Value::Bool(true),
             "Registrable" | "Interactive" => Value::Bool(actor.def.interactive),
             "Zoomable" | "Scalable" => Value::Bool(actor.def.scalable),
             "Rotatable" => Value::Bool(actor.def.rotatable),
@@ -82,10 +78,8 @@ impl World {
             "Colorable" => Value::Bool(actor.def.colorable),
             "SoundPanning" => Value::Bool(actor.def.sound_panning),
             "SaveState" => Value::Bool(true),
-            "NonIntMouseEvents" => Value::Bool(false),
             "AccCaption" => Value::Null,
             "IgnoreItems" => Value::Bool(actor.def.ignore_items),
-            "SceneIndependent" => Value::Bool(false),
             "SubtitlesWidth" => Value::Int(actor.subtitles.width),
             "SubtitlesPosX" => Value::Int(actor.subtitles.x),
             "SubtitlesPosY" => Value::Int(actor.subtitles.y),
@@ -147,8 +141,8 @@ impl World {
             "SubtitlesPosY" => actor.subtitles.y = int,
             "SubtitlesPosRelative" => actor.subtitles.relative = flag,
             "SubtitlesPosXCenter" => actor.subtitles.x_center = flag,
-            "Movable" | "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate"
-            | "SaveState" | "NonIntMouseEvents" | "AccCaption" | "SceneIndependent" => {}
+            "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate" | "SaveState"
+            | "AccCaption" => {}
             _ => return false,
         }
         true
@@ -282,11 +276,6 @@ impl World {
                 self.stub("Actor.GetSpriteObject");
                 Return::null()
             }
-            "Caption" => Return::value(
-                self.actor(id)
-                    .map(|a| a.def.caption.clone())
-                    .unwrap_or_default(),
-            ),
             "MergeAnims" => {
                 let path = arg(0).get_string(self);
                 let ok = self
@@ -338,8 +327,7 @@ impl World {
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
                 return Some(self.inventory_call(name, args));
             }
-            "HasCursor" => Return::value(false),
-            "GetCursor" | "GetCursorObject" | "GetAttachment" => Return::null(),
+            "GetAttachment" => Return::null(),
             _ if ACTOR_STUBS.contains(&name) => {
                 self.stub(&format!("Actor.{name}"));
                 Return::null()

@@ -13,7 +13,6 @@ use luma_formats::{Rgb, Sprite};
 use luma_render::{DrawList, Quad, Rect};
 use luma_script::NativeId;
 
-use crate::objects::Kind;
 use crate::scene_view::{AnimState, DrawItem, EntityRef, SpriteBank, key};
 use crate::world::World;
 
@@ -157,6 +156,20 @@ impl Cursors {
         self.anims.get(&key(path)).map_or(0, |a| a.current_frame)
     }
 
+    /// The animation state of a cursor sprite, once it was shown or
+    /// restarted.
+    pub fn anim(&self, path: &str) -> Option<&AnimState> {
+        self.anims.get(&key(path))
+    }
+
+    /// The animation state of a cursor sprite, mutable, created at its
+    /// first frame.
+    pub(crate) fn anim_mut(&mut self, path: &str) -> &mut AnimState {
+        self.anims
+            .entry(key(path))
+            .or_insert_with(|| AnimState::new(path))
+    }
+
     /// The frame the shown cursor is at.
     pub fn frame(&self) -> usize {
         self.shown
@@ -269,19 +282,6 @@ impl World {
                 self.cursors.noninteractive = None;
                 true
             }
-        }
-    }
-
-    /// The cursor of an object (`CURSOR` of entities and actors).
-    fn object_cursor(&self, id: NativeId) -> Option<String> {
-        match self.objects.get(id).map(|n| &n.kind) {
-            Some(Kind::Actor) => self.actor(id).and_then(|a| a.def.cursor.clone()),
-            Some(Kind::Entity(r)) => self
-                .scene()
-                .and_then(|v| v.entity(*r))
-                .and_then(|e| e.cursor.clone()),
-            Some(Kind::Control) => self.control(id).and_then(|c| c.cursor.clone()),
-            _ => None,
         }
     }
 

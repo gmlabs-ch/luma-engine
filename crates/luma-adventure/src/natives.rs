@@ -72,8 +72,6 @@ const GAME_STUBS: &[&str] = &[
 ];
 
 const OBJECT_STUBS: &[&str] = &[
-    "SetCursor",
-    "RemoveCursor",
     "PlayAnim",
     "PlayAnimAsync",
     "ForceTalkAnim",
@@ -87,13 +85,15 @@ const OBJECT_STUBS: &[&str] = &[
     "SetTalkSprite",
     "CreateRegion",
     "DeleteRegion",
-    "SetCaption",
 ];
 
 impl World {
     /// A built-in property of a native, if the native defines it.
     pub(crate) fn native_get(&self, id: NativeId, name: &str) -> Option<Value> {
         let kind = self.native(id)?.kind.clone();
+        if let Some(value) = self.object_get(id, name) {
+            return Some(value);
+        }
         match kind {
             Kind::Game => self.game_get(name),
             Kind::Keyboard => match name {
@@ -125,6 +125,7 @@ impl World {
             Kind::Entity(r) => self.entity_get(r, name),
             Kind::Region { layer, index } => self.region_get(layer, index, name),
             Kind::Sprite(owner) => self.sprite_get(owner, name),
+            Kind::CursorSprite(owner) => self.cursor_sprite_get(owner, name),
             Kind::Actor => self.actor_get(id, name),
             Kind::Control => self.control_get(id, name),
             Kind::Item => self.item_get(id, name),
@@ -143,6 +144,9 @@ impl World {
             Some(native) => native.kind.clone(),
             None => return false,
         };
+        if self.object_set(id, name, value) {
+            return true;
+        }
         match kind {
             Kind::Game => self.game_set(name, value),
             Kind::Scene => self.scene_set(name, value),
@@ -150,6 +154,7 @@ impl World {
             Kind::Entity(r) => self.entity_set(r, name, value),
             Kind::Region { layer, index } => self.region_set(layer, index, name, value),
             Kind::Sprite(owner) => self.sprite_set(owner, name, value),
+            Kind::CursorSprite(owner) => self.cursor_sprite_set(owner, name, value),
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
@@ -168,6 +173,9 @@ impl World {
         let kind = self.native(id)?.kind.clone();
         let mut ctx = ctx;
         if let Some(ret) = self.holder_call(id, name, args, &mut ctx) {
+            return Some(ret);
+        }
+        if let Some(ret) = self.object_call(id, name, args) {
             return Some(ret);
         }
         match kind {
@@ -193,6 +201,7 @@ impl World {
             Kind::Entity(r) => self.entity_call(id, r, name, args),
             Kind::Region { layer, index } => self.region_call(layer, index, name, args),
             Kind::Sprite(owner) => self.sprite_call(owner, name),
+            Kind::CursorSprite(owner) => self.cursor_sprite_call(owner, name),
             Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
@@ -1098,7 +1107,6 @@ impl World {
             "Y" => Value::Int(e.y),
             "Height" => Value::Int(self.entity_height(r)),
             "Ready" => Value::Bool(!self.scene().is_some_and(|v| v.is_talking(r))),
-            "Movable" => Value::Bool(true),
             "Registrable" | "Interactive" => Value::Bool(e.interactive),
             "Zoomable" | "Scalable" => Value::Bool(e.scalable),
             "Rotatable" => Value::Bool(e.rotatable),
@@ -1112,11 +1120,9 @@ impl World {
             "Colorable" => Value::Bool(e.colorable),
             "SoundPanning" => Value::Bool(e.sound_panning),
             "SaveState" => Value::Bool(e.save_state),
-            "NonIntMouseEvents" => Value::Bool(false),
             "AccCaption" => Value::Null,
             "Active" => Value::Bool(e.active),
             "IgnoreItems" => Value::Bool(e.ignore_items),
-            "SceneIndependent" => Value::Bool(false),
             "SubtitlesWidth" => Value::Int(self.subtitle_mods_of(r).map_or(0, |m| m.width)),
             "SubtitlesPosX" => Value::Int(self.subtitle_mods_of(r).map_or(0, |m| m.x)),
             "SubtitlesPosY" => Value::Int(self.subtitle_mods_of(r).map_or(0, |m| m.y)),
@@ -1189,8 +1195,7 @@ impl World {
             "WalkToX" => e.walk_to_x = int,
             "WalkToY" => e.walk_to_y = int,
             "WalkToDirection" => e.walk_to_dir = Direction::from_code(i64::from(int)),
-            "Movable" | "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate"
-            | "NonIntMouseEvents" | "AccCaption" | "SceneIndependent" => {}
+            "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate" | "AccCaption" => {}
             _ => return false,
         }
         true
@@ -1215,13 +1220,6 @@ impl World {
                     e.y = y;
                 }
                 Return::null()
-            }
-            "Caption" => {
-                let caption = self
-                    .entity_def(r)
-                    .map(|e| e.caption.clone())
-                    .unwrap_or_default();
-                Return::value(caption)
             }
             "SetSprite" => {
                 let path = match arg(0) {
@@ -1297,8 +1295,7 @@ impl World {
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
                 return Some(self.inventory_call(name, args));
             }
-            "HasCursor" => Return::value(false),
-            "GetCursor" | "GetCursorObject" | "GetAttachment" => Return::null(),
+            "GetAttachment" => Return::null(),
             _ if OBJECT_STUBS.contains(&name) => {
                 self.stub(&format!("Entity.{name}"));
                 Return::null()
@@ -1490,6 +1487,72 @@ impl World {
             _ => return false,
         }
         true
+    }
+
+    /// The cursor of an object as a sprite object (`GetCursorObject`):
+    /// the cursor sprite with its animation, as the cursor shows it.
+    fn cursor_sprite_get(&self, owner: NativeId, name: &str) -> Option<Value> {
+        let path = self.object_cursor(owner)?;
+        let loaded = self.cursors.bank.sprite(&path);
+        let frames = loaded.map_or(0, |l| l.sprite.frames.len());
+        let anim = self.cursors.anim(&path);
+        Some(match name {
+            "Type" => Value::from("sprite"),
+            "Filename" => Value::from(path.clone()),
+            "NumFrames" => Value::Int(frames as i32),
+            "CurrentFrame" => Value::Int(if frames == 0 {
+                -1
+            } else {
+                anim.map_or(0, |a| a.current_frame.min(frames - 1) as i32)
+            }),
+            "PixelPerfect" => Value::Bool(loaded.is_some_and(|l| l.sprite.precise)),
+            "Looping" => Value::Bool(
+                anim.and_then(|a| a.looping)
+                    .unwrap_or_else(|| loaded.is_some_and(|l| l.sprite.looping)),
+            ),
+            "Owner" => Value::Native(owner),
+            "Finished" => Value::Bool(anim.is_some_and(|a| a.finished)),
+            "Paused" => Value::Bool(anim.is_some_and(|a| a.paused)),
+            _ => return None,
+        })
+    }
+
+    fn cursor_sprite_set(&mut self, owner: NativeId, name: &str, value: &Value) -> bool {
+        let Some(path) = self.object_cursor(owner) else {
+            return false;
+        };
+        let (int, flag) = (value.get_int(self), value.get_bool(self));
+        let anim = self.cursors.anim_mut(&path);
+        match name {
+            "CurrentFrame" => {
+                anim.current_frame = int.max(0) as usize;
+                anim.last_frame_time = 0;
+                anim.finished = false;
+            }
+            "Looping" => anim.looping = Some(flag),
+            "PixelPerfect" => {}
+            _ => return false,
+        }
+        true
+    }
+
+    fn cursor_sprite_call(&mut self, owner: NativeId, name: &str) -> Option<Return> {
+        let path = self.object_cursor(owner)?;
+        Some(match name {
+            "Reset" => {
+                self.cursors.anim_mut(&path).reset();
+                Return::null()
+            }
+            "Pause" | "Play" => {
+                self.cursors.anim_mut(&path).paused = name == "Pause";
+                Return::null()
+            }
+            "GetFrame" | "DeleteFrame" | "AddFrame" | "InsertFrame" => {
+                self.stub(&format!("Sprite.{name}"));
+                Return::null()
+            }
+            _ => return None,
+        })
     }
 
     fn sprite_call(&mut self, owner: NativeId, name: &str) -> Option<Return> {

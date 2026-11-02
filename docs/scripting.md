@@ -159,6 +159,17 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
 | Sprite objects | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner` | `Reset`, `Pause`, `Play` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
+| Every object (`CBObject`, `CAdObject`) | `Movable`, `SceneIndependent`, `NonIntMouseEvents` (see below) | `SetCursor`, `RemoveCursor`, `GetCursor`, `GetCursorObject`, `HasCursor` (see [game-loop.md](game-loop.md#cursors)); `SetCaption(text, slot)` and `Caption(slot)`: slot 1 (or 0) is the object's caption, slots 2 to 7 are extra captions, all expanded through the string table |
+
+Every object carries the flags of the original engine's base object
+(`ObjectState`, saved with the object): `Movable`, which Wintermute 1.x
+only consults when a sprite with an owner is drawn through
+`CBSprite::Draw`, a path no scene object takes, so it is kept for the
+scripts and changes nothing on screen; `SceneIndependent`, which places
+the object's speech as if its position were on the screen rather than
+in the scrolled scene (entity containers set it on their entities);
+and `NonIntMouseEvents`, described in
+[game-loop.md](game-loop.md#the-active-object).
 
 Scripts are attached by the `SCRIPT` keys of `default.game`, `.scene`,
 `.entity`, layers and regions, and by `AttachScript`. Changing scene

@@ -110,18 +110,18 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BObject.cpp
 - Hierarchy and Luma: CBScriptHolder → CBObject; Luma: game, entities, actors (sound, position, flags); controls, regions, layers have their own subsets
-- Count: 45 done, 27 todo, 0 no-op
+- Count: 55 done, 17 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `SkipTo` | method | **done** | Moves the object to (x, y) immediately, or to another object's position. |
-| `Caption` | method | **done** | Returns the object's caption (argument selects a stored caption). Luma: entities and actors; missing on `Game` and items. |
-| `SetCaption` | method | **todo** | Sets the caption text (second argument selects the caption slot). Stubbed on entities and actors; implemented on items only. |
-| `SetCursor` | method | **todo** | Sets the cursor shown when the mouse is over the object. Stubbed. |
-| `RemoveCursor` | method | **todo** | Removes the object's own cursor. Stubbed. |
-| `GetCursor` | method | **todo** | Returns the object's cursor file. Luma returns null. |
-| `GetCursorObject` | method | **todo** | Returns the object's cursor as a sprite object. Luma returns null. |
-| `HasCursor` | method | **todo** | True when the object has its own cursor. Luma always returns false. |
+| `Caption` | method | **done** | Returns a caption slot (1 to 7; 0 is 1) of any object: game, scene objects, controls, items. |
+| `SetCaption` | method | **done** | Sets a caption slot (text, slot), expanded through the string table. |
+| `SetCursor` | method | **done** | Sets the cursor shown when the mouse is over the object (entities, actors, controls); false when the sprite does not load. Items keep their normal / hover cursors (`SetNormalCursor`). |
+| `RemoveCursor` | method | **done** | Removes the object's own cursor. |
+| `GetCursor` | method | **done** | Returns the object's cursor file. |
+| `GetCursorObject` | method | **done** | Returns the object's cursor as a sprite object sharing the cursor's animation. |
+| `HasCursor` | method | **done** | True when the object has its own cursor. |
 | `LoadSound` | method | **done** | Loads the object's sound effect without playing it. |
 | `PlaySound` | method | **done** | Plays the object's sound (file, looping, loop start). |
 | `PlaySoundEvent` | method | **done** | Plays a sound and raises a script event on the object when it ends. |
@@ -137,7 +137,7 @@ How the list was made. For every class with a script interface, the names tested
 | `X`, `Y` | get/set | **done** | Position in scene coordinates. |
 | `Height` | get | **done** | Height of the current frame, scaled. |
 | `Ready` | get | **done** | False while the object is talking, walking or playing an animation a script waits for. |
-| `Movable` | get/set | **todo** | Whether the object can be moved by the engine (e.g. dragged). Luma reads true, ignores the set. |
+| `Movable` | get/set | **done** | Whether the engine may move the object. Kept per object; WME 1.x only reads it in `CBSprite::Draw`, which no scene object goes through, so it changes nothing on screen in either engine. |
 | `Registrable` | get/set | **done** | Whether the object is registered for mouse interaction (same as `Interactive`). |
 | `Interactive` | get/set | **done** | Whether the object reacts to the mouse. |
 | `Zoomable`, `Scalable` | get/set | **done** | Whether the scene's scale levels apply to the object. |
@@ -152,7 +152,7 @@ How the list was made. For every class with a script interface, the names tested
 | `Colorable` | get/set | **done** | Whether the scene's ambient colour tints the object. |
 | `SoundPanning` | get/set | **done** | Whether the object's sound pans with its screen position. |
 | `SaveState` | get/set | **done** | Whether the object is saved with the scene state (entities; actors always read true and ignore the set). |
-| `NonIntMouseEvents` | get/set | **todo** | Whether the object receives mouse events while the game is non-interactive. Luma reads false, ignores the set. |
+| `NonIntMouseEvents` | get/set | **done** | Whether the object stays under the mouse while the game is non-interactive (on by default for windows, controls and container entities). |
 | `AccCaption` | get/set | **todo** | Caption read out by the accessibility text-to-speech. Luma reads null, ignores the set. |
 
 ## 3. The Game object
@@ -435,7 +435,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdObject.cpp
 - Hierarchy and Luma: CBObject → CAdObject → CAdTalkHolder / CAdObject3D; Luma: entities, actors (`entity_call`, `actor_call`)
-- Count: 30 done, 11 todo, 0 no-op
+- Count: 32 done, 9 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -456,7 +456,7 @@ How the list was made. For every class with a script interface, the names tested
 | `Type` | get | **done** | Class name of the object. |
 | `Active` | get/set | **done** | Whether the object is shown and active. |
 | `IgnoreItems` | get/set | **done** | Whether a selected item may be used on the object. |
-| `SceneIndependent` | get/set | **todo** | Object stays in the scene tree across scene changes. Luma reads false, ignores the set. |
+| `SceneIndependent` | get/set | **done** | The object's position is on the screen, not in the scene: its speech is not moved by the scroll offset (the only use WME 1.x makes of it). |
 | `SubtitlesWidth`, `SubtitlesPosRelative`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosXCenter` | get/set | **done** | Placement of the object's subtitles. |
 | `NumItems` | get | **done** | Number of items in the object's inventory. |
 | `ParticleEmitter` | get | **todo** | The object's particle emitter. Luma reads null. |
@@ -1030,7 +1030,7 @@ How the list was made. For every class with a script interface, the names tested
 | Global variables | 4 | 1 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
-| CBObject | 45 | 27 | 0 | 72 |
+| CBObject | 55 | 17 | 0 | 72 |
 | CBGame | 90 | 58 | 17 | 165 |
 | CAdGame | 56 | 9 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
@@ -1039,7 +1039,7 @@ How the list was made. For every class with a script interface, the names tested
 | CBRegion | 7 | 4 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
 | CAdWaypointGroup | 0 | 3 | 0 | 3 |
-| CAdObject | 30 | 11 | 0 | 41 |
+| CAdObject | 32 | 9 | 0 | 41 |
 | CAdTalkHolder | 3 | 4 | 0 | 7 |
 | CAdActor | 23 | 0 | 0 | 23 |
 | CAdEntity | 11 | 9 | 0 | 20 |
@@ -1070,9 +1070,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **559** | **568** | **29** | **1156** |
+| **All** | **571** | **556** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 544 done, 559 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 556 done, 547 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1107,7 +1107,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 |-------|-----:|----------------|
 | Game services | 46 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
 | Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
-| Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
+| Object model (2D) | 35 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, per-object inventories, `GetSpriteObject` on actors and items. Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Sprites and frames | 48 | Frame and sub-frame objects (`GetFrame`, `AddFrame`, `Delay`, `MoveX`, hotspots...), runtime-built sprites, frame events. Reads on the sprite format already exist in `luma-formats`. |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
@@ -1117,7 +1117,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **568** | |
+| **All** | **556** | |
 
 ## Members in Luma that WME 1.x does not define
 

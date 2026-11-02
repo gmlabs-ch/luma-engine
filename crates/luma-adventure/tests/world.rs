@@ -2645,3 +2645,228 @@ fn load_items_reloads_the_items_as_the_original_engine_does() {
     assert_eq!(runtime.world.item_by_name("rock"), Some(rock));
     assert_eq!(names(&runtime), ["key", "rock"]);
 }
+
+/// Calls a method on a native as a script would, from the game's own
+/// script, and returns the value it leaves.
+fn call_native(
+    runtime: &mut Runtime,
+    target: luma_script::NativeId,
+    name: &str,
+    args: &[Value],
+) -> Value {
+    use luma_script::Host;
+    let game = runtime.world.game_id();
+    let script = runtime.engine.scripts_of(game)[0];
+    let ctx = luma_script::Context {
+        engine: &mut runtime.engine,
+        script,
+        owner: Some(game),
+        line: 0,
+    };
+    runtime
+        .world
+        .call_method(target, name, args, ctx)
+        .map(|r| r.value)
+        .unwrap_or(Value::Null)
+}
+
+#[test]
+fn objects_have_their_own_cursor_caption_slots_and_flags() {
+    use luma_adventure::EntityRef;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    let prop_ref = EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    let text = |v: Value| v.get_string(&());
+
+    // The object's own cursor (`SetCursor`) is shown over it instead of
+    // the active cursor; a cursor that does not load leaves the old one.
+    assert_eq!(
+        call_native(&mut runtime, prop, "HasCursor", &[]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(&mut runtime, prop, "GetCursor", &[]),
+        Value::Null
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "SetCursor",
+            &[Value::from("sprites\\cursor.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "SetCursor",
+            &[Value::from("missing.sprite")]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        text(call_native(&mut runtime, prop, "GetCursor", &[])),
+        "sprites\\cursor.sprite"
+    );
+    assert_eq!(
+        call_native(&mut runtime, prop, "HasCursor", &[]),
+        Value::Bool(true)
+    );
+    let cursor = call_native(&mut runtime, prop, "GetCursorObject", &[])
+        .as_native()
+        .expect("a sprite object");
+    assert_eq!(
+        runtime.world.get_property(cursor, "Filename"),
+        Some(Value::from("sprites\\cursor.sprite"))
+    );
+    assert_eq!(
+        runtime.world.get_property(cursor, "NumFrames"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(
+        runtime.world.get_property(cursor, "Owner"),
+        Some(Value::Native(prop))
+    );
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(6, 7);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(prop));
+    assert_eq!(
+        runtime.world.cursors().shown(),
+        Some("sprites\\cursor.sprite")
+    );
+    call_native(&mut runtime, prop, "RemoveCursor", &[]);
+    assert_eq!(
+        call_native(&mut runtime, prop, "HasCursor", &[]),
+        Value::Bool(false)
+    );
+    assert!(
+        !runtime.world.objects().contains(cursor)
+            || runtime.world.get_property(cursor, "Filename").is_none(),
+        "the cursor object has nothing to show"
+    );
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.cursors().shown(),
+        Some("art\\green.png"),
+        "back to the active cursor"
+    );
+
+    // Caption slots: slot 1 is the caption, 2 to 7 are extra, all
+    // expanded through the string table.
+    call_native(
+        &mut runtime,
+        prop,
+        "SetCaption",
+        &[Value::from("/GREET/x"), Value::Int(2)],
+    );
+    call_native(
+        &mut runtime,
+        prop,
+        "SetCaption",
+        &[Value::from("Prop"), Value::Int(0)],
+    );
+    assert_eq!(
+        text(call_native(&mut runtime, prop, "Caption", &[Value::Int(2)])),
+        "Hello"
+    );
+    assert_eq!(
+        text(call_native(&mut runtime, prop, "Caption", &[])),
+        "Prop"
+    );
+    assert_eq!(
+        runtime.world.get_property(prop, "Caption"),
+        Some(Value::from("Prop"))
+    );
+    assert_eq!(
+        text(call_native(&mut runtime, prop, "Caption", &[Value::Int(3)])),
+        ""
+    );
+    assert_eq!(
+        text(call_native(&mut runtime, prop, "Caption", &[Value::Int(9)])),
+        ""
+    );
+
+    // The flags are kept per object; `NonIntMouseEvents` keeps the
+    // object under the mouse while the game is not interactive.
+    assert_eq!(
+        runtime.world.get_property(prop, "Movable"),
+        Some(Value::Bool(true))
+    );
+    runtime
+        .world
+        .set_property(prop, "Movable", &Value::Bool(false));
+    assert_eq!(
+        runtime.world.get_property(prop, "Movable"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(
+        runtime.world.get_property(prop, "SceneIndependent"),
+        Some(Value::Bool(false))
+    );
+    runtime
+        .world
+        .set_property(prop, "SceneIndependent", &Value::Bool(true));
+    assert_eq!(
+        runtime.world.get_property(prop, "SceneIndependent"),
+        Some(Value::Bool(true))
+    );
+    let window = runtime.world.window_ids()[0];
+    assert_eq!(
+        runtime.world.get_property(window, "NonIntMouseEvents"),
+        Some(Value::Bool(true)),
+        "windows take the mouse while the game is not interactive"
+    );
+    assert_eq!(
+        runtime.world.get_property(prop, "NonIntMouseEvents"),
+        Some(Value::Bool(false))
+    );
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(false));
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), None);
+    runtime
+        .world
+        .set_property(prop, "NonIntMouseEvents", &Value::Bool(true));
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(prop));
+
+    // The state is part of a saved game.
+    runtime.save_game(11, "flags", false).unwrap();
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(11).unwrap();
+    assert_eq!(
+        loaded.world.get_property(prop, "Movable"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(
+        loaded.world.get_property(prop, "NonIntMouseEvents"),
+        Some(Value::Bool(true))
+    );
+    assert_eq!(
+        text(call_native(&mut loaded, prop, "Caption", &[Value::Int(2)])),
+        "Hello"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}

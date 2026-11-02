@@ -112,14 +112,6 @@ impl World {
                 };
                 Return::value(path.map_or(Value::Null, Value::from))
             }
-            "SetCaption" => {
-                let caption = arg(0).get_string(self);
-                let caption = self.expand(&caption);
-                if let Some(item) = self.item_mut(id) {
-                    item.def.caption = caption;
-                }
-                Return::null()
-            }
             "SetFont" => {
                 let path = match arg(0) {
                     Value::Null => None,
@@ -150,9 +142,7 @@ impl World {
             | "ForceTalkAnim"
             | "AddTalkSprite"
             | "RemoveTalkSprite"
-            | "SetTalkSprite"
-            | "SetCursor"
-            | "RemoveCursor" => {
+            | "SetTalkSprite" => {
                 self.stub(&format!("Item.{name}"));
                 Return::null()
             }

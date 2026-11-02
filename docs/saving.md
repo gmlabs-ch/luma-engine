@@ -24,7 +24,10 @@ A saved game holds:
   its threads, and the engine-wide globals; programs are named by the
   file they were loaded from;
 - the native objects and their handles, which stay the same after a
-  load, so that every reference in a script is still good;
+  load, so that every reference in a script is still good, with the
+  script properties set on each and its runtime state (`ObjectState`:
+  the `Movable`, `SceneIndependent` and `NonIntMouseEvents` flags, the
+  extra caption slots, the forced talk animation);
 - the current scene as the scripts left it (its entities, regions and
   layers, the animation and the sentence of each entity), the previous
   scene's name, a scene change asked and not done yet, and the states
@@ -123,7 +126,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `2` today |
+| 4 | layout version, little-endian; `3` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -134,7 +137,9 @@ of The White Chamber is a few kilobytes). The header is read alone by
 `GetSaveSlotDescription`, without decompressing the body. Because
 `postcard` is positional, the fields of the state are versioned by the
 layout version: a change of the state's shape bumps `VERSION`, and
-older files are then refused rather than misread. Thumbnails
+files of another version are then refused rather than misread (the
+header still reads, so a slot of an older file keeps its description).
+Version 3 added the objects' runtime state. Thumbnails
 (`Game.StoreSaveThumbnail`) are not stored yet.
 
 ## Checking a game

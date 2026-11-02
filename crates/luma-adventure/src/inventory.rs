@@ -178,6 +178,7 @@ impl World {
             engine.finish(script, true);
         }
         self.inventory.items.remove(index);
+        self.forget_owned(id);
         self.objects.remove(id);
         true
     }

@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -272,6 +272,12 @@ pub fn read_save_header(path: &Path) -> Result<SaveHeader, String> {
 fn read_file(path: &Path) -> Result<(SaveHeader, Vec<u8>), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let (header, offset) = read_header_bytes(&bytes)?;
+    let version = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+    if version != VERSION {
+        return Err(format!(
+            "saved game version {version} is older than this engine's ({VERSION})"
+        ));
+    }
     let mut body = Vec::new();
     ZlibDecoder::new(&bytes[offset..])
         .read_to_end(&mut body)

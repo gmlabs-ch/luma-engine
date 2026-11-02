@@ -2,6 +2,12 @@
 //! parts, sprites, and the inert stand-ins for what is not implemented
 //! yet. Handles are generational, so that a handle to an object of a
 //! previous scene is simply invalid.
+//!
+//! Written with reference to `BObject.cpp` and `AdObject.cpp` of
+//! Wintermute Engine 1.x (MIT License, Copyright (c) 2003-2013 Jan
+//! Nedoma); see `NOTICE`.
+
+use std::collections::BTreeMap;
 
 use luma_script::{NativeId, Properties};
 
@@ -32,8 +38,11 @@ pub enum Kind {
         /// The node's index in the layer.
         index: usize,
     },
-    /// The sprite object of an entity (`GetSpriteObject`).
+    /// The sprite object of an entity, an actor or an item
+    /// (`GetSpriteObject`).
     Sprite(NativeId),
+    /// The cursor of an object as a sprite object (`GetCursorObject`).
+    CursorSprite(NativeId),
     /// An actor (`Game.LoadActor`, `Scene.LoadActor`); its state lives in
     /// the world's actor list.
     Actor,
@@ -51,13 +60,70 @@ pub enum Kind {
     Inert(String),
 }
 
-/// A native object: its kind and the properties scripts set on it.
+/// What the engine's base object classes keep on an object beyond its
+/// definition (`CBObject`, `CAdObject`): the flags scripts set, the
+/// extra caption slots, the talk animation forced for the next
+/// sentence. Every object has one; the parts that do not apply to its
+/// kind stay at their defaults.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ObjectState {
+    /// `Movable`: whether the engine may move the object (true by
+    /// default). Wintermute 1.x only reads it when a sprite with an owner
+    /// is drawn through `CBSprite::Draw`, which no scene object does, so
+    /// the flag is kept for scripts and has no effect on the frame.
+    pub movable: bool,
+    /// `SceneIndependent`: the object's position is on the screen, not
+    /// in the scene, so its speech is not moved by the scroll offset.
+    pub scene_independent: bool,
+    /// `NonIntMouseEvents`: the object stays under the mouse while the
+    /// game is not interactive (true for windows, controls and the
+    /// containers' entities).
+    pub non_int_mouse_events: bool,
+    /// The caption slots 2 to 7 (`SetCaption(text, slot)`); slot 1 is
+    /// the object's caption.
+    pub captions: BTreeMap<u8, String>,
+    /// The sprite `ForceTalkAnim` named for the next sentence, and
+    /// whether that sentence used it.
+    pub forced_talk_anim: Option<String>,
+    /// See `forced_talk_anim`.
+    pub forced_talk_used: bool,
+}
+
+impl Default for ObjectState {
+    fn default() -> Self {
+        ObjectState {
+            movable: true,
+            scene_independent: false,
+            non_int_mouse_events: false,
+            captions: BTreeMap::new(),
+            forced_talk_anim: None,
+            forced_talk_used: false,
+        }
+    }
+}
+
+impl ObjectState {
+    /// The state a fresh object of a kind starts with: the windows, the
+    /// controls and the containers' entities take mouse events while the
+    /// game is not interactive (`CUIObject`, `CUIEntity`).
+    pub fn for_kind(kind: &Kind) -> ObjectState {
+        ObjectState {
+            non_int_mouse_events: matches!(kind, Kind::Control | Kind::Entity(EntityRef::Ui(_))),
+            ..ObjectState::default()
+        }
+    }
+}
+
+/// A native object: its kind, the properties scripts set on it and its
+/// runtime state.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Native {
     /// What it is.
     pub kind: Kind,
     /// Script properties (`ScProp`).
     pub props: Properties,
+    /// The base classes' runtime state.
+    pub state: ObjectState,
 }
 
 /// The table of native objects.
@@ -84,6 +150,7 @@ impl Objects {
     /// Adds an object and returns its handle.
     pub fn insert(&mut self, kind: Kind) -> NativeId {
         let native = Native {
+            state: ObjectState::for_kind(&kind),
             kind,
             props: Properties::new(),
         };
