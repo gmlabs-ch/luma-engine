@@ -75,6 +75,8 @@ no code copied):
   crates/luma-adventure/src/natives_ui.rs
   crates/luma-adventure/src/inventory.rs
   crates/luma-adventure/src/natives_item.rs
+  crates/luma-adventure/src/particles.rs
+  crates/luma-adventure/src/natives_particles.rs
   docs/game-loop.md
   docs/audio.md
   docs/video.md

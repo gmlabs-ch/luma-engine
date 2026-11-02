@@ -25,7 +25,8 @@ in this order (`Runtime::tick`):
    a sprite frame that becomes current plays its `SOUND`, stops the
    sprite's earlier frame sounds when marked `KILL_SOUND`, raises
    `FrameChanged` on the sprite object and its `APPLY_EVENT`s on the
-   object showing the sprite;
+   object showing the sprite; the particle emitters of the entities and
+   actors follow their owner and emit (see [particles.md](particles.md));
 6. the view scrolls towards the main object; the objects' sounds follow
    them;
 7. the object under the mouse is found and becomes the **active
@@ -36,8 +37,8 @@ in this order (`Runtime::tick`):
 9. the events raised during the frame reach their scripts (they run
    next frame).
 
-The frame is then drawn: the scene with the actors, the windows marked
-`IN_GAME`, the other windows, the sentences, the cursor, the fader's
+The frame is then drawn: the scene with the actors (each object's
+particles right after it), the windows marked `IN_GAME`, the other windows, the sentences, the cursor, the fader's
 colour over everything, the loading icon (see
 [saving.md](saving.md#loading-and-saving-screens-loading-icon)), and
 last the messages of `Game.Msg`: short
