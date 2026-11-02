@@ -1071,9 +1071,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 6 | 0 | 21 |
-| **All** | **728** | **395** | **30** | **1153** |
+| **All** | **743** | **380** | **30** | **1153** |
 
-Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 713 done, 389 todo, 30 no-op.
+Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 728 done, 374 todo, 30 no-op.
 
 ## WME classes Luma lacks entirely
 
