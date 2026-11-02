@@ -76,6 +76,10 @@ no code copied):
   crates/luma-adventure/src/scene_state.rs
   crates/luma-adventure/src/save.rs
   crates/luma-audio/src/audio.rs
+  crates/luma-adventure/src/objects.rs
+  crates/luma-adventure/src/natives_object.rs
+  crates/luma-adventure/src/natives_region.rs
+  crates/luma-adventure/src/scene_edit.rs
 
 -------------------------------------------------------------------------------
 Dependencies under the Mozilla Public License 2.0
