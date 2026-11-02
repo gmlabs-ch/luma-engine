@@ -10,9 +10,9 @@ its classification (3.2, 3.3, specified in
 [formats/geometry.md](formats/geometry.md)), the camera and the 2D/3D
 mapping (section 4), the actor definition file (section 5, specified in
 [formats/actor3d.md](formats/actor3d.md)), the `.X` model as data
-(section 6 and the sampling of 7, specified in
-[formats/xfile.md](formats/xfile.md)) and the floor height (9.1). The
-rest is still the plan.
+(section 6, specified in [formats/xfile.md](formats/xfile.md)), the
+animation and skinning at run time (section 7) and the floor height
+(9.1). The rest is still the plan.
 
 ## 0. Sources and rules
 
@@ -615,17 +615,34 @@ What WME makes of the result:
   rewrites the positions and normals of a clone of the loaded mesh (the
   blended-mesh conversion is commented out). The result keeps the loaded
   vertex format (position, normal, UV) and is drawn per material subset
-  (D3DX attribute table).
+  (D3DX attribute table). **As implemented** (`luma_3d::animation`,
+  section 7): every vertex a bone weights starts from zero and
+  accumulates `weight * (position * palette)` and `weight * (normal *
+  palette's 3x3)`, the normals then normalised (what `UpdateSkinnedMesh`
+  does with a null inverse-transpose array, **[ext]**; the fixed-function
+  pipeline renormalises anyway, 10.1). A bone whose frame the model lacks
+  uses the identity for its combined matrix (the original dereferences an
+  unset pointer there). A vertex no bone weights keeps its loaded position
+  (what D3DX does with it is not known **[ext]**; the sample files weight
+  every vertex).
 - **Rigid meshes** (no bones) are transformed every frame by their parent
   frame's combined matrix: **positions only**; the normals stay as loaded, so
-  the lighting of rigid parts on moving frames is slightly off. A faithful
-  port can keep this or transform the normals as well.
+  the lighting of rigid parts on moving frames is slightly off. As
+  implemented, Luma transforms the normals as well (by the 3x3 part,
+  renormalised), a deliberate departure.
 - **Bounding box.** Recomputed from the skinned vertices every frame
-  (`D3DXComputeBoundingBox`, with a manual fallback when NaNs appear).
+  (`D3DXComputeBoundingBox`, with a manual fallback when NaNs appear). The
+  **model's** box (`UpdateBoundingRect`) starts at the origin and grows
+  around the meshes' boxes, so it always contains the model's origin; Luma
+  does the same (`AnimatedModel::bounding_box`), since the 2D bounding
+  rectangle and the hit test of task 16 are built on it.
 - **Adjacency.** Face-to-face adjacency for shadow volumes is regenerated on
   the clone with `GenerateAdjacency(0, ...)`: vertices at identical
   positions count as one point, so UV and normal seams do not open edges. A
-  Luma loader must weld by position.
+  Luma loader must weld by position. Nothing in the animation or skinning
+  needs it (the skinned vertices keep the loaded indices), so it is left
+  to the stencil shadows (task 12b), computed from
+  `SkinnedMesh::vertices` positions when the volumes are built.
 
 ### 6.4 Animation sets
 
@@ -672,71 +689,145 @@ the first key, and a zero gap met after a positive one resets the minimum
 
 ## 7. Animation at runtime
 
-All in `XModel.cpp`, `XAnimationChannel.cpp`, `XActiveAnimation.cpp`,
-`XAnimation.cpp`, `XFrameNode.cpp`.
+**As implemented** in `luma_3d::animation` (`AnimatedModel`, the
+`CXModel` of the original at run time, over the data of
+`luma_3d::model`), from `XModel.cpp`, `XAnimationChannel.cpp`,
+`XActiveAnimation.cpp`, `XAnimation.cpp`, `XAnimationSet.cpp` and
+`XFrameNode.cpp`. Times are milliseconds of a timer the caller advances
+(`update(delta_ms)`, the game timer in the original); the timer starts at
+0 and wraps like the original's `DWORD`.
 
-- **10 channels** (`X_NUM_ANIMATION_CHANNELS`), numbered 0..9. Channel 0
-  carries the standard animations the actor logic selects (idle, walk,
-  turn, talk-stance). Others are for scripts (`PlayAnimChannel`).
-- Each frame (`CXModel::Update`): reset every frame to its original local
-  matrix; update every channel in order 0..9, each of which **sets the local
-  transform of the frames its animation has tracks for**, later channels
-  overriding earlier ones on the same frame; compute combined matrices from
-  the root; skin the meshes. So a "wave" animation that only has tracks for
-  the arm bones, played in channel 1, replaces the arm of the walk cycle.
+- **10 channels** (`X_NUM_ANIMATION_CHANNELS`, `animation::NUM_CHANNELS`),
+  numbered 0..9. Channel 0 carries the standard animations the actor logic
+  selects (idle, walk, turn, talk-stance). Others are for scripts
+  (`PlayAnimChannel`). A channel holds up to two *active animations*: the
+  current one in slot 0 and, during a transition, the incoming one in
+  slot 1.
+- **Each update** (`CXModel::Update`, `AnimatedModel::update`): every frame
+  starts from its loaded local matrix; the channels update in order 0..9,
+  each writing the **sampled transform** (scale, rotation, position; not
+  a matrix) of every frame its animation has tracks for into one of the
+  frame's two **transformation slots** (`CXFrameNode::SetTransformation`),
+  later channels overriding earlier ones on the same frame and slot; then
+  the frames build their local matrix from the slots (below), the combined
+  matrices are computed from the root, the meshes are skinned (6.3) and
+  the boxes recomputed. So a "wave" animation that only has tracks for the
+  arm bones, played in channel 1, replaces the arm of the walk cycle.
+- **Frame slots** (`CXFrameNode::UpdateMatrices`): a frame whose slot 0 is
+  unused keeps its loaded matrix, **whatever slot 1 holds**; with slot 0
+  used alone its transform is applied as is; with both used the two
+  transforms are blended by **slot 0's** factor (`Lerp` for scale and
+  position, `Slerp` for rotation, `Transform::blend`), then `S * R * T`.
+  Both slots are cleared after use. Consequences the study missed: during
+  a transition a frame only the incoming animation animates stays at rest
+  until the transition ends, a frame only the outgoing one animates holds
+  the outgoing pose unblended, and a frame animated both by an earlier,
+  non-transitioning channel and by a later channel's incoming animation
+  only keeps the earlier channel's pose (its slot 0 carries a factor of
+  0).
 - **Sampling** one track at local time `t` (in ticks): find the first key
   with `time > t`; interpolate it with the previous one
   (`(t - t1) / (t2 - t1)`, `0` when equal times); `t` before the first key
   gives the first key. If *no* key is later than `t` the indices stay at
   **0 and 0**: the pose snaps to the **first** key (not the last). Callers
   keep `t` below the last key time (a finished animation uses
-  `total - 1` ms) so this is only reached by degenerate data. **As
-  implemented** by `Animation::sample` (one frame's `Transform`),
-  `AnimationSet::apply` (the sampled frames written over a list of local
-  matrices), `Model::rest_pose`, `Model::combine` and `Model::sample`
-  (rest pose, one set applied, combined matrices); a missing track leaves
-  position `0`, scale `1`, rotation identity, so a rotation-only track
-  also moves the frame to its parent's origin, as in the original. The
-  blend of the two transition slots is `Transform::blend`
-  (`Lerp`/`Slerp`/`Lerp`), the event selection of a frame change is
-  `AnimationSet::events_between`; the channels and active animations that
-  drive them are task 9.
-- **Active animation.** Started with the game timer; local time = elapsed
-  ms. If `elapsed > total`: looping wraps with `%`, a non-looping one
-  becomes *finished* and holds `total - 1`. `Looping` comes from the set
-  (`AnimationOptions` or the actor file's `LOOPING`).
-- **Events.** Frame index `= localTime / frameTime + 1`; when it changes
-  (not during a transition) `OnFrameChanged(current, previous)` fires every
-  event with `previous < FRAME <= current`, and after a wrap those with
-  `FRAME > previous` first. Event frames are clamped to `[1, totalFrames]`
-  when added. An event runs the owner's event handler by name
-  (`ApplyEvent("footstep")`, i.e. `on "footstep" { ... }` in the actor's
-  script).
-- **Transitions** (`PlayAnim(set, transitionTime, stopTransitionTime)`).
-  A channel holds up to two active animations. With transition time 0, or
-  when the channel is empty, the new one replaces the old at once. Otherwise
-  both poses are **frozen** for the duration: the old animation at the local
+  `total - 1` ms) so this is only reached by degenerate data.
+  `Animation::sample` (one frame's `Transform`), `AnimationSet::sample`
+  (the transforms of the resolved frames), `Model::rest_pose`,
+  `Model::combine` and `Model::sample` (rest pose, one set applied,
+  combined matrices) in `luma_3d::model`, [formats/xfile.md](formats/xfile.md)
+  2.4; a missing track leaves position `0`, scale `1`, rotation identity,
+  so a rotation-only track also moves the frame to its parent's origin, as
+  in the original. The millisecond local time becomes ticks by `ms *
+  (ticks_per_second / 1000)` truncated (`Model::ms_to_ticks`).
+- **Active animation** (`CXActiveAnimation`, `animation::ActiveAnimation`).
+  Started with the timer; local time = elapsed ms. If `elapsed > total`:
+  looping wraps with `%` (0 when the total is 0), a non-looping one
+  becomes *finished* and holds `total - 1` (which wraps to `u32::MAX` for
+  an empty set, as the original's `DWORD` does; the pose then snaps to the
+  first keys). `Looping` is read from the set when the animation starts
+  (`AnimationOptions` or the actor file's `LOOPING`, applied to the set by
+  `AnimationDef::apply`).
+- **Events.** Frame index `= localTime / frameTime + 1` (0 when the frame
+  time is 0; 1-based); when it changes `OnFrameChanged(current, previous)`
+  fires every event with `previous < FRAME <= current`, and after a wrap
+  (`previous > current`) those with `FRAME > previous` first
+  (`AnimationSet::events_between`). The index starts at -1, so the first
+  update of a freshly started animation fires the events of frame 1.
+  Event frames are clamped to `[1, totalFrames]` when added
+  (`AnimationSet::add_event`). No event fires while a pose is **frozen**
+  (transitions, below), but the frame index is still tracked, so the
+  events of the frame an incoming animation shows during a transition (its
+  frame 1) **never fire** once it starts. `AnimatedModel::update` returns
+  the event names in firing order; an event runs the owner's event handler
+  by name (`ApplyEvent("footstep")`, i.e. `on "footstep" { ... }` in the
+  actor's script, task 14).
+- **Transitions** (`PlayAnim(set, transitionTime, stopTransitionTime)`,
+  `AnimatedModel::play_with`). With transition time 0, or when the channel
+  is empty, the new animation replaces the old at once. Otherwise both
+  poses are **frozen** for the duration: the old animation at the local
   time it had reached (slot 0) and the new one at its first pose (slot 1,
-  because its local time is still 0). While `Game.timer - start < time`,
-  `UpdateMatrices` blends the two with `lerp = elapsed / time` (`Lerp` for
-  scale and position, `Slerp` for rotation, then `S * R * T`). At the end the
-  new animation becomes the only one, its start time is reset and it starts
-  playing from its beginning. No events fire during a transition. Asking for
-  the animation that already plays on the channel (same name) does nothing
-  unless the request forces a restart; the scripts' `PlayAnim` forces it, the
-  actor's own idle/walk/turn requests do not.
+  because its local time is still 0). While `timer - start < time`, the
+  frames blend the two with `lerp = elapsed / time` (through the frame
+  slots above). When `elapsed >= time` the new animation becomes the only
+  one, its start time is reset to the current timer (the transition time
+  is not counted) and it is updated at once from its beginning. Asking for
+  the animation the channel already **heads for** (the incoming one during
+  a transition, else the current one; names compared ignoring case) does
+  nothing unless the request forces a restart; the scripts' `PlayAnim`
+  forces it, the actor's own idle/walk/turn requests do not
+  (`force_restart`).
+- **Finishing and stopping** (`StopAnim(transitionTime)`,
+  `AnimatedModel::stop`). When a non-looping animation finishes, the
+  channel stops it with the *stop transition time* given when it was
+  played; `StopAnim` with a time does the same on demand: the current
+  animation is made non-looping, the incoming one (if any) is dropped, and
+  the current pose is **held, frozen, for that time** (so no event); then
+  the channel empties and the frames fall back to their loaded matrices.
+  There is no blend back to the rest pose: the hold only delays the snap.
+  With time 0, or an empty channel, the channel empties at once. On the
+  update where an animation finishes, the frame still shows its last pose
+  (`total - 1`); the stop takes effect from the next update. As in the
+  original, a 0 stop time therefore shows the rest pose one update after
+  the end.
 - **The transition time actually used** when switching from animation `A`
   to `B` on a channel is `Owner.GetAnimTransitionTime(A, B)`: the pair set
-  by `SetAnimTransitionTime`, else the actor's `AnimTransitionTime` (default
-  200 ms). The `AnimStopTransitionTime` (default 200 ms) is used when an
-  animation finishes or is stopped (`StopAnim`): the animation is made
-  non-looping, held for that time, then the channel empties and the frames
-  fall back to their original matrices (there is no blend back to the rest
-  pose in the code; the fade-out only delays the removal).
-- `IsAnimPending(channel, name)` is true while the channel's active
-  animation (the incoming one during a transition) is not finished and, when
-  a name is given, has that name (case-insensitive). The scripts'
-  `IsAnimPlaying` looks at **channel 0 only**.
+  by `SetAnimTransitionTime` (names compared ignoring case; a negative time
+  removes the pair), else the actor's `AnimTransitionTime` (default
+  **200 ms**, `animation::DEFAULT_TRANSITION_MS`). The
+  `AnimStopTransitionTime` (default 200 ms,
+  `DEFAULT_STOP_TRANSITION_MS`) is the stop transition time the actor
+  passes with every `PlayAnim` and `StopAnim`. In the original the pair
+  table lives in the actor and overrides whatever time the caller passed
+  whenever the channel has a current animation (so an attachment's
+  `PlayAnim`, which passes 0, still uses its owner actor's table and
+  default). Luma keeps the table and the two defaults on the
+  `AnimatedModel` (`set_transition_time`, `transition_time`,
+  `set_default_transition_ms`, `set_default_stop_transition_ms`);
+  `play(channel, name, force_restart)` resolves them as the actor does,
+  `play_with(channel, name, transition_ms, stop_transition_ms,
+  force_restart)` uses the times given.
+- `IsAnimPending(channel, name)` (`AnimatedModel::is_playing`) is true
+  while the channel has an **unfinished** animation in either slot and,
+  when a name is given, the animation it heads for has that name
+  (case-insensitive). A pose held after `StopAnim` still counts as playing
+  (the animation did not finish); a pose held after a natural end does
+  not. The scripts' `IsAnimPlaying` looks at **channel 0 only**;
+  `IsAnimPending(name)` over all channels is `is_playing_on_any_channel`.
+- **Unloading a set** (`UnloadAnim`, `AnimatedModel::remove_animation_set`)
+  drops it from every channel slot that plays it; a transition in progress
+  keeps running and ends on whatever is left.
+- **Outputs of an update**: the local and combined matrix of every frame
+  (`local_matrices`, `combined_matrices`, `bone_matrix(name)` for
+  attachments and `GetBonePosition*`), the skinned meshes
+  (`meshes()`: one `SkinnedMesh` per model mesh with a contiguous
+  `Vec<Vertex>` indexed like the model's, ready for a vertex buffer, and
+  its box), the model's box (`bounding_box`, containing the origin as in
+  6.3), and the posed-triangle pick (`pick(origin, direction)`,
+  `CXMesh::PickPoly` with the single-sided `IntersectTriangle` of 9.2; the
+  ray is in model space, the caller inverts the world matrix, task 16).
+  A new `AnimatedModel` is posed at rest once, so these are valid before
+  the first update.
 
 ## 8. Actor logic
 
@@ -1201,7 +1292,7 @@ the core crates:
 |-------|------|-----|
 | Math with the D3D conventions (matrices, quaternions, project/unproject, the D3DX functions listed in 12.2) | `luma-3d` | **Done**: `luma_3d::math`. |
 | `.X` reader (text, optional binary), `.3ds` reader, `.geometry`, `.act3d`, `.anim` parsers: pure data | `luma-3d` | **Done** except binary `.X`: `luma_3d::three_ds`, `node_patterns`, `xfile`, `model`, `actor3d`; the module crate is re-exported by `luma` as `luma::three_d` under the `3d` feature; `luma-formats` only parses the scene keys. |
-| Model, skeleton, animation channels, CPU skinning, geometry queries, path finder, camera projection, picking | `luma-3d` | No GPU, no game logic, unit-testable. |
+| Model, skeleton, animation channels, CPU skinning, geometry queries, path finder, camera projection, picking | `luma-3d` | No GPU, no game logic, unit-testable. **Done** for the skeleton, channels, skinning and the model pick (`luma_3d::animation`). |
 | The 3D pass on wgpu (pipelines, lights, shadows) | `luma-3d::render`, depending on `luma-render` for `Gpu`/`Target` | The 2D `luma-render` stays small. |
 | A small generic extension point in `luma-render` | `luma-render` | See 12.3. |
 | `Actor3D` object, its state machine, 2D/3D scene glue, scripts | `luma-adventure`, behind a Cargo feature `3d` | Genre behaviour. |
@@ -1371,7 +1462,7 @@ read first.
 | 6 | **`.act3d` and `.anim`.** Parser to a typed definition, TEMPLATE, defaults, `ANIMATION`/`EVENT`, obsolete keys. `docs/formats/actor3d.md`. **Done** (`luma_3d::actor3d`). | `AdActor3DX.cpp` (`LoadBuffer`, `ParseEffect`, `MergeAnimations2`), `XModel.cpp` (`ParseAnim`, `ParseEvent`), `AdActor3D.cpp` (`IsActorX`) | S | |
 | 7 | **Camera and the 2D/3D mapping.** View and projection of 4.1 for a scene (`Camera`, viewport, scroll, layer size, `SCROLL_3D_COMPATIBILITY`, `FOV_OVERRIDE`, clip planes), `convert_2d_to_3d` (exact and tolerant), `convert_3d_to_2d`, the object's 2D position. **Done** (`luma_3d::camera`; the object's 2D position is `Projection::project` of its origin, to be called by task 14). | `BRenderD3D.cpp` (`SetProjection`, `GetProjectionParams`), `AdSceneGeometry.cpp` (`Convert*`, `StoreDrawingParams`), `AdObject3D.cpp`, `AdGame.cpp` (`GetLayerSize`), `AdScene.cpp` (`ScrollTo`) | M | 1, 5 |
 | 8 | **Geometry queries and the 3D path finder.** `DirectPathExists`, `GetBlockIntersection`, Dijkstra with the alternate-target rerun. Decide per quirk (9.2, 9.3) whether to reproduce. Already done with task 5: `GetHeightAt` (`SceneGeometry::height_at`), `DropWaypoints`, node enabling, the triangle tests of 9.2 (`math::intersect_triangle`, `pick_get_intersect`). | `AdSceneGeometry.cpp`, `3DUtils.cpp` (`IntersectTriangle`, `PickGetIntersect`), `AdPath3D.cpp`, `AdPathPoint3D.cpp` | M | 5 |
-| 9 | **Skeleton animation and skinning.** Frame hierarchy and matrices, channels, active animations, blending slots, events, transition-time table, looping and finish rules, CPU skinning, bounding box, ray/triangle picking of a posed model, bone matrices and positions. | `XFrameNode.cpp`, `XModel.cpp`, `XAnimationChannel.cpp`, `XActiveAnimation.cpp`, `XAnimation.cpp` (`Update`), `XAnimationSet.cpp`, `XMesh.cpp` (`Update`, `PickPoly`) | L | 3 |
+| 9 | **Skeleton animation and skinning.** Frame hierarchy and matrices, channels, active animations, blending slots, events, transition-time table, looping and finish rules, CPU skinning, bounding box, ray/triangle picking of a posed model, bone matrices and positions. **Done** (`luma_3d::animation`, section 7); the 2D bone positions need the camera of task 14, the welded adjacency goes to task 12b. | `XFrameNode.cpp`, `XModel.cpp`, `XAnimationChannel.cpp`, `XActiveAnimation.cpp`, `XAnimation.cpp` (`Update`), `XAnimationSet.cpp`, `XMesh.cpp` (`Update`, `PickPoly`) | L | 3 |
 
 ### Phase B: drawing
 
