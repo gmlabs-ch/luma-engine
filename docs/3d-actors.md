@@ -518,8 +518,9 @@ generic object tree without interpreting the template declarations) and
 `animation_set`, the sampler of 6.4 and 7), specified in
 [formats/xfile.md](formats/xfile.md), which is the reference for the
 subset; the tables below are kept as the summary with the corrections
-found while implementing. Binary and compressed files are detected and
-rejected (task 4).
+found while implementing. Binary and MSZIP-compressed files are read into
+the same tree (task 4, `luma_3d::xfile_binary`; `formats/xfile.md` 1.4
+and 1.5).
 
 ### 6.1 Who parses what
 
@@ -1374,19 +1375,20 @@ the core crates:
 | Piece | Home | Why |
 |-------|------|-----|
 | Math with the D3D conventions (matrices, quaternions, project/unproject, the D3DX functions listed in 12.2) | `luma-3d` | **Done**: `luma_3d::math`. |
-| `.X` reader (text, optional binary), `.3ds` reader, `.geometry`, `.act3d`, `.anim` parsers: pure data | `luma-3d` | **Done** except binary `.X`: `luma_3d::three_ds`, `node_patterns`, `xfile`, `model`, `actor3d`; the module crate is re-exported by `luma` as `luma::three_d` under the `3d` feature; `luma-formats` only parses the scene keys. |
+| `.X` reader (text, binary, compressed), `.3ds` reader, `.geometry`, `.act3d`, `.anim` parsers: pure data | `luma-3d` | **Done**: `luma_3d::three_ds`, `node_patterns`, `xfile`, `xfile_binary`, `model`, `actor3d`; the module crate is re-exported by `luma` as `luma::three_d` under the `3d` feature; `luma-formats` only parses the scene keys. |
 | Model, skeleton, animation channels, CPU skinning, geometry queries, path finder, camera projection, picking | `luma-3d` | No GPU, no game logic, unit-testable. **Done** for the skeleton, channels, skinning and the model pick (`luma_3d::animation`). |
 | The mesh pass on wgpu (depth buffer, pipelines, lighting shader, textures with mipmaps) | `luma-render` | **Done**: a `MeshDraw` item of the `DrawList`, see 12.3. Generic (plain matrices, vertices, lights); knows nothing of actors or scenes. |
 | Shadows, the geometry overlay, the conversion of models and lights into mesh draws | `luma-3d`, on the public API of `luma-render` | See 12.4. |
 | `Actor3D` object, its state machine, 2D/3D scene glue, scripts | `luma-adventure`, behind a Cargo feature `3d` | Genre behaviour. |
 | Feature `3d` in `luma` (off by default) that enables `luma-3d` and `luma-adventure/3d` | `luma` | `docs/modules.md`. |
 
-New third-party dependencies: none so far. The maths is a few plain types
+New third-party dependencies: none beyond `flate2`, already in the workspace. The maths is a few plain types
 in `luma_3d::math` rather than a math crate (`glam` was considered): the
 row-vector convention stays explicit and the D3DX functions are written
-from their documentation. Decompression for MSZIP-compressed `.X`:
-`flate2` is already in the workspace (raw deflate with a preset dictionary).
-No crate is needed for `.X` or `.3ds`.
+from their documentation. MSZIP-compressed `.X` files are inflated with
+`flate2` (raw deflate; the history of the previous block is fed as a stored
+block, since the Rust back end has no preset-dictionary call). No other
+crate is needed for `.X` or `.3ds`.
 
 ### 12.2 Library functions of D3DX that must be re-implemented exactly
 
@@ -1548,7 +1550,7 @@ read first.
 | 1 | **Crate and conventions.** `luma-3d` with a feature in `luma`, `README.md` and `docs/modules.md` rows, the `math` module (D3D conventions, the functions of 12.2). **Done.** | `3DUtils.cpp`, `3DCamera.cpp`, `BObject.cpp` (`GetMatrix`), `dcgf.h` (`DegToRad`) | S | |
 | 2 | **`.X` text container.** Tokenizer and template-agnostic reader to a generic object tree (`xof 0303txt`, named templates recorded by name and GUID, nested data, data references, comments; binary and compressed headers rejected). `docs/formats/xfile.md`. **Done** (`luma_3d::xfile`). | `XFile.cpp`, `XModel.cpp` (`LoadFromFile`), `XFrameNode.cpp` (`LoadFromXData`); samples `trinity.x`, `teapot.x` | M | 1 |
 | 3 | **`.X` to model.** Frames, `FrameTransformMatrix`, meshes (triangulation, normal vertex splitting, materials, `TextureFilename`), `SkinWeights` and the bind matrices, `AnimTicksPerSecond`, animation sets with the four key types, `AnimationOptions`, merging, material naming, the sampler. **Done** (`luma_3d::model`); the position-welded adjacency moves to task 9 / 12b, where it is consumed. | `XMesh.cpp`, `SkinMeshHelper.cpp`, `XAnimation.cpp` (`Load`, `LoadAnimationKeyData`), `XAnimationSet.cpp`, `3DMaterial.cpp` | L | 2 |
-| 4 | **`.X` binary and compressed.** `bin `, `tzip`/`bzip` (MSZIP) with `flate2`. Only if a real game needs it; check first which variant the games use. | (public DirectX documentation **[ext]**) | M | 2 |
+| 4 | **`.X` binary and compressed.** `bin `, `tzip`/`bzip` (MSZIP) with `flate2`, into the same tree as the text reader. **Done** (`luma_3d::xfile_binary`); checked against fixtures built in the tests, not yet against a file from a real game (`formats/xfile.md` 1.4 and 1.5 say what is unverified). | (public DirectX documentation **[ext]**) | M | 2 |
 | 5 | **`.3ds` geometry and `.geometry`.** The chunk walker of 3.2 into planes, blocks, generics, waypoint points, cameras, lights; the node patterns; scene keys of 3.1 in `luma_formats::scene`. `docs/formats/geometry.md`. **Done** (`luma_3d::three_ds`, `node_patterns`, `scene_geometry`). | `3DLoader3DS.cpp`, `3DS_chunks.h`, `AdSceneGeometry.cpp` (`LoadFile`), `AdGeomExt*.cpp`, `AdWaypointGroup3D.cpp`, `3DMesh.cpp`, `3DLight.cpp` | M | 1 |
 | 6 | **`.act3d` and `.anim`.** Parser to a typed definition, TEMPLATE, defaults, `ANIMATION`/`EVENT`, obsolete keys. `docs/formats/actor3d.md`. **Done** (`luma_3d::actor3d`). | `AdActor3DX.cpp` (`LoadBuffer`, `ParseEffect`, `MergeAnimations2`), `XModel.cpp` (`ParseAnim`, `ParseEvent`), `AdActor3D.cpp` (`IsActorX`) | S | |
 | 7 | **Camera and the 2D/3D mapping.** View and projection of 4.1 for a scene (`Camera`, viewport, scroll, layer size, `SCROLL_3D_COMPATIBILITY`, `FOV_OVERRIDE`, clip planes), `convert_2d_to_3d` (exact and tolerant), `convert_3d_to_2d`, the object's 2D position. **Done** (`luma_3d::camera`; the object's 2D position is `Projection::project` of its origin, to be called by task 14). | `BRenderD3D.cpp` (`SetProjection`, `GetProjectionParams`), `AdSceneGeometry.cpp` (`Convert*`, `StoreDrawingParams`), `AdObject3D.cpp`, `AdGame.cpp` (`GetLayerSize`), `AdScene.cpp` (`ScrollTo`) | M | 1, 5 |
@@ -1590,8 +1592,8 @@ read first.
 4. 12b, then 12a, then 12c (the demo uses stencil; the default for scenes
    without `MAX_SHADOW_TYPE` is flat; simple is trivial).
 5. 17, 18, 19, 20.
-6. 4 (binary `.X`) as soon as a real game shows it is needed; it may move
-   up to the start of phase A if the first real file is binary.
+6. 4 (binary `.X`) is done ahead of need; the first real binary file will
+   confirm the details that could not be verified.
 
 ### Size of the whole effort
 
@@ -1614,9 +1616,10 @@ models are not part of it.
    is a real commercial 3D game available for local tests? Are the sample
    models (teapot) acceptable in CI?
 3. **Binary `.X`.** The samples are text; real games probably ship both.
-   Which does the target game use? The text reader is done and reports a
-   binary or compressed header as an unsupported format, so the first
-   real game will tell.
+   All four forms are read now, from the public documentation and
+   fixtures built in the tests; the first real binary or compressed file
+   (the opt-in test over `testdata/local/` picks them up) will confirm
+   the size words of the MSZIP container.
 4. **Quirk policy.** Where the original is arguably wrong (single-sided
    picking, walk planes ignoring `active` in queries, the alternate-target
    path, the first-key pose when the time is past the last key, `PlayAnimAsync`

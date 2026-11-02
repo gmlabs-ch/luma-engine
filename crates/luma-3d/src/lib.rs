@@ -20,8 +20,9 @@
 //!   follows;
 //! - [`camera`]: the scene camera, the projection that maps the layer onto
 //!   the 3D world, and the conversions between scene pixels and 3D points;
-//! - [`xfile`]: the DirectX `.X` text container the actor models are
-//!   stored in, read into a generic object tree;
+//! - [`xfile`]: the DirectX `.X` container the actor models are stored
+//!   in, read into a generic object tree; the text form is read there,
+//!   the binary and MSZIP-compressed forms in `xfile_binary`;
 //! - [`model`]: a model built from that tree: the frame hierarchy, the
 //!   meshes with their materials and skin weights, the animation sets and
 //!   a sampler that poses the frames at a time;
@@ -47,6 +48,7 @@ pub mod path3d;
 pub mod scene_geometry;
 pub mod three_ds;
 pub mod xfile;
+mod xfile_binary;
 
 pub use actor3d::{Actor3dDef, AnimationDef, ShadowType};
 pub use animation::{ActiveAnimation, AnimatedModel, BoundingBox, SkinnedMesh};

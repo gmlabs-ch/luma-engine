@@ -1740,7 +1740,7 @@ AnimationSet s {
             Error::NoFrame
         );
         assert!(matches!(
-            Model::parse(b"xof 0303bin 0032", "m.x").unwrap_err(),
+            Model::parse(b"xof 0303bin 0032\0", "m.x").unwrap_err(),
             Error::File(_)
         ));
         let out_of_range = "xof 0303txt 0032\nFrame F { Mesh { 1; 0;0;0;; 1; 3;0,1,2;; } }";

@@ -989,6 +989,7 @@ dependencies = [
 name = "luma-3d"
 version = "0.0.1"
 dependencies = [
+ "flate2",
  "luma-formats",
 ]
 
