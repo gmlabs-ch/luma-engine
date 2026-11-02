@@ -65,6 +65,16 @@ result.coinHoverCursor = coin.GetHoverCursorObject();
 var coinNormal = coin.GetNormalCursorObject();
 result.coinNormalCursor = coinNormal.Filename;
 
+// Right-to-left text: a flag scripts and string tables set.
+result.rtlBefore = Game.TextRTL;
+Game.TextRTL = true;
+result.rtlSet = Game.TextRTL;
+Game.TextRTL = false;
+Game.LoadStringTable("rtl.tab");
+result.rtlTable = Game.TextRTL;
+result.rtlGreet = Game.ExpandString("/GREET/x");
+Game.TextRTL = false;
+
 Game.ChangeScene("scenes\room.scene");
 
 on "Check"
@@ -112,6 +122,11 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("game.script", compile(GAME_SCRIPT, "game.script"));
     pkg.add_file("scenes\\room.scene", SCENE.to_vec());
     pkg.add_file("items.items", ITEMS.to_vec());
+    pkg.add_file("rtl.tab", b"@right-to-left\r\nGREET\tShalom\r\n".to_vec());
+    pkg.add_file(
+        "edit.window",
+        b"WINDOW { NAME=\"w\" X=0 Y=0 WIDTH=60 HEIGHT=40 EDIT { NAME=\"name\" X=1 Y=1 WIDTH=50 HEIGHT=10 } }".to_vec(),
+    );
     pkg.add_file("art\\red.png", png(4, 4, [255, 0, 0, 255]));
     pkg.add_file("art\\green.png", png(4, 4, [0, 255, 0, 255]));
     pkg.add_file(
@@ -286,5 +301,63 @@ fn suspended_rendering_is_a_flag_the_front_end_reads() {
         .apply_event(&mut runtime.world, game, "Resume", false);
     runtime.tick(16);
     assert!(!runtime.world.suspended_rendering());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn right_to_left_text_is_a_flag_the_fonts_and_editors_follow() {
+    let (dir, mut runtime, _) = start();
+    assert_eq!(result(&runtime, "rtlBefore"), Value::Bool(false));
+    assert_eq!(result(&runtime, "rtlSet"), Value::Bool(true));
+    // A string table's `@right-to-left` turns it on
+    // (`CBStringTable::AddString`); the entry is not a string.
+    assert_eq!(result(&runtime, "rtlTable"), Value::Bool(true));
+    assert_eq!(result(&runtime, "rtlGreet"), Value::from("Shalom"));
+    assert!(!runtime.world.text_rtl(), "the script turned it off again");
+
+    // An editor mirrors its keys with right-to-left text
+    // (`CUIEdit::HandleKeypress`).
+    const VK_BACK: i32 = 8;
+    const VK_END: i32 = 35;
+    const VK_HOME: i32 = 36;
+    const VK_DELETE: i32 = 46;
+    let game = runtime.world.game_id();
+    let window = call_native(
+        &mut runtime,
+        game,
+        "LoadWindow",
+        &[Value::from("edit.window")],
+    )
+    .as_native()
+    .unwrap();
+    let edit = call_native(&mut runtime, window, "GetWidget", &[Value::from("name")])
+        .as_native()
+        .unwrap();
+    let keys = [
+        (65, Some('a')),
+        (66, Some('b')),
+        (67, Some('c')),
+        (VK_BACK, None),
+        (VK_END, None),
+        (VK_HOME, None),
+        (VK_DELETE, None),
+        (68, Some('d')),
+    ];
+    for (code, text) in keys {
+        runtime.world.edit_key(edit, code, text);
+    }
+    assert_eq!(runtime.world.control(edit).unwrap().text, "db");
+    {
+        use luma_script::Natives;
+        runtime.world.set_property(edit, "Text", &Value::from(""));
+    }
+    runtime.world.set_text_rtl(true);
+    for (code, text) in keys {
+        runtime.world.edit_key(edit, code, text);
+    }
+    // Typed backwards in memory ("cba"), Backspace took the character
+    // after the caret, Home went to the end, Delete took the one before
+    // it, and "d" went in before the caret.
+    assert_eq!(runtime.world.control(edit).unwrap().text, "bd");
     std::fs::remove_dir_all(&dir).ok();
 }

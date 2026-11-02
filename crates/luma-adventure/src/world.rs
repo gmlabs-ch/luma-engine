@@ -170,6 +170,10 @@ pub struct World {
     /// `Game.TextEncoding`: 0 for ANSI, 1 for UTF-8; set by the string
     /// table loaded (a byte order mark means UTF-8) and by scripts.
     pub(crate) text_encoding: i32,
+    /// `Game.TextRTL` (`CBGame::m_TextRTL`): right-to-left text, set by
+    /// a string table's `@right-to-left` entry and by scripts; the
+    /// fonts follow it.
+    pub(crate) text_rtl: bool,
     /// `Game.StartupScene`, from `STARTUP_SCENE` of the game file.
     pub(crate) startup_scene: Option<String>,
     /// Whether the front-end runs the game in a window
@@ -321,6 +325,7 @@ impl World {
             main_object: None,
             quit: false,
             text_encoding: 0,
+            text_rtl: false,
             startup_scene,
             windowed: false,
             suspended_rendering: false,
@@ -499,6 +504,19 @@ impl World {
     /// no sprite and skips the flip; headless runs ignore it.
     pub fn suspended_rendering(&self) -> bool {
         self.suspended_rendering
+    }
+
+    /// Whether text is laid out right to left (`Game.TextRTL`).
+    pub fn text_rtl(&self) -> bool {
+        self.text_rtl
+    }
+
+    /// Sets right-to-left text (`Game.TextRTL`, a string table's
+    /// `@right-to-left`): the TrueType fonts lay their lines out from
+    /// the last glyph and the editors mirror their keys.
+    pub fn set_text_rtl(&mut self, rtl: bool) {
+        self.text_rtl = rtl;
+        self.fonts.set_rtl(rtl);
     }
 
     /// The scene a script asked for, not yet loaded.
@@ -871,6 +889,11 @@ impl World {
                 // A byte order mark switches the game to UTF-8 text
                 // (`CBStringTable::LoadFile`); any other table back to ANSI.
                 self.text_encoding = i32::from(self.strings.utf8);
+                // `@right-to-left` turns right-to-left text on
+                // (`CBStringTable::AddString`); nothing turns it off.
+                if self.strings.right_to_left {
+                    self.set_text_rtl(true);
+                }
                 true
             }
             Err(err) => {

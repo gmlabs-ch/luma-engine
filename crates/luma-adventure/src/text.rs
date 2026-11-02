@@ -102,6 +102,15 @@ impl Font {
         }
     }
 
+    /// Lays TrueType text out right to left (`Game.TextRTL`); bitmap
+    /// fonts are unaffected, as in the original engine, where only the
+    /// GDI text of `CBFontTT` reads the flag.
+    pub fn set_rtl(&mut self, rtl: bool) {
+        if let Font::TrueType(f) = self {
+            f.set_rtl(rtl);
+        }
+    }
+
     /// Draws a text in a box at `(x, y)` of `width`, from the textures
     /// uploaded (`CBFont::DrawText`).
     #[allow(clippy::too_many_arguments)]
@@ -273,6 +282,8 @@ pub struct TrueTypeFont {
     max_char_height: i32,
     glyphs: HashMap<char, Option<Glyph>>,
     texts: Vec<CachedText>,
+    /// Whether lines are laid out right to left (`Game.TextRTL`).
+    rtl: bool,
 }
 
 impl TrueTypeFont {
@@ -330,7 +341,17 @@ impl TrueTypeFont {
             max_char_height,
             glyphs: HashMap::new(),
             texts: Vec::new(),
+            rtl: false,
         })
+    }
+
+    /// Lays lines out right to left when `rtl`; the texts rendered so
+    /// far go when the direction changes.
+    pub fn set_rtl(&mut self, rtl: bool) {
+        if self.rtl != rtl {
+            self.rtl = rtl;
+            self.texts.clear();
+        }
     }
 
     fn glyph(&mut self, ch: char) -> Option<&Glyph> {
@@ -482,8 +503,17 @@ impl TrueTypeFont {
                     text_offset = text_offset.max(glyph.bearing_y());
                 }
             }
+            // Right-to-left text lays the line's glyphs out from the last
+            // to the first: the reading order GDI gives the original
+            // engine with `ETO_RTLREADING`, without a bidirectional
+            // algorithm.
+            let visual: Vec<char> = if self.rtl {
+                line.chars().rev().collect()
+            } else {
+                line.chars().collect()
+            };
             let mut prev: Option<char> = None;
-            for ch in line.chars() {
+            for ch in visual {
                 let (metrics, bearing_y, coverage) = match self.glyph(ch) {
                     Some(glyph) => (glyph.metrics, glyph.bearing_y(), glyph.coverage.clone()),
                     None => continue,
@@ -631,6 +661,8 @@ fn set_pixel(image: &mut Image, x: i32, y: i32) {
 pub struct FontBank {
     fonts: HashMap<String, Font>,
     missing: Vec<(String, String)>,
+    /// Whether text is laid out right to left (`Game.TextRTL`).
+    rtl: bool,
 }
 
 impl FontBank {
@@ -650,7 +682,8 @@ impl FontBank {
             return false;
         }
         match Font::load(vfs, path) {
-            Ok(font) => {
+            Ok(mut font) => {
+                font.set_rtl(self.rtl);
                 self.fonts.insert(k, font);
                 true
             }
@@ -669,6 +702,20 @@ impl FontBank {
     /// A loaded font, mutable.
     pub fn get_mut(&mut self, path: &str) -> Option<&mut Font> {
         self.fonts.get_mut(&key(path))
+    }
+
+    /// Lays the fonts' text out right to left (`Game.TextRTL`); fonts
+    /// loaded later follow.
+    pub fn set_rtl(&mut self, rtl: bool) {
+        self.rtl = rtl;
+        for font in self.fonts.values_mut() {
+            font.set_rtl(rtl);
+        }
+    }
+
+    /// Whether text is laid out right to left.
+    pub fn rtl(&self) -> bool {
+        self.rtl
     }
 
     /// Fonts that could not be loaded, with the reason.
@@ -768,6 +815,19 @@ mod tests {
             font.prepare(&format!("t{i}"), 50, TextAlign::Left, -1);
         }
         assert_eq!(font.texts.len(), CACHED_TEXTS);
+
+        // Right-to-left lays the glyphs out from the last: "ab" comes out
+        // as "ba" does left to right; the cache goes with the direction.
+        let (ltr, _) = font.render("ba", 100, TextAlign::Left, -1);
+        font.set_rtl(true);
+        assert!(font.texts.is_empty());
+        let (rtl, _) = font.render("ab", 100, TextAlign::Left, -1);
+        assert_eq!(rtl.pixels, ltr.pixels);
+        let (same, _) = font.render("ab", 100, TextAlign::Left, -1);
+        font.set_rtl(false);
+        let (back, _) = font.render("ab", 100, TextAlign::Left, -1);
+        assert_eq!(same.pixels, rtl.pixels);
+        assert_ne!(back.pixels, rtl.pixels);
     }
 
     /// Every `.font` of the local test game loads and measures text.

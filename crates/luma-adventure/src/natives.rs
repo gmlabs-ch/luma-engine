@@ -420,7 +420,6 @@ impl World {
             "SuspendedRendering" => Value::Bool(self.suspended_rendering),
             "SoundAvailable" => Value::Bool(self.sounds.audio.device().is_some()),
             "DebugMode"
-            | "TextRTL"
             | "SuppressScriptErrors"
             | "AutorunDisabled"
             | "AutoSaveOnExit"
@@ -431,6 +430,7 @@ impl World {
             }
             "FPS" => Value::Int(self.fps),
             "TextEncoding" => Value::Int(self.text_encoding),
+            "TextRTL" => Value::Bool(self.text_rtl),
             "StartupScene" => self.startup_scene.clone().map_or(Value::Null, Value::from),
             "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
             "SaveDirectory" => Value::from(self.save_directory().to_string_lossy().into_owned()),
@@ -491,6 +491,7 @@ impl World {
                 // `NUM_TEXT_ENCODINGS` is 2: ANSI and UTF-8.
                 self.text_encoding = value.get_int(self).clamp(0, 1);
             }
+            "TextRTL" => self.set_text_rtl(value.get_bool(self)),
             "StartupScene" => {
                 self.startup_scene = match value {
                     Value::Null => None,

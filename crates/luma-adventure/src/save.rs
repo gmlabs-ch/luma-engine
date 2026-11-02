@@ -202,6 +202,7 @@ world_state! {
     name: String,
     caption: String,
     text_encoding: i32,
+    text_rtl: bool,
     suspended_rendering: bool,
     startup_scene: Option<String>,
     mouse_lock: (i32, i32, i32, i32),
@@ -734,6 +735,7 @@ impl World {
         for image in images {
             self.load_ui_image(&image);
         }
+        self.fonts.set_rtl(self.text_rtl);
         for font in fonts {
             self.load_font(&font);
         }

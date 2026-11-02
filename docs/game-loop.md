@@ -80,7 +80,10 @@ so; headless runs read `false`), `SoundAvailable` whether an audio
 device was opened, `AcceleratedMode` (and `Accelerated`) always true
 with wgpu. `TextEncoding` is `0` (ANSI) or `1` (UTF-8): set by every
 string table loaded (a byte order mark means UTF-8, as in the original
-engine) and by the script. `Game.GetFileChecksum(file, hex)` is the
+engine) and by the script. `TextRTL` turns right-to-left text on, for
+the TrueType fonts and the editors (set by a string table's
+`@right-to-left` entry or by the script; see
+[formats/font.md](formats/font.md#notes-for-implementers)). `Game.GetFileChecksum(file, hex)` is the
 CRC-32 of a file of the game (IEEE polynomial, as the original engine's
 `crc.cpp`), as an integer or a lowercase hex string, `null` for a
 missing file. `Game.OpenDocument(target)` opens a file or an address
@@ -210,7 +213,9 @@ A key going down updates `Game.Keyboard`, is offered to the
 [accessibility](#accessibility) shortcuts (Ctrl+Tab, Ctrl+Space, when
 their switches are on), then goes to the **focused window** when there
 is one: `Tab` moves its focus between its focusable controls, an editor
-with the focus edits its text; a key the window did not use raises
+with the focus edits its text (mirrored for right-to-left text, see
+[formats/window.md](formats/window.md#edit)); a key the window did not
+use raises
 `Keypress` on the window when its scripts handle that event, else on
 the game. Without a focused window, `Keypress` goes to the game.
 

@@ -161,7 +161,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp
 - Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`, `accessibility.rs`)
-- Count: 135 done, 11 todo, 19 no-op
+- Count: 137 done, 9 todo, 19 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -245,7 +245,7 @@ How the list was made. For every class with a script interface, the names tested
 | `AcceleratedMode` | get | **done** | True when GPU accelerated; Luma reads true. |
 | `Accelerated` | get | **done** | Alias of `AcceleratedMode`. |
 | `TextEncoding` | get/set | **done** | Text encoding of the game: 0 ANSI, 1 UTF-8, set by each string table loaded (byte order mark) and by the script, clamped as WME does. The fonts still draw text as Latin-1 whatever the value (see `docs/rendering.md`). |
-| `TextRTL` | get/set | **todo** | Right-to-left text layout. Luma reads false, ignores the set. |
+| `TextRTL` | get/set | **done** | Right-to-left text, set by a string table's `@right-to-left` and by scripts, saved. TrueType fonts lay each line's glyphs out from the last (WME passes `ETO_RTLREADING` to GDI; Luma has no bidirectional algorithm, so mixed-direction runs are not reordered), bitmap fonts are unaffected as in WME, and editors mirror `Backspace`, `Delete`, `Home` and `End`, keep the caret before a typed character and set their text against the right edge. |
 | `SoundBufferSize` | get/set | **no-op** | DirectSound buffer length in seconds; the audio backend manages its buffers. |
 | `SuspendedRendering` | get/set | **done** | While true the front-end presents no frame and the window keeps the last one, as WME's `CBSubFrame::Display` draws nothing and its loop skips the flip; the game runs on. `luma-player` honours it, headless runs ignore it. Saved. |
 | `SuppressScriptErrors` | get/set | **no-op** | Hides the script error dialog; Luma only logs errors and never shows one. |
@@ -1033,7 +1033,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 69 | 3 | 0 | 72 |
-| CBGame | 135 | 11 | 19 | 165 |
+| CBGame | 137 | 9 | 19 | 165 |
 | CAdGame | 63 | 2 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
 | CAdScene | 58 | 23 | 2 | 83 |
@@ -1072,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **928** | **193** | **32** | **1153** |
+| **All** | **930** | **191** | **32** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 907 done, 193 todo, 32 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 909 done, 191 todo, 32 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1099,12 +1099,12 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
-| Game services | 2 | `TextRTL`. Done: `SuspendedRendering`, `Scene.SetViewport`, private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`, the game's and the items' cursor objects and the items' hover image objects. |
+| Game services | 0 | Done: `TextRTL`, `SuspendedRendering`, `Scene.SetViewport`, private settings, screenshots and thumbnails, loading screens, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, the volume, sound, FPS and encoding properties, `StartupScene`, the game's and the items' cursor objects and the items' hover image objects. |
 | Script library | 2 | `new Actor` and `new Entity`, which follow runtime entity creation. (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory`, `new Object` and the HSL colour helpers are done.) |
 | Object model (2D) | 0 | Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories (`Game.InventoryObject`). |
 | Rendering features | 0 | Done: rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades (see `docs/rendering.md`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **193** | |
+| **All** | **191** | |
 
 ## Members in Luma that WME 1.x does not define
 
