@@ -95,6 +95,8 @@ no code copied):
   docs/formats/xfile.md
   crates/luma-3d/src/xfile.rs
   crates/luma-3d/src/model.rs
+  docs/formats/actor3d.md
+  crates/luma-3d/src/actor3d.rs
 
 -------------------------------------------------------------------------------
 Dependencies under the Mozilla Public License 2.0
