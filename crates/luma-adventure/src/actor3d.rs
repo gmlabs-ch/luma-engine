@@ -1390,6 +1390,10 @@ pub struct Actor3dDraw<'a> {
     pub model: &'a AnimatedModel,
     /// The world matrix.
     pub world: Mat4,
+    /// The position in world units (the feet), where the shadows lie.
+    pub position: Vec3,
+    /// The heading in degrees, which turns the simple shadow.
+    pub angle: f32,
     /// The lights that light the actor, at most [`crate::scene3d::MAX_LIGHTS`].
     pub lights: Vec<&'a Light>,
     /// The ambient colour: the actor's override, else the scene's.
@@ -1424,6 +1428,10 @@ pub struct ThreeDFrame<'a> {
     pub fog: Option<crate::scene3d::Fog>,
     /// The geometry, for the shadow receivers.
     pub geometry: &'a SceneGeometry,
+    /// Whether the game and the scene allow stencil shadows
+    /// (`CAdGame::GetMaxShadowType()`): the receivers are then written
+    /// to the depth buffer before the main layer's nodes.
+    pub stencil_shadows: bool,
 }
 
 impl World {
@@ -1633,11 +1641,13 @@ impl World {
         let view = self.scene.as_ref()?;
         let scene3d = view.three_d.as_ref()?;
         let projection = scene3d.projection()?;
+        let max_shadow = self.max_shadow_type.min(view.scene.max_shadow_type);
         let frame = ThreeDFrame {
             projection,
             ambient: view.scene.ambient_light_color,
             fog: scene3d.fog,
             geometry: &scene3d.geometry,
+            stencil_shadows: max_shadow >= ShadowType::Stencil as u8,
         };
         let scene_ambient = luma_script::rgba(
             i32::from(view.scene.ambient_light_color.r),
@@ -1645,7 +1655,6 @@ impl World {
             i32::from(view.scene.ambient_light_color.b),
             255,
         );
-        let max_shadow = self.max_shadow_type.min(view.scene.max_shadow_type);
         let mut draws = Vec::new();
         for (index, (id, _)) in self.free_objects().into_iter().enumerate() {
             let Some(actor) = self.actor3d(id) else {
@@ -1661,6 +1670,8 @@ impl World {
                 other_index: index,
                 model,
                 world: actor.world_matrix(),
+                position: actor.position,
+                angle: actor.angle,
                 lights: Scene3d::lights_for(
                     &scene3d.geometry,
                     actor.position,

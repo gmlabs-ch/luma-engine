@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use luma_archive::Vfs;
 use luma_formats::scene::{Entity, EntityKind, Layer, Region, SceneNode};
 use luma_formats::{BlendMode, Frame, Rgb, Rgba, Scene, Sprite, SubFrame};
-use luma_render::{Attributes, DrawList, Quad, Rect, Renderer, Texture};
+use luma_render::{Attributes, Draw3d, DrawList, Quad, Rect, Renderer, Texture};
 
 use crate::error::{Error, Result};
 use crate::talk::{Sentence, SubtitleMods};
@@ -633,6 +633,14 @@ pub struct Overlays<'a> {
     pub others: HashMap<usize, Vec<(Quad<'a>, Attributes)>>,
     /// The videos drawn in entities' places instead of their sprites.
     pub videos: Vec<VideoOverlay<'a>>,
+    /// The 3D items drawn in place of other objects (the 3D actors), by
+    /// index among them: the shadow, then the model (`CAdActor3DX::
+    /// Display`), before the object's particles.
+    pub three_d: HashMap<usize, Vec<Draw3d<'a>>>,
+    /// The 3D items drawn before the nodes of the main layer: the shadow
+    /// receivers written to the depth buffer (`CAdScene::TraverseNodes`,
+    /// `RenderShadowGeometry`).
+    pub before_main: Vec<Draw3d<'a>>,
 }
 
 /// A scene and everything needed to run and draw it.
@@ -1409,6 +1417,7 @@ impl SceneView {
             }
         };
         let mut current_layer = usize::MAX;
+        let mut main_started = false;
         // An entity's video, where it plays, takes the sprite's place,
         // the attachments around it (`CAdEntity::Display`).
         let video_of = |r: EntityRef| overlays.videos.iter().find(|v| v.entity == r);
@@ -1442,6 +1451,12 @@ impl SceneView {
                 current_layer = layer;
                 let (ox, oy) = camera.layer_offset(scene, &scene.layers[layer]);
                 list.set_offset(-ox, -oy);
+                if scene.layers[layer].main && !main_started {
+                    main_started = true;
+                    for draw in &overlays.before_main {
+                        list.push_3d(draw.clone());
+                    }
+                }
             }
             let overlay = match item {
                 DrawItem::Node { layer, index } => {
@@ -1477,6 +1492,9 @@ impl SceneView {
                     overlays.entities.get(&r)
                 }
                 DrawItem::Other { index, .. } => {
+                    for draw in overlays.three_d.get(&index).into_iter().flatten() {
+                        list.push_3d(draw.clone());
+                    }
                     if let Some(d) = others.get(index) {
                         draw_object(list, d);
                     }

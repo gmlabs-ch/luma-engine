@@ -20,6 +20,13 @@ pub mod actor3d {
     pub enum Actor3d {}
 }
 
+/// The GPU side of the 3D actors, empty in this build.
+pub mod draw3d {
+    /// Nothing to keep without the `3d` feature.
+    #[derive(Debug, Default)]
+    pub struct Render3d;
+}
+
 /// The 3D side of a scene, which this build cannot hold.
 pub mod scene3d {
     /// Uninhabited: no scene geometry exists without the `3d` feature.
@@ -53,6 +60,12 @@ impl<'de> Deserialize<'de> for scene3d::Scene3d {
 
 impl World {
     pub(crate) fn update_actors3d(&mut self) {}
+
+    pub(crate) fn upload_3d(&mut self, _: &luma_render::Renderer) {
+        let draw3d::Render3d = self.render3d;
+    }
+
+    pub(crate) fn three_d_overlays<'a>(&'a self, _: &mut crate::scene_view::Overlays<'a>) {}
 
     pub(crate) fn reload_3d(&mut self) {}
 

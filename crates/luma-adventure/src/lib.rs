@@ -50,6 +50,8 @@ pub mod actor;
 #[cfg(feature = "3d")]
 pub mod actor3d;
 pub mod capture;
+#[cfg(feature = "3d")]
+pub mod draw3d;
 mod error;
 pub mod fader;
 pub mod input;
@@ -87,7 +89,7 @@ pub mod video;
 pub mod world;
 
 #[cfg(not(feature = "3d"))]
-use three_d_off::{actor3d, scene3d};
+use three_d_off::{actor3d, draw3d, scene3d};
 
 pub use accessibility::{
     Accessibility, CommandSpeech, RecordingSpeech, Speech, SpeechKind, SpeechRecord,

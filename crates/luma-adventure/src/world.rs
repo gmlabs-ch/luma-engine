@@ -131,6 +131,9 @@ pub struct World {
     /// `Game.SetShadowImage`: the image of the 3D actors' simple shadows
     /// when they name none.
     pub(crate) shadow_image: Option<String>,
+    /// The GPU side of the 3D actors (their meshes and textures), refreshed
+    /// by [`World::upload`]; empty without the `3d` feature.
+    pub(crate) render3d: crate::draw3d::Render3d,
     /// The particle emitters of entities and actors, by handle.
     pub(crate) emitters: Vec<(NativeId, crate::particles::Emitter)>,
     pub(crate) pending_events: Vec<(NativeId, String)>,
@@ -301,6 +304,7 @@ impl World {
             actors3d: Vec::new(),
             max_shadow_type: 3,
             shadow_image: None,
+            render3d: Default::default(),
             emitters: Vec::new(),
             pending_events: Vec::new(),
             sounds: Sounds::new(audio),
@@ -1490,6 +1494,8 @@ impl World {
             }
         }
         overlays.videos = self.video_overlays();
+        // The 3D actors' shadows and models, and the shadow receivers.
+        self.three_d_overlays(&mut overlays);
         (drawables, overlays)
     }
 
@@ -1758,7 +1764,8 @@ impl World {
     }
 
     /// Uploads the textures of the scene, of the actors, of the cursors
-    /// and of the fonts.
+    /// and of the fonts, and the meshes of the 3D actors with this
+    /// frame's pose.
     pub fn upload(&mut self, renderer: &luma_render::Renderer) {
         if let Some(view) = self.scene.as_mut() {
             view.upload(&self.vfs, renderer);
@@ -1774,6 +1781,7 @@ impl World {
         self.ui.bank.upload(&self.vfs, renderer);
         self.upload_video(renderer);
         self.fonts.upload(renderer);
+        self.upload_3d(renderer);
     }
 
     /// Loads a scene, replacing the current one (`CAdGame::ChangeScene`):
