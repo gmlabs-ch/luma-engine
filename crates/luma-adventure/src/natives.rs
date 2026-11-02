@@ -64,8 +64,6 @@ const OBJECT_STUBS: &[&str] = &[
     "PlayAnimAsync",
     "ForceTalkAnim",
     "StickToRegion",
-    "CreateParticleEmitter",
-    "DeleteParticleEmitter",
     "AddAttachment",
     "RemoveAttachment",
     "AddTalkSprite",
@@ -125,6 +123,7 @@ impl World {
             Kind::Actor => self.actor_get(id, name),
             Kind::Control => self.control_get(id, name),
             Kind::Item => self.item_get(id, name),
+            Kind::Emitter(_) => self.emitter_get(id, name),
             Kind::Inert(kind) => match name {
                 "Type" => Some(Value::from(kind.to_ascii_lowercase())),
                 "Name" => Some(Value::from(kind)),
@@ -158,6 +157,7 @@ impl World {
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
+            Kind::Emitter(_) => self.emitter_set(id, name, value),
             Kind::Keyboard
             | Kind::Math
             | Kind::ResponseBox
@@ -216,6 +216,7 @@ impl World {
             Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
+            Kind::Emitter(_) => self.emitter_call(id, name, args),
             Kind::Class(_) => None,
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
@@ -1317,7 +1318,7 @@ impl World {
             }
             "NumItems" => Value::Int(self.inventory.taken.len() as i32),
             "NumAttachments" => Value::Int(0),
-            "ParticleEmitter" => Value::Null,
+            "ParticleEmitter" => native_or_null(self.node_id(r).and_then(|id| self.emitter_of(id))),
             "Item" => e.item.clone().map_or(Value::Null, Value::from),
             "Subtype" => Value::from(match e.kind {
                 luma_formats::EntityKind::Sound => "sound",
@@ -1492,6 +1493,9 @@ impl World {
             }
             "HasCursor" => Return::value(false),
             "GetCursor" | "GetCursorObject" | "GetAttachment" => Return::null(),
+            "CreateParticleEmitter" | "DeleteParticleEmitter" => {
+                self.emitter_owner_call(id, name, args)
+            }
             _ if OBJECT_STUBS.contains(&name) => {
                 self.stub(&format!("Entity.{name}"));
                 Return::null()

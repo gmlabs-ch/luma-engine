@@ -21,8 +21,6 @@ const ACTOR_STUBS: &[&str] = &[
     "SetCursor",
     "RemoveCursor",
     "StickToRegion",
-    "CreateParticleEmitter",
-    "DeleteParticleEmitter",
     "AddAttachment",
     "RemoveAttachment",
     "SetCaption",
@@ -105,7 +103,8 @@ impl World {
             "SubtitlesPosXCenter" => Value::Bool(actor.subtitles.x_center),
             "NumItems" => Value::Int(self.inventory.taken.len() as i32),
             "NumAttachments" => Value::Int(0),
-            "ParticleEmitter" | "Item" => Value::Null,
+            "ParticleEmitter" => self.emitter_of(id).map_or(Value::Null, Value::Native),
+            "Item" => Value::Null,
             _ => return None,
         })
     }
@@ -356,6 +355,9 @@ impl World {
             }
             "HasCursor" => Return::value(false),
             "GetCursor" | "GetCursorObject" | "GetAttachment" => Return::null(),
+            "CreateParticleEmitter" | "DeleteParticleEmitter" => {
+                self.emitter_owner_call(id, name, args)
+            }
             _ if ACTOR_STUBS.contains(&name) => {
                 self.stub(&format!("Actor.{name}"));
                 Return::null()

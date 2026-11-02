@@ -125,13 +125,21 @@ is absent.
 | `PERSISTENT_STATE_SPRITES` | bool | true | With `PERSISTENT_STATE`, also keep the sprites objects were switched to. |
 | `CURSOR` | string | | Sprite used as the mouse cursor over the scene instead of the game's cursor. |
 | `VIEWPORT` | `left,top,right,bottom` | the whole window | Part of the window the scene is drawn in. Not written by the editor. |
-| `CAMERA` | string | | Name of the active 3D camera in the scene geometry. Only meaningful for the 3D version of the engine; a 2D scene never has one. |
+| `GEOMETRY` | string | | The `.3ds` scene geometry of a 3D scene, see [geometry.md](geometry.md) and [3D keys](#3d-keys). A 2D scene has none. |
+| `CAMERA` | string | the geometry's first | Name of the active camera of the scene geometry (case-insensitive); an unknown name keeps the first camera. |
+| `FOV_OVERRIDE` | float | | Vertical field of view in **radians** (SceneEdit shows degrees and writes radians) replacing the camera's. Absent or negative keeps the camera's. |
+| `NEAR_CLIPPING_PLANE`, `FAR_CLIPPING_PLANE` | float | 90, 10000 | Clipping distances in world units. Absent or negative means the default. |
+| `WAYPOINT_HEIGHT` | float | 10 | How far above the floor the 3D waypoints are placed. Absent or negative keeps the default. |
+| `2D_PATHFINDING` | bool | false | 3D actors path-find on the scene's 2D regions and waypoints exactly like 2D actors; the geometry then only maps 2D to 3D. |
+| `MAX_SHADOW_TYPE` | int | 2 | Highest shadow type allowed in the scene: 0 none, 1 simple, 2 flat, 3 stencil; clamped to that range. |
+| `SCROLL_3D_COMPATIBILITY` | bool | false | Pre-1.7 behaviour: the camera sees only the top-left screenful of the scene, whatever the layer size. |
+| `AMBIENT_LIGHT_COLOR` | `{ r,g,b }` | `0,0,0` | Ambient light for 3D actors. |
 | `LAYER` | block, repeatable | | The layers, drawn in order, see [`LAYER`](#layer). |
 | `ENTITY` | block, repeatable | | *Free* entities, see [Free entities](#free-entities). |
 | `WAYPOINTS` | block, repeatable | | Waypoint groups, see [`WAYPOINTS`](#waypoints). |
 | `SCALE_LEVEL` | block, repeatable | | See [Scale and rotation levels](#scale-and-rotation-levels). |
 | `ROTATION_LEVEL` | block, repeatable | | Same. |
-| `EDITOR_MARGIN_H`, `EDITOR_MARGIN_V`, `EDITOR_COLOR_*`, `EDITOR_SHOW_*`, `EDITOR_PROPERTY` | | | Editor state, ignored by the engine. |
+| `EDITOR_MARGIN_H`, `EDITOR_MARGIN_V`, `EDITOR_COLOR_*`, `EDITOR_SHOW_*`, `EDITOR_RESOLUTION_WIDTH`, `EDITOR_RESOLUTION_HEIGHT`, `EDITOR_PROPERTY` | | | Editor state, ignored by the engine (the 3D camera is set up from the game's resolution, not the editor's). |
 | `EVENTS` | | | Reserved, ignored. |
 
 A scene with no main layer loads, with a warning, and has a size of
@@ -401,9 +409,22 @@ the scene offset (`CAdScene::m_ParalaxScrolling`, the `else` branch of
 property exposes it; only the editor's preview turns it off. Games always
 scroll with parallax, so Luma Engine implements only that branch.
 
-`CAMERA` names a camera of the 3D geometry in the 3D version of the
-engine, which sets up a perspective view for 3D actors from it; the 2D
-engine reads and ignores the key.
+## 3D keys
+
+A scene with a `GEOMETRY` key is a 3D scene: a painted 2D scene plus a
+hidden `.3ds` geometry (walk planes, blocks, waypoints, cameras and
+lights) that 3D actors move in. `CAMERA` names the camera the background
+was rendered with; it sets up the perspective view that ties a pixel of
+the main layer to a point of the geometry. The 3D keys are read by
+`luma_formats::scene::Scene` (fields `geometry`, `fov_override`,
+`near_clipping_plane`, `far_clipping_plane`, `waypoint_height`,
+`pathfinding_2d`, `max_shadow_type`, `scroll_3d_compatibility`,
+`ambient_light_color`) and used by the `luma-3d` module; the geometry
+file is described in [geometry.md](geometry.md) and the camera mapping in
+[../3d-actors.md](../3d-actors.md). In the original, the keys only take
+effect with the Direct3D renderer: the software renderer ignores
+`GEOMETRY` and cannot load 3D actors. Fog is set by script
+(`Scene.EnableFog`), not by a key.
 
 ## Notes for implementers
 

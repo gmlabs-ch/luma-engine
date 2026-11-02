@@ -119,4 +119,7 @@ row and column when scaled, which the original engine does as well.
   era and keeps streaming simple; an atlas can come when draw-call counts
   matter.
 - 3D actors.
-- Render-to-texture effects, lighting, particles.
+- Render-to-texture effects, lighting. Particles are quads pushed by
+  `luma-adventure` with their rotation and their owner's blend mode (see
+  [particles.md](particles.md)); they need no renderer feature of their
+  own.

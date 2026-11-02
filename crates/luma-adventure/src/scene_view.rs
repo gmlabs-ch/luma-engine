@@ -571,6 +571,18 @@ impl DrawItem {
     }
 }
 
+/// Quads drawn right after an object of the scene, in its layer: the
+/// particles of its emitter (`CAdEntity::Display`, `CAdActor::Display`
+/// draw the emitter after the sprite).
+#[derive(Default)]
+pub struct Overlays<'a> {
+    /// By entity, for the scene's entities: the quads with their
+    /// attributes (a particle's rotation, the emitter's blend mode).
+    pub entities: HashMap<EntityRef, Vec<(Quad<'a>, Attributes)>>,
+    /// By index among the other objects given to the drawing (actors).
+    pub others: HashMap<usize, Vec<(Quad<'a>, Attributes)>>,
+}
+
 /// A scene and everything needed to run and draw it.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SceneView {
@@ -1090,6 +1102,18 @@ impl SceneView {
         camera: &Camera,
         others: &[Drawable<'a>],
     ) {
+        self.draw_with_overlays(list, camera, others, &Overlays::default());
+    }
+
+    /// Like [`SceneView::draw_with`], with the `overlays` of the objects
+    /// (their particles) pushed right after each object, in its layer.
+    pub fn draw_with_overlays<'a>(
+        &'a self,
+        list: &mut DrawList<'a>,
+        camera: &Camera,
+        others: &[Drawable<'a>],
+        overlays: &Overlays<'a>,
+    ) {
         let scene = &self.scene;
         let positions: Vec<(i32, i32)> = others.iter().map(|d| (d.x, d.y)).collect();
         let mut current_layer = usize::MAX;
@@ -1100,28 +1124,36 @@ impl SceneView {
                 let (ox, oy) = camera.layer_offset(scene, &scene.layers[layer]);
                 list.set_offset(-ox, -oy);
             }
-            match item {
+            let overlay = match item {
                 DrawItem::Node { layer, index } => {
+                    let r = EntityRef::Node { layer, index };
                     if let Some(SceneNode::Entity(entity)) = self.node(layer, index) {
-                        if let Some(d) = self.drawable(EntityRef::Node { layer, index }, entity) {
+                        if let Some(d) = self.drawable(r, entity) {
                             draw_object(list, &d);
                         }
                     }
+                    overlays.entities.get(&r)
                 }
                 DrawItem::Free { index, .. } => {
+                    let r = EntityRef::Free(index);
                     if let Some(d) = scene
                         .free_entities
                         .get(index)
-                        .and_then(|e| self.drawable(EntityRef::Free(index), e))
+                        .and_then(|e| self.drawable(r, e))
                     {
                         draw_object(list, &d);
                     }
+                    overlays.entities.get(&r)
                 }
                 DrawItem::Other { index, .. } => {
                     if let Some(d) = others.get(index) {
                         draw_object(list, d);
                     }
+                    overlays.others.get(&index)
                 }
+            };
+            for (quad, attributes) in overlay.into_iter().flatten() {
+                list.push_with(*quad, *attributes);
             }
         }
         list.set_offset(0.0, 0.0);

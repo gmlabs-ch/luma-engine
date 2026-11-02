@@ -8,7 +8,7 @@
 
 use crate::def::{Document, Node, Nodes};
 use crate::error::{Error, Result};
-use crate::image::{BlendMode, Rgba};
+use crate::image::{BlendMode, Rgb, Rgba};
 use crate::sprite::Rect;
 
 /// A point in scene coordinates.
@@ -144,8 +144,35 @@ pub struct Scene {
     pub cursor: Option<String>,
     /// Part of the window the scene is drawn in.
     pub viewport: Option<Rect>,
-    /// Name of the active 3D camera; meaningless for 2D scenes.
+    /// Name of the active 3D camera of the geometry (`CAMERA`); an
+    /// unknown name keeps the geometry's first camera.
     pub camera: Option<String>,
+    /// The `.3ds` scene geometry file (`GEOMETRY`); `None` for a 2D scene.
+    pub geometry: Option<String>,
+    /// Field of view in **radians** replacing the active camera's
+    /// (`FOV_OVERRIDE`); absent or negative keeps the camera's.
+    pub fov_override: Option<f32>,
+    /// Near clipping distance in world units (`NEAR_CLIPPING_PLANE`);
+    /// absent or negative means the renderer's default (90).
+    pub near_clipping_plane: Option<f32>,
+    /// Far clipping distance in world units (`FAR_CLIPPING_PLANE`); absent
+    /// or negative means the renderer's default (10000).
+    pub far_clipping_plane: Option<f32>,
+    /// Height of the 3D waypoints above the floor (`WAYPOINT_HEIGHT`);
+    /// absent or negative keeps the geometry's default (10).
+    pub waypoint_height: Option<f32>,
+    /// 3D actors path-find on the scene's 2D regions and waypoints
+    /// (`2D_PATHFINDING`); the geometry then only maps 2D to 3D.
+    pub pathfinding_2d: bool,
+    /// Highest shadow type allowed in the scene, 0 none, 1 simple, 2 flat,
+    /// 3 stencil (`MAX_SHADOW_TYPE`, clamped; default 2).
+    pub max_shadow_type: u8,
+    /// Pre-1.7 framing: the camera sees the top-left screenful of the
+    /// scene whatever the layer size (`SCROLL_3D_COMPATIBILITY`).
+    pub scroll_3d_compatibility: bool,
+    /// Ambient light colour for 3D actors (`AMBIENT_LIGHT_COLOR`), black
+    /// by default.
+    pub ambient_light_color: Rgb,
     /// The layers, in drawing order.
     pub layers: Vec<Layer>,
     /// Waypoint groups for path finding.
@@ -502,6 +529,7 @@ impl Scene {
         })?;
         let mut scene = Scene {
             persistent_state_sprites: true,
+            max_shadow_type: 2,
             ..Scene::default()
         };
         for node in root.nodes() {
@@ -515,6 +543,22 @@ impl Scene {
                 "PERSISTENT_STATE_SPRITES" => scene.persistent_state_sprites = boolean(node),
                 "CURSOR" => scene.cursor = node.as_str().map(str::to_string),
                 "CAMERA" => scene.camera = node.as_str().map(str::to_string),
+                "GEOMETRY" => scene.geometry = node.as_str().map(str::to_string),
+                "FOV_OVERRIDE" => scene.fov_override = float(node),
+                "NEAR_CLIPPING_PLANE" => scene.near_clipping_plane = float(node),
+                "FAR_CLIPPING_PLANE" => scene.far_clipping_plane = float(node),
+                "WAYPOINT_HEIGHT" => scene.waypoint_height = float(node),
+                "2D_PATHFINDING" => scene.pathfinding_2d = boolean(node),
+                "MAX_SHADOW_TYPE" => scene.max_shadow_type = integer(node).clamp(0, 3) as u8,
+                "SCROLL_3D_COMPATIBILITY" => scene.scroll_3d_compatibility = boolean(node),
+                "AMBIENT_LIGHT_COLOR" => {
+                    let v = ints(node);
+                    scene.ambient_light_color = Rgb {
+                        r: clamp_channel(v.first().copied().unwrap_or(0)),
+                        g: clamp_channel(v.get(1).copied().unwrap_or(0)),
+                        b: clamp_channel(v.get(2).copied().unwrap_or(0)),
+                    };
+                }
                 "VIEWPORT" => {
                     let v = ints(node);
                     scene.viewport = Some(Rect {
@@ -1024,6 +1068,10 @@ fn integer(node: &Node) -> i32 {
         .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
+fn float(node: &Node) -> Option<f32> {
+    node.as_float().map(|f| f as f32)
+}
+
 fn ints(node: &Node) -> Vec<i64> {
     node.as_ints().unwrap_or_default()
 }
@@ -1484,6 +1532,59 @@ SCENE {
         assert!(matches!(err, Error::Syntax(_)), "{err}");
         let err = Entity::parse(b"SCENE { }").unwrap_err();
         assert!(matches!(err, Error::Invalid { .. }), "{err}");
+    }
+
+    #[test]
+    fn reads_the_3d_keys_with_their_defaults() {
+        let scene = Scene::parse(b"SCENE { NAME=\"flat\" }").unwrap();
+        assert_eq!(scene.geometry, None);
+        assert_eq!(scene.camera, None);
+        assert_eq!(scene.fov_override, None);
+        assert_eq!(scene.near_clipping_plane, None);
+        assert_eq!(scene.far_clipping_plane, None);
+        assert_eq!(scene.waypoint_height, None);
+        assert!(!scene.pathfinding_2d);
+        assert_eq!(scene.max_shadow_type, 2);
+        assert!(!scene.scroll_3d_compatibility);
+        assert_eq!(scene.ambient_light_color, Rgb { r: 0, g: 0, b: 0 });
+
+        let scene = Scene::parse(
+            br#"SCENE {
+  NAME="Warehouse"
+  GEOMETRY="scenes\front\geometry.3ds"
+  CAMERA="Camera01"
+  MAX_SHADOW_TYPE=7
+  FOV_OVERRIDE=1.25
+  NEAR_CLIPPING_PLANE=-1
+  FAR_CLIPPING_PLANE=5000
+  WAYPOINT_HEIGHT=12.5
+  2D_PATHFINDING=TRUE
+  SCROLL_3D_COMPATIBILITY=TRUE
+  AMBIENT_LIGHT_COLOR { 300, 20, -5 }
+  EDITOR_RESOLUTION_WIDTH=800
+}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            scene.geometry.as_deref(),
+            Some("scenes\\front\\geometry.3ds")
+        );
+        assert_eq!(scene.camera.as_deref(), Some("Camera01"));
+        assert_eq!(scene.max_shadow_type, 3);
+        assert_eq!(scene.fov_override, Some(1.25));
+        assert_eq!(scene.near_clipping_plane, Some(-1.0));
+        assert_eq!(scene.far_clipping_plane, Some(5000.0));
+        assert_eq!(scene.waypoint_height, Some(12.5));
+        assert!(scene.pathfinding_2d);
+        assert!(scene.scroll_3d_compatibility);
+        assert_eq!(
+            scene.ambient_light_color,
+            Rgb {
+                r: 255,
+                g: 20,
+                b: 0
+            }
+        );
     }
 
     #[test]

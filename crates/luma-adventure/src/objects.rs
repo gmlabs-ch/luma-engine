@@ -68,6 +68,10 @@ pub enum Kind {
     /// An inventory item (`ITEMS`); its state lives in the world's
     /// inventory.
     Item,
+    /// The particle emitter of an entity or an actor
+    /// (`CreateParticleEmitter`), by its owner; its state lives in the
+    /// world's emitter list.
+    Emitter(NativeId),
     /// A stand-in that keeps the properties scripts set and answers every
     /// method with `null`: windows, actors and other objects of later
     /// milestones.

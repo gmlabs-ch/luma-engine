@@ -41,6 +41,10 @@ A saved game holds:
 - the view: scroll offset, target, auto-scroll settings;
 - the actors with their position, direction, state, path, animation and
   sentence;
+- the particle emitters of the entities and actors, with their
+  parameters, sprite files, forces and every particle, live or dead
+  (see [particles.md](particles.md)); their sprites are loaded again
+  from the files;
 - the inventory: the items as the scripts modified them, those taken,
   the selected item, the box's window and scroll;
 - the windows and their controls, the focused window, what the mouse
@@ -223,7 +227,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `7` today |
+| 4 | layout version, little-endian; `8` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -234,7 +238,9 @@ of The White Chamber is a few kilobytes). The header is read alone by
 `GetSaveSlotDescription`, without decompressing the body. Because
 `postcard` is positional, the fields of the state are versioned by the
 layout version: a change of the state's shape bumps `VERSION`, and
-older files are then refused rather than misread.
+older files are then refused rather than misread. Version 7 added the
+particle emitters; version 8 the per-axis scale, rotation and blend
+mode of objects and emitters, and the scene's fader.
 
 ## Checking a game
 
