@@ -138,6 +138,20 @@ fn game_script() -> Vec<u8> {
     call(&mut a, "kb", "IsKeyDown", &[Arg::Str("a")]);
     store(&mut a, "aDown");
     a.emit(Instruction::RetEvent);
+    // on "MouseWheelUp" / "MouseWheelDown": result.wheel = "up" / "down";
+    // on "QuitGame": result.quitAsked = true (the game goes on).
+    for (event, key, value) in [
+        ("MouseWheelUp", "wheel", "up"),
+        ("MouseWheelDown", "wheel", "down"),
+        ("QuitGame", "quitAsked", "asked"),
+    ] {
+        a.event(event);
+        a.emit(Instruction::Scope);
+        a.def_glob_var("result");
+        a.push_string(value);
+        store(&mut a, key);
+        a.emit(Instruction::RetEvent);
+    }
     // on "PlayIntro": Game.PlayTheora("intro.ogv"); result.afterVideo = true;
     a.event("PlayIntro");
     a.emit(Instruction::Scope);
@@ -203,6 +217,12 @@ fn window_script() -> Vec<u8> {
     a.pop_var("kb");
     get(&mut a, "kb", "KeyCode");
     store(&mut a, "winKey");
+    a.emit(Instruction::RetEvent);
+    a.event("MouseWheelDown");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.push_string("window");
+    store(&mut a, "winWheel");
     a.emit(Instruction::RetEvent);
     // on "Probe": the state images as sprite objects, a container made
     // at runtime, Freezable, and Exclusive written as a property.
@@ -736,6 +756,9 @@ fn prop_script() -> Vec<u8> {
         ("LeftClick", "clicked"),
         ("RightClick", "rightClicked"),
         ("LeftDoubleClick", "doubleClicked"),
+        ("RightDoubleClick", "rightDoubleClicked"),
+        ("MiddleClick", "middleClicked"),
+        ("MiddleRelease", "middleReleased"),
     ] {
         a.event(event);
         a.emit(Instruction::Scope);
@@ -2175,11 +2198,37 @@ fn mouse_keyboard_cursors_and_fades() {
     runtime.mouse_right_down();
     runtime.tick(16);
     assert_eq!(result(&runtime, "rightClicked"), Value::from("prop"));
-    // A second click at once is a double click.
+    // A second click at once is a double click, for either button.
     runtime.mouse_left_down();
     runtime.mouse_left_up();
     runtime.tick(16);
     assert_eq!(result(&runtime, "doubleClicked"), Value::from("prop"));
+    runtime.engine.set_global("result", Value::object());
+    runtime.mouse_right_down();
+    runtime.mouse_right_up();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "rightDoubleClicked"), Value::from("prop"));
+    assert_eq!(result(&runtime, "rightClicked"), Value::Null);
+    // The middle button, and the wheel, which goes to the game while no
+    // window is focused.
+    runtime.mouse_middle_down();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "middleClicked"), Value::from("prop"));
+    runtime.mouse_middle_up();
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "middleReleased"), Value::from("prop"));
+    runtime.mouse_wheel(-1);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "wheel"), Value::from("down"));
+    runtime.mouse_wheel(3);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "wheel"), Value::from("up"));
+    // Closing the window asks the game script, which keeps the game
+    // running here.
+    assert!(runtime.window_close());
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "quitAsked"), Value::from("asked"));
+    assert!(!runtime.world.quit_requested());
     // Off the prop: the cursor is the default one and animates; a click
     // reaches the scene with the mouse in scene coordinates.
     runtime.mouse_move(20, 30);
@@ -2419,6 +2468,13 @@ fn windows_buttons_keys_and_menus() {
     runtime.key_down(9, None, false, false, false);
     runtime.tick(16);
     assert_eq!(result(&runtime, "winKey"), Value::Int(9));
+    // The wheel goes to the focused window when it handles the event,
+    // else to the game.
+    runtime.mouse_wheel(-1);
+    runtime.mouse_wheel(1);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "winWheel"), Value::from("window"));
+    assert_eq!(result(&runtime, "wheel"), Value::from("up"));
     // A menu opened system-exclusive freezes the game: the timer stops
     // and the opening script waits.
     runtime

@@ -2398,9 +2398,10 @@ impl Runtime {
 
     /// Raises a mouse event (`CAdGame::OnMouseLeftDown` and the like):
     /// on the game first; when its scripts do not handle it, on the
-    /// active object, else on the scene when the mouse is over it. While
-    /// the game is frozen, only the active object gets it.
-    fn mouse_event(&mut self, event: &str) {
+    /// active object, else, for the events the adventure game dispatches
+    /// itself (`scene_too`), on the scene when the mouse is over it.
+    /// While the game is frozen, only the active object gets it.
+    fn mouse_event(&mut self, event: &str, scene_too: bool) {
         let game = self.world.game_id;
         let running = !self.world.is_frozen();
         if running && self.engine.apply_event(&mut self.world, game, event, false) {
@@ -2409,26 +2410,36 @@ impl Runtime {
         if let Some(active) = self.world.active_object() {
             self.engine
                 .apply_event(&mut self.world, active, event, false);
-        } else if running && self.mouse_in_viewport() {
+        } else if scene_too && running && self.mouse_in_viewport() {
             let scene = self.world.scene_id;
             self.engine
                 .apply_event(&mut self.world, scene, event, false);
         }
     }
 
+    /// Whether a click at the mouse is the second of a double click: it
+    /// follows `last` within 400 ms and 4 pixels (the Windows defaults
+    /// the engine relied on). `last` is then cleared, or set to this
+    /// click.
+    fn note_click(&mut self, right: bool) -> bool {
+        let (x, y, clock) = (self.world.mouse.x, self.world.mouse.y, self.world.clock);
+        let last = if right {
+            &mut self.world.mouse.last_right_click
+        } else {
+            &mut self.world.mouse.last_left_click
+        };
+        let double = last.is_some_and(|(at, lx, ly)| {
+            clock.saturating_sub(at) < 400 && (lx - x).abs() <= 4 && (ly - y).abs() <= 4
+        });
+        *last = if double { None } else { Some((clock, x, y)) };
+        double
+    }
+
     /// The left button goes down: a click, or a double click when it
     /// follows another within 400 ms and 4 pixels. While the game is not
     /// interactive, the click only skips the sentences.
     pub fn mouse_left_down(&mut self) {
-        let (x, y, clock) = (self.world.mouse.x, self.world.mouse.y, self.world.clock);
-        let double = self
-            .world
-            .mouse
-            .last_left_click
-            .is_some_and(|(at, lx, ly)| {
-                clock.saturating_sub(at) < 400 && (lx - x).abs() <= 4 && (ly - y).abs() <= 4
-            });
-        self.world.mouse.last_left_click = if double { None } else { Some((clock, x, y)) };
+        let double = self.note_click(false);
         self.world.mouse.left_down = true;
         if self.world.is_video_playing() {
             if matches!(
@@ -2448,9 +2459,9 @@ impl Runtime {
         }
         self.world.ui_mouse_down();
         if double {
-            self.mouse_event("LeftDoubleClick");
+            self.mouse_event("LeftDoubleClick", true);
         } else {
-            self.mouse_event("LeftClick");
+            self.mouse_event("LeftClick", true);
         }
     }
 
@@ -2458,12 +2469,17 @@ impl Runtime {
     pub fn mouse_left_up(&mut self) {
         self.world.mouse.left_down = false;
         self.world.ui_mouse_up();
-        self.mouse_event("LeftRelease");
+        self.mouse_event("LeftRelease", true);
     }
 
-    /// The right button goes down (`RightClick`); while the game is not
-    /// interactive, it only skips the sentences.
+    /// The right button goes down: `RightClick`, or `RightDoubleClick`
+    /// when it follows another right click within 400 ms and 4 pixels
+    /// (`CBGame::OnMouseRightDblClick`, which goes to the game then the
+    /// active object, not to the scene). While the game is not
+    /// interactive, a click only skips the sentences and a double click
+    /// does nothing.
     pub fn mouse_right_down(&mut self) {
+        let double = self.note_click(true);
         if self.world.is_video_playing() {
             if matches!(
                 self.world.video_skip_button,
@@ -2474,15 +2490,80 @@ impl Runtime {
             return;
         }
         if !self.world.interactive {
-            self.world.click_while_busy(true);
+            if !double {
+                self.world.click_while_busy(true);
+            }
             return;
         }
-        self.mouse_event("RightClick");
+        if double {
+            self.mouse_event("RightDoubleClick", false);
+        } else {
+            self.mouse_event("RightClick", true);
+        }
     }
 
     /// The right button goes up (`RightRelease`).
     pub fn mouse_right_up(&mut self) {
-        self.mouse_event("RightRelease");
+        self.mouse_event("RightRelease", true);
+    }
+
+    /// The middle button goes down (`MiddleClick`, `CBGame::
+    /// OnMouseMiddleDown`): to the game, else to the active object;
+    /// nothing while a video plays or the game is not interactive.
+    pub fn mouse_middle_down(&mut self) {
+        if self.world.is_video_playing() || !self.world.interactive {
+            return;
+        }
+        self.mouse_event("MiddleClick", false);
+    }
+
+    /// The middle button goes up (`MiddleRelease`).
+    pub fn mouse_middle_up(&mut self) {
+        if self.world.is_video_playing() {
+            return;
+        }
+        self.mouse_event("MiddleRelease", false);
+    }
+
+    /// The wheel turns (`CBGame::HandleMouseWheel`): `MouseWheelUp` for a
+    /// positive `delta`, `MouseWheelDown` for a negative one, raised on
+    /// the focused window when its scripts handle that event, else on
+    /// the game.
+    pub fn mouse_wheel(&mut self, delta: i32) {
+        if delta == 0 {
+            return;
+        }
+        let event = if delta < 0 {
+            "MouseWheelDown"
+        } else {
+            "MouseWheelUp"
+        };
+        if let Some(window) = self.world.focused_window() {
+            if self.engine.can_handle_event(window, event) {
+                self.engine
+                    .apply_event(&mut self.world, window, event, false);
+                return;
+            }
+        }
+        let game = self.world.game_id;
+        self.engine.apply_event(&mut self.world, game, event, false);
+    }
+
+    /// The player asked to close the game's window (`CBGame::
+    /// OnWindowClose`): when a game script handles `QuitGame`, the event
+    /// is raised (unless the game is frozen) and the game goes on, so
+    /// that the script may confirm and call `Game.QuitGame()` itself;
+    /// `true` then. `false` when no script handles it: the window closes.
+    pub fn window_close(&mut self) -> bool {
+        let game = self.world.game_id;
+        if !self.engine.can_handle_event(game, "QuitGame") {
+            return false;
+        }
+        if !self.world.is_frozen() {
+            self.engine
+                .apply_event(&mut self.world, game, "QuitGame", false);
+        }
+        true
     }
 
     /// A key goes down (`CBGame::HandleKeypress`): the keyboard state is

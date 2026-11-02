@@ -109,6 +109,26 @@ charge of forwarding it (The White Chamber's dispatches to the active
 object or the scene itself, and its scenes walk the actor to
 `Scene.MouseX`, `Scene.MouseY`).
 
+`RightDoubleClick`, `MiddleClick` and `MiddleRelease` follow the same
+path but stop at the active object: the engine's adventure layer only
+forwards the left-button events and the right click to the scene
+(`CAdGame` against `CBGame`). A right double click replaces the second
+`RightClick`, as the system's double-click message did; a middle click
+or a right double click does nothing while the game is not interactive
+(a right click then skips the sentence, as before).
+
+The wheel raises `MouseWheelUp` or `MouseWheelDown` on the **focused
+window** when its scripts handle that event, else on the game
+(`CBGame::HandleMouseWheel`); a notch of the wheel is one event, in
+either direction. The headless player turns it with `--wheel up` or
+`--wheel down`.
+
+Closing the game's window raises `QuitGame` on the game when a game
+script handles it, and the window stays open: the script confirms and
+calls `Game.QuitGame()` itself (nothing is raised while the game is
+frozen). Without a handler, the window closes and the game ends
+(`CBGame::OnWindowClose`).
+
 While the game is frozen by a system-exclusive window, the game and the
 scene get no mouse event: only the active object does, a control of the
 window or its shield.
@@ -242,5 +262,4 @@ the actors' lines; the scene's objects do not.
 
 - Each object's own inventory (`Game.InventoryObject`): one inventory
   serves every object.
-- The mouse wheel, which the engine gives to the focused window.
 - Transitions other than the fade.

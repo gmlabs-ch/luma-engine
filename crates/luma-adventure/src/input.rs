@@ -28,6 +28,8 @@ pub struct Mouse {
     pub left_down: bool,
     /// The last left click: wall clock and position, for double clicks.
     pub last_left_click: Option<(u64, i32, i32)>,
+    /// The last right click, for double clicks.
+    pub last_right_click: Option<(u64, i32, i32)>,
 }
 
 /// The keyboard as scripts see it (`Game.Keyboard`).

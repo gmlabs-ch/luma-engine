@@ -233,10 +233,13 @@ interactive.
 Input (see [docs/game-loop.md](game-loop.md)): the mouse raises
 `LeftClick`, `LeftRelease`, `RightClick`, `RightRelease` and
 `LeftDoubleClick` on the game first, then on the object under the
-mouse or on the scene; the object under the mouse gets `MouseEntry`
-and `MouseLeave`; a key raises `Keypress` on the focused window when
-its scripts handle it, else on the game. `Game.FadeOut` and `FadeIn`
-make the script wait for the fade.
+mouse or on the scene (`RightDoubleClick`, `MiddleClick` and
+`MiddleRelease` stop at the object); the object under the mouse gets
+`MouseEntry` and `MouseLeave`; the wheel raises `MouseWheelUp` or
+`MouseWheelDown` and a key `Keypress` on the focused window when its
+scripts handle it, else on the game; closing the game's window raises
+`QuitGame` on the game when a script handles it. `Game.FadeOut` and
+`FadeIn` make the script wait for the fade.
 
 Windows (see [docs/formats/window.md](formats/window.md)) and their
 controls are script holders of their own: a window's `SCRIPT` and its

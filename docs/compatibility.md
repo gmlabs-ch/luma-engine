@@ -1001,19 +1001,19 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 
 - WME source: src/engine_core/wme_base/BGame.cpp, wme_ad/AdGame.cpp, wme_ad/AdObject.cpp, wme_base/UIButton.cpp, wme_base/BSprite.cpp (search `ApplyEvent("`)
 - Hierarchy and Luma: luma-adventure/src/world.rs (`mouse_event`, `key_down`), ui.rs, scene_state.rs
-- Count: 15 done, 6 todo, 0 no-op
+- Count: 21 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `LeftClick`, `LeftRelease`, `RightClick`, `RightRelease` | event | **done** | Mouse button events: raised on the game, then on the object under the mouse or the scene. |
 | `LeftDoubleClick` | event | **done** | Double click of the left button. |
-| `RightDoubleClick` | event | **todo** | Double click of the right button (BGame.cpp, same dispatch as the left one). |
-| `MiddleClick`, `MiddleRelease` | event | **todo** | Middle button events. |
-| `MouseWheelUp`, `MouseWheelDown` | event | **todo** | Wheel events: raised on the focused window if it handles them, else on the game. |
+| `RightDoubleClick` | event | **done** | Double click of the right button: on the game, else on the active object (not the scene, as `CBGame` dispatches it); replaces the second `RightClick`. |
+| `MiddleClick`, `MiddleRelease` | event | **done** | Middle button events, dispatched as the right double click. |
+| `MouseWheelUp`, `MouseWheelDown` | event | **done** | Wheel events: raised on the focused window if it handles them, else on the game. |
 | `MouseEntry`, `MouseLeave` | event | **done** | The object under the mouse changes. |
 | `Keypress` | event | **done** | A non-printable key, on the focused window if it handles the event, else on the game. |
 | `Press` | event | **done** | A button was released over itself; with `ParentNotify`, also an event named after the button on its window. |
-| `QuitGame` | event | **todo** | The player closed the window; raised on the game if a handler exists (otherwise the game quits). |
+| `QuitGame` | event | **done** | The player closed the window; raised on the game if a handler exists and the game is not frozen, and the window stays open (otherwise the game quits). |
 | `SceneShutdown` | event | **done** | The scene is about to be left (unbreakable). |
 | `BeforeSave`, `AfterLoad` | event | **done** | Around saving and loading (unbreakable). |
 | `ActorEntry`, `ActorLeave` | event | **done** | An actor enters / leaves a region of the main layer (raised on the region). |
@@ -1070,10 +1070,10 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3D | 0 | 40 | 0 | 40 |
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
-| Events raised on objects | 15 | 6 | 0 | 21 |
-| **All** | **738** | **385** | **30** | **1153** |
+| Events raised on objects | 21 | 0 | 0 | 21 |
+| **All** | **744** | **379** | **30** | **1153** |
 
-Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 723 done, 379 todo, 30 no-op.
+Of the total, 21 are events (21 done) and the rest are methods, properties, functions, constructors and global variables: 723 done, 379 todo, 30 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1107,11 +1107,10 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Video | 7 | Entity-bound Theora video (`PlayTheora` on an entity and its pause/stop family), AVI for the deprecated `PlayVideo`. |
 | Sound effects | 2 | `SoundFXEcho`, `SoundFXReverb` (also listed in `docs/audio.md`). |
-| Input and system events | 6 | Wheel, middle and right-double-click events, the `QuitGame` event. |
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **385** | |
+| **All** | **379** | |
 
 ## Members in Luma that WME 1.x does not define
 
