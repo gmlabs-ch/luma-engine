@@ -944,7 +944,7 @@ impl Region {
     /// Parses a region block. Scene regions (`scene == true`) read the
     /// blocking, decoration, scale and tint keys; the hotspot of an entity
     /// reads only the base keys, like the engine.
-    pub(crate) fn from_node(node: &Node, scene: bool) -> Result<Region> {
+    pub fn from_node(node: &Node, scene: bool) -> Result<Region> {
         let mut region = Region::default();
         let (mut r, mut g, mut b, mut alpha) = (255i64, 255i64, 255i64, 255i64);
         for child in node.nodes() {
@@ -989,7 +989,9 @@ impl Region {
 }
 
 impl WaypointGroup {
-    pub(crate) fn from_node(node: &Node) -> Result<WaypointGroup> {
+    /// Parses a `WAYPOINTS` block (a scene's, or the private one of an
+    /// actor definition).
+    pub fn from_node(node: &Node) -> Result<WaypointGroup> {
         let mut group = WaypointGroup::default();
         for child in node.nodes() {
             match child.key.to_ascii_uppercase().as_str() {
