@@ -264,7 +264,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdGame.cpp
 - Hierarchy and Luma: CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `responses.rs`, `inventory.rs`)
-- Count: 58 done, 7 todo, 0 no-op
+- Count: 60 done, 5 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -283,8 +283,8 @@ How the list was made. For every class with a script interface, the names tested
 | `GetResponse` | method | **done** | Shows the choices and waits for the player's pick. |
 | `GetNumResponses` | method | **done** | Number of choices currently available. |
 | `StartDlgBranch`, `EndDlgBranch`, `GetCurrentDlgBranch` | method | **done** | Dialogue-branch bookkeeping used by "once" responses. |
-| `TakeItem`, `DropItem`, `GetItem`, `HasItem` | method | **done** | Inventory handling for the game object (one shared inventory). |
-| `IsItemTaken` | method | **done** | True when the named item is in the inventory. |
+| `TakeItem`, `DropItem`, `GetItem`, `HasItem` | method | **done** | Inventory handling for the game's own inventory. |
+| `IsItemTaken` | method | **done** | True when the named item is in any object's inventory. |
 | `GetInventoryWindow` | method | **done** | Returns the inventory window. |
 | `GetResponsesWindow`, `GetResponseWindow` | method | **done** | Returns the dialogue responses window. |
 | `LoadResponseBox` | method | **done** | Loads a different responses window definition. |
@@ -303,7 +303,7 @@ How the list was made. For every class with a script interface, the names tested
 | `ResponsesVisible` | get | **done** | True while the responses window is shown. |
 | `PrevScene`, `PreviousScene`, `PrevSceneFilename`, `PreviousSceneFilename` | get | **done** | Name / file of the previous scene. |
 | `LastResponse`, `LastResponseOrig` | get | **done** | Text (expanded / original) of the last chosen response. |
-| `InventoryObject` | get/set | **todo** | The object whose inventory is shown (each object has its own in WME). Luma has one shared inventory; the set is ignored. |
+| `InventoryObject` | get/set | **done** | The object whose inventory the box shows (the game itself by default); the box's scroll position is kept per inventory. |
 | `TalkSkipButton` | get/set | **done** | Mouse button that skips speech. |
 | `VideoSkipButton` | get/set | **done** | Mouse button that skips videos. |
 | `ChangingScene` | get | **done** | True while a scene change is pending. |
@@ -447,7 +447,7 @@ How the list was made. For every class with a script interface, the names tested
 | `Talk`, `TalkAsync` | method | **done** | Says a sentence (text, sound, duration, stances, align). |
 | `StickToRegion` | method | **done** | Draws a free object in the slot of a region of the main layer (by object or name) whatever its position; null unsticks. |
 | `SetFont`, `GetFont` | method | **done** | Sets / reads the font used for the object's speech. |
-| `TakeItem`, `DropItem`, `GetItem`, `HasItem` | method | **done** | Inventory handling (shared inventory in Luma). |
+| `TakeItem`, `DropItem`, `GetItem`, `HasItem` | method | **done** | Inventory handling on the object's own inventory, created on first use. |
 | `CreateParticleEmitter` | method | **todo** | Creates a particle emitter attached to the object. Particles are not implemented. |
 | `DeleteParticleEmitter` | method | **todo** | Deletes the object's emitter. |
 | `AddAttachment` | method | **done** | Attaches an entity file to the object (file, pre-display flag, offset), drawn before or after it, scaled and tinted with it, hit as it. |
@@ -1032,7 +1032,7 @@ How the list was made. For every class with a script interface, the names tested
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 55 | 17 | 0 | 72 |
 | CBGame | 90 | 58 | 17 | 165 |
-| CAdGame | 58 | 7 | 0 | 65 |
+| CAdGame | 60 | 5 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
 | CAdScene | 52 | 29 | 2 | 83 |
 | CAdLayer | 18 | 0 | 0 | 18 |
@@ -1070,9 +1070,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **604** | **523** | **29** | **1156** |
+| **All** | **606** | **521** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 589 done, 514 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 591 done, 512 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1106,7 +1106,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 |-------|-----:|----------------|
 | Game services | 46 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
 | Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
-| Object model (2D) | 2 | Per-object inventories (`Game.InventoryObject`). Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments. |
+| Object model (2D) | 0 | Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments, per-object inventories (`Game.InventoryObject`). |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Sprites and frames | 48 | Frame and sub-frame objects (`GetFrame`, `AddFrame`, `Delay`, `MoveX`, hotspots...), runtime-built sprites, frame events. Reads on the sprite format already exist in `luma-formats`. |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
@@ -1116,7 +1116,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **523** | |
+| **All** | **521** | |
 
 ## Members in Luma that WME 1.x does not define
 

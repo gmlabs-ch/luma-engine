@@ -593,6 +593,9 @@ impl World {
         if self.main_object == Some(id) {
             self.main_object = None;
         }
+        if self.inventory.owner == Some(id) {
+            self.set_inventory_owner(None);
+        }
         self.forget_owned(id);
         self.objects.remove(id);
         true
@@ -1123,9 +1126,14 @@ impl World {
                 engine.finish(script, true);
             }
         }
-        // The attachments of the scene's objects go with them.
+        // The attachments of the scene's objects go with them, and the
+        // inventory box goes back to the game's own when it showed one of
+        // theirs.
         for id in gone.clone() {
             self.remove_attachments_of(engine, id);
+            if self.inventory.owner == Some(id) {
+                self.set_inventory_owner(None);
+            }
         }
         for id in gone {
             self.objects.remove(id);

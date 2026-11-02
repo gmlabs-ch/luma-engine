@@ -278,9 +278,10 @@ impl World {
         })
     }
 
-    /// The inventory methods every adventure object shares
-    /// (`CAdObject::ScCallMethod`): one inventory, the game's.
-    pub(crate) fn inventory_call(&mut self, name: &str, args: &[Value]) -> Return {
+    /// The inventory methods every adventure object has
+    /// (`CAdObject::ScCallMethod`), on the inventory of `owner`: the
+    /// game's own for the game, else the object's.
+    pub(crate) fn inventory_call(&mut self, owner: NativeId, name: &str, args: &[Value]) -> Return {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         match name {
             "TakeItem" => {
@@ -292,7 +293,7 @@ impl World {
                             Value::Null => None,
                             a => Some(a.get_string(self)),
                         };
-                        if !self.take_item(&item, after.as_deref()) {
+                        if !self.take_item_for(owner, &item, after.as_deref()) {
                             self.log(format!("Cannot add item '{item}' to inventory"));
                         }
                     }
@@ -304,7 +305,7 @@ impl World {
                     Value::Null => self.log("DropItem: item name expected".to_string()),
                     v => {
                         let item = v.get_string(self);
-                        if !self.drop_item(&item) {
+                        if !self.drop_item_for(owner, &item) {
                             self.log(format!("Cannot remove item '{item}' from inventory"));
                         }
                     }
@@ -318,14 +319,22 @@ impl World {
                     let index = v.get_int(self);
                     usize::try_from(index)
                         .ok()
-                        .and_then(|i| self.inventory.taken.get(i).copied())
+                        .and_then(|i| self.taken_items_of(owner).get(i).copied())
                 }
             })),
-            "HasItem" | "IsItemTaken" => match arg(0) {
+            "HasItem" => match arg(0) {
                 Value::Null => Return::value(false),
                 v => {
                     let name = v.get_string(self);
-                    Return::value(self.has_item(&name))
+                    Return::value(self.has_item_for(owner, &name))
+                }
+            },
+            // `IsItemTaken` looks in every inventory (`CAdGame::IsItemTaken`).
+            "IsItemTaken" => match arg(0) {
+                Value::Null => Return::value(false),
+                v => {
+                    let name = v.get_string(self);
+                    Return::value(self.is_item_taken(&name))
                 }
             },
             _ => Return::null(),
@@ -353,7 +362,7 @@ impl World {
             "TotalNumItems" => Value::Int(self.inventory.items.len() as i32),
             "InventoryScrollOffset" => Value::Int(self.inventory.scroll_offset),
             "SmartItemCursor" => Value::Bool(self.inventory.smart_item_cursor),
-            "InventoryObject" => Value::Native(self.game_id),
+            "InventoryObject" => Value::Native(self.inventory_owner()),
             "ScreenWidth" => Value::Int(self.settings().width as i32),
             "ScreenHeight" => Value::Int(self.settings().height as i32),
             "Interactive" => Value::Bool(self.interactive),
@@ -416,7 +425,7 @@ impl World {
             "InventoryVisible" => self.inventory.visible = value.get_bool(self),
             "InventoryScrollOffset" => self.inventory.scroll_offset = value.get_int(self),
             "SmartItemCursor" => self.inventory.smart_item_cursor = value.get_bool(self),
-            "InventoryObject" => {}
+            "InventoryObject" => self.set_inventory_owner(value.as_native()),
             "TalkSkipButton" => {
                 self.talk_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }
@@ -706,7 +715,7 @@ impl World {
             })),
             "GetInventoryWindow" => Return::value(native_or_null(self.inventory.window)),
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" | "IsItemTaken" => {
-                return Some(self.inventory_call(name, args));
+                return Some(self.inventory_call(game_id, name, args));
             }
             "GetActiveCursorObject" | "GetWaitCursorObject" => {
                 self.stub(&format!("Game.{name}"));
@@ -1221,7 +1230,10 @@ impl World {
             "SubtitlesPosXCenter" => {
                 Value::Bool(self.subtitle_mods_of(r).is_none_or(|m| m.x_center))
             }
-            "NumItems" => Value::Int(self.inventory.taken.len() as i32),
+            "NumItems" => Value::Int(
+                self.node_id(r)
+                    .map_or(0, |id| self.taken_items_of(id).len() as i32),
+            ),
             "ParticleEmitter" => Value::Null,
             "Item" => e.item.clone().map_or(Value::Null, Value::from),
             "Subtype" => Value::from(match e.kind {
@@ -1430,7 +1442,7 @@ impl World {
                     .map_or(Value::Null, Value::from),
             ),
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
-                return Some(self.inventory_call(name, args));
+                return Some(self.inventory_call(id, name, args));
             }
             "CreateRegion" => Return::value(native_or_null(self.create_entity_region(id))),
             "DeleteRegion" => Return::value(self.delete_entity_region(id)),

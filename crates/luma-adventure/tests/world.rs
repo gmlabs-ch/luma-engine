@@ -3980,3 +3980,150 @@ fn game_entities_outlive_scenes_and_attachments_follow_their_owner() {
     assert_eq!(runtime.world.game_view().entity_refs().len(), 1);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn objects_have_their_own_inventories_and_the_box_switches_between_them() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    let actor = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\bob.actor", false)
+        .unwrap();
+    let key = runtime.world.item_by_name("key").unwrap();
+    let coin = runtime.world.item_by_name("coin").unwrap();
+
+    // The game's own inventory and the actor's are separate lists;
+    // IsItemTaken sees both.
+    call_native(&mut runtime, game, "TakeItem", &[Value::from("key")]);
+    call_native(&mut runtime, actor, "TakeItem", &[Value::from("coin")]);
+    assert_eq!(runtime.world.taken_items(), &[key]);
+    assert_eq!(runtime.world.taken_items_of(actor), &[coin]);
+    assert_eq!(
+        runtime.world.get_property(game, "NumItems"),
+        Some(Value::Int(1))
+    );
+    assert_eq!(
+        runtime.world.get_property(actor, "NumItems"),
+        Some(Value::Int(1))
+    );
+    assert_eq!(
+        call_native(&mut runtime, game, "HasItem", &[Value::from("coin")]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(&mut runtime, actor, "HasItem", &[Value::from("coin")]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(&mut runtime, game, "IsItemTaken", &[Value::from("coin")]),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(&mut runtime, actor, "GetItem", &[Value::Int(0)]),
+        Value::Native(coin)
+    );
+    assert_eq!(
+        call_native(&mut runtime, game, "GetItem", &[Value::Int(0)]),
+        Value::Native(key)
+    );
+    assert!(runtime.world.is_item_taken("coin"));
+    // The scene entity tied to a taken item hides whoever took it.
+    call_native(&mut runtime, actor, "TakeItem", &[Value::from("key")]);
+    let keyspot = runtime.world.find_node("keyspot").unwrap();
+    assert_eq!(
+        runtime.world.get_property(keyspot, "Active"),
+        Some(Value::Bool(false))
+    );
+    assert_eq!(runtime.world.taken_items_of(actor), &[coin, key]);
+    assert_eq!(
+        call_native(&mut runtime, actor, "DropItem", &[Value::from("key")]),
+        Value::Null
+    );
+    assert_eq!(runtime.world.taken_items_of(actor), &[coin]);
+    assert_eq!(runtime.world.taken_items(), &[key], "the game's copy stays");
+
+    // The box shows the game's inventory until InventoryObject names
+    // another; the scroll position is kept per inventory.
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(game))
+    );
+    runtime
+        .world
+        .set_property(game, "InventoryVisible", &Value::Bool(true));
+    runtime
+        .world
+        .set_property(game, "InventoryScrollOffset", &Value::Int(1));
+    runtime
+        .world
+        .set_property(game, "InventoryObject", &Value::Native(actor));
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(actor))
+    );
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryScrollOffset"),
+        Some(Value::Int(0))
+    );
+    runtime.tick(16);
+    let cells: Vec<luma_script::NativeId> = runtime
+        .world
+        .inventory()
+        .items
+        .iter()
+        .filter(|(_, item)| item.current_sprite.is_some())
+        .map(|(id, _)| *id)
+        .collect();
+    assert_eq!(cells, vec![coin], "the box shows the actor's coin");
+    runtime
+        .world
+        .set_property(game, "InventoryObject", &Value::Null);
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(game))
+    );
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryScrollOffset"),
+        Some(Value::Int(1))
+    );
+    runtime
+        .world
+        .set_property(game, "InventoryObject", &Value::Native(game));
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(game))
+    );
+
+    // Deleting an item takes it out of every inventory; unloading the
+    // owner shown brings the box back to the game's.
+    runtime
+        .world
+        .set_property(game, "InventoryObject", &Value::Native(actor));
+    assert!(runtime.world.delete_item(&mut runtime.engine, coin));
+    assert!(runtime.world.taken_items_of(actor).is_empty());
+    runtime.save_game(15, "pockets", false).unwrap();
+    assert!(runtime.world.unload_object(&mut runtime.engine, actor));
+    assert_eq!(
+        runtime.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(game))
+    );
+
+    // A saved game keeps each inventory and the owner shown.
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(15).unwrap();
+    assert_eq!(
+        loaded.world.get_property(game, "InventoryObject"),
+        Some(Value::Native(actor))
+    );
+    assert_eq!(loaded.world.taken_items(), &[key]);
+    call_native(&mut loaded, actor, "TakeItem", &[Value::from("key")]);
+    assert_eq!(loaded.world.taken_items_of(actor), &[key]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

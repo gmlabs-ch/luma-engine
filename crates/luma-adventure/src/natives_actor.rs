@@ -75,7 +75,7 @@ impl World {
             "SubtitlesPosY" => Value::Int(actor.subtitles.y),
             "SubtitlesPosRelative" => Value::Bool(actor.subtitles.relative),
             "SubtitlesPosXCenter" => Value::Bool(actor.subtitles.x_center),
-            "NumItems" => Value::Int(self.inventory.taken.len() as i32),
+            "NumItems" => Value::Int(self.taken_items_of(id).len() as i32),
             "ParticleEmitter" | "Item" => Value::Null,
             _ => return None,
         })
@@ -328,7 +328,7 @@ impl World {
                     .map_or(Value::Null, Value::from),
             ),
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
-                return Some(self.inventory_call(name, args));
+                return Some(self.inventory_call(id, name, args));
             }
             _ if ACTOR_STUBS.contains(&name) => {
                 self.stub(&format!("Actor.{name}"));

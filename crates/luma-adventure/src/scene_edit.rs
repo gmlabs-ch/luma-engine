@@ -113,6 +113,11 @@ impl World {
         if self.active_object == Some(id) {
             self.active_object = None;
         }
+        if self.inventory.owner == Some(id) {
+            // The box goes back to the game's own (`CAdGame::RemoveObject`
+            // forgets the owner).
+            self.set_inventory_owner(None);
+        }
         self.forget_owned(id);
         self.objects.remove(id);
     }

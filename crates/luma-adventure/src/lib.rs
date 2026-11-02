@@ -70,7 +70,7 @@ pub use fader::{Fader, SCENE_FADE_MS};
 pub use input::{Cursors, Keyboard, Mouse};
 pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;
-pub use objects::{Attachment, Kind, Native, ObjectState, Objects};
+pub use objects::{Attachment, Kind, Native, ObjectInventory, ObjectState, Objects};
 pub use path::Floor;
 pub use responses::{Response, ResponseKind, Responses};
 pub use save::{SAVE_EXTENSION, SaveHeader, read_save_header};

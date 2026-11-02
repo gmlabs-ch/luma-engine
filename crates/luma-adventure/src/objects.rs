@@ -100,6 +100,19 @@ pub struct ObjectState {
     pub attachments: Vec<Attachment>,
     /// The object this one is an attachment of.
     pub attached_to: Option<NativeId>,
+    /// The object's own inventory (`CAdObject::m_Inventory`), once a
+    /// script used it; the game's is kept by the world.
+    pub inventory: Option<ObjectInventory>,
+}
+
+/// The inventory of an object other than the game (`CAdInventory`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ObjectInventory {
+    /// The items taken, in order.
+    pub taken: Vec<NativeId>,
+    /// Where the inventory box was scrolled when it last showed this
+    /// inventory.
+    pub scroll_offset: i32,
 }
 
 /// An entity attached to an object (`CAdObject::m_AttachmentsPre`,
@@ -124,6 +137,7 @@ impl Default for ObjectState {
             stick_region: None,
             attachments: Vec::new(),
             attached_to: None,
+            inventory: None,
         }
     }
 }

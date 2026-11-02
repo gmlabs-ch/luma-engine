@@ -215,7 +215,5 @@ the actors' lines; the scene's objects do not.
 
 ## Not yet
 
-- Each object's own inventory (`Game.InventoryObject`): one inventory
-  serves every object.
 - The mouse wheel, which the engine gives to the focused window.
 - Transitions other than the fade.

@@ -219,12 +219,21 @@ its speech file, which then times it. The sounds advance with the game
 clock when no audio device is there, so scripts behave the same in
 headless runs.
 
-The inventory (see [docs/formats/window.md](formats/window.md)) is one
-list of taken items shared by the game, the actors and the entities
-(the engine gives each object its own, switched with
-`Game.InventoryObject`); taking an item hides the scene entities whose
-`ITEM` names it, dropping it shows them again, and the selected item
-draws its cursor. `Game.LoadItems(file, merge)` loads another items
+The inventory (see [docs/formats/window.md](formats/window.md)): the
+game has its own list of taken items (`Game.TakeItem`, `DropItem`,
+`GetItem`, `HasItem`, `NumItems`), and every actor and entity gets one
+of its own the first time a script uses these methods on it
+(`CAdObject::GetInventory`). The inventory box shows the game's by
+default; `Game.InventoryObject = object` switches it to the object's
+(`null` or the game itself goes back), keeping the box's scroll
+position per inventory, and `Game.InventoryObject` reads the object
+shown. `Game.IsItemTaken(name)` looks in every inventory, as does the
+hiding of a scene's entities whose `ITEM` is taken when the scene
+loads. Taking an item, into any inventory, hides the scene entities
+whose `ITEM` names it, dropping it shows them again, and the selected
+item draws its cursor; deleting an item takes it out of every
+inventory. An object's inventory goes with the object, and the box
+goes back to the game's when its owner goes. `Game.LoadItems(file, merge)` loads another items
 file: without `merge` the items are replaced and what the inventory
 held is lost, as in the original engine (a language menu does this
 before anything is taken, so that the captions expand with the string

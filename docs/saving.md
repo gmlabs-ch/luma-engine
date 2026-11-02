@@ -39,8 +39,9 @@ A saved game holds:
   `Game.LoadEntity`, `AddAttachment`) with their sprites' state;
 - the actors with their position, direction, state, path, animation and
   sentence;
-- the inventory: the items as the scripts modified them, those taken,
-  the selected item, the box's window and scroll;
+- the inventory: the items as the scripts modified them, those taken
+  (the game's and each object's own), the selected item, the object
+  whose inventory the box shows, the box's window and scroll;
 - the windows and their controls, the focused window, what the mouse
   captured, whether the game is frozen and by how many windows;
 - the sounds: each object's sound and the music channels, by file,
