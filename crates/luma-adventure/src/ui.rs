@@ -250,6 +250,10 @@ pub struct EditState {
     pub last_blink: u64,
     /// Whether the caret is shown.
     pub cursor_visible: bool,
+    /// How far from the frame the text starts: the room left after the
+    /// text and the caret when right-to-left text sits against the
+    /// right edge (`CUIEdit::Display`'s `AlignOffset`), 0 otherwise.
+    pub align_offset: i32,
 }
 
 impl Default for EditState {
@@ -265,6 +269,7 @@ impl Default for EditState {
             cursor_blink_rate: 600,
             last_blink: 0,
             cursor_visible: true,
+            align_offset: 0,
         }
     }
 }
@@ -2083,6 +2088,7 @@ impl World {
         }
         let (text, width) = (control.text.clone(), control.width);
         let font = self.control_font(control.font.as_deref());
+        let rtl = self.text_rtl;
         let Some(e) = control.edit() else { return };
         let (frame, sel_end, mut scroll, blink_rate, last_blink, cursor_char) = (
             e.frame_width,
@@ -2093,6 +2099,7 @@ impl World {
             e.cursor_char.clone(),
         );
         // Keep the caret in view.
+        let mut align_offset = 0;
         if let Some(font) = &font {
             let cursor_width = self.measure_text_width(Some(font), &cursor_char);
             loop {
@@ -2109,6 +2116,13 @@ impl World {
             scroll = scroll.min(sel_end);
             let shown = text.get(scroll..).unwrap_or("").to_string();
             let with_caret = format!("{shown}{cursor_char}");
+            // Right-to-left text sits against the right edge: it starts
+            // after the room the text and the caret leave.
+            if rtl {
+                let used = self.measure_text_width(Some(font), &shown)
+                    + if focused { cursor_width } else { 0 };
+                align_offset = (width - 2 * frame - used).max(0);
+            }
             if let Some(f) = self.fonts.get_mut(font) {
                 f.prepare(&shown, -1, TextAlign::Left, -1);
                 f.prepare(&with_caret, -1, TextAlign::Left, -1);
@@ -2118,6 +2132,7 @@ impl World {
         let blink = blink_rate > 0 && clock.saturating_sub(last_blink) >= blink_rate as u64;
         if let Some(e) = self.control_mut(id).and_then(Control::edit_mut) {
             e.scroll_offset = scroll;
+            e.align_offset = align_offset;
             if !focused {
                 e.cursor_visible = false;
             } else if blink || last_blink == 0 {
@@ -2322,9 +2337,12 @@ impl World {
     /// A key in a text editor (`CUIEdit::HandleKeypress`); an edit of
     /// the text raises an event named after the editor on its parent
     /// when `PARENT_NOTIFY` is on, as `InsertChars` and `DeleteChars`
-    /// do.
+    /// do. With right-to-left text (`Game.TextRTL`) `Backspace` takes
+    /// the character after the caret and `Delete` the one before, `Home`
+    /// and `End` swap, and a typed character leaves the caret before it.
     pub fn edit_key(&mut self, id: NativeId, code: i32, text: Option<char>) -> bool {
-        let (shift, control_down) = (self.keyboard.shift, self.keyboard.control);
+        let (shift, control_down, rtl) =
+            (self.keyboard.shift, self.keyboard.control, self.text_rtl);
         let mut typed: Option<char> = None;
         let Some(control) = self.control_mut(id) else {
             return false;
@@ -2360,7 +2378,13 @@ impl World {
             VK_ESCAPE | VK_TAB | VK_RETURN => return false,
             VK_BACK => {
                 edited = true;
-                if start == end {
+                if start == end && rtl {
+                    // The character after the caret goes, and the caret
+                    // steps back.
+                    let to = next_boundary(&new_text, start);
+                    new_text.replace_range(start..to, "");
+                    start = prev_boundary(&new_text, start);
+                } else if start == end {
                     let from = prev_boundary(&new_text, start);
                     new_text.replace_range(from..start, "");
                     start = from;
@@ -2373,7 +2397,12 @@ impl World {
             }
             VK_DELETE => {
                 edited = true;
-                if start == end {
+                if start == end && rtl {
+                    // The character before the caret goes.
+                    let from = prev_boundary(&new_text, start);
+                    new_text.replace_range(from..start, "");
+                    start = from;
+                } else if start == end {
                     let to = next_boundary(&new_text, start);
                     new_text.replace_range(start..to, "");
                 } else {
@@ -2396,13 +2425,13 @@ impl World {
                 }
             }
             VK_HOME => {
-                end = 0;
+                end = if rtl { new_text.len() } else { 0 };
                 if !shift {
                     start = end;
                 }
             }
             VK_END => {
-                end = new_text.len();
+                end = if rtl { 0 } else { new_text.len() };
                 if !shift {
                     start = end;
                 }
@@ -2422,7 +2451,12 @@ impl World {
                     let fits = max_length < 0 || new_text.chars().count() < max_length as usize;
                     if fits {
                         new_text.insert(end, ch);
-                        end += ch.len_utf8();
+                        // Right-to-left keeps the caret before the new
+                        // character: the text is typed backwards in
+                        // memory, forwards on screen.
+                        if !rtl {
+                            end += ch.len_utf8();
+                        }
                     }
                     start = end;
                     typed = Some(ch);
@@ -2748,7 +2782,7 @@ impl World {
             .text
             .get(e.scroll_offset.min(control.text.len())..)
             .unwrap_or("");
-        let frame = e.frame_width;
+        let frame = e.frame_width + e.align_offset;
         let caret_at = e.sel_end.min(control.text.len());
         if e.cursor_visible && self.is_focused(id) {
             let before = control
@@ -2761,13 +2795,21 @@ impl World {
                 list,
                 &with_caret,
                 x + frame,
-                y + frame,
+                y + e.frame_width,
                 -1,
                 TextAlign::Left,
                 -1,
             );
         } else {
-            font.draw(list, shown, x + frame, y + frame, -1, TextAlign::Left, -1);
+            font.draw(
+                list,
+                shown,
+                x + frame,
+                y + e.frame_width,
+                -1,
+                TextAlign::Left,
+                -1,
+            );
         }
     }
 

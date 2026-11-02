@@ -150,7 +150,10 @@ An editor can take the focus (`Tab` moves it between the focusable
 controls of a window) and reads the keys: printable characters are
 inserted at the caret, `Backspace`, `Delete`, the arrows, `Home` and
 `End` edit and move. `Escape`, `Tab` and `Return` are left to the
-window.
+window. With right-to-left text (`Game.TextRTL`) the text sits against
+the right edge, `Backspace` deletes the character after the caret and
+`Delete` the one before, `Home` and `End` swap, and a typed character
+leaves the caret before it, as the original engine's editor does.
 
 ## `TILED_IMAGE` (`.tiled`)
 

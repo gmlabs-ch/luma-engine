@@ -64,7 +64,8 @@ A saved game holds:
   the keyboard state;
 - the game's own settings a script may change: name, caption,
   subtitles, talk and video skip buttons, `Interactive`, the main
-  object, `TextEncoding`, `StartupScene`, the mouse lock rectangle,
+  object, `TextEncoding`, `TextRTL`, `SuspendedRendering`,
+  `StartupScene`, the mouse lock rectangle,
   the loading and saving screens and whether `Game.Reset` asked not to
   remember the scene left next; the game timer and the wall clock; the
   random generator.
@@ -255,7 +256,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `11` today |
+| 4 | layout version, little-endian; `12` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -277,7 +278,10 @@ animations of the controls' state images, the container entities'
 `Freezable` flag and the windows' pending mode changes, the right click
 kept for double clicks, and the objects' sound effects. Version 11,
 after 10, added the accessibility captions (`AccCaption`) to the
-objects' runtime state.
+objects' runtime state. Version 12, after 11, changed the cursor sprite
+objects (which cursor of the game, an item or an object they stand
+for) and added the items' hover image objects, `TextRTL` and
+`SuspendedRendering`.
 
 ## Checking a game
 

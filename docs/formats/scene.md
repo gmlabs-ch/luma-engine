@@ -124,7 +124,7 @@ is absent.
 | `PERSISTENT_STATE` | bool | false | Remember the state of the scene's named nodes (active, caption, sprite, cursor, alpha colour) when the player leaves, and put it back when they come back; see [game-loop.md](../game-loop.md#scene-state-between-visits). Positions and script variables are not kept. |
 | `PERSISTENT_STATE_SPRITES` | bool | true | With `PERSISTENT_STATE`, also keep the sprites objects were switched to. |
 | `CURSOR` | string | | Sprite used as the mouse cursor over the scene instead of the game's cursor. |
-| `VIEWPORT` | `left,top,right,bottom` | the whole window | Part of the window the scene is drawn in. Not written by the editor. |
+| `VIEWPORT` | `left,top,right,bottom` | the game's `SCENE_VIEWPORT`, else the whole window | Part of the window the scene is drawn in and scrolled for; the scene's own viewport comes before the game's. `Scene.SetViewport(x, y, width, height)` sets it at run time (a width or height of 0 or less means the window's; the rectangle is kept inside the window), and it goes with the scene. Not written by the editor. |
 | `GEOMETRY` | string | | The `.3ds` scene geometry of a 3D scene, see [geometry.md](geometry.md) and [3D keys](#3d-keys). A 2D scene has none. |
 | `CAMERA` | string | the geometry's first | Name of the active camera of the scene geometry (case-insensitive); an unknown name keeps the first camera. |
 | `FOV_OVERRIDE` | float | | Vertical field of view in **radians** (SceneEdit shows degrees and writes radians) replacing the camera's. Absent or negative keeps the camera's. |
@@ -422,7 +422,13 @@ they are shown in, updated every frame, and they stay when the scene
 changes, reset like the game's actors (their sentence and `PlayAnim`
 end, their scripts' waits are cut). `Game.UnloadObject` removes one.
 Luma keeps them in a view of their own (`World::game_view`), named by
-`EntityRef::Game`, with their sprites.
+`EntityRef::Game`, with their sprites. `new Entity()` makes one too, and
+`new Actor()` an empty actor of the game (the original engine's
+`CAdGame::ExternalCall`); the original engine's objects belong to no
+list and are never drawn, Luma's are the game's own, so a sprite given
+to them shows. `new Entity(file)` and `new Actor(file)` load the file,
+as `Game.LoadEntity` and `Game.LoadActor` do: a Luma extension, the
+original constructors take no argument.
 
 `AddAttachment(file, preDisplay, x, y)` on an actor or an entity loads an
 entity file as an attachment of the object (`CAdObject::m_AttachmentsPre`,
@@ -468,7 +474,9 @@ draws a full-screen shield that captures the mouse.
 ## Camera
 
 The 2D engine has no camera object: the scene is drawn through a
-**viewport** (the window, or `VIEWPORT` when set) and a **scroll offset**
+**viewport** (the window, or the game's `SCENE_VIEWPORT`, or the
+scene's own `VIEWPORT` / `Scene.SetViewport`, the most specific one) and
+a **scroll offset**
 `(offset_x, offset_y)` clamped to `[0, scene_width - viewport_width]` and
 `[0, scene_height - viewport_height]`. The scroll follows the main actor
 ("auto scroll": one pixel every 10 ms by default, both configurable by

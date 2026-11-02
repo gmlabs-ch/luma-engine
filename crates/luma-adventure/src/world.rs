@@ -26,7 +26,7 @@ use crate::inventory::Inventory;
 use crate::objects::{Kind, Native, Objects};
 use crate::path::Floor;
 use crate::scene_state::SceneState;
-use crate::scene_view::{Camera, Drawable, Overlays, SceneView};
+use crate::scene_view::{Camera, Drawable, Overlays, SceneView, SpriteBank};
 use crate::settings::GameSettings;
 use crate::sound::Sounds;
 use crate::talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
@@ -170,11 +170,19 @@ pub struct World {
     /// `Game.TextEncoding`: 0 for ANSI, 1 for UTF-8; set by the string
     /// table loaded (a byte order mark means UTF-8) and by scripts.
     pub(crate) text_encoding: i32,
+    /// `Game.TextRTL` (`CBGame::m_TextRTL`): right-to-left text, set by
+    /// a string table's `@right-to-left` entry and by scripts; the
+    /// fonts follow it.
+    pub(crate) text_rtl: bool,
     /// `Game.StartupScene`, from `STARTUP_SCENE` of the game file.
     pub(crate) startup_scene: Option<String>,
     /// Whether the front-end runs the game in a window
     /// (`Game.WindowedMode`); false without a window.
     pub(crate) windowed: bool,
+    /// `Game.SuspendedRendering` (`CBGame::m_SuspendedRendering`): while
+    /// true the front-end keeps the last frame on screen instead of
+    /// presenting new ones; the game runs on.
+    pub(crate) suspended_rendering: bool,
     /// Frames drawn in the last whole second (`Game.FPS`), and the
     /// counters behind it (`m_Fps`, `m_FpsTime`, `m_FramesRendered`).
     pub(crate) fps: i32,
@@ -317,8 +325,10 @@ impl World {
             main_object: None,
             quit: false,
             text_encoding: 0,
+            text_rtl: false,
             startup_scene,
             windowed: false,
+            suspended_rendering: false,
             fps: 0,
             fps_time: 0,
             fps_frames: 0,
@@ -422,10 +432,20 @@ impl World {
         (self.offset_x, self.offset_y)
     }
 
-    /// The part of the screen the scene is shown in (`SCENE_VIEWPORT`,
-    /// `Game.SetSceneViewport`): `(x, y, width, height)`, the whole
-    /// screen by default.
+    /// The part of the screen the scene is shown in: the scene's own
+    /// viewport (`VIEWPORT` in the scene file, `Scene.SetViewport`) when
+    /// it has one, else the game's (`SCENE_VIEWPORT`,
+    /// `Game.SetSceneViewport`), as `CAdScene::GetViewportSize` picks
+    /// them: `(x, y, width, height)`, the whole screen by default.
     pub fn viewport(&self) -> (i32, i32, i32, i32) {
+        if let Some(rect) = self.scene.as_ref().and_then(|v| v.scene.viewport) {
+            return (
+                rect.left,
+                rect.top,
+                (rect.right - rect.left).max(0),
+                (rect.bottom - rect.top).max(0),
+            );
+        }
         self.scene_viewport.unwrap_or((
             0,
             0,
@@ -476,6 +496,27 @@ impl World {
     /// Whether a script asked to quit (`Game.QuitGame`).
     pub fn quit_requested(&self) -> bool {
         self.quit
+    }
+
+    /// Whether a script suspended rendering (`Game.SuspendedRendering`):
+    /// a front-end then keeps the frame on screen instead of presenting
+    /// new ones, while the game keeps running. The original engine draws
+    /// no sprite and skips the flip; headless runs ignore it.
+    pub fn suspended_rendering(&self) -> bool {
+        self.suspended_rendering
+    }
+
+    /// Whether text is laid out right to left (`Game.TextRTL`).
+    pub fn text_rtl(&self) -> bool {
+        self.text_rtl
+    }
+
+    /// Sets right-to-left text (`Game.TextRTL`, a string table's
+    /// `@right-to-left`): the TrueType fonts lay their lines out from
+    /// the last glyph and the editors mirror their keys.
+    pub fn set_text_rtl(&mut self, rtl: bool) {
+        self.text_rtl = rtl;
+        self.fonts.set_rtl(rtl);
     }
 
     /// The scene a script asked for, not yet loaded.
@@ -848,6 +889,11 @@ impl World {
                 // A byte order mark switches the game to UTF-8 text
                 // (`CBStringTable::LoadFile`); any other table back to ANSI.
                 self.text_encoding = i32::from(self.strings.utf8);
+                // `@right-to-left` turns right-to-left text on
+                // (`CBStringTable::AddString`); nothing turns it off.
+                if self.strings.right_to_left {
+                    self.set_text_rtl(true);
+                }
                 true
             }
             Err(err) => {
@@ -932,9 +978,12 @@ impl World {
             Some(Kind::Keyboard) => "keyboard".to_string(),
             Some(Kind::Math) => "math".to_string(),
             Some(Kind::ResponseBox) => "response box".to_string(),
-            Some(Kind::Sprite(_) | Kind::CursorSprite(_) | Kind::ControlImage { .. }) => {
-                "sprite".to_string()
-            }
+            Some(
+                Kind::Sprite(_)
+                | Kind::HoverSprite(_)
+                | Kind::CursorSprite { .. }
+                | Kind::ControlImage { .. },
+            ) => "sprite".to_string(),
             Some(Kind::EntityRegion(owner)) => self
                 .region_ref(crate::natives_region::RegionRef::Entity(*owner))
                 .map(|r| r.name.clone())
@@ -1033,6 +1082,16 @@ impl World {
             self.attach(engine, id, &script);
         }
         Some(id)
+    }
+
+    /// An empty actor of the game (`new Actor()`): no file, no sprites,
+    /// in no scene, kept across scene changes like `Game.LoadActor`'s.
+    pub fn new_actor(&mut self) -> NativeId {
+        let actor =
+            Actor::from_definition(luma_formats::Actor::default(), "", false, SpriteBank::new());
+        let id = self.objects.insert(Kind::Actor);
+        self.actors.push((id, actor));
+        id
     }
 
     /// Removes an object scripts created (`Game.UnloadObject`): an actor,
@@ -1699,9 +1758,10 @@ impl World {
                 Kind::Entity(_) | Kind::Actor => is_scene_object(*id),
                 // The sprite, cursor and region objects of the scene's
                 // objects, their frames and sub-frames go with them.
-                Kind::Sprite(owner) | Kind::CursorSprite(owner) | Kind::EntityRegion(owner) => {
-                    is_scene_object(owner)
-                }
+                Kind::Sprite(owner)
+                | Kind::HoverSprite(owner)
+                | Kind::CursorSprite { owner, .. }
+                | Kind::EntityRegion(owner) => is_scene_object(owner),
                 Kind::ControlImage { .. } => false,
                 Kind::Frame { sprite, .. } | Kind::SubFrame { sprite, .. } => {
                     match self.objects.get(sprite).map(|n| &n.kind) {
@@ -2517,9 +2577,12 @@ impl Natives for World {
             Some(Kind::Entity(_)) => "entity".to_string(),
             Some(Kind::Region { .. } | Kind::EntityRegion(_)) => "region".to_string(),
             Some(Kind::WaypointGroup(_)) => "waypoint-group".to_string(),
-            Some(Kind::Sprite(_) | Kind::CursorSprite(_) | Kind::ControlImage { .. }) => {
-                "sprite".to_string()
-            }
+            Some(
+                Kind::Sprite(_)
+                | Kind::HoverSprite(_)
+                | Kind::CursorSprite { .. }
+                | Kind::ControlImage { .. },
+            ) => "sprite".to_string(),
             Some(Kind::Frame { .. }) => "frame".to_string(),
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Emitter(_)) => "particle-emitter".to_string(),
@@ -2546,7 +2609,9 @@ impl Natives for World {
             }
             Some(Kind::Actor) => "[actor object]".to_string(),
             Some(Kind::Control | Kind::Item) => format!("[{}]", self.describe(id)),
-            Some(Kind::Sprite(_) | Kind::ControlImage { .. }) => "[sprite]".to_string(),
+            Some(Kind::Sprite(_) | Kind::HoverSprite(_) | Kind::ControlImage { .. }) => {
+                "[sprite]".to_string()
+            }
             Some(Kind::Frame { .. }) => "[frame]".to_string(),
             Some(Kind::SubFrame { .. }) => "[subframe]".to_string(),
             Some(Kind::Object) => "[object]".to_string(),
@@ -2762,11 +2827,31 @@ impl Host for World {
                 }
                 Some(Return::constructed(Value::Native(id)))
             }
-            // Not implemented: the placeholder object the compiler
-            // created for the `new` expression stays.
+            // `new Actor()` and `new Entity()` (`CAdGame::ExternalCall`):
+            // an empty actor or entity. WME's object belongs to no list
+            // and is never drawn or updated; Luma makes it one of the
+            // game's own, so that a sprite given to it shows and
+            // `Game.UnloadObject` removes it. A file argument, which WME
+            // discards, loads the file as `Game.LoadActor` and
+            // `Game.LoadEntity` do; a file that does not load leaves an
+            // empty object, logged.
             "Actor" | "Entity" => {
-                self.stub(&format!("new {name}()"));
-                Some(Return::null())
+                let path = match args.first() {
+                    Some(Value::Null) | None => None,
+                    Some(v) => Some(v.get_string(self)),
+                };
+                let id = if name == "Actor" {
+                    match path.and_then(|p| self.load_actor(ctx.engine, &p, false)) {
+                        Some(id) => id,
+                        None => self.new_actor(),
+                    }
+                } else {
+                    match path.and_then(|p| self.load_game_entity(ctx.engine, &p)) {
+                        Some(id) => id,
+                        None => self.create_game_entity(ctx.engine, None),
+                    }
+                };
+                Some(Return::constructed(Value::Native(id)))
             }
             _ => None,
         }

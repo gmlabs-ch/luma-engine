@@ -1211,6 +1211,9 @@ impl App for GamePlayer {
         self.runtime.draw(list, Some(frame.renderer.white()));
         match self.frame_limit {
             Some(limit) if frame.frame_index + 1 >= limit => Flow::Exit,
+            // `Game.SuspendedRendering`: the game ran its frame, the
+            // window keeps showing the last one presented.
+            _ if self.runtime.world.suspended_rendering() => Flow::Skip,
             _ => Flow::Continue,
         }
     }

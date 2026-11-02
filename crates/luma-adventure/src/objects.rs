@@ -51,8 +51,19 @@ pub enum Kind {
         /// Which of its images.
         slot: ImageSlot,
     },
-    /// The cursor of an object as a sprite object (`GetCursorObject`).
-    CursorSprite(NativeId),
+    /// A cursor as a sprite object: an object's own (`GetCursorObject`),
+    /// the game's active or wait cursor (`Game.GetActiveCursorObject`,
+    /// `GetWaitCursorObject`) or an item's (`GetNormalCursorObject`,
+    /// `GetHoverCursorObject`).
+    CursorSprite {
+        /// Whose cursor: the object, the game or the item.
+        owner: NativeId,
+        /// Which of its cursors.
+        slot: CursorSlot,
+    },
+    /// The hover image of an item as a sprite object
+    /// (`GetHoverSpriteObject`).
+    HoverSprite(NativeId),
     /// The clickable region of an entity (`Entity.Region`,
     /// `CreateRegion`), by the entity's handle.
     EntityRegion(NativeId),
@@ -105,6 +116,23 @@ pub enum Kind {
     /// An object of the script library (`new String`, `new Array`,
     /// `new Date`, `new File`, `new MemBuffer`); the class answers for it.
     Class(ClassObject),
+}
+
+/// Which cursor of an object a cursor sprite object stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum CursorSlot {
+    /// The object's own cursor (`CURSOR`, `SetCursor`).
+    Own,
+    /// The game's cursor over interactive objects (`ACTIVE_CURSOR`).
+    Active,
+    /// The game's cursor while it is not interactive
+    /// (`NONINTERACTIVE_CURSOR`).
+    Wait,
+    /// An item's cursor while it is selected (`CURSOR`).
+    ItemNormal,
+    /// An item's cursor over an object it can be used on
+    /// (`CURSOR_HOVER`).
+    ItemHover,
 }
 
 /// What the engine's base object classes keep on an object beyond its

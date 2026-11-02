@@ -79,7 +79,8 @@ STORER0041	I'm back!|How was that possible?
 - A `|` in the text is a line break.
 - A file starting with the UTF-8 byte order mark switches the game's
   text encoding to UTF-8; otherwise text is 8-bit in the game's code page.
-- The special entry `@right-to-left` enables right-to-left text.
+- The special entry `@right-to-left` turns right-to-left text on
+  (`Game.TextRTL`; see [font.md](font.md#notes-for-implementers)).
 
 Scripts and definition files refer to text as `/ID/fallback`: the
 engine replaces it with the table's text for `ID`, or with the fallback

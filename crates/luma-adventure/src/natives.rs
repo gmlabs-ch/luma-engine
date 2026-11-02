@@ -17,7 +17,7 @@ use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 
 use crate::accessibility::SpeechKind;
 use crate::natives_region::RegionRef;
-use crate::objects::Kind;
+use crate::objects::{CursorSlot, Kind};
 use crate::scene_view::{EntityRef, frame_height, key};
 use crate::talk::TalkSkipButton;
 use crate::video::{VideoPlayback, VideoPlayer};
@@ -106,8 +106,8 @@ impl World {
             }
             Kind::EntityRegion(owner) => self.region_get(RegionRef::Entity(owner), name),
             Kind::WaypointGroup(index) => self.waypoint_group_get(index, name),
-            Kind::CursorSprite(owner) => self.cursor_sprite_get(owner, name),
-            Kind::Sprite(owner) => self.sprite_get(id, owner, name),
+            Kind::CursorSprite { owner, slot } => self.cursor_sprite_get(owner, slot, name),
+            Kind::Sprite(owner) | Kind::HoverSprite(owner) => self.sprite_get(id, owner, name),
             Kind::ControlImage { control, .. } => self.sprite_get(id, control, name),
             Kind::Frame { .. } => self.frame_get(id, name),
             Kind::SubFrame { .. } => self.subframe_get(id, name),
@@ -162,8 +162,10 @@ impl World {
             }
             Kind::EntityRegion(owner) => self.region_set(RegionRef::Entity(owner), name, value),
             Kind::WaypointGroup(index) => self.waypoint_group_set(index, name, value),
-            Kind::CursorSprite(owner) => self.cursor_sprite_set(owner, name, value),
-            Kind::Sprite(_) | Kind::ControlImage { .. } => self.sprite_set(id, name, value),
+            Kind::CursorSprite { owner, slot } => self.cursor_sprite_set(owner, slot, name, value),
+            Kind::Sprite(_) | Kind::HoverSprite(_) | Kind::ControlImage { .. } => {
+                self.sprite_set(id, name, value)
+            }
             Kind::Frame { .. } => self.frame_set(id, name, value),
             Kind::SubFrame { .. } => self.subframe_set(id, name, value),
             Kind::Actor => self.actor_set(id, name, value),
@@ -230,8 +232,10 @@ impl World {
             }
             Kind::EntityRegion(owner) => self.region_call(RegionRef::Entity(owner), name, args),
             Kind::WaypointGroup(_) => None,
-            Kind::CursorSprite(owner) => self.cursor_sprite_call(owner, name),
-            Kind::Sprite(_) | Kind::ControlImage { .. } => self.sprite_call(id, name, args, &ctx),
+            Kind::CursorSprite { owner, slot } => self.cursor_sprite_call(owner, slot, name),
+            Kind::Sprite(_) | Kind::HoverSprite(_) | Kind::ControlImage { .. } => {
+                self.sprite_call(id, name, args, &ctx)
+            }
             Kind::Frame { .. } => self.frame_call(id, name, args, &ctx),
             Kind::SubFrame { .. } => self.subframe_call(id, name, args),
             Kind::Actor => self.actor_call(id, name, args, ctx),
@@ -413,10 +417,9 @@ impl World {
             "Frozen" => Value::Bool(self.is_frozen()),
             "FocusedWindow" => native_or_null(self.focused_window()),
             "WindowedMode" => Value::Bool(self.windowed),
+            "SuspendedRendering" => Value::Bool(self.suspended_rendering),
             "SoundAvailable" => Value::Bool(self.sounds.audio.device().is_some()),
             "DebugMode"
-            | "TextRTL"
-            | "SuspendedRendering"
             | "SuppressScriptErrors"
             | "AutorunDisabled"
             | "AutoSaveOnExit"
@@ -427,6 +430,7 @@ impl World {
             }
             "FPS" => Value::Int(self.fps),
             "TextEncoding" => Value::Int(self.text_encoding),
+            "TextRTL" => Value::Bool(self.text_rtl),
             "StartupScene" => self.startup_scene.clone().map_or(Value::Null, Value::from),
             "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
             "SaveDirectory" => Value::from(self.save_directory().to_string_lossy().into_owned()),
@@ -475,6 +479,7 @@ impl World {
                 self.talk_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }
             "VideoSubtitles" => self.video_subtitles = value.get_bool(self),
+            "SuspendedRendering" => self.suspended_rendering = value.get_bool(self),
             "VideoSkipButton" => {
                 self.video_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }
@@ -486,6 +491,7 @@ impl World {
                 // `NUM_TEXT_ENCODINGS` is 2: ANSI and UTF-8.
                 self.text_encoding = value.get_int(self).clamp(0, 1);
             }
+            "TextRTL" => self.set_text_rtl(value.get_bool(self)),
             "StartupScene" => {
                 self.startup_scene = match value {
                     Value::Null => None,
@@ -882,9 +888,15 @@ impl World {
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" | "IsItemTaken" => {
                 return Some(self.inventory_call(game_id, name, args));
             }
+            // The cursors as sprite objects (`CBGame::m_ActiveCursor`,
+            // `m_CursorNoninteractive`).
             "GetActiveCursorObject" | "GetWaitCursorObject" => {
-                self.stub(&format!("Game.{name}"));
-                Return::null()
+                let slot = if name == "GetActiveCursorObject" {
+                    CursorSlot::Active
+                } else {
+                    CursorSlot::Wait
+                };
+                Return::value(native_or_null(self.cursor_sprite_object(game_id, slot)))
             }
             "RegWriteNumber" | "RegWriteString" => {
                 let key = arg(0).get_string(self);
@@ -1228,9 +1240,32 @@ impl World {
                 };
                 Return::value(index.is_some_and(|i| self.delete_layer(ctx.engine, i)))
             }
+            // The scene's own viewport, before the game's; a width or
+            // height of zero or less means the screen's, and the
+            // rectangle is kept on the screen (`CBViewport::SetRect`).
             "SetViewport" => {
-                self.stub(&format!("Scene.{name}"));
-                Return::null()
+                let (x, y, w, h) = (
+                    arg(0).get_int(self),
+                    arg(1).get_int(self),
+                    arg(2).get_int(self),
+                    arg(3).get_int(self),
+                );
+                let (sw, sh) = (self.settings().width as i32, self.settings().height as i32);
+                let w = if w <= 0 { sw } else { w };
+                let h = if h <= 0 { sh } else { h };
+                let rect = luma_formats::Rect {
+                    left: x.max(0),
+                    top: y.max(0),
+                    right: (x + w).min(sw),
+                    bottom: (y + h).min(sh),
+                };
+                match self.scene.as_mut() {
+                    Some(view) => {
+                        view.scene.viewport = Some(rect);
+                        Return::value(true)
+                    }
+                    None => Return::value(false),
+                }
             }
             // The scene's own fader, over the scene viewport only; it
             // runs on the game timer (`CAdScene::ScCallMethod`).
@@ -1734,10 +1769,11 @@ impl World {
     // Sprites
     // ----------------------------------------------------------------
 
-    /// The cursor of an object as a sprite object (`GetCursorObject`):
+    /// A cursor as a sprite object (`GetCursorObject`,
+    /// `Game.GetActiveCursorObject`, an item's `GetNormalCursorObject`...):
     /// the cursor sprite with its animation, as the cursor shows it.
-    fn cursor_sprite_get(&self, owner: NativeId, name: &str) -> Option<Value> {
-        let path = self.object_cursor(owner)?;
+    fn cursor_sprite_get(&self, owner: NativeId, slot: CursorSlot, name: &str) -> Option<Value> {
+        let path = self.cursor_in_slot(owner, slot)?;
         let loaded = self.cursors.bank.sprite(&path);
         let frames = loaded.map_or(0, |l| l.sprite.frames.len());
         let anim = self.cursors.anim(&path);
@@ -1762,8 +1798,14 @@ impl World {
         })
     }
 
-    fn cursor_sprite_set(&mut self, owner: NativeId, name: &str, value: &Value) -> bool {
-        let Some(path) = self.object_cursor(owner) else {
+    fn cursor_sprite_set(
+        &mut self,
+        owner: NativeId,
+        slot: CursorSlot,
+        name: &str,
+        value: &Value,
+    ) -> bool {
+        let Some(path) = self.cursor_in_slot(owner, slot) else {
             return false;
         };
         let (int, flag) = (value.get_int(self), value.get_bool(self));
@@ -1781,8 +1823,13 @@ impl World {
         true
     }
 
-    fn cursor_sprite_call(&mut self, owner: NativeId, name: &str) -> Option<Return> {
-        let path = self.object_cursor(owner)?;
+    fn cursor_sprite_call(
+        &mut self,
+        owner: NativeId,
+        slot: CursorSlot,
+        name: &str,
+    ) -> Option<Return> {
+        let path = self.cursor_in_slot(owner, slot)?;
         Some(match name {
             "Reset" => {
                 self.cursors.anim_mut(&path).reset();
