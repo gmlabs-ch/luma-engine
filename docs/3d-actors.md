@@ -11,9 +11,10 @@ its classification (3.2, 3.3, specified in
 mapping (section 4), the actor definition file (section 5, specified in
 [formats/actor3d.md](formats/actor3d.md)), the `.X` model as data
 (section 6, specified in [formats/xfile.md](formats/xfile.md)), the
-animation and skinning at run time (section 7) and the geometry at
-runtime (section 9: floor height, segment tests, path finder). The rest
-is still the plan.
+animation and skinning at run time (section 7), the geometry at
+runtime (section 9: floor height, segment tests, path finder) and the
+mesh pass of the renderer (sections 10.1 and 12.3, specified in
+[rendering.md](rendering.md#3d-pass)). The rest is still the plan.
 
 ## 0. Sources and rules
 
@@ -1138,6 +1139,10 @@ of what the scene saves (8.7).
 
 ### 10.1 Render state in 3D
 
+**As implemented** in `luma-render` (the mesh pipelines and `mesh.wgsl`;
+see [rendering.md](rendering.md#3d-pass)); the actor's `BlendMode` is a
+field of each mesh draw, the lights of a draw are chosen by the caller.
+
 `CBRenderD3D::Setup3D` (called whenever a 3D object is about to update or
 draw, `Setup2D` for the others; the renderer tracks which one is current).
 The effect on a frame:
@@ -1371,8 +1376,8 @@ the core crates:
 | Math with the D3D conventions (matrices, quaternions, project/unproject, the D3DX functions listed in 12.2) | `luma-3d` | **Done**: `luma_3d::math`. |
 | `.X` reader (text, optional binary), `.3ds` reader, `.geometry`, `.act3d`, `.anim` parsers: pure data | `luma-3d` | **Done** except binary `.X`: `luma_3d::three_ds`, `node_patterns`, `xfile`, `model`, `actor3d`; the module crate is re-exported by `luma` as `luma::three_d` under the `3d` feature; `luma-formats` only parses the scene keys. |
 | Model, skeleton, animation channels, CPU skinning, geometry queries, path finder, camera projection, picking | `luma-3d` | No GPU, no game logic, unit-testable. **Done** for the skeleton, channels, skinning and the model pick (`luma_3d::animation`). |
-| The 3D pass on wgpu (pipelines, lights, shadows) | `luma-3d::render`, depending on `luma-render` for `Gpu`/`Target` | The 2D `luma-render` stays small. |
-| A small generic extension point in `luma-render` | `luma-render` | See 12.3. |
+| The mesh pass on wgpu (depth buffer, pipelines, lighting shader, textures with mipmaps) | `luma-render` | **Done**: a `MeshDraw` item of the `DrawList`, see 12.3. Generic (plain matrices, vertices, lights); knows nothing of actors or scenes. |
+| Shadows, the geometry overlay, the conversion of models and lights into mesh draws | `luma-3d`, on the public API of `luma-render` | See 12.4. |
 | `Actor3D` object, its state machine, 2D/3D scene glue, scripts | `luma-adventure`, behind a Cargo feature `3d` | Genre behaviour. |
 | Feature `3d` in `luma` (off by default) that enables `luma-3d` and `luma-adventure/3d` | `luma` | `docs/modules.md`. |
 
@@ -1395,63 +1400,71 @@ wrote itself (`IntersectTriangle`, `PickGetIntersect`,
 
 ### 12.3 `luma-render`
 
-Today it draws a `DrawList` of textured quads in one pass, with no depth
-attachment. A 3D pass needs:
+**As implemented**; the specification is the "3D pass" section of
+[rendering.md](rendering.md#3d-pass). In short:
 
-1. **A depth (and stencil) attachment**, `Depth24PlusStencil8` or
-   `Depth32FloatStencil8`, created with the target, cleared once per frame.
-   2D quads draw with depth test and writes off.
-2. **A way to interleave 3D with the quads**, because a 3D actor is in the
-   middle of the 2D order. Options:
-   (a) the `DrawList` gets a second kind of item, an opaque **custom pass**
-   (`Box<dyn FnOnce(&mut CustomPassContext)>` or an index into a registry
-   the module owns), and the renderer splits the list into segments: a
-   render pass for each run of quads, and a callback for each custom item,
-   all with `LoadOp::Load` on colour and depth. A frame has a few passes,
-   which is fine for a 2D game (but each `Load`/`Store` costs bandwidth on
-   tiled GPUs).
-   (b) one render pass, the module records its draws into the same pass
-   through a callback receiving the `RenderPass`. Fewer passes, but the flat
-   shadow's render-to-texture must then be done *before* the pass.
-   Recommended: (a), with the module free to render its offscreen shadow
-   textures at the beginning of the callback of the first item (they are
-   independent of the visible frame).
-3. **The viewport of the 3D pass** equals the letterboxed rectangle and the
-   scene viewport (scissor) used by the quads, with the projection of 4.1
-   computed from the logical resolution.
-4. Offscreen tests as for 2D (`Offscreen`, read back).
+1. **A depth and stencil buffer** (`Depth24PlusStencil8`), owned by the
+   renderer at the target's size and cleared once per frame with the
+   colour (`CBRenderD3D::Fill`). Quads draw with the depth test and the
+   writes off (`Setup2D`); meshes test `<=` and write (`Setup3D`). The
+   stencil is cleared to zero for the shadow volumes to come.
+2. **Meshes are items of the `DrawList`**, interleaved with the quads:
+   `DrawList::push_mesh(MeshDraw)` records the draw before the quad with
+   the current index, and one render pass draws the list in order (the
+   study's option of a custom pass per segment was dropped: a single pass
+   with two pipelines is simpler and cheaper on tiled GPUs, and the
+   shadow textures of the flat shadows can be rendered before the pass).
+   A `MeshDraw` takes a `MeshHandle` (`Renderer::upload_mesh`, vertices
+   `position, normal, uv` and `u32` indices, front faces clockwise;
+   `update_mesh` for the skinned pose of the frame), an optional index
+   range for a material subset, the world and view-projection matrices as
+   column-major `[[f32; 4]; 4]` (`Mat4::to_cols_array` then
+   `luma_render::matrix`), the texture, the material (diffuse, emissive),
+   the ambient colour, up to 8 `Light`s (point, spot, directional, the
+   model of 3.4 without attenuation), fog, the culling flag and the blend
+   mode.
+3. **The viewport** of the meshes is the quads' (letterboxed or not), so
+   the projection of 4.1 is computed from the logical resolution and the
+   meshes land where the 2D mapping says.
+4. **Textures** for meshes are uploaded with a CPU-built mipmap chain
+   (`Renderer::mesh_texture`) and sampled trilinearly with repeat
+   addressing; the colour key is already alpha `0` and the alpha test cuts
+   it (`ALPHAREF 8`).
+5. Offscreen tests as for 2D (`crates/luma-render/tests/mesh.rs`): a lit
+   textured mesh with directional, ambient, point and spot lights, the
+   culling winding, index ranges, meshes between quads with the depth
+   test, a vertex update between two frames, the alpha test, fog and the
+   letterboxed viewport.
 
-Everything else (pipelines, vertex layouts, uniforms, shadow geometry) can
-live in `luma-3d`.
+`luma-render` does not depend on `luma-3d`: the conversion of a
+`luma_3d::model::Material` into a `MeshMaterial`, of a skinned mesh into
+`MeshVertex`es and of `C3DLight`s into `Light`s is the module's.
 
 ### 12.4 The 3D pass in `luma-3d`
 
-- **Mesh pipeline.** Vertex: position, normal, UV (CPU-skinned each frame
-  into a dynamic buffer); index buffer per mesh; one draw per material
-  subset. Uniforms: world, view-projection (the 4.1 matrix), the light list
-  (up to 8: kind, position, direction, range, spot angles, colour/256),
-  ambient, material (diffuse, emissive), fog, alpha reference, tint, blend
-  mode. Texture: repeat sampler, **trilinear with generated mipmaps** (the
-  2D textures have none), RGBA8 with the magenta key already applied by
-  the image loader.
-- **Lighting shader.** Per-vertex, to match the originals: `colour =
-  emissive + globalAmbient*ambientMat + sum(light terms)` with the
-  light model of 3.4 (no distance attenuation for point lights, spot cone
-  and range as above), `clamp`, then `texture * colour`, alpha from the
-  texture, `discard` below 8/255, then blend. Gouraud interpolation of the
-  vertex colour (do the lighting in the vertex shader). A per-pixel mode is
-  an option later.
-- **Depth.** `LessEqual`, writes on, with the stencil state for shadows.
-- **Fog:** linear on view depth.
+With the mesh pass in `luma-render`, the module's part is the glue and
+the shadows:
+
+- **Mesh conversion.** One `MeshHandle` per `.X` mesh, uploaded at load
+  with the bind-pose vertices; each frame, after skinning,
+  `update_mesh` with the `SkinnedMesh` vertices (already in model space),
+  then one `MeshDraw` per material subset (the index range of its
+  triangles; `triangle_materials` groups them). World matrix: `BObject::
+  GetMatrix` (section 2); view-projection: section 4.1. Light colours are
+  the `0..255` channels divided by 256 (3.4); the light list is the
+  scene's selection (`EnableLights`: all the active lights, or the nearest
+  8 to the object, minus the ignored names), ambient the scene's or the
+  object's override.
 - **Stencil shadows:** shadow volumes built on the CPU every frame from
   the skinned triangles (the algorithm of 10.4) into a dynamic buffer; two
   draws with `IncrementClamp`/`DecrementClamp` on depth pass (cull-mode
   switch), then a full-screen quad with stencil test `>= 1` and stencil pass
   op `Zero`, which clears the stencil without a clear call. The depth prepass
-  of receiver meshes is a depth-only pipeline.
+  of receiver meshes is a depth-only pipeline. These need stencil states
+  and a depth-only pipeline added to `luma-render` (task 12b).
 - **Flat shadows:** a pre-pass renders the actor into a 512x512 texture
   (own depth buffer) before the main pass; the floor quad samples it with a
-  projective matrix.
+  projective matrix (task 12c).
 - **Picking** needs the skinned triangles on the CPU: same buffers, kept.
 
 ### 12.5 `luma-adventure`
@@ -1546,8 +1559,8 @@ read first.
 
 | # | Task | WME files | Size | After |
 |---|------|-----------|------|-------|
-| 10 | **`luma-render` extension.** Depth/stencil attachment, `DrawList` custom items with the segment splitting of 12.3, tests that a custom pass sees the right depth and viewport. | `BRenderD3D.cpp` (`Fill`, `Setup2D`/`Setup3D`) | M | |
-| 11 | **Mesh pass.** Pipelines, dynamic skinned buffers, materials and textures with mipmaps and the colour key, lights (selection, model of 3.4), ambient, fog, alpha test and blend mode, culling option; the geometry debug overlay (`Scene.ShowGeometry`) as the validation tool for task 7. | `BRenderD3D.cpp` (`Setup3D`), `XMesh.cpp` (`Render`), `3DMaterial.cpp`, `3DLight.cpp`, `AdSceneGeometry.cpp` (`Render`, `EnableLights`, `CreateLights`) | L | 7, 9, 10 |
+| 10 | **`luma-render` extension.** Depth/stencil buffer cleared once per frame, quads without depth, `MeshDraw` items of the `DrawList` drawn in order in the same pass, mesh upload and per-frame vertex update, tests of the depth test among meshes and of the viewport. **Done** (12.3, [rendering.md](rendering.md#3d-pass)). | `BRenderD3D.cpp` (`Fill`, `Setup2D`/`Setup3D`) | M | |
+| 11 | **Mesh pass.** Pipelines, dynamic skinned buffers, materials and textures with mipmaps and the colour key, lights (model of 3.4), ambient, fog, alpha test and blend mode, culling option. **Done** in `luma-render` (shader `mesh.wgsl`); the light *selection* per object (`EnableLights`) and the geometry debug overlay (`Scene.ShowGeometry`, the validation tool for task 7) move to task 13, which has the scene. | `BRenderD3D.cpp` (`Setup3D`), `XMesh.cpp` (`Render`), `3DMaterial.cpp`, `3DLight.cpp`, `AdSceneGeometry.cpp` (`Render`, `EnableLights`, `CreateLights`) | L | 7, 9, 10 |
 | 12a | **Simple shadows.** | `3DShadowGen.cpp` (`RenderSimple`) | S | 11 |
 | 12b | **Stencil shadows.** CPU shadow volumes, stencil passes, receiver depth prepass, attachments, `SHADOW_MODEL`. | `3DShadowVolume.cpp`, `AdActor3DX.cpp` (`DisplayShadowVolume`), `AdSceneGeometry.cpp` (`RenderShadowGeometry`), `XMesh.cpp` (`UpdateShadowVol`), `AdScene.cpp` (`TraverseNodes`) | M | 11, 9 |
 | 12c | **Flat shadows.** Light-view pre-pass to texture, projective floor quad. | `3DShadowGen.cpp` (`Render`, `SetAdjustedProjectionMatrix`, `SetTextureMatrixStage0Stage1`) | M | 11 |
