@@ -99,6 +99,7 @@ no code copied):
   crates/luma-3d/src/three_ds.rs
   crates/luma-3d/src/node_patterns.rs
   crates/luma-3d/src/scene_geometry.rs
+  crates/luma-3d/src/path3d.rs
   crates/luma-3d/src/camera.rs
   docs/formats/xfile.md
   crates/luma-3d/src/xfile.rs

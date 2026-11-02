@@ -15,7 +15,9 @@
 //! - [`node_patterns`]: the `.geometry` sidecar that says which mesh is a
 //!   walk plane, a block, a waypoint or a generic shadow receiver;
 //! - [`scene_geometry`]: the classified geometry of a scene and the
-//!   queries on it;
+//!   queries on it (floor height, segment tests, node and light toggles);
+//! - [`path3d`]: the path finder over the waypoints and the path an actor
+//!   follows;
 //! - [`camera`]: the scene camera, the projection that maps the layer onto
 //!   the 3D world, and the conversions between scene pixels and 3D points;
 //! - [`xfile`]: the DirectX `.X` text container the actor models are
@@ -37,6 +39,7 @@ pub mod camera;
 pub mod math;
 pub mod model;
 pub mod node_patterns;
+pub mod path3d;
 pub mod scene_geometry;
 pub mod three_ds;
 pub mod xfile;
@@ -46,6 +49,7 @@ pub use camera::{CameraSettings, Projection, Ray, ViewSetup, Viewport};
 pub use math::{Mat4, Plane, Quat, Vec3};
 pub use model::{Animation, AnimationSet, Bone, Frame, Material, Mesh, Model, Transform};
 pub use node_patterns::{NodeKind, NodePattern, NodePatterns};
+pub use path3d::{Path3D, PathFinder, Ticket};
 pub use scene_geometry::{Camera, Light, MeshNode, SceneGeometry, TriangleMesh, WaypointGroup};
 
 /// The file extension of scene geometry files, without the dot. The

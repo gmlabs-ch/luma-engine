@@ -11,8 +11,9 @@ its classification (3.2, 3.3, specified in
 mapping (section 4), the actor definition file (section 5, specified in
 [formats/actor3d.md](formats/actor3d.md)), the `.X` model as data
 (section 6 and the sampling of 7, specified in
-[formats/xfile.md](formats/xfile.md)) and the floor height (9.1). The
-rest is still the plan.
+[formats/xfile.md](formats/xfile.md)) and the geometry at runtime
+(section 9: floor height, segment tests, path finder). The rest is still
+the plan.
 
 ## 0. Sources and rules
 
@@ -941,30 +942,80 @@ debug rendering and the shadow-receiver pass skip inactive planes.
 
 ### 9.3 Path finder
 
-`GetPath(source, target, path)` starts a request, `PathFinderStep` advances
-it; the scene's `InitLoop` runs steps for up to `PFMaxTime = 15` ms per game
-loop. Only one request is open at a time (`GetPath` returns false while
-busy, and the actor asks again next frame).
+**As implemented** by `path3d::PathFinder` (the `m_PF*` state of
+`CAdSceneGeometry`: `request` is `GetPath`, `step` is `PathFinderStep`,
+`run` is `InitLoop`) and `path3d::Path3D` (`CAdPath3D`).
+
+`GetPath(source, target, path)` opens a request, `PathFinderStep` advances
+it, and the scene's `InitLoop` runs steps once per game loop. Only one
+request is open at a time (`GetPath` returns false while busy, and the
+actor asks again next frame).
+
+**Timing.** `InitLoop` means to spend at most `PFMaxTime = 15` ms per loop,
+but it measures with `Game->m_CurrentTime`, which `CBGame::InitLoop` sets
+once per frame and nothing refreshes during the loop: the elapsed time is
+always zero and the loop only ends when the request is done. A request is
+therefore always computed in full during the game loop after the one that
+accepted it; `PathFinder::run` does the same, and open question 8 is
+closed by this.
 
 1. Both ends are lifted: `y = GetHeightAt(p, waypointHeight) +
-   waypointHeight`.
-2. Nodes: source (distance 0), target (infinite), and every point of every
-   active waypoint group (infinite).
-3. A plain Dijkstra: take the unmarked node with the lowest distance; if it
-   is the target, build the path by following the origin links and **drop the
-   first point** (the start); otherwise relax every unmarked node whose
-   straight segment passes `DirectPathExists` (edge length = Euclidean
-   distance).
-4. **Fallback.** If the target was never reached, the request is rerun once
-   (`Rerun = true`) with an *alternate target*: while running, for every
-   edge from the current node to the target found blocked, the shortest such
-   edge supplies `GetBlockIntersection` (the first piercing point on the
-   blocks, in file order), moved back `30` units toward the node. The
-   alternate is also recomputed for edges that were visible but not
-   shorter; the original does this unconditionally, and when no block is
-   hit it produces a bogus point. A faithful port should keep the "blocked
-   edge" condition only and say so.
-5. The path is a list of 3D points; the actor walks them with 8.3.
+   waypointHeight` (a point over no walk plane keeps its own `y`, plus the
+   height).
+2. Nodes, in this order: source (distance 0), target (infinite), every
+   point of every **active** waypoint group (infinite), in file order.
+3. A plain Dijkstra with exact position comparisons: take the unmarked node
+   with the lowest finite distance (the first one on ties) and mark it. If
+   its position **equals** the target's (a waypoint sitting exactly on the
+   target counts), build the path by following the origin links and **drop
+   the first point** (the start); the path is ready. Otherwise, for every
+   unmarked node whose straight segment from the current node passes
+   `DirectPathExists`, relax it when strictly shorter (edge length =
+   Euclidean distance; ties keep the earlier origin).
+4. **Alternate target.** On the first pass, every edge from the current
+   node to a node at the target's position that did *not* relax it
+   (blocked, or free but not shorter) is a candidate: the shortest
+   candidate so far sets the alternate target to `GetBlockIntersection`
+   of that edge, moved `30` units back toward the current node
+   (`ALTERNATE_TARGET_BACKOFF`). When the edge pierces no active block,
+   the intersection is the origin and the alternate target becomes a
+   point 30 units from the origin toward the current node. For a free but
+   longer edge this is harmless, since the target is reached and the
+   alternate never used; for an edge blocked by a **walk plane** (the
+   segment to the target dips through the floor, as toward a target below
+   the plane's extension) that bogus point becomes the route. Reproduced
+   as written, sentinel included: an alternate target that is exactly the
+   origin counts as none. The study's earlier worry about the free-edge
+   case was unfounded; the walk-plane case is the real quirk.
+5. **Fallback.** When no unmarked node with a finite distance is left and
+   the target was never marked: on the first pass, if an alternate target
+   is set, the request is rerun once (`Rerun = true`) from the same source
+   toward it, both ends lifted again by step 1; the rerun computes no
+   alternate and, when it fails too, ends ready with an **empty** path.
+   With no alternate target the path is ready and empty at once. A target
+   inside a block, for instance, yields a walk to a point 30 units short
+   of the block along the shortest blocked approach, which may be the
+   source itself (empty path) or a point behind the actor.
+6. The path is a list of 3D points at waypoint height, the start excluded;
+   a free line gives a single point. The actor walks them with 8.3.
+
+**`CAdPath3D`** (`Path3D`): the points, a cursor starting at `-1` and a
+`ready` flag. `GetFirst` (`first`) rewinds to the first point, or returns
+null for an empty path and leaves the cursor; `GetNext` (`advance`) advances
+and returns the point there, or null past the end (from the initial cursor
+it returns the first point); `GetCurrent` (`current`) is the point under
+the cursor or null; `Reset` clears everything; `SetReady` returns the
+previous flag. A saved game stores the points, the cursor and the flag
+(`Path3D::from_parts`).
+
+**Ownership in Luma.** The original writes the result into the requester's
+own `CAdPath3D`. `PathFinder::request` returns a `Ticket` instead, `run`
+computes the open request, and the holder of the ticket collects the
+result with `take_path` (an actor in `WAITING_PATH` tries every frame; a
+later request supersedes the ticket). `PathFinder::find_path` does the
+three at once. The finder is a value of its own that borrows the
+`SceneGeometry`, owned by the scene beside its geometry; its state is part
+of what the scene saves (8.7).
 
 ### 9.4 Other geometry services
 
@@ -1397,7 +1448,7 @@ read first.
 | 5 | **`.3ds` geometry and `.geometry`.** The chunk walker of 3.2 into planes, blocks, generics, waypoint points, cameras, lights; the node patterns; scene keys of 3.1 in `luma_formats::scene`. `docs/formats/geometry.md`. **Done** (`luma_3d::three_ds`, `node_patterns`, `scene_geometry`). | `3DLoader3DS.cpp`, `3DS_chunks.h`, `AdSceneGeometry.cpp` (`LoadFile`), `AdGeomExt*.cpp`, `AdWaypointGroup3D.cpp`, `3DMesh.cpp`, `3DLight.cpp` | M | 1 |
 | 6 | **`.act3d` and `.anim`.** Parser to a typed definition, TEMPLATE, defaults, `ANIMATION`/`EVENT`, obsolete keys. `docs/formats/actor3d.md`. **Done** (`luma_3d::actor3d`). | `AdActor3DX.cpp` (`LoadBuffer`, `ParseEffect`, `MergeAnimations2`), `XModel.cpp` (`ParseAnim`, `ParseEvent`), `AdActor3D.cpp` (`IsActorX`) | S | |
 | 7 | **Camera and the 2D/3D mapping.** View and projection of 4.1 for a scene (`Camera`, viewport, scroll, layer size, `SCROLL_3D_COMPATIBILITY`, `FOV_OVERRIDE`, clip planes), `convert_2d_to_3d` (exact and tolerant), `convert_3d_to_2d`, the object's 2D position. **Done** (`luma_3d::camera`; the object's 2D position is `Projection::project` of its origin, to be called by task 14). | `BRenderD3D.cpp` (`SetProjection`, `GetProjectionParams`), `AdSceneGeometry.cpp` (`Convert*`, `StoreDrawingParams`), `AdObject3D.cpp`, `AdGame.cpp` (`GetLayerSize`), `AdScene.cpp` (`ScrollTo`) | M | 1, 5 |
-| 8 | **Geometry queries and the 3D path finder.** `DirectPathExists`, `GetBlockIntersection`, Dijkstra with the alternate-target rerun. Decide per quirk (9.2, 9.3) whether to reproduce. Already done with task 5: `GetHeightAt` (`SceneGeometry::height_at`), `DropWaypoints`, node enabling, the triangle tests of 9.2 (`math::intersect_triangle`, `pick_get_intersect`). | `AdSceneGeometry.cpp`, `3DUtils.cpp` (`IntersectTriangle`, `PickGetIntersect`), `AdPath3D.cpp`, `AdPathPoint3D.cpp` | M | 5 |
+| 8 | **Geometry queries and the 3D path finder.** `DirectPathExists`, `GetBlockIntersection`, Dijkstra with the alternate-target rerun, the waypoint groups, the light toggles, the path an actor consumes. Every quirk of 9.2 and 9.3 is reproduced. **Done** (`luma_3d::path3d`, `SceneGeometry::direct_path_exists`, `block_intersection`, `set_light_enabled`, `set_light_color`). | `AdSceneGeometry.cpp`, `3DUtils.cpp` (`IntersectTriangle`, `PickGetIntersect`), `AdPath3D.cpp`, `AdPathPoint3D.cpp` | M | 5 |
 | 9 | **Skeleton animation and skinning.** Frame hierarchy and matrices, channels, active animations, blending slots, events, transition-time table, looping and finish rules, CPU skinning, bounding box, ray/triangle picking of a posed model, bone matrices and positions. | `XFrameNode.cpp`, `XModel.cpp`, `XAnimationChannel.cpp`, `XActiveAnimation.cpp`, `XAnimation.cpp` (`Update`), `XAnimationSet.cpp`, `XMesh.cpp` (`Update`, `PickPoly`) | L | 3 |
 
 ### Phase B: drawing
@@ -1477,9 +1528,9 @@ models are not part of it.
    nudge): an approximation by a planar projection of the vertices onto
    `y = actor.y` is much simpler (no pre-pass) and probably close; is the
    difference acceptable?
-8. **Path-finder time budget.** 15 ms per frame in the original; Luma can
-   run it to completion at once. Behaviour differs only in timing when
-   several actors path-find in one frame.
+8. **Path-finder time budget.** Closed: the original's 15 ms budget is
+   dead code (9.3), the request always runs to completion in one game
+   loop, and `PathFinder::run` does the same.
 9. **Resolution mismatch.** The camera is defined against the runtime
    resolution and the main layer (4.1). A game running at another resolution
    than its scenes were laid out for would shift; check the sample scenes

@@ -4,9 +4,9 @@
 //!
 //! The runtime queries that only need the geometry live here too: the
 //! floor height under a point, the conversion of a scene pixel to the
-//! nearest point on a walk plane (with a [`Projection`]), node and light
-//! lookups by name. Path finding and the segment tests come with the path
-//! finder.
+//! nearest point on a walk plane (with a [`Projection`]), the segment
+//! tests against the planes and blocks, node and light toggles by name.
+//! The path finder over the waypoints is [`crate::path3d`].
 //!
 //! Written with reference to the MIT-licensed Wintermute Engine 1.x sources
 //! (`AdSceneGeometry.cpp`, `AdWaypointGroup3D.cpp`, `3DMesh.cpp`,
@@ -596,7 +596,7 @@ fn height_at(planes: &[MeshNode], mut pos: Vec3, tolerance: f32) -> Option<f32> 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::three_ds::Builder;
 
