@@ -27,7 +27,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp (CBGame::ExternalCall, CBGame::RegisterExternals)
 - Hierarchy and Luma: luma-script/src/engine.rs (`builtin`), luma-adventure/src/world.rs (`call_function`)
-- Count: 16 done, 4 todo, 1 no-op
+- Count: 20 done, 0 todo, 1 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -37,9 +37,9 @@ How the list was made. For every class with a script interface, the names tested
 | `Random` | function | **done** | Random integer in [min, max]. Luma uses its own seeded generator, so sequences differ from WME's. |
 | `SetScriptTimeSlice` | function | **done** | Limits how long the calling script runs per frame before yielding. |
 | `MakeRGBA`, `MakeRGB`, `RGB` | function | **done** | Packs r, g, b (and a) into the engine's 0xAARRGGBB integer. |
-| `MakeHSL` | function | **todo** | Builds a colour integer from hue, saturation, lightness. |
+| `MakeHSL` | function | **done** | Builds an opaque colour integer from hue, saturation and lightness in 0..=255 (`CBUtils::HSLtoRGB`), single-precision arithmetic and byte truncation included. |
 | `GetRValue`, `GetGValue`, `GetBValue`, `GetAValue` | function | **done** | Extracts one channel of a colour integer. |
-| `GetHValue`, `GetSValue`, `GetLValue` | function | **todo** | Extracts hue, saturation or lightness of a colour integer. |
+| `GetHValue`, `GetSValue`, `GetLValue` | function | **done** | Extracts the hue, saturation or lightness of a colour integer, in 0..=255 (`CBUtils::RGBtoHSL`). |
 | `Debug` | function | **no-op** | Hits a breakpoint in the WME script debugger when one is attached, otherwise does nothing. Luma has no debugger protocol, so it does nothing either way. |
 | `ToString`, `ToInt`, `ToFloat`, `ToBool` | function | **done** | Explicit conversions with the engine's coercion rules. |
 
@@ -1026,7 +1026,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 
 | Class | done | todo | no-op | total |
 |-------|-----:|-----:|------:|------:|
-| Global functions | 16 | 4 | 1 | 21 |
+| Global functions | 20 | 0 | 1 | 21 |
 | Constructors | 5 | 3 | 1 | 9 |
 | Global variables | 4 | 1 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
@@ -1071,9 +1071,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 6 | 0 | 21 |
-| **All** | **728** | **395** | **30** | **1153** |
+| **All** | **732** | **391** | **30** | **1153** |
 
-Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 713 done, 389 todo, 30 no-op.
+Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 717 done, 385 todo, 30 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1102,7 +1102,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
 | Game services | 8 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
-| Script library | 16 | The `Directory` object, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. (`String`, `Array`, `Date`, `File` and `MemBuffer` are done.) |
+| Script library | 12 | The `Directory` object, `new Object` with scripts, `new Actor` and `new Entity`. (`String`, `Array`, `Date`, `File`, `MemBuffer` and the HSL colour helpers are done.) |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
@@ -1112,7 +1112,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **395** | |
+| **All** | **391** | |
 
 ## Members in Luma that WME 1.x does not define
 

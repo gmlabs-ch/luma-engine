@@ -68,7 +68,10 @@ error there.
 `EXTERNAL_CALL name` is a global function: the host is asked first, then
 the engine's built-ins (`Sleep`, `WaitFor`, `Random`, `ToString`, `ToInt`,
 `ToFloat`, `ToBool`, `LOG`, `Debug`, `SetScriptTimeSlice`, `MakeRGBA`,
-`GetRValue` and the like), otherwise a runtime error and `null`. A
+`GetRValue`, `MakeHSL`, `GetHValue` and the like), otherwise a runtime
+error and `null`. The HSL helpers take and give components in 0..=255
+and compute in single precision with each result truncated to a byte,
+as the original does, so `GetHValue(MakeRGB(0, 255, 0))` is 84, not 85. A
 function listed in the script's externals table (a Windows DLL import) is
 logged as unsupported and yields `null`.
 

@@ -36,7 +36,7 @@ mod snapshot;
 mod stack;
 mod value;
 
-pub use engine::{Counts, Engine, Global, Removed, rgba};
+pub use engine::{Counts, Engine, Global, Removed, hsl_to_rgb, rgb_to_hsl, rgba};
 pub use error::{Error, Result};
 pub use host::{Context, Effect, Host, Return};
 pub use instruction::{Instruction, Opcode, OperandKind};
