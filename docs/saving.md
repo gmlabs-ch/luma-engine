@@ -64,7 +64,8 @@ A saved game holds:
   the keyboard state;
 - the game's own settings a script may change: name, caption,
   subtitles, talk and video skip buttons, `Interactive`, the main
-  object, `TextEncoding`, `StartupScene`, the mouse lock rectangle,
+  object, `TextEncoding`, `SuspendedRendering`, `StartupScene`, the
+  mouse lock rectangle,
   the loading and saving screens and whether `Game.Reset` asked not to
   remember the scene left next; the game timer and the wall clock; the
   random generator.
@@ -279,7 +280,7 @@ kept for double clicks, and the objects' sound effects. Version 11,
 after 10, added the accessibility captions (`AccCaption`) to the
 objects' runtime state. Version 12, after 11, changed the cursor sprite
 objects (which cursor of the game, an item or an object they stand
-for) and added the items' hover image objects.
+for) and added the items' hover image objects and `SuspendedRendering`.
 
 ## Checking a game
 

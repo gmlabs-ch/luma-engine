@@ -202,6 +202,7 @@ world_state! {
     name: String,
     caption: String,
     text_encoding: i32,
+    suspended_rendering: bool,
     startup_scene: Option<String>,
     mouse_lock: (i32, i32, i32, i32),
     temp_disable_save_state: bool,

@@ -71,6 +71,9 @@ pub struct Frame<'a> {
 pub enum Flow {
     /// Keep running.
     Continue,
+    /// Keep running, but do not present this frame: the draw list is
+    /// dropped and the window keeps showing the previous frame.
+    Skip,
     /// Close the window and return from [`run`].
     Exit,
 }
@@ -95,7 +98,8 @@ pub trait App {
     }
 
     /// Fills the draw list for a frame. Return [`Flow::Exit`] to close
-    /// the window after this frame.
+    /// the window after this frame, [`Flow::Skip`] to leave the window
+    /// as it is (the list is not drawn).
     fn draw<'a>(&'a mut self, frame: &Frame<'a>, list: &mut DrawList<'a>) -> Flow;
 }
 
@@ -243,6 +247,11 @@ impl<A: App> Runner<A> {
             frame.size.height as f32 / frame.scale_factor as f32,
         );
         let flow = self.app.draw(&frame, &mut list);
+        if flow == Flow::Skip {
+            // The surface texture goes back unpresented: the window keeps
+            // its last image.
+            return Ok(Flow::Continue);
+        }
         let view = texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -287,7 +296,7 @@ impl<A: App> ApplicationHandler for Runner<A> {
             }
             WindowEvent::Resized(size) => self.resize(size),
             WindowEvent::RedrawRequested => match self.redraw() {
-                Ok(Flow::Continue) => {}
+                Ok(Flow::Continue | Flow::Skip) => {}
                 Ok(Flow::Exit) => event_loop.exit(),
                 Err(err) => {
                     self.result = Err(err);

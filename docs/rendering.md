@@ -42,8 +42,9 @@ Wintermute format; the formats are in [docs/formats](formats/README.md).
    of each quad's blend mode (see [Transforms](#transforms)).
    Consecutive quads with the same texture and blend mode are one draw
    call.
-3. The window presents the swap chain texture; an `Offscreen` can be
-   read back.
+3. The window presents the swap chain texture, unless the application
+   answered `Flow::Skip` for this frame, which keeps the previous one on
+   screen; an `Offscreen` can be read back.
 
 The composition of a scene into a draw list (layers, parallax, free
 entities sorted into the floor regions, sprite frames, hotspots, scale and

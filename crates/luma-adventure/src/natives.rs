@@ -417,10 +417,10 @@ impl World {
             "Frozen" => Value::Bool(self.is_frozen()),
             "FocusedWindow" => native_or_null(self.focused_window()),
             "WindowedMode" => Value::Bool(self.windowed),
+            "SuspendedRendering" => Value::Bool(self.suspended_rendering),
             "SoundAvailable" => Value::Bool(self.sounds.audio.device().is_some()),
             "DebugMode"
             | "TextRTL"
-            | "SuspendedRendering"
             | "SuppressScriptErrors"
             | "AutorunDisabled"
             | "AutoSaveOnExit"
@@ -479,6 +479,7 @@ impl World {
                 self.talk_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }
             "VideoSubtitles" => self.video_subtitles = value.get_bool(self),
+            "SuspendedRendering" => self.suspended_rendering = value.get_bool(self),
             "VideoSkipButton" => {
                 self.video_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }

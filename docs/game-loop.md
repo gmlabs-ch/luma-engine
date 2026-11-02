@@ -61,6 +61,13 @@ and its subtitles are drawn.
 Without a window (`--headless`), the same loop runs with a fixed frame
 duration, and the sounds run on the game clock.
 
+While a script holds `Game.SuspendedRendering` true (the original
+engine's way of hiding a heavy loading sequence), the loop runs as
+above but the player presents no frame: the window keeps the last one
+shown until the script sets it back to false. The original engine draws
+no sprite and skips the flip; the headless player ignores the flag, so
+its frames are still rendered.
+
 Scripts read the loop's clocks and counters on the game object:
 `CurrentTime` is the game timer (stopped while frozen), `WindowsTime`
 the wall clock since the game started (the original engine gives the

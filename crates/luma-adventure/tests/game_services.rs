@@ -70,6 +70,14 @@ Game.ChangeScene("scenes\room.scene");
 on "Check"
 {
   result.checked = true;
+  result.suspendedBefore = Game.SuspendedRendering;
+  Game.SuspendedRendering = true;
+  result.suspendedAfter = Game.SuspendedRendering;
+}
+
+on "Resume"
+{
+  Game.SuspendedRendering = false;
 }
 "#;
 
@@ -253,5 +261,30 @@ fn the_scenes_own_viewport_comes_before_the_games() {
     runtime.change_scene("scenes\\room.scene").unwrap();
     runtime.tick(16);
     assert_eq!(runtime.world.viewport(), (1, 1, 10, 10));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn suspended_rendering_is_a_flag_the_front_end_reads() {
+    let (dir, mut runtime, _) = start();
+    let game = runtime.world.game_id();
+    assert!(!runtime.world.suspended_rendering());
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Check", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "checked"), Value::Bool(true));
+    assert_eq!(result(&runtime, "suspendedBefore"), Value::Bool(false));
+    assert_eq!(result(&runtime, "suspendedAfter"), Value::Bool(true));
+    // The game runs on while suspended: the player skips presenting.
+    assert!(runtime.world.suspended_rendering());
+    let timer = runtime.world.timer();
+    runtime.tick(16);
+    assert!(runtime.world.timer() > timer);
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Resume", false);
+    runtime.tick(16);
+    assert!(!runtime.world.suspended_rendering());
     std::fs::remove_dir_all(&dir).ok();
 }

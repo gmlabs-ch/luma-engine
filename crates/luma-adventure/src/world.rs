@@ -175,6 +175,10 @@ pub struct World {
     /// Whether the front-end runs the game in a window
     /// (`Game.WindowedMode`); false without a window.
     pub(crate) windowed: bool,
+    /// `Game.SuspendedRendering` (`CBGame::m_SuspendedRendering`): while
+    /// true the front-end keeps the last frame on screen instead of
+    /// presenting new ones; the game runs on.
+    pub(crate) suspended_rendering: bool,
     /// Frames drawn in the last whole second (`Game.FPS`), and the
     /// counters behind it (`m_Fps`, `m_FpsTime`, `m_FramesRendered`).
     pub(crate) fps: i32,
@@ -319,6 +323,7 @@ impl World {
             text_encoding: 0,
             startup_scene,
             windowed: false,
+            suspended_rendering: false,
             fps: 0,
             fps_time: 0,
             fps_frames: 0,
@@ -486,6 +491,14 @@ impl World {
     /// Whether a script asked to quit (`Game.QuitGame`).
     pub fn quit_requested(&self) -> bool {
         self.quit
+    }
+
+    /// Whether a script suspended rendering (`Game.SuspendedRendering`):
+    /// a front-end then keeps the frame on screen instead of presenting
+    /// new ones, while the game keeps running. The original engine draws
+    /// no sprite and skips the flip; headless runs ignore it.
+    pub fn suspended_rendering(&self) -> bool {
+        self.suspended_rendering
     }
 
     /// The scene a script asked for, not yet loaded.
