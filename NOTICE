@@ -77,7 +77,10 @@ no code copied):
   crates/luma-adventure/src/save.rs
   crates/luma-audio/src/audio.rs
   docs/3d-actors.md
+  docs/formats/geometry.md
   crates/luma-3d/src/math.rs
+  crates/luma-3d/src/three_ds.rs
+  crates/luma-3d/src/node_patterns.rs
 
 -------------------------------------------------------------------------------
 Dependencies under the Mozilla Public License 2.0
