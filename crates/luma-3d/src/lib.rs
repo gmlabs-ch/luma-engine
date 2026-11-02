@@ -17,10 +17,13 @@
 //! - [`scene_geometry`]: the classified geometry of a scene and the
 //!   queries on it;
 //! - [`camera`]: the scene camera, the projection that maps the layer onto
-//!   the 3D world, and the conversions between scene pixels and 3D points.
+//!   the 3D world, and the conversions between scene pixels and 3D points;
+//! - [`xfile`]: the DirectX `.X` text container the actor models are
+//!   stored in, read into a generic object tree.
 //!
 //! The behaviour follows `docs/3d-actors.md`, which is the specification;
-//! `docs/formats/geometry.md` describes the files. The crate is an optional
+//! `docs/formats/geometry.md` and `docs/formats/xfile.md` describe the
+//! files. The crate is an optional
 //! module of the engine: `luma` re-exports it as `luma::three_d` behind its
 //! `3d` feature.
 
@@ -29,6 +32,7 @@ pub mod math;
 pub mod node_patterns;
 pub mod scene_geometry;
 pub mod three_ds;
+pub mod xfile;
 
 pub use camera::{CameraSettings, Projection, Ray, ViewSetup, Viewport};
 pub use math::{Mat4, Plane, Quat, Vec3};
