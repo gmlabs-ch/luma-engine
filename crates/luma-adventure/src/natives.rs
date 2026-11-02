@@ -125,6 +125,19 @@ impl World {
                 "Name" => Some(Value::from(kind)),
                 _ => None,
             },
+            Kind::Object => match name {
+                "Type" => Some(Value::from("object")),
+                // `CBScriptHolder` names a fresh object `<unnamed>`; a
+                // name scripts give is kept as a property.
+                "Name" => Some(
+                    self.native(id)?
+                        .props
+                        .get("Name")
+                        .cloned()
+                        .unwrap_or(Value::from("<unnamed>")),
+                ),
+                _ => None,
+            },
             Kind::Class(_) => None,
         }
     }
@@ -158,6 +171,7 @@ impl World {
             | Kind::ResponseBox
             | Kind::Fader
             | Kind::Inert(_)
+            | Kind::Object
             | Kind::Class(_) => false,
         }
     }
@@ -210,7 +224,7 @@ impl World {
             Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
-            Kind::Class(_) => None,
+            Kind::Class(_) | Kind::Object => None,
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
                     let widget = self.inert("Widget");

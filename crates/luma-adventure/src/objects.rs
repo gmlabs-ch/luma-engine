@@ -69,6 +69,9 @@ pub enum Kind {
     /// method with `null`: windows, actors and other objects of later
     /// milestones.
     Inert(String),
+    /// `new Object(...)` (`CSXObject`): a bare object scripts attach
+    /// scripts to; its `Name` and the rest live in its properties.
+    Object,
     /// An object of the script library (`new String`, `new Array`,
     /// `new Date`, `new File`, `new MemBuffer`); the class answers for it.
     Class(ClassObject),

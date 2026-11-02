@@ -901,6 +901,12 @@ impl World {
                 .map(|i| i.def.name.clone())
                 .unwrap_or_default(),
             Some(Kind::Inert(kind)) => kind.clone(),
+            Some(Kind::Object) => self
+                .objects
+                .get(id)
+                .and_then(|n| n.props.get("Name"))
+                .map(|v| v.get_string(self))
+                .unwrap_or_else(|| "<unnamed>".to_string()),
             Some(Kind::Class(object)) => object.type_name().to_string(),
             None => "invalid".to_string(),
         }
@@ -971,12 +977,12 @@ impl World {
         Some(id)
     }
 
-    /// Removes an object scripts created (`Game.UnloadObject`): an actor
-    /// or an inert object, with its scripts. Returns whether the handle
-    /// named one.
+    /// Removes an object scripts created (`Game.UnloadObject`): an actor,
+    /// a `new Object` or an inert object, with its scripts. Returns
+    /// whether the handle named one.
     pub fn unload_object(&mut self, engine: &mut Engine, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| &n.kind) {
-            Some(Kind::Actor | Kind::Inert(_)) => {}
+            Some(Kind::Actor | Kind::Inert(_) | Kind::Object) => {}
             Some(Kind::Control) => return self.unload_control(engine, id),
             _ => return false,
         }
@@ -2026,6 +2032,7 @@ impl Natives for World {
                 .to_string(),
             Some(Kind::Item) => "item".to_string(),
             Some(Kind::Inert(kind)) => kind.to_ascii_lowercase(),
+            Some(Kind::Object) => "object".to_string(),
             Some(Kind::Class(object)) => object.type_name().to_string(),
             None => String::new(),
         }
@@ -2043,6 +2050,7 @@ impl Natives for World {
             Some(Kind::Sprite(_)) => "[sprite]".to_string(),
             Some(Kind::Frame { .. }) => "[frame]".to_string(),
             Some(Kind::SubFrame { .. }) => "[subframe]".to_string(),
+            Some(Kind::Object) => "[object]".to_string(),
             Some(_) => "[native object]".to_string(),
             None => "[invalid object]".to_string(),
         }
@@ -2235,12 +2243,22 @@ impl Host for World {
         (i64::from(from) + (value as i64).rem_euclid(span)) as i32
     }
 
-    fn call_function(&mut self, name: &str, args: &[Value], _ctx: Context<'_>) -> Option<Return> {
+    fn call_function(&mut self, name: &str, args: &[Value], ctx: Context<'_>) -> Option<Return> {
         match name {
             // The script library classes.
             "String" | "Array" | "Date" | "File" | "MemBuffer" => {
                 let object = ClassObject::construct(name, args, self)?;
                 let id = self.objects.insert(Kind::Class(object));
+                Some(Return::constructed(Value::Native(id)))
+            }
+            // `new Object(script, ...)` (`CSXObject`): a bare object with
+            // the given scripts attached; they run from the next tick.
+            "Object" => {
+                let id = self.objects.insert(Kind::Object);
+                for arg in args {
+                    let path = arg.get_string(self);
+                    self.attach(ctx.engine, id, &path);
+                }
                 Some(Return::constructed(Value::Native(id)))
             }
             // Not implemented: the placeholder object the compiler

@@ -71,12 +71,14 @@ fn game() -> std::path::PathBuf {
     dir
 }
 
+/// A property of the `result` global, a `new Object()` the world owns.
 fn result(runtime: &Runtime, key: &str) -> Value {
     runtime
         .engine
         .global("result")
-        .and_then(|r| r.properties())
-        .and_then(|p| p.get(key))
+        .and_then(Value::as_native)
+        .and_then(|id| runtime.world.objects().get(id))
+        .and_then(|native| native.props.get(key))
         .cloned()
         .unwrap_or(Value::Null)
 }

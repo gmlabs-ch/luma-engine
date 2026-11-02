@@ -81,9 +81,13 @@ a placeholder object is made `this`, the constructor fills it, and the
 call's own result is dropped, so that the object stays on the stack as
 the value of the expression. A constructor answers with
 `Return::constructed`, which writes the object into the `this` slot and
-yields `null`; `new Object()` is answered by the engine with nothing to
-add, the placeholder being the object. A constructor nobody knows is an
-undefined function: an error is logged and the placeholder stays.
+yields `null`. `new Object(...)` is a constructor of the host too: the
+adventure layer makes a bare native object (`CSXObject`) and attaches
+the scripts named by the arguments to it (`new Object("a.script",
+"b.script")`), so that its methods and events are theirs; a host without
+objects of its own leaves it to the engine, which keeps the placeholder
+as the object. A constructor nobody knows is an undefined function: an
+error is logged and the placeholder stays.
 
 Script functions (`CALL`) are ordinary jumps with a return address; the
 callee opens a scope, fixes the argument count with `CORRECT_STACK`
@@ -178,6 +182,7 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | Frames (`Sprite.GetFrame`, `AddFrame`, `InsertFrame`) | `Delay`, `Keyframe`, `KillSounds`, `MoveX`, `MoveY`, `NumSubframes`, `NumEvents` | `GetSound`, `SetSound`, `GetSubframe`, `AddSubframe`, `InsertSubframe`, `DeleteSubframe`, `AddEvent`, `DeleteEvent`; a frame with a single sub-frame answers for it (`frame.MirrorX`, `frame.SetImage(...)`) |
 | Sub-frames (`Frame.GetSubframe`, `AddSubframe`, `InsertSubframe`) | `HotspotX`, `HotspotY`, `MirrorX`, `MirrorY`, `Decoration`, `AlphaColor`, `TransparentColor` (read only), `Is2DOnly`, `Is3DOnly` | `GetImage`, `SetImage` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
+| `new Object(scripts...)` | `Type` (`object`), `Name` (`<unnamed>` until a script sets it), script-set properties | The script holder's methods; the scripts given to the constructor are attached, so the object answers their methods and events. `Game.UnloadObject` removes it. The string form is `[object]`. |
 | `String`, `Array`, `Date`, `File`, `MemBuffer` objects | see [Script library classes](#script-library-classes) | |
 
 When a frame of an object's sprite becomes current, its `SOUND` plays,

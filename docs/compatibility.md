@@ -46,12 +46,12 @@ How the list was made. For every class with a script interface, the names tested
 ### Constructors (`new X(...)`)
 
 - WME source: src/engine_core/wme_base/BGame.cpp, src/engine_core/wme_ad/AdGame.cpp (CAdGame::ExternalCall)
-- Hierarchy and Luma: luma-adventure/src/world.rs (`call_function`: the library classes become `Kind::Class` objects answered by `luma-script/src/classes/`; `Object`, `Actor` and `Entity` leave the placeholder object the compiler creates for `new`)
-- Count: 5 done, 3 todo, 1 no-op
+- Hierarchy and Luma: luma-adventure/src/world.rs (`call_function`: the library classes become `Kind::Class` objects answered by `luma-script/src/classes/`, `Object` a `Kind::Object` native with its scripts attached; `Actor` and `Entity` leave the placeholder object the compiler creates for `new`)
+- Count: 6 done, 2 todo, 1 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Object` | constructor | **todo** | Generic object, optionally with script files to attach as arguments. Luma keeps the plain object the compiler creates: properties work, the attached scripts and the CBObject members do not. |
+| `Object` | constructor | **done** | Generic object (CSXObject), the script files given as arguments attached to it; `Type` is `object`, `Name` reads `<unnamed>` until set, and `Game.UnloadObject` removes it. The CBObject members beyond the script holder's (`X`, `Caption`...) are plain properties on it. |
 | `String` | constructor | **done** | `new String(text)`: string object with methods (see CSXString). `new String()` holds `[null]`, `new String(n)` an empty text of capacity n, as in WME. |
 | `Array` | constructor | **done** | `new Array(...)`: array object (see CSXArray). Empty, n unset elements, or the arguments. |
 | `Date` | constructor | **done** | `new Date()`: date/time object (see CSXDate). The current time is the host's clock, UTC in the adventure layer. |
@@ -1028,7 +1028,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Class | done | todo | no-op | total |
 |-------|-----:|-----:|------:|------:|
 | Global functions | 20 | 0 | 1 | 21 |
-| Constructors | 5 | 3 | 1 | 9 |
+| Constructors | 6 | 2 | 1 | 9 |
 | Global variables | 5 | 0 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
@@ -1072,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 6 | 0 | 21 |
-| **All** | **741** | **381** | **31** | **1153** |
+| **All** | **742** | **380** | **31** | **1153** |
 
-Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 726 done, 375 todo, 31 no-op.
+Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 727 done, 374 todo, 31 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1102,7 +1102,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Group | todo | What it covers |
 |-------|-----:|----------------|
 | Game services | 8 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
-| Script library | 3 | `new Object` with scripts, `new Actor` and `new Entity`. (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory` and the HSL colour helpers are done.) |
+| Script library | 2 | `new Actor` and `new Entity`, which follow runtime entity creation. (`String`, `Array`, `Date`, `File`, `MemBuffer`, `Directory`, `new Object` and the HSL colour helpers are done.) |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
@@ -1112,7 +1112,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **381** | |
+| **All** | **380** | |
 
 ## Members in Luma that WME 1.x does not define
 
