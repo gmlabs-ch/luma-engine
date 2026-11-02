@@ -192,6 +192,19 @@ impl Light {
     }
 }
 
+/// A group of waypoints (`CAdWaypointGroup3D`). The loader puts every
+/// waypoint mesh of the file into one group; the path finder links the
+/// points of the active groups.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WaypointGroup {
+    /// The points: the bounding-box centre of each waypoint mesh, lifted
+    /// to `floor + waypoint_height` by [`SceneGeometry::drop_waypoints`].
+    pub points: Vec<Vec3>,
+    /// Whether the path finder uses the group. The original starts it
+    /// `true` and has no script or file that changes it.
+    pub active: bool,
+}
+
 /// The classified geometry of a scene.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneGeometry {
@@ -201,10 +214,10 @@ pub struct SceneGeometry {
     pub blocks: Vec<MeshNode>,
     /// The generic meshes, in file order.
     pub generics: Vec<MeshNode>,
-    /// The waypoints: the bounding-box centre of every waypoint mesh,
-    /// lifted to `floor + waypoint_height` by [`Self::drop_waypoints`].
-    /// The original keeps them in a single group.
-    pub waypoints: Vec<Vec3>,
+    /// The waypoint groups: empty for a file without waypoint meshes,
+    /// otherwise one group holding them all, in file order (the original
+    /// never creates a second one).
+    pub waypoint_groups: Vec<WaypointGroup>,
     /// The cameras, in file order.
     pub cameras: Vec<Camera>,
     /// The lights, in file order.
@@ -242,7 +255,7 @@ impl SceneGeometry {
             walkplanes: Vec::new(),
             blocks: Vec::new(),
             generics: Vec::new(),
-            waypoints: Vec::new(),
+            waypoint_groups: Vec::new(),
             cameras: Vec::new(),
             lights: Vec::new(),
             waypoint_height: Self::DEFAULT_WAYPOINT_HEIGHT,
@@ -262,9 +275,17 @@ impl SceneGeometry {
                 NodeKind::Walkplane => geometry.walkplanes.push(node()),
                 NodeKind::Blocked => geometry.blocks.push(node()),
                 NodeKind::Generic => geometry.generics.push(node()),
-                NodeKind::Waypoint => geometry
-                    .waypoints
-                    .push(TriangleMesh::from_3ds(mesh).center()),
+                NodeKind::Waypoint => {
+                    if geometry.waypoint_groups.is_empty() {
+                        geometry.waypoint_groups.push(WaypointGroup {
+                            points: Vec::new(),
+                            active: true,
+                        });
+                    }
+                    geometry.waypoint_groups[0]
+                        .points
+                        .push(TriangleMesh::from_3ds(mesh).center());
+                }
             }
         }
         geometry.cameras = file
@@ -289,11 +310,22 @@ impl SceneGeometry {
     pub fn drop_waypoints(&mut self) {
         let height = self.waypoint_height;
         let planes = std::mem::take(&mut self.walkplanes);
-        for point in &mut self.waypoints {
+        for point in self
+            .waypoint_groups
+            .iter_mut()
+            .flat_map(|group| group.points.iter_mut())
+        {
             let floor = height_at(&planes, *point, 0.0).unwrap_or(point.y);
             point.y = floor + height;
         }
         self.walkplanes = planes;
+    }
+
+    /// Every waypoint of every group, active or not, in file order.
+    pub fn waypoints(&self) -> impl Iterator<Item = &Vec3> {
+        self.waypoint_groups
+            .iter()
+            .flat_map(|group| group.points.iter())
     }
 
     /// Sets the waypoint height and drops the waypoints again, as the
@@ -595,7 +627,9 @@ mod tests {
         assert_eq!(g.generics.len(), 1);
         assert_eq!(g.generics[0].name, "shadow_1");
         assert!(g.generics[0].receive_shadows);
-        assert_eq!(g.waypoints.len(), 2);
+        assert_eq!(g.waypoint_groups.len(), 1);
+        assert!(g.waypoint_groups[0].active);
+        assert_eq!(g.waypoints().count(), 2);
         assert_eq!(g.cameras.len(), 2);
         assert_eq!(g.lights.len(), 2);
         assert_eq!(g.active_camera, Some(0));
@@ -604,14 +638,24 @@ mod tests {
     #[test]
     fn waypoints_are_box_centres_dropped_to_the_floor() {
         let g = demo();
+        let points = &g.waypoint_groups[0].points;
         // Centre (15, 55, 15) dropped to the floor at 0 plus the height 10.
-        assert_eq!(g.waypoints[0], Vec3::new(15.0, 10.0, 15.0));
+        assert_eq!(points[0], Vec3::new(15.0, 10.0, 15.0));
         // Off the floor: keeps its own height, plus the waypoint height.
-        assert_eq!(g.waypoints[1], Vec3::new(205.0, 65.0, 205.0));
+        assert_eq!(points[1], Vec3::new(205.0, 65.0, 205.0));
         let mut g = g;
         g.set_waypoint_height(25.0);
-        assert_eq!(g.waypoints[0], Vec3::new(15.0, 25.0, 15.0));
-        assert_eq!(g.waypoints[1], Vec3::new(205.0, 90.0, 205.0));
+        let points = &g.waypoint_groups[0].points;
+        assert_eq!(points[0], Vec3::new(15.0, 25.0, 15.0));
+        assert_eq!(points[1], Vec3::new(205.0, 90.0, 205.0));
+    }
+
+    #[test]
+    fn a_file_without_waypoint_meshes_has_no_group() {
+        let bytes = Builder::file(&[floor("walk_01", 0.0)], &[]);
+        let g = SceneGeometry::load_3ds(&bytes, &NodePatterns::standard()).unwrap();
+        assert!(g.waypoint_groups.is_empty());
+        assert_eq!(g.waypoints().count(), 0);
     }
 
     #[test]

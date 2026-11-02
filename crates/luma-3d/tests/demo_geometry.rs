@@ -37,7 +37,9 @@ fn the_front_scene_of_the_demo_loads_as_the_study_describes() {
     assert_eq!(names(&geometry.walkplanes), vec!["walk_01"]);
     assert_eq!(geometry.blocks.len(), 5, "{:?}", names(&geometry.blocks));
     assert!(geometry.blocks.iter().all(|b| b.name.starts_with("blk_")));
-    assert_eq!(geometry.waypoints.len(), 10);
+    assert_eq!(geometry.waypoint_groups.len(), 1);
+    assert!(geometry.waypoint_groups[0].active);
+    assert_eq!(geometry.waypoint_groups[0].points.len(), 10);
     assert_eq!(
         geometry.generics.len(),
         12,
@@ -58,7 +60,7 @@ fn the_front_scene_of_the_demo_loads_as_the_study_describes() {
     assert_eq!(geometry.active_camera().unwrap().name, "Camera01");
 
     // Every waypoint sits 10 units over the walk plane.
-    for point in &geometry.waypoints {
+    for point in geometry.waypoints() {
         let floor = geometry.height_at(*point, 0.0).unwrap();
         assert!(
             (point.y - floor - 10.0).abs() < 1e-3,

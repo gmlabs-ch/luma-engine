@@ -46,7 +46,7 @@ pub use camera::{CameraSettings, Projection, Ray, ViewSetup, Viewport};
 pub use math::{Mat4, Plane, Quat, Vec3};
 pub use model::{Animation, AnimationSet, Bone, Frame, Material, Mesh, Model, Transform};
 pub use node_patterns::{NodeKind, NodePattern, NodePatterns};
-pub use scene_geometry::{Camera, Light, MeshNode, SceneGeometry, TriangleMesh};
+pub use scene_geometry::{Camera, Light, MeshNode, SceneGeometry, TriangleMesh, WaypointGroup};
 
 /// The file extension of scene geometry files, without the dot. The
 /// original accepts no other geometry format.
