@@ -461,6 +461,19 @@ pub struct Drawable<'a> {
     pub tint: Rgba,
 }
 
+/// A video drawn in an entity's place (`Entity.PlayTheora`): the frame
+/// shown, at the entity's position, scaled and tinted like the entity.
+pub struct VideoOverlay<'a> {
+    /// The entity whose video it is.
+    pub entity: EntityRef,
+    /// The frame shown.
+    pub texture: &'a Texture,
+    /// Scale in percent.
+    pub zoom: f32,
+    /// Tint and opacity.
+    pub tint: Rgba,
+}
+
 /// An entity saying a sentence.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EntityTalk {
@@ -956,7 +969,7 @@ impl SceneView {
     /// Fills a draw list with the scene as seen by `camera`, showing the
     /// frames the animations are at (see [`SceneView::advance`]).
     pub fn draw<'a>(&'a self, list: &mut DrawList<'a>, camera: &Camera) {
-        self.draw_with(list, camera, &[]);
+        self.draw_with(list, camera, &[], &[]);
     }
 
     /// The order the scene's objects are drawn in (`CAdScene::
@@ -1021,16 +1034,42 @@ impl SceneView {
     }
 
     /// Like [`SceneView::draw`], with other objects (actors) drawn among
-    /// the free entities, in the order of [`SceneView::draw_order`].
+    /// the free entities, in the order of [`SceneView::draw_order`], and
+    /// `videos` drawn in their entities' places instead of the sprites.
     pub fn draw_with<'a>(
         &'a self,
         list: &mut DrawList<'a>,
         camera: &Camera,
         others: &[Drawable<'a>],
+        videos: &[VideoOverlay<'a>],
     ) {
         let scene = &self.scene;
         let positions: Vec<(i32, i32)> = others.iter().map(|d| (d.x, d.y)).collect();
         let mut current_layer = usize::MAX;
+        // An entity's video, where it plays, takes the sprite's place
+        // (`CAdEntity::Display`).
+        let draw_entity = |list: &mut DrawList<'a>, r: EntityRef, entity: &'a Entity| {
+            if let Some(video) = videos.iter().find(|v| v.entity == r) {
+                if entity.active && entity.kind == EntityKind::Normal {
+                    let zoom = video.zoom / 100.0;
+                    list.push(Quad {
+                        texture: video.texture,
+                        dst: Rect::new(
+                            entity.x as f32,
+                            entity.y as f32,
+                            (video.texture.width as f32 * zoom).trunc(),
+                            (video.texture.height as f32 * zoom).trunc(),
+                        ),
+                        src: None,
+                        tint: video.tint,
+                        flip_x: false,
+                        flip_y: false,
+                    });
+                }
+            } else if let Some(d) = self.drawable(r, entity) {
+                draw_object(list, &d);
+            }
+        };
         for item in self.draw_order(&positions) {
             let layer = item.layer();
             if layer != current_layer {
@@ -1041,18 +1080,12 @@ impl SceneView {
             match item {
                 DrawItem::Node { layer, index } => {
                     if let Some(SceneNode::Entity(entity)) = self.node(layer, index) {
-                        if let Some(d) = self.drawable(EntityRef::Node { layer, index }, entity) {
-                            draw_object(list, &d);
-                        }
+                        draw_entity(list, EntityRef::Node { layer, index }, entity);
                     }
                 }
                 DrawItem::Free { index, .. } => {
-                    if let Some(d) = scene
-                        .free_entities
-                        .get(index)
-                        .and_then(|e| self.drawable(EntityRef::Free(index), e))
-                    {
-                        draw_object(list, &d);
+                    if let Some(entity) = scene.free_entities.get(index) {
+                        draw_entity(list, EntityRef::Free(index), entity);
                     }
                 }
                 DrawItem::Other { index, .. } => {

@@ -2553,6 +2553,16 @@ impl World {
         if !control.visible || !entity.def.active {
             return;
         }
+        // A video the entity plays takes its sprite's place.
+        if let Some(owner) = index.and_then(|i| self.node_id(EntityRef::Ui(i))) {
+            if self.entity_videos.contains_key(&owner) {
+                let (x, y) = (ox + control.x + entity.def.x, oy + control.y + entity.def.y);
+                if let Some(quad) = self.ui_video_quad(owner, x, y, tint) {
+                    list.push(quad);
+                }
+                return;
+            }
+        }
         let Some(loaded) = entity
             .def
             .sprite

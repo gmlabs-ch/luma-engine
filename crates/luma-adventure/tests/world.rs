@@ -767,6 +767,46 @@ fn prop_script() -> Vec<u8> {
         store(&mut a, key);
         a.emit(Instruction::RetEvent);
     }
+    // on "PlayVideo": this.PlayTheora("intro.ogv", true); the state after.
+    a.event("PlayVideo");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(
+        &mut a,
+        "this",
+        "PlayTheora",
+        &[Arg::Str("intro.ogv"), Arg::Int(1)],
+    );
+    store(&mut a, "videoOk");
+    call(&mut a, "this", "IsTheoraPlaying", &[]);
+    store(&mut a, "videoPlaying");
+    call(&mut a, "this", "IsTheoraPaused", &[]);
+    store(&mut a, "videoPaused");
+    a.emit(Instruction::RetEvent);
+    // on "PlayMissingVideo": result.videoMissing = this.PlayTheora("none.ogv");
+    a.event("PlayMissingVideo");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    call(&mut a, "this", "PlayTheora", &[Arg::Str("none.ogv")]);
+    store(&mut a, "videoMissing");
+    a.emit(Instruction::RetEvent);
+    // on "PauseVideo" / "ResumeVideo" / "StopVideo".
+    for (event, method, key) in [
+        ("PauseVideo", "PauseTheora", "pauseOk"),
+        ("ResumeVideo", "ResumeTheora", "resumeOk"),
+        ("StopVideo", "StopTheora", "stopOk"),
+    ] {
+        a.event(event);
+        a.emit(Instruction::Scope);
+        a.def_glob_var("result");
+        call(&mut a, "this", method, &[]);
+        store(&mut a, key);
+        call(&mut a, "this", "IsTheoraPlaying", &[]);
+        store(&mut a, "videoPlaying");
+        call(&mut a, "this", "IsTheoraPaused", &[]);
+        store(&mut a, "videoPaused");
+        a.emit(Instruction::RetEvent);
+    }
     a.bind(end);
     a.emit(Instruction::Ret);
     a.build()
@@ -2302,6 +2342,137 @@ fn mouse_keyboard_cursors_and_fades() {
         Value::Int(luma_script::rgba(10, 20, 30, 255))
     );
     assert_eq!(runtime.world.fader().color().unwrap().a, 255);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn entities_play_videos_in_their_place() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    let prop_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    runtime.world.skip_to(0, 0);
+    runtime.tick(16);
+    // A missing file: false, logged, and nothing plays.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "PlayMissingVideo", false);
+    let log = runtime.tick(16);
+    assert_eq!(result(&runtime, "videoMissing"), Value::Bool(false));
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Entity.PlayTheora - error playing video 'none.ogv'")),
+        "{log:?}"
+    );
+    assert!(runtime.world.entity_video(prop).is_none());
+    // The video plays in the prop's place, looping, on the game timer;
+    // the game is not frozen and the scripts go on.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "PlayVideo", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "videoOk"), Value::Bool(true));
+    assert_eq!(result(&runtime, "videoPlaying"), Value::Bool(true));
+    assert_eq!(result(&runtime, "videoPaused"), Value::Bool(false));
+    assert!(!runtime.world.is_frozen());
+    assert!(!runtime.world.is_video_playing(), "not a game video");
+    let video = runtime.world.entity_video(prop).unwrap();
+    assert!(video.looping);
+    assert_eq!(video.frame_index(), Some(0));
+    for _ in 0..20 {
+        runtime.tick(16);
+    }
+    assert_eq!(
+        runtime.world.entity_video(prop).unwrap().frame_index(),
+        Some(3),
+        "about 340 ms at 10 fps"
+    );
+    // Paused: the frame holds; resumed: it goes on from there.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "PauseVideo", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "pauseOk"), Value::Bool(true));
+    assert_eq!(result(&runtime, "videoPlaying"), Value::Bool(false));
+    assert_eq!(result(&runtime, "videoPaused"), Value::Bool(true));
+    for _ in 0..30 {
+        runtime.tick(16);
+    }
+    assert_eq!(
+        runtime.world.entity_video(prop).unwrap().frame_index(),
+        Some(3)
+    );
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "ResumeVideo", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "resumeOk"), Value::Bool(true));
+    assert_eq!(result(&runtime, "videoPlaying"), Value::Bool(true));
+    for _ in 0..10 {
+        runtime.tick(16);
+    }
+    let frame = runtime.world.entity_video(prop).unwrap().frame_index();
+    assert!(frame == Some(4) || frame == Some(5), "{frame:?}");
+    // Looping: still playing well past its second.
+    for _ in 0..100 {
+        runtime.tick(16);
+    }
+    let video = runtime.world.entity_video(prop).unwrap();
+    assert!(video.is_running());
+    assert!(video.frame_index().unwrap() < 10);
+    // Stopped: the sprite is back; stopping again is false.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "StopVideo", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "stopOk"), Value::Bool(true));
+    assert_eq!(result(&runtime, "videoPlaying"), Value::Bool(false));
+    assert!(runtime.world.entity_video(prop).is_none());
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, prop, "StopVideo", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "stopOk"), Value::Bool(false));
+    // A video that does not loop, started half-way, ends by itself and
+    // the entity shows its sprite again.
+    assert!(
+        runtime
+            .world
+            .play_entity_theora(prop, "intro.ogv", false, None, 500)
+    );
+    runtime.tick(16);
+    assert!(
+        runtime
+            .world
+            .entity_video(prop)
+            .unwrap()
+            .frame_index()
+            .unwrap()
+            >= 5
+    );
+    for _ in 0..40 {
+        runtime.tick(16);
+    }
+    assert!(runtime.world.entity_video(prop).is_none());
+    // The video of an entity that leaves with its scene goes with it.
+    assert!(
+        runtime
+            .world
+            .play_entity_theora(prop, "intro.ogv", true, None, 0)
+    );
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.tick(16);
+    assert!(runtime.world.entity_video(prop).is_none());
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

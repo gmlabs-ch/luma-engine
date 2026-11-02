@@ -161,7 +161,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp
 - Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`)
-- Count: 123 done, 24 todo, 18 no-op
+- Count: 123 done, 23 todo, 19 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -185,7 +185,7 @@ How the list was made. For every class with a script interface, the names tested
 | `GetSoundLength` | method | **done** | Duration in milliseconds of a sound file. |
 | `SetMousePos` | method | **done** | Moves the mouse cursor. |
 | `LockMouseRect` | method | **done** | Confines the mouse to a rectangle (edges put in order; applies while all four are non-zero, as in WME). Luma clamps the position the game sees and does not move the system cursor. |
-| `PlayVideo` | method | **todo** | Deprecated AVI player (DirectShow). Luma aliases it to `PlayTheora`; AVI files cannot play. |
+| `PlayVideo` | method | **no-op** | Deprecated AVI player (DirectShow, Windows codecs). Luma plays an Ogg Theora file given to it as `PlayTheora` does and refuses an `.avi` with a log line and `false`; AVI decoding is out of scope (see `docs/video.md`). |
 | `PlayTheora` | method | **done** | Plays an Ogg Theora video full-frame (file, type, x, y, freeze music, drop frames, subtitles). |
 | `QuitGame` | method | **done** | Ends the game. |
 | `RegWriteNumber`, `RegWriteString` | method | **done** | Stores a value in the game's private settings: the `PrivateSettings` section of `wme.ini` in WME, of `settings.ini` in the save directory in Luma (see `docs/saving.md`). |
@@ -501,13 +501,13 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdEntity.cpp
 - Hierarchy and Luma: CAdTalkHolder → CAdEntity; Luma: entities (`entity_call`)
-- Count: 11 done, 9 todo, 0 no-op
+- Count: 17 done, 3 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `StopSound` | method | **done** | Stops the entity's sound. |
-| `PlayTheora` | method | **todo** | Plays an Ogg Theora video inside the entity's rectangle (file, looping, ...). |
-| `StopTheora`, `IsTheoraPlaying`, `PauseTheora`, `ResumeTheora`, `IsTheoraPaused` | method | **todo** | Controls the entity-bound video. |
+| `PlayTheora` | method | **done** | Plays an Ogg Theora video in the entity's place (file, looping, alpha image, start time), at the entity's position, scale and sound volume; the game runs on. Not kept in saved games. |
+| `StopTheora`, `IsTheoraPlaying`, `PauseTheora`, `ResumeTheora`, `IsTheoraPaused` | method | **done** | Controls the entity-bound video; the pause holds the sound too. |
 | `CreateRegion` | method | **todo** | Creates the entity's own clickable region. Stubbed. |
 | `DeleteRegion` | method | **todo** | Deletes that region. Stubbed. |
 | `Type` | get | **done** | `entity`. |
@@ -1032,7 +1032,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 45 | 27 | 0 | 72 |
-| CBGame | 123 | 24 | 18 | 165 |
+| CBGame | 123 | 23 | 19 | 165 |
 | CAdGame | 59 | 6 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
 | CAdScene | 46 | 35 | 2 | 83 |
@@ -1043,7 +1043,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdObject | 30 | 11 | 0 | 41 |
 | CAdTalkHolder | 3 | 4 | 0 | 7 |
 | CAdActor | 23 | 0 | 0 | 23 |
-| CAdEntity | 11 | 9 | 0 | 20 |
+| CAdEntity | 17 | 3 | 0 | 20 |
 | CAdItem | 23 | 3 | 0 | 26 |
 | CBSprite | 18 | 0 | 0 | 18 |
 | CBFrame | 21 | 0 | 0 | 21 |
@@ -1071,9 +1071,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **744** | **379** | **30** | **1153** |
+| **All** | **750** | **372** | **31** | **1153** |
 
-Of the total, 21 are events (21 done) and the rest are methods, properties, functions, constructors and global variables: 723 done, 379 todo, 30 no-op.
+Of the total, 21 are events (21 done) and the rest are methods, properties, functions, constructors and global variables: 729 done, 372 todo, 31 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1091,7 +1091,7 @@ These classes have no done member in Luma: the object does not exist for scripts
 | `CAdActor3DX` | 3D actor with X-file models and skeletal animation, effects, attachments | 67 |
 | `CAdAttach3DX` | Model attached to a bone of a 3D actor | 7 |
 
-Classes that exist in WME 1.x with a script interface but that are no-op by design: `CSXTcpClient` (unfinished in WME itself), `CSXPluginObject` (Windows DLL plugins), `CUIMarkup` (never instantiated), and the Windows-only parts of `CSXDirectory`/`CSXMemBuffer`.
+Classes that exist in WME 1.x with a script interface but that are no-op by design: `CSXTcpClient` (unfinished in WME itself), `CSXPluginObject` (Windows DLL plugins), `CUIMarkup` (never instantiated), the Windows-only parts of `CSXDirectory`/`CSXMemBuffer`, and the AVI side of `Game.PlayVideo` (DirectShow).
 
 WME classes with no script interface of their own (nothing to port; scripts reach them only through the owner's methods): `CBSound`, `CBFont`/`CBFontBitmap`/`CBFontTT`, `CAdInventory`, `CAdInventoryBox`, `CAdResponseBox`, `CAdResponse`, `CAdSceneNode`, `CAdSentence`, `CAdSpriteSet`, `CAdTalkDef`, `CAdScaleLevel`, `CAdRotLevel`, `CAdWalkplane`, `CAdBlock`, `CAdGeneric`, `CBViewport`, `CBFader`, `CUITiledImage`, `CBPersistMgr`, `CBEventSet`, the video players (`VidTheoraPlayer`), `C3DLight`, `C3DModel`. The inventory, responses, fader and viewport are driven through `Game` methods and properties (`GetInventoryWindow`, `AddResponse`, `FadeOut`, `SetSceneViewport`), which the tables above cover.
 
@@ -1105,12 +1105,11 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Script library | 16 | The `Directory` object, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. (`String`, `Array`, `Date`, `File` and `MemBuffer` are done.) |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
-| Video | 7 | Entity-bound Theora video (`PlayTheora` on an entity and its pause/stop family), AVI for the deprecated `PlayVideo`. |
 | Sound effects | 2 | `SoundFXEcho`, `SoundFXReverb` (also listed in `docs/audio.md`). |
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **379** | |
+| **All** | **372** | |
 
 ## Members in Luma that WME 1.x does not define
 

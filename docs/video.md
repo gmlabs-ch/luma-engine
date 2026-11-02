@@ -1,10 +1,11 @@
 # Video playback
 
-How Luma Engine plays the videos a game asks for with `Game.PlayTheora`:
-Ogg files holding a Theora picture stream and, usually, a Vorbis sound
-track. The rules follow the original engine (`VidTheoraPlayer.cpp`,
-`VidSubtitler.cpp` and `BGame.cpp` of Wintermute Engine 1.x, MIT) so
-that intros and cut-scenes behave as their authors expect.
+How Luma Engine plays the videos a game asks for with `Game.PlayTheora`
+(full-frame cut-scenes) and `Entity.PlayTheora` (a video in an entity's
+place): Ogg files holding a Theora picture stream and, usually, a Vorbis
+sound track. The rules follow the original engine (`VidTheoraPlayer.cpp`,
+`VidSubtitler.cpp`, `BGame.cpp` and `AdEntity.cpp` of Wintermute Engine
+1.x, MIT) so that intros and cut-scenes behave as their authors expect.
 
 Implemented by the `luma-video` core crate (demuxing, decoding,
 colour conversion) and `luma_adventure::video` (playback, timing,
@@ -58,8 +59,17 @@ Game.PlayTheora(filename, type, x, y, freezeMusic, dropFrames, subtitleFile)
 | `subtitleFile` | | A `.sub` file; without one, the video's name with `.sub`. |
 
 The call returns `true` when the file opened, `false` otherwise (the
-missing file is logged and the script goes on). `Game.PlayVideo` is the
-deprecated older name and does the same (without the subtitle argument).
+missing file is logged and the script goes on).
+
+`Game.PlayVideo` is the deprecated older name: in the original engine it
+played **AVI** files through DirectShow and whatever codecs the Windows
+machine had. Luma decodes Ogg Theora only: `PlayVideo` plays an Ogg file
+given to it as `PlayTheora` does (same arguments, no subtitle file, the
+deprecation warning logged), and refuses an `.avi` file with a log line
+(`Game.PlayVideo: AVI files are not supported`) and `false`, so that the
+script goes on as after a missing file. A game that ships AVI videos
+needs them converted to Ogg Theora; the file name in the script stays
+the same if the `.ogg` keeps it.
 
 While a video plays:
 
@@ -89,6 +99,50 @@ frame is shown when its time (`index × fps_den / fps_num`) is reached;
 frames whose time has already passed are decoded but not shown, unless
 `dropFrames` is `false`, in which case every frame is shown in turn.
 
+## `Entity.PlayTheora`
+
+```
+entity.PlayTheora(filename, looping, alphaFile, startTime)
+```
+
+| Argument | Default | Meaning |
+|----------|---------|---------|
+| `filename` | | The `.ogg` or `.ogv` file. |
+| `looping` | `false` | Whether the video starts again at its end. |
+| `alphaFile` | | An image whose alpha channel masks the frames, pixel by pixel (the frame stays opaque outside the image). |
+| `startTime` | `0` | Where to start in the video, in milliseconds. |
+
+The video takes the place of the entity's sprite (`CAdEntity::Display`):
+drawn at the entity's position (its top-left corner there, no hotspot),
+in the entity's layer, scaled by the entity's `Scale` when it has one
+(100 % otherwise, whatever the scene's scale levels), tinted with the
+entity's `AlphaColor`. The entity keeps its hit area, its scripts and
+its events. The game runs on: nothing freezes, the scripts go on and the
+call returns at once (`true`, or `false` with a runtime error logged
+when the file cannot be opened). The sound track plays as the entity's
+sound would, at its `SoundVolume`.
+
+The video advances on the **game timer**, so it stops while the game is
+frozen by a system window or a cut-scene and resumes after; a paused
+video (`PauseTheora`) holds its frame and its sound. When it ends, a
+looping video starts again from its first frame (the sound with it);
+another one is dropped and the entity shows its sprite again from the
+next frame. `StopTheora` drops it at once. An entity in a window's
+entity container plays its video the same way, at the container's
+position.
+
+| Method | Effect |
+|--------|--------|
+| `StopTheora()` | Stops and drops the video; `true` when there was one. |
+| `IsTheoraPlaying()` | Whether a video plays and is not paused. |
+| `PauseTheora()`, `ResumeTheora()` | Hold / release the video and its sound; `true` when the state changed. |
+| `IsTheoraPaused()` | Whether the video is paused. |
+
+Deviations from the original engine: the video is not kept in saved
+games (the engine saves the player and reopens the file on load; after
+a load in Luma the entity shows its sprite), and only one video plays
+per entity, as there.
+
 ## Subtitles
 
 A `.sub` file is a text file with one subtitle per line:
@@ -110,8 +164,9 @@ the game's `VIDEO_FONT`, or its `SYSTEM_FONT` without one.
 
 ## Not yet
 
-- Looping videos, `SeekToTime`, alpha-masked videos and the `.avi`
-  player of the old `PlayVideo`.
+- The `.avi` player of the old `PlayVideo` (see above: by design).
+- `SetTheoraTexture` on 3D actors, with the rest of the 3D module.
+- An entity's video in saved games.
 - The White Chamber's own videos (`assets\data0001.ogg` and the others)
   are not in the itch.io release used for testing; the engine logs the
   missing file and the game goes on to the next scene.

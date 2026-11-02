@@ -18,7 +18,7 @@ use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 use crate::objects::Kind;
 use crate::scene_view::{EntityRef, frame_height};
 use crate::talk::TalkSkipButton;
-use crate::video::VideoPlayback;
+use crate::video::{VideoPlayback, VideoPlayer};
 use crate::world::World;
 use luma_formats::font::TextAlign;
 
@@ -497,6 +497,15 @@ impl World {
                         "Warning: Game.PlayVideo() is now deprecated. Use Game.PlayTheora() instead."
                             .to_string(),
                     );
+                    if filename.to_ascii_lowercase().ends_with(".avi") {
+                        // The engine played AVI files through DirectShow
+                        // and the codecs installed on Windows; Luma
+                        // decodes Ogg Theora only.
+                        self.log(format!(
+                            "Game.PlayVideo: AVI files are not supported ('{filename}'); only Ogg Theora videos play."
+                        ));
+                        return Some(Return::value(false));
+                    }
                 }
                 let started = self.play_theora(
                     ctx.engine,
@@ -1364,6 +1373,31 @@ impl World {
                 }
                 Return::null()
             }
+            "PlayTheora" => {
+                // PlayTheora(file, looping, alphaFile, startTime)
+                let filename = arg(0).get_string(self);
+                let looping = !arg(1).is_null() && arg(1).get_bool(self);
+                let alpha = match arg(2) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let start_ms = u64::try_from(arg(3).get_int(self)).unwrap_or(0);
+                let ok =
+                    self.play_entity_theora(id, &filename, looping, alpha.as_deref(), start_ms);
+                if !ok {
+                    self.log(format!(
+                        "Runtime error. Entity.PlayTheora - error playing video '{filename}'"
+                    ));
+                }
+                Return::value(ok)
+            }
+            "StopTheora" => Return::value(self.stop_entity_video(id)),
+            "IsTheoraPlaying" => {
+                Return::value(self.entity_video(id).is_some_and(VideoPlayer::is_running))
+            }
+            "PauseTheora" => Return::value(self.pause_entity_video(id)),
+            "ResumeTheora" => Return::value(self.resume_entity_video(id)),
+            "IsTheoraPaused" => Return::value(self.entity_video(id).is_some_and(|v| v.paused)),
             "Caption" => {
                 let caption = self
                     .entity_def(r)

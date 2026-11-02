@@ -8,7 +8,7 @@
 //! Nedoma); see `NOTICE`.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use luma_archive::Vfs;
@@ -31,7 +31,7 @@ use crate::sound::Sounds;
 use crate::talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
 use crate::text::FontBank;
 use crate::ui::{Control, Ui};
-use crate::video::VideoPlayer;
+use crate::video::{EntityVideo, VideoPlayer};
 use luma_audio::Audio;
 use luma_formats::font::TextAlign;
 
@@ -139,6 +139,10 @@ pub struct World {
     pub(crate) ui_entities: Vec<crate::ui::UiEntity>,
     pub(crate) inventory: Inventory,
     pub(crate) video: Option<VideoPlayer>,
+    /// The videos playing in entities' places, by entity.
+    pub(crate) entity_videos: HashMap<NativeId, EntityVideo>,
+    /// Textures of ended videos, forgotten at the next upload.
+    pub(crate) dropped_textures: Vec<luma_render::Texture>,
     pub(crate) video_texture: Option<luma_render::Texture>,
     pub(crate) video_uploaded: u64,
     pub(crate) video_subtitles: bool,
@@ -183,7 +187,7 @@ pub struct World {
     pub(crate) temp_disable_save_state: bool,
     pub(crate) timer: u64,
     pub(crate) clock: u64,
-    log: Vec<String>,
+    pub(crate) log: Vec<String>,
     stubs: HashSet<String>,
     pub(crate) rng: u64,
     /// The slot `Game.LoadGame` asked for, loaded at the next frame.
@@ -276,6 +280,8 @@ impl World {
             ui_entities: Vec::new(),
             inventory: Inventory::default(),
             video: None,
+            entity_videos: HashMap::new(),
+            dropped_textures: Vec::new(),
             video_texture: None,
             video_uploaded: 0,
             video_subtitles: false,
@@ -1268,7 +1274,7 @@ impl World {
             return;
         }
         if let Some(view) = &self.scene {
-            view.draw_with(list, camera, &self.drawables());
+            view.draw_with(list, camera, &self.drawables(), &self.video_overlays());
         }
         self.draw_windows(list, true, white);
         self.draw_inventory(list, white);
@@ -2357,6 +2363,7 @@ impl Runtime {
         self.world.fader.update(timer, clock);
         self.engine.tick(&mut self.world);
         self.world.update_scene();
+        self.world.update_entity_videos();
         self.world.update_actors();
         self.world.scroll_step();
         self.world.update_sounds();
