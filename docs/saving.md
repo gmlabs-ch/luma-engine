@@ -213,6 +213,26 @@ logged and the value is lost, as the original engine reports nothing
 to the script either. The section name is the original engine's, so a
 game's values can be copied from its `wme.ini` by hand.
 
+### Accessibility settings
+
+The same file holds the player's accessibility switches, in an
+`[Accessibility]` section with the keys the original engine's settings
+dialog writes (`TTSEnabled`, `TTSCaptions`, `TTSTalk`, `TTSKeypress`,
+`KeyboardEnabled`, `KeyboardCursorSkip`, `KeyboardPause`; `1`/`0`,
+`true`/`false`, `yes`/`no`), read when the game starts; see
+[game-loop.md](game-loop.md#accessibility). A key absent keeps the
+default: everything off but the three text-to-speech kinds and the
+cursor skip, which apply once their master switch is on.
+
+```ini
+[Accessibility]
+TTSEnabled=1
+KeyboardEnabled=1
+```
+
+The `AccCaption` scripts set on objects is saved with the game, like
+the original's `m_AccessCaption`; the switches are not.
+
 ## File format
 
 The format is Luma's own: the original engine's `.dsv` files serialize
@@ -222,7 +242,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `6` today |
+| 4 | layout version, little-endian; `7` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |

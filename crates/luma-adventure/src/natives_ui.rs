@@ -56,7 +56,7 @@ impl World {
                     .and_then(|w| w.filename.clone())
                     .map_or(Value::Null, Value::from),
             ),
-            "AccCaption" | "Movable" => Some(Value::Null),
+            "Movable" => Some(Value::Null),
             "NextSibling" | "PrevSibling" => {
                 let parent = c.parent?;
                 let siblings = self.widgets_of(parent);

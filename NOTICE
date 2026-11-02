@@ -90,6 +90,7 @@ no code copied):
   crates/luma-adventure/src/save.rs
   crates/luma-adventure/src/registry.rs
   crates/luma-adventure/src/capture.rs
+  crates/luma-adventure/src/accessibility.rs
   crates/luma-audio/src/audio.rs
   docs/3d-actors.md
   docs/formats/geometry.md

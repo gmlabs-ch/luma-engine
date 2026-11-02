@@ -576,6 +576,15 @@ impl World {
     /// as a wandering character; the centre of a sprite may fall on a
     /// transparent pixel, which nothing here checks.
     pub fn hit_point(&mut self, id: NativeId) -> Option<(i32, i32)> {
+        let (x, y, w, h) = self.hit_rect(id)?;
+        Some((x + w / 2, y + h / 2))
+    }
+
+    /// The rectangle on screen of the last hit area drawn for an object
+    /// (`x`, `y`, `width`, `height`): the bounding box of its region, its
+    /// sprite's frame or its own rectangle; `None` when the object is
+    /// not on screen.
+    pub fn hit_rect(&mut self, id: NativeId) -> Option<(i32, i32, i32, i32)> {
         let hits = std::mem::take(&mut self.hits);
         let mut found = None;
         for hit in hits.iter().rev() {
@@ -632,10 +641,7 @@ impl World {
             if w <= 0 || h <= 0 {
                 continue;
             }
-            found = Some((
-                x + w / 2 - hit.layer_offset.0,
-                y + h / 2 - hit.layer_offset.1,
-            ));
+            found = Some((x - hit.layer_offset.0, y - hit.layer_offset.1, w, h));
             break;
         }
         self.hits = hits;
@@ -734,6 +740,7 @@ impl World {
         }
         self.active_object = object;
         if let Some(entered) = object {
+            self.speak_caption_of(entered);
             self.queue_event(entered, "MouseEntry".to_string());
         }
     }

@@ -15,6 +15,7 @@ use luma_formats::Rgba;
 use luma_formats::scene::Direction;
 use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 
+use crate::accessibility::SpeechKind;
 use crate::objects::Kind;
 use crate::scene_view::{EntityRef, frame_height};
 use crate::talk::TalkSkipButton;
@@ -51,7 +52,6 @@ const GAME_STUBS: &[&str] = &[
     "HideStatusLine",
     "LoadEntity",
     "CreateEntity",
-    "AccOutputText",
     "DumpTextureStats",
     "EnableScriptProfiling",
     "DisableScriptProfiling",
@@ -82,6 +82,10 @@ impl World {
         // The library objects answer in place: no copy of their contents.
         if let Kind::Class(object) = &self.native(id)?.kind {
             return object.get_property(name, self);
+        }
+        // `AccCaption` belongs to every CBObject (`m_AccessCaption`).
+        if name == "AccCaption" && self.has_access_caption(id) {
+            return Some(self.access_caption_value(id));
         }
         let kind = self.native(id)?.kind.clone();
         match kind {
@@ -154,6 +158,11 @@ impl World {
             Some(native) => native.kind.clone(),
             None => return false,
         };
+        if name == "AccCaption" && self.has_access_caption(id) {
+            let caption = (!value.is_null()).then(|| value.get_string(self));
+            self.set_access_caption(id, caption);
+            return true;
+        }
         match kind {
             Kind::Game => self.game_set(name, value),
             Kind::Scene => self.scene_set(name, value),
@@ -407,6 +416,13 @@ impl World {
             "StartupScene" => self.startup_scene.clone().map_or(Value::Null, Value::from),
             "SoundBufferSize" | "AutoSaveSlot" => Value::Int(0),
             "SaveDirectory" => Value::from(self.save_directory().to_string_lossy().into_owned()),
+            "AccTTSEnabled" => Value::Bool(self.access.tts_enabled),
+            "AccTTSTalk" => Value::Bool(self.access.tts_talk),
+            "AccTTSCaptions" => Value::Bool(self.access.tts_captions),
+            "AccTTSKeypress" => Value::Bool(self.access.tts_keypress),
+            "AccKeyboardEnabled" => Value::Bool(self.access.keyboard_enabled),
+            "AccKeyboardCursorSkip" => Value::Bool(self.access.keyboard_cursor_skip),
+            "AccKeyboardPause" => Value::Bool(self.access.keyboard_pause),
             "MostRecentSaveSlot" => Value::Int(self.most_recent_save_slot()),
             "TalkSkipButton" => Value::Int(self.talk_skip_button.code()),
             "ResponsesVisible" => Value::Bool(self.responses_visible()),
@@ -917,6 +933,12 @@ impl World {
                 let path = arg(0).get_string(self);
                 Return::value(self.load_response_box_from(ctx.engine, &path))
             }
+            "AccOutputText" => {
+                let text = arg(0).get_string(self);
+                let kind = SpeechKind::from_code(arg(1).get_int(self));
+                self.access_speak(&text, kind);
+                Return::null()
+            }
             _ if GAME_STUBS.contains(&name) => {
                 self.stub(&format!("Game.{name}"));
                 Return::null()
@@ -1274,7 +1296,6 @@ impl World {
             "SoundPanning" => Value::Bool(e.sound_panning),
             "SaveState" => Value::Bool(e.save_state),
             "NonIntMouseEvents" => Value::Bool(false),
-            "AccCaption" => Value::Null,
             "Active" => Value::Bool(e.active),
             "IgnoreItems" => Value::Bool(e.ignore_items),
             "SceneIndependent" => Value::Bool(false),
@@ -1351,7 +1372,7 @@ impl World {
             "WalkToY" => e.walk_to_y = int,
             "WalkToDirection" => e.walk_to_dir = Direction::from_code(i64::from(int)),
             "Movable" | "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate"
-            | "NonIntMouseEvents" | "AccCaption" | "SceneIndependent" => {}
+            | "NonIntMouseEvents" | "SceneIndependent" => {}
             _ => return false,
         }
         true

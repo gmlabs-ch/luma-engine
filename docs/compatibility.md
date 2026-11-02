@@ -110,7 +110,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BObject.cpp
 - Hierarchy and Luma: CBScriptHolder → CBObject; Luma: game, entities, actors (sound, position, flags); controls, regions, layers have their own subsets
-- Count: 45 done, 27 todo, 0 no-op
+- Count: 47 done, 25 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -153,15 +153,15 @@ How the list was made. For every class with a script interface, the names tested
 | `SoundPanning` | get/set | **done** | Whether the object's sound pans with its screen position. |
 | `SaveState` | get/set | **done** | Whether the object is saved with the scene state (entities; actors always read true and ignore the set). |
 | `NonIntMouseEvents` | get/set | **todo** | Whether the object receives mouse events while the game is non-interactive. Luma reads false, ignores the set. |
-| `AccCaption` | get/set | **todo** | Caption read out by the accessibility text-to-speech. Luma reads null, ignores the set. |
+| `AccCaption` | get/set | **done** | Caption read out by the accessibility text-to-speech in place of the caption; `null` clears it. On the game, entities, actors, items, windows, controls and `new Object`s; saved with the game. |
 
 ## 3. The Game object
 
 ### CBGame (the `Game` object, base part)
 
 - WME source: src/engine_core/wme_base/BGame.cpp
-- Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`)
-- Count: 123 done, 24 todo, 18 no-op
+- Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`, `accessibility.rs`)
+- Count: 131 done, 16 todo, 18 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -214,7 +214,7 @@ How the list was made. For every class with a script interface, the names tested
 | `DisplayLoadingIcon` | method | **done** | Shows a loading icon sprite (file, x, y, persistent) over the frame: one frame, or until hidden when persistent. |
 | `HideLoadingIcon` | method | **done** | Hides the loading icon. |
 | `DumpTextureStats` | method | **no-op** | Writes texture memory statistics to a file (D3D only); debugging aid. |
-| `AccOutputText` | method | **todo** | Speaks text through the accessibility text-to-speech. Stubbed. |
+| `AccOutputText` | method | **done** | Speaks text through the accessibility text-to-speech (text, type: 0 caption, 1 talk, 2 keypress), when it is on and the type's switch allows it. The backend is macOS's `say`; elsewhere the text-to-speech is unavailable, as WME's is without a SAPI voice. |
 | `IsShadowTypeSupported` | method | **todo** | True when the renderer supports a 3D shadow type. |
 | `StoreSaveThumbnail`, `DeleteSaveThumbnail` | method | **done** | Captures / discards the screenshot stored in the next save file (size from `THUMBNAIL_WIDTH/HEIGHT`). The capture is the next frame rendered; a save without a stored thumbnail carries none, where WME takes one at save time. |
 | `GetFileChecksum` | method | **done** | CRC-32 of a file in the virtual file system, as integer or hex string; `null` for a missing file. |
@@ -251,8 +251,8 @@ How the list was made. For every class with a script interface, the names tested
 | `SuppressScriptErrors` | get/set | **no-op** | Hides the script error dialog; Luma only logs errors and never shows one. |
 | `Frozen` | get | **done** | True while the game is frozen by a system-exclusive window. |
 | `Direct3DDevice`, `DirectDrawInterface` | get | **no-op** | Raw Direct3D / DirectDraw interface pointers (Windows only). |
-| `AccTTSEnabled`, `AccTTSTalk`, `AccTTSCaptions`, `AccTTSKeypress` | get | **todo** | Accessibility: text-to-speech master switch and which events it reads out (speech, captions, keys). Not implemented. |
-| `AccKeyboardEnabled`, `AccKeyboardCursorSkip`, `AccKeyboardPause` | get | **todo** | Accessibility: keyboard-only play, cursor skipping, pause on focus. Not implemented. |
+| `AccTTSEnabled`, `AccTTSTalk`, `AccTTSCaptions`, `AccTTSKeypress` | get | **done** | Accessibility: text-to-speech master switch and which texts it reads out (sentences without a speech file, captions of the object under the mouse, keys typed). From the `Accessibility` section of `settings.ini` (WME: of the registry, through its settings dialog). |
+| `AccKeyboardEnabled`, `AccKeyboardCursorSkip`, `AccKeyboardPause` | get | **done** | Accessibility: Ctrl+Tab cycling through the clickable objects with a red frame while Ctrl is held, the cursor jumping to the object picked, Ctrl+Space pausing under a shield window. Same source. Luma moves the cursor whether or not Ctrl is still held, and does not list objects through region nodes (see `docs/game-loop.md`). |
 | `UsedMemory` | get | **no-op** | Memory use statistic. |
 | `MaxActiveLights` | get | **todo** | Number of simultaneous 3D lights the device supports. |
 | `HardwareTL` | get | **no-op** | True when the Direct3D device does hardware transform and lighting; no meaning with wgpu. |
@@ -1032,8 +1032,8 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Global variables | 5 | 0 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
-| CBObject | 45 | 27 | 0 | 72 |
-| CBGame | 123 | 24 | 18 | 165 |
+| CBObject | 47 | 25 | 0 | 72 |
+| CBGame | 131 | 16 | 18 | 165 |
 | CAdGame | 59 | 6 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
 | CAdScene | 46 | 35 | 2 | 83 |
@@ -1072,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 6 | 0 | 21 |
-| **All** | **742** | **380** | **31** | **1153** |
+| **All** | **752** | **370** | **31** | **1153** |
 
-Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 727 done, 374 todo, 31 no-op.
+Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 737 done, 364 todo, 31 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1109,10 +1109,9 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Video | 7 | Entity-bound Theora video (`PlayTheora` on an entity and its pause/stop family), AVI for the deprecated `PlayVideo`. |
 | Sound effects | 2 | `SoundFXEcho`, `SoundFXReverb` (also listed in `docs/audio.md`). |
 | Input and system events | 6 | Wheel, middle and right-double-click events, the `QuitGame` event. |
-| Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **380** | |
+| **All** | **370** | |
 
 ## Members in Luma that WME 1.x does not define
 

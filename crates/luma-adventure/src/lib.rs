@@ -38,9 +38,12 @@
 //!   (`Game.RegReadNumber`, `RegWriteString`...).
 //! - [`capture`]: screenshots and save thumbnails, captured from the
 //!   frame the front-end renders next.
+//! - [`accessibility`]: text-to-speech of captions, speech and typed
+//!   keys, and keyboard-only play (`Game.Acc*`, `AccCaption`).
 
 #![forbid(unsafe_code)]
 
+pub mod accessibility;
 pub mod actor;
 pub mod capture;
 mod error;
@@ -68,6 +71,9 @@ pub mod ui;
 pub mod video;
 pub mod world;
 
+pub use accessibility::{
+    Accessibility, CommandSpeech, RecordingSpeech, Speech, SpeechKind, SpeechRecord,
+};
 pub use actor::{Actor, ActorEvent, ActorState, WalkContext};
 pub use error::{Error, Result};
 pub use fader::{Fader, SCENE_FADE_MS};

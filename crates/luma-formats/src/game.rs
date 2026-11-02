@@ -37,6 +37,10 @@ pub struct GameFile {
     pub video_subtitles: bool,
     /// `PERSONAL_SAVEGAMES`: saved games per user profile.
     pub personal_savegames: bool,
+    /// `ALLOW_ACCESSIBILITY_TAB`: whether the player may turn the
+    /// accessibility features on (text-to-speech, keyboard play); true
+    /// by default.
+    pub allow_accessibility_tab: bool,
     /// `LOCAL_SAVE_DIR`: where saved games go.
     pub local_save_dir: Option<String>,
     /// `THUMBNAIL_WIDTH`: width of the thumbnail stored in saved games;
@@ -92,6 +96,7 @@ impl Default for GameFile {
             subtitles_speed: 70,
             video_subtitles: false,
             personal_savegames: false,
+            allow_accessibility_tab: true,
             local_save_dir: None,
             thumbnail_width: 0,
             thumbnail_height: 0,
@@ -147,6 +152,9 @@ impl GameFile {
                 "VIDEO_SUBTITLES" => game.video_subtitles = node.as_bool().unwrap_or(false),
                 "PERSONAL_SAVEGAMES" => {
                     game.personal_savegames = node.as_bool().unwrap_or(false);
+                }
+                "ALLOW_ACCESSIBILITY_TAB" => {
+                    game.allow_accessibility_tab = node.as_bool().unwrap_or(true);
                 }
                 "LOCAL_SAVE_DIR" => game.local_save_dir = text(node),
                 "THUMBNAIL_WIDTH" => {

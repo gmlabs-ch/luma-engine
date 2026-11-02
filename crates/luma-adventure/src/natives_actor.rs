@@ -83,7 +83,6 @@ impl World {
             "SoundPanning" => Value::Bool(actor.def.sound_panning),
             "SaveState" => Value::Bool(true),
             "NonIntMouseEvents" => Value::Bool(false),
-            "AccCaption" => Value::Null,
             "IgnoreItems" => Value::Bool(actor.def.ignore_items),
             "SceneIndependent" => Value::Bool(false),
             "SubtitlesWidth" => Value::Int(actor.subtitles.width),
@@ -148,7 +147,7 @@ impl World {
             "SubtitlesPosRelative" => actor.subtitles.relative = flag,
             "SubtitlesPosXCenter" => actor.subtitles.x_center = flag,
             "Movable" | "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate"
-            | "SaveState" | "NonIntMouseEvents" | "AccCaption" | "SceneIndependent" => {}
+            | "SaveState" | "NonIntMouseEvents" | "SceneIndependent" => {}
             _ => return false,
         }
         true

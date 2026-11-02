@@ -17,6 +17,7 @@ use luma_formats::{GameFile, Scene, StringTable};
 use luma_script::classes::{ClassHost, ClassObject, DirEntry, relative_path};
 use luma_script::{Context, Engine, Host, NativeId, Natives, Return, State, Value};
 
+use crate::accessibility::{Accessibility, SpeechKind};
 use crate::actor::{Actor, ActorEvent, WalkContext, scene_obstacles};
 use crate::error::{Error, Result};
 use crate::fader::{Fader, SCENE_FADE_MS};
@@ -198,6 +199,10 @@ pub struct World {
     pub(crate) personal_save: bool,
     /// Whether the game's save directory was tried.
     pub(crate) save_dir_checked: bool,
+    /// The accessibility switches and state (`CBAccessMgr`).
+    pub(crate) access: Accessibility,
+    /// `AccCaption` of the objects that have one (`m_AccessCaption`).
+    pub(crate) access_captions: BTreeMap<NativeId, String>,
 }
 
 impl World {
@@ -312,6 +317,8 @@ impl World {
             pending_save: None,
             personal_save: personal_savegames,
             save_dir_checked: false,
+            access: Accessibility::new(),
+            access_captions: BTreeMap::new(),
         };
         // The settings' table first, then the game file's on top, as the
         // original engine loads them.
@@ -1256,6 +1263,9 @@ impl World {
         self.draw_inventory(list, white);
         self.draw_windows(list, false, white);
         self.draw_responses(list, white);
+        if let Some(white) = white {
+            self.draw_access_hint(list, white);
+        }
         if self.subtitles {
             for draw in &self.sentences {
                 if let Some(font) = self.fonts.get(&draw.font) {
@@ -1670,6 +1680,10 @@ impl World {
             let length = text.chars().count() as u64;
             duration = (self.subtitles_speed.max(0) as u64 * length).max(1000);
         }
+        // Without a speech file, the text-to-speech reads the sentence.
+        if sound.is_none() {
+            self.access_speak(&text, SpeechKind::Talk);
+        }
         let mods = self.subtitle_mods(id);
         let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
         let (mut x, mut y) = match &kind {
@@ -1789,6 +1803,7 @@ impl World {
             view.skip_sentences(timer);
         }
         self.stop_speech();
+        self.access.stop();
     }
 
     /// A left or right click while the game is not interactive skips
@@ -2323,6 +2338,7 @@ impl Runtime {
     /// run on the first tick. The startup scene, if the game names one,
     /// is scheduled first.
     pub fn start(&mut self) {
+        self.world.init_accessibility();
         if let Some(scene) = self.world.startup_scene.clone() {
             self.world.schedule_scene(&scene, true);
         }
@@ -2417,6 +2433,7 @@ impl Runtime {
         self.world.update_sounds();
         self.world.collect_hits();
         self.world.update_active_object();
+        self.world.update_accessibility();
         self.world.update_ui(&mut self.engine);
         self.world.update_inventory(&mut self.engine);
         self.world.prepare_inventory_texts();
@@ -2557,6 +2574,9 @@ impl Runtime {
             if code == 27 {
                 self.world.stop_video(&mut self.engine);
             }
+            return;
+        }
+        if self.world.access_key(&mut self.engine, code) {
             return;
         }
         let game = self.world.game_id;

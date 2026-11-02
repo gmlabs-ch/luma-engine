@@ -1268,6 +1268,7 @@ impl World {
             return true;
         }
         let pause_music = window.pause_music;
+        self.access.clear_active();
         self.make_freezable(engine, id, false);
         if let Some(control) = self.control_mut(id) {
             if let Some(window) = control.window_mut() {
@@ -2070,6 +2071,7 @@ impl World {
     /// do.
     pub fn edit_key(&mut self, id: NativeId, code: i32, text: Option<char>) -> bool {
         let (shift, control_down) = (self.keyboard.shift, self.keyboard.control);
+        let mut typed: Option<char> = None;
         let Some(control) = self.control_mut(id) else {
             return false;
         };
@@ -2169,6 +2171,7 @@ impl World {
                         end += ch.len_utf8();
                     }
                     start = end;
+                    typed = Some(ch);
                 }
                 None => handled = false,
             },
@@ -2182,6 +2185,10 @@ impl World {
             if let Some(parent) = parent {
                 self.queue_event(parent, name);
             }
+        }
+        // The key typed is read out (`CUIEdit::HandleKeypress`).
+        if let Some(ch) = typed {
+            self.access_speak(&ch.to_string(), crate::accessibility::SpeechKind::Keypress);
         }
         handled
     }

@@ -24,7 +24,7 @@ const GAME_SCRIPT: &str = r#"
 global result = new Object();
 var shots = Game.SaveDirectory + Directory.PathSeparator + "shots";
 result.created = Directory.Create(shots);
-var f = new File(shots + "\\one.png");
+var f = new File(shots + "\one.png");
 f.OpenAsBinary(2);
 f.WriteByte(1);
 f.Close();
@@ -45,7 +45,7 @@ result.type = Directory.Type;
 result.cwd = Directory.CurrentDirectory;
 result.temp = Directory.TempDirectory;
 result.deletedFull = Directory.Delete("shots");
-result.escaped = Directory.Create("..\\outside");
+result.escaped = Directory.Create("..\outside");
 "#;
 
 fn compile(source: &str) -> Vec<u8> {

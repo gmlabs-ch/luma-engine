@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -199,6 +199,7 @@ world_state! {
     startup_scene: Option<String>,
     mouse_lock: (i32, i32, i32, i32),
     temp_disable_save_state: bool,
+    access_captions: BTreeMap<NativeId, String>,
     loading_screen: Option<crate::world::ScreenImage>,
     saving_screen: Option<crate::world::ScreenImage>,
     timer: u64,
