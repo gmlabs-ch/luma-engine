@@ -45,8 +45,11 @@ in this order (`Runtime::tick`):
 
 The frame is then drawn: the scene with the actors (each object's
 particles right after it; a 3D actor takes its place in the order at
-its projected position, and `World::three_d_draws` hands the 3D pass
-its model, lights and shadow), the windows marked `IN_GAME`, the other windows, the sentences, the cursor, the fader's
+its projected position, where its shadow, its model and its attachments
+are pushed as 3D items of the draw list, and the scene's shadow
+receivers are written to the depth buffer before the main layer's
+nodes, see [3d-actors.md](3d-actors.md) section 10), the windows marked
+`IN_GAME`, the other windows, the sentences, the cursor, the fader's
 colour over everything, the loading icon (see
 [saving.md](saving.md#loading-and-saving-screens-loading-icon)), and
 last the messages of `Game.Msg`: short

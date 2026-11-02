@@ -41,7 +41,8 @@ luma = { version = "0.0.1", features = ["adventure", "audio-device"] }
 ```
 
 and uses `luma::adventure::Runtime`, `luma::render::window::run` and so
-on. `luma-player` is built this way. A game that needs none of the
+on. `luma-player` is built this way, with `3d` as well so that it plays
+the games with 3D actors. A game that needs none of the
 adventure behaviour depends on `luma` with `default-features = false`
 and gets the core alone; the CI checks that this builds.
 

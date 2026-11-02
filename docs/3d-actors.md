@@ -1,6 +1,6 @@
 # 3D actors on 2D backgrounds
 
-Status: **study, partly implemented.** This note collects what the
+Status: **study, implemented.** This note collects what the
 Wintermute Engine 1.x sources do for 3D characters standing on painted 2D
 backgrounds ("2.5D"), what Luma Engine does to do the same, and the split
 into tasks. The parts marked **as implemented** are the specification of
@@ -17,11 +17,10 @@ mesh pass of the renderer (sections 10.1 and 12.3, specified in
 [rendering.md](rendering.md#3d-pass)) and, in `crates/luma-adventure`
 behind its `3d` feature (which `luma`'s `3d` feature turns on), the actor
 logic (section 8), the attachments (8.6), the hit testing (10.3), the
-textures set by script (10.5), the scripting surface (11) and the saved
-games (8.7): tasks 13 to 20, all but the drawing. The drawing hookup of
-the actors into the mesh pass and the shadows are still the plan;
-`World::three_d_draws` hands the drawing step what it needs, the
-attachments and the material overrides included.
+textures set by script (10.5), the scripting surface (11), the saved
+games (8.7) and the drawing of the actors with their shadows (10.2,
+10.4, 12.4): tasks 10 to 20. What remains is listed in 12.4 (the
+`SHADOW_MODEL`, the geometry overlay) and in section 16.
 
 ## 0. Sources and rules
 
@@ -1303,6 +1302,24 @@ the **main** layer, the remaining free objects are drawn the same way. So:
   3D object in a scene without geometry.
 - The debug overlay (`Scene.ShowGeometry`) is drawn after all layers.
 
+**As implemented** (`luma_adventure::draw3d`, `World::draw`,
+`SceneView::draw_with_overlays`): the 3D actors are the `DrawItem::
+Other` items of the order, sorted and placed exactly like the 2D free
+objects (their `Drawable` has no sprite). `World::scene_draw_parts`
+puts in the scene's `Overlays` the 3D items of each actor, by its index
+among the free objects (`Overlays::three_d`: the shadow, then one mesh
+draw per material of each mesh of the model, then the attachments'),
+and the shadow receivers (`Overlays::before_main`); `draw_with_overlays`
+pushes the receivers when it enters the main layer, before its first
+node, and each actor's items in its place, before the actor's particle
+overlay, so that the painter's order of the frame holds and the depth
+buffer only orders 3D things among themselves (section 10.1). `World::
+three_d_draws` gives the data; `World::upload`, called with the renderer
+before the frame is drawn, keeps the GPU side (`Render3d`: the meshes
+updated with the posed vertices, the textures, the receivers). Without
+geometry the scene has no `Scene3d`, `three_d_draws` is `None` and no
+3D object is drawn. The debug overlay is not drawn (12.4).
+
 ### 10.3 Hit testing
 
 **As implemented**: `Actor3d::update` projects the eight corners of the
@@ -1386,6 +1403,64 @@ LIGHT_POSITION * Scale`.
 - Stencil and flat/simple must not be mixed in one scene (the manual says
   artifacts appear).
 
+**As implemented** (`luma_adventure::draw3d`, over the shadow items of
+[rendering.md](rendering.md#shadow-items)); the effective type comes
+with `Actor3dDraw::shadow_type`, the colour, the light position (`actor
+.position + LIGHT_POSITION * Scale`), the size and the image with it;
+the shadow is pushed before the model and the attachments cast with the
+actor (`RenderModel`, `DisplayShadowVol`). Where Luma differs from the
+original, on purpose:
+
+- **Simple**: the unit quad of `CreateSimpleShadow` (`-1..1` in X/Z,
+  the image mapped once), with `Scaling(size, 1, size) * RotationY(angle)
+  * Translation(position)`, the actor's or the game's image decoded with
+  the magenta colour key and mipmapped, else a default image generated in
+  code (`default_shadow_image`: a 64x64 black blob, alpha 192 at the
+  centre falling smoothly to 0 at the edge, standing in for the
+  original's `shadow.png`), drawn **unlit** (emissive white, the texture's
+  alpha), alpha-blended, depth test on, no depth writes.
+- **Flat**: no light-view pre-pass. The posed meshes of the model and of
+  the attachments are drawn a second time with the world matrix followed
+  by the planar shadow matrix `shadow_matrix(plane y = position.y, light)`
+  (`D3DXMatrixShadow` for a point light: every vertex goes to where the
+  line from the shadow light through it meets the plane), in a solid
+  colour, no texture, no light, no depth writes, with the renderer's
+  `stencil_once` (reference `other_index % 255 + 1`) so that the
+  overlapping triangles of the silhouette darken the floor once, as the
+  original's single textured quad does. The colour is the shadow colour's
+  alpha with its RGB channels **squared**, since the original modulates
+  the silhouette texture (drawn in the shadow colour) by the floor quad's
+  vertex colour (the shadow colour again); for the default black it is
+  black. Differences: the silhouette is not cut at 250 units from the
+  actor, and it is sharp where the original's 512x512 texture is
+  filtered. A keyed texture makes no hole in the original either (the
+  alpha stage is disabled for the pre-pass), nor here.
+- **Stencil**: the algorithm of `C3DShadowVolume::AddMesh` as written,
+  on each posed mesh of the model and of the attachments
+  (`draw3d::add_shadow_volume`): the face normal `(v2 - v1) x (v1 - v0)`,
+  a face turned toward the light when its dot with the light direction
+  (the direction from the actor to its shadow light, moved to the model's
+  space by the inverse world matrix, `D3DXVec3TransformNormal`) is
+  negative, the position-welded adjacency (`draw3d::Adjacency`, exact
+  position equality, computed once per model mesh and again when the mesh
+  changes shape), the quads `(v1, v2, v3), (v2, v4, v3)` with `v3, v4 = v1,
+  v2 - light * |light - position| * 1.5`. The vertices of every model are
+  moved to world space and pushed as one `ShadowVolumeDraw`, followed by
+  the `StencilFill` in the shadow colour; the renderer counts them with
+  wrapping increments and decrements as Direct3D did (the quads face
+  inward, so a shadowed pixel counts to 255; see rendering.md). The
+  `SHADOW_MODEL` is not used yet: the display model casts.
+- **Receivers**: when `min(Game.MaxShadowType, Scene.MaxShadowType)` is
+  stencil (`ThreeDFrame::stencil_shadows`), the active nodes flagged
+  `RECEIVE_SHADOWS` (walk planes, blocks and generics alike, `SceneGeometry
+  ::nodes`) are uploaded once per scene and geometry and pushed as
+  `DepthOnlyDraw`s, counter-clockwise faces culled as `RenderShadowGeometry`
+  sets `D3DCULL_CCW`, before the first node of the main layer. They hide
+  the actors behind them, as in the original.
+- Mixing: a flat shadow leaves its stencil reference where it drew and a
+  stencil fill clears only where it passed, so flat and stencil shadows
+  in one frame interfere, as the manual warns for the original.
+
 ### 10.5 Textures, sprites and videos as textures
 
 Materials keep the `.x` texture, or one replaced by script:
@@ -1410,6 +1485,20 @@ decoded frame to the mesh pass as the texture; the video is not an entity
 video and has no sound. The overrides are saved with the actor (8.7) and
 the files are opened again after a load. Attachments have no material
 members.
+
+The drawing side (`draw3d::Render3d`): a material whose `name` matches
+an override (ignoring ASCII case) is textured with it; the texture of a
+file that is not a `.sprite` is decoded with the colour key and
+mipmapped like a model texture; a `.sprite` is parsed once, every image
+of its frames uploaded, and its `AnimState` stepped with the game timer
+when the frame is prepared (`World::upload`), the first sub-frame's image
+of the current frame being the texture (the sprite's hotspots, moves,
+sounds and scripts play no part); a Theora video is opened without sound
+and stepped on the game timer with the entity videos' rules, restarted
+from its first frame when it ends, its decoded frame uploaded as the
+texture (no mipmaps). A file that cannot be opened is logged once and
+the material keeps its `.x` texture. An override an actor no longer has
+(or that names another file) is dropped with its GPU texture.
 
 ## 11. The scripting surface
 
@@ -1549,7 +1638,7 @@ the core crates:
 | `.X` reader (text, binary, compressed), `.3ds` reader, `.geometry`, `.act3d`, `.anim` parsers: pure data | `luma-3d` | **Done**: `luma_3d::three_ds`, `node_patterns`, `xfile`, `xfile_binary`, `model`, `actor3d`; the module crate is re-exported by `luma` as `luma::three_d` under the `3d` feature; `luma-formats` only parses the scene keys. |
 | Model, skeleton, animation channels, CPU skinning, geometry queries, path finder, camera projection, picking | `luma-3d` | No GPU, no game logic, unit-testable. **Done** for the skeleton, channels, skinning and the model pick (`luma_3d::animation`). |
 | The mesh pass on wgpu (depth buffer, pipelines, lighting shader, textures with mipmaps) | `luma-render` | **Done**: a `MeshDraw` item of the `DrawList`, see 12.3. Generic (plain matrices, vertices, lights); knows nothing of actors or scenes. |
-| Shadows, the geometry overlay, the conversion of models and lights into mesh draws | `luma-3d`, on the public API of `luma-render` | See 12.4. |
+| Shadows and the conversion of models and lights into mesh draws | `luma-adventure` (`draw3d`), on the public API of `luma-render` | **Done**: see 12.4; the geometry overlay is not drawn. |
 | `Actor3D` object, its state machine, 2D/3D scene glue, scripts | `luma-adventure`, behind a Cargo feature `3d` | Genre behaviour. |
 | Feature `3d` in `luma` (off by default) that enables `luma-3d` and `luma-adventure/3d` | `luma` | `docs/modules.md`. |
 
@@ -1613,32 +1702,46 @@ wrote itself (`IntersectTriangle`, `PickGetIntersect`,
 `luma_3d::model::Material` into a `MeshMaterial`, of a skinned mesh into
 `MeshVertex`es and of `C3DLight`s into `Light`s is the module's.
 
-### 12.4 The 3D pass in `luma-3d`
+### 12.4 The 3D pass: `luma_adventure::draw3d`
 
-With the mesh pass in `luma-render`, the module's part is the glue and
-the shadows:
+**As implemented.** The glue between `World::three_d_draws` and the
+renderer lives in the adventure module, not in `luma-3d` as first
+planned: it needs the world (the files through the `Vfs`, the game
+timer, the scene's path) and `luma-3d` stays free of the renderer.
 
-- **Mesh conversion.** One `MeshHandle` per `.X` mesh, uploaded at load
-  with the bind-pose vertices; each frame, after skinning,
-  `update_mesh` with the `SkinnedMesh` vertices (already in model space),
-  then one `MeshDraw` per material subset (the index range of its
-  triangles; `triangle_materials` groups them). World matrix: `BObject::
-  GetMatrix` (section 2); view-projection: section 4.1. Light colours are
-  the `0..255` channels divided by 256 (3.4); the light list is the
-  scene's selection (`EnableLights`: all the active lights, or the nearest
-  8 to the object, minus the ignored names), ambient the scene's or the
-  object's override.
-- **Stencil shadows:** shadow volumes built on the CPU every frame from
-  the skinned triangles (the algorithm of 10.4) into a dynamic buffer; two
-  draws with `IncrementClamp`/`DecrementClamp` on depth pass (cull-mode
-  switch), then a full-screen quad with stencil test `>= 1` and stencil pass
-  op `Zero`, which clears the stencil without a clear call. The depth prepass
-  of receiver meshes is a depth-only pipeline. These need stencil states
-  and a depth-only pipeline added to `luma-render` (task 12b).
-- **Flat shadows:** a pre-pass renders the actor into a 512x512 texture
-  (own depth buffer) before the main pass; the floor quad samples it with a
-  projective matrix (task 12c).
-- **Picking** needs the skinned triangles on the CPU: same buffers, kept.
+- **`Render3d`**, a field of the world (`World::render3d`), is the GPU
+  side kept across frames: per actor or attachment and mesh index the
+  uploaded mesh (`Renderer::upload_mesh` with the posed vertices and the
+  triangles **sorted by material**, so that each material is one index
+  range as the attribute table of a `D3DXMesh` makes it; `update_mesh`
+  every frame with the skinned pose; uploaded again when a reload changed
+  the triangle count) and its adjacency, the textures by path (decoded
+  with the magenta colour key, `Renderer::mesh_texture` for the mipmaps;
+  a file that fails is logged and remembered as missing), the script
+  textures (10.5), the shadow receivers (10.4), the unit quad and the
+  default image of the simple shadows. `World::upload` refreshes it
+  (`Render3d::upload`) and frees what belongs to actors and attachments
+  that are gone; it is empty without the `3d` feature.
+- **Items.** `World::draw` asks `Render3d::overlays` for the frame's
+  items (10.2): per material of each mesh a `MeshDraw` with the world
+  matrix of section 2 and the frame's view-projection (`Projection::
+  view_projection`, both through `Mat4::to_cols_array` and
+  `luma_render::matrix`), the material's diffuse and emissive, its
+  texture (the override's when a script set one), the ambient (the
+  actor's override else the scene's), the lights converted by
+  `convert_light` (channels divided by 256, point lights with range
+  100000, spots with `theta 0.5`, `phi 1.0`, falloff 1, range `|target -
+  position|`, as 3.4 says), the fog (`Scene.EnableFog`, colour channels
+  divided by 255), `cull_backfaces = !DrawBackfaces` and the actor's blend
+  mode. The attachments follow with their full matrix and their own
+  backface flag, lit like the actor. The `AlphaColor` tint is not applied,
+  as the original's texture stage ignores it (10.1).
+- **Shadows**: 10.4.
+- **Picking** uses the skinned triangles on the CPU (10.3), untouched.
+- **Not done**: the `SHADOW_MODEL` (the display model casts the shadow)
+  and the geometry overlay of `Scene.ShowGeometry` (wireframe in the
+  original, which needs a line pipeline the renderer does not have; the
+  flag is not stored either).
 
 ### 12.5 `luma-adventure`
 
@@ -1659,13 +1762,14 @@ saved games keep their shape):
   (`GEOMETRY`, `CAMERA`, `WAYPOINT_HEIGHT`), owns the path finder and
   the fog, and keeps the projection of the frame for the drawing step.
 - Drawing order: a 3D actor is a free object at its projected position
-  (`DrawItem::Other`), with an empty `Drawable`; the 3D pass takes
+  (`DrawItem::Other`), with an empty `Drawable`; the 3D pass (12.4) takes
   `World::three_d_draws()`: the frame's `Projection`, the scene's
-  ambient and fog and geometry (shadow receivers), and per actor its
-  index among the free objects, the posed `AnimatedModel`, the world
-  matrix, the lights of 3.4 (`Scene3d::lights_for`), the ambient
-  override, the backface flag and the shadow settings (the effective
-  type, colour, light position, size, image).
+  ambient and fog and geometry (shadow receivers), whether stencil
+  shadows are allowed, and per actor its index among the free objects,
+  the posed `AnimatedModel`, the world matrix, position and angle, the
+  lights of 3.4 (`Scene3d::lights_for`), the ambient override, the
+  backface flag, the shadow settings (the effective type, colour, light
+  position, size, image), the material overrides and the attachments.
 - Hit areas: 10.3.
 - Scripts: `natives_actor3d.rs`, `scene3d.rs`, the game's shadow rows in
   `natives.rs`.
@@ -1674,8 +1778,9 @@ saved games keep their shape):
   (`AttachmentDraw`, with the full matrix) and `Actor3dDraw::materials`;
   the bone emitter through the particle system (`natives_particles.rs`).
 - Saving: 8.7, layout version 14.
-- The headless player loads and runs 3D scenes as they are; only the
-  drawing needs the 3D pass.
+- The player is built with the `3d` feature: the window and the
+  headless `--screenshot` draw the 3D actors through `World::upload` and
+  `World::draw` like everything else.
 
 ### 12.6 Testing
 
@@ -1688,7 +1793,15 @@ saved games keep their shape):
   ticks and the quaternion conjugate), skinning of the two-bone box,
   blending halfway, events.
 - Rendering tests use the offscreen path and compare a few pixels (a lit
-  triangle, a depth overlap, a shadow darkening).
+  triangle, a depth overlap, a shadow darkening): `crates/luma-render/
+  tests/shadow.rs` for the stencil items and the mesh options,
+  `crates/luma-adventure/src/draw3d.rs` for the silhouette of a cube, the
+  adjacency, the planar shadow matrix and the light conversion, and
+  `crates/luma-player/tests/three_d.rs` runs the player headless on a
+  synthetic 3D game (a lit quad on a painted background, a walk plane, a
+  camera, a light) with each `MAX_SHADOW_TYPE` and checks the pixels the
+  `Projection` names (the body lit, the floor green, the shadow darker
+  where the light casts it). All skip without a graphics adapter.
 - Real files are opt-in under `testdata/local/` and skip when absent. The
   WME repository carries a demo (`install/source/projects/wme_demo_3d`) that
   is the only 3D sample known to us. It is loose files (no `.dcp`); its
@@ -1751,22 +1864,22 @@ read first.
 |---|------|-----------|------|-------|
 | 10 | **`luma-render` extension.** Depth/stencil buffer cleared once per frame, quads without depth, `MeshDraw` items of the `DrawList` drawn in order in the same pass, mesh upload and per-frame vertex update, tests of the depth test among meshes and of the viewport. **Done** (12.3, [rendering.md](rendering.md#3d-pass)). | `BRenderD3D.cpp` (`Fill`, `Setup2D`/`Setup3D`) | M | |
 | 11 | **Mesh pass.** Pipelines, dynamic skinned buffers, materials and textures with mipmaps and the colour key, lights (model of 3.4), ambient, fog, alpha test and blend mode, culling option. **Done** in `luma-render` (shader `mesh.wgsl`); the light *selection* per object (`EnableLights`) and the geometry debug overlay (`Scene.ShowGeometry`, the validation tool for task 7) move to task 13, which has the scene. | `BRenderD3D.cpp` (`Setup3D`), `XMesh.cpp` (`Render`), `3DMaterial.cpp`, `3DLight.cpp`, `AdSceneGeometry.cpp` (`Render`, `EnableLights`, `CreateLights`) | L | 7, 9, 10 |
-| 12a | **Simple shadows.** | `3DShadowGen.cpp` (`RenderSimple`) | S | 11 |
-| 12b | **Stencil shadows.** CPU shadow volumes, stencil passes, receiver depth prepass, attachments, `SHADOW_MODEL`. | `3DShadowVolume.cpp`, `AdActor3DX.cpp` (`DisplayShadowVolume`), `AdSceneGeometry.cpp` (`RenderShadowGeometry`), `XMesh.cpp` (`UpdateShadowVol`), `AdScene.cpp` (`TraverseNodes`) | M | 11, 9 |
-| 12c | **Flat shadows.** Light-view pre-pass to texture, projective floor quad. | `3DShadowGen.cpp` (`Render`, `SetAdjustedProjectionMatrix`, `SetTextureMatrixStage0Stage1`) | M | 11 |
+| 12a | **Simple shadows.** **Done** (10.4; the default image is generated). | `3DShadowGen.cpp` (`RenderSimple`) | S | 11 |
+| 12b | **Stencil shadows.** CPU shadow volumes, stencil passes, receiver depth prepass, attachments, `SHADOW_MODEL`. **Done** but the `SHADOW_MODEL` (10.4, the shadow items of `luma-render`). | `3DShadowVolume.cpp`, `AdActor3DX.cpp` (`DisplayShadowVolume`), `AdSceneGeometry.cpp` (`RenderShadowGeometry`), `XMesh.cpp` (`UpdateShadowVol`), `AdScene.cpp` (`TraverseNodes`) | M | 11, 9 |
+| 12c | **Flat shadows.** Light-view pre-pass to texture, projective floor quad. **Done** as a planar projection of the posed triangles with a stencil mask (10.4), not a pre-pass. | `3DShadowGen.cpp` (`Render`, `SetAdjustedProjectionMatrix`, `SetTextureMatrixStage0Stage1`) | M | 11 |
 
 ### Phase C: the actor in the game
 
 | # | Task | WME files | Size | After |
 |---|------|-----------|------|-------|
-| 13 | **Scene integration.** Load geometry with the scene, active camera and light/node state, the 2D position of 3D objects, the draw order hook with `Other` items, geometry scenes in the headless player. **Done** (`luma_adventure::scene3d`, `World::projection_3d`, `World::three_d_draws`); the custom draw item waits for the 3D pass. | `AdScene.cpp` (`LoadBuffer`, `TraverseNodes`, `DisplayRegionContent`, `UpdateFreeObjects`, `ScrollTo`) | M | 5, 7, 11 |
+| 13 | **Scene integration.** Load geometry with the scene, active camera and light/node state, the 2D position of 3D objects, the draw order hook with `Other` items, geometry scenes in the headless player. **Done** (`luma_adventure::scene3d`, `World::projection_3d`, `World::three_d_draws`, the hookup in `draw3d`). | `AdScene.cpp` (`LoadBuffer`, `TraverseNodes`, `DisplayRegionContent`, `UpdateFreeObjects`, `ScrollTo`) | M | 5, 7, 11 |
 | 14 | **`Actor3D` core.** Load, idle, `PlayAnim` family, drop to floor, `SkipTo`, `X`/`Y`, direction, scale; `Game.LoadActor3D`/`Scene.LoadActor3D`/`Unload*`. **Done** (`luma_adventure::actor3d`). | `AdActor3DX.cpp`, `AdObject3D.cpp`, `AdActor3D.cpp` (`CreateFromFile`) | M | 6, 9, 13 |
 | 15 | **Walking, turning, direct control, talking.** 8.2 to 8.4 over tasks 8 and the existing 2D path module for `2D_PATHFINDING`; blocked region and waypoints of the actor. **Done**; the actor's own blocked region and waypoints are parsed and not yet handed to the 2D floor of the other actors. | `AdActor3DX.cpp` (`Update`, `GoTo*`, `FollowPath*`, `GetNextStep*`, `PrepareTurn`, `TurnToStep`) | L | 8, 14 |
 | 16 | **Hit testing and captions.** Projected rectangle and polygon pick, registration order, `GetHeight`. **Done** (10.3). | `XModel.cpp` (`IsTransparentAt`, `UpdateBoundingRect`), `XMesh.cpp` (`PickPoly`), `BRenderer.cpp` (`GetObjectAt`) | S | 9, 14 |
-| 17 | **Attachments and bones.** `AddAttachment`, `GetAttachment`, the attachment object, `GetBonePosition2D/3D`, `CreateParticleEmitterBone`. **Done** (`Attachment3d`, `AttachmentDraw`; the drawing of the attachments and their stencil volumes is the mesh pass's, task 12). | `AdAttach3DX.cpp`, `AdActor3DX.cpp` (`UpdateAttachments`, `DisplayAttachments`, `UpdatePartEmitter`), `AdObject3D.cpp` (`GetBonePosition*`) | S | 14 |
+| 17 | **Attachments and bones.** `AddAttachment`, `GetAttachment`, the attachment object, `GetBonePosition2D/3D`, `CreateParticleEmitterBone`. **Done** (`Attachment3d`, `AttachmentDraw`; drawn and casting with the actor, 12.4, 10.4). | `AdAttach3DX.cpp`, `AdActor3DX.cpp` (`UpdateAttachments`, `DisplayAttachments`, `UpdatePartEmitter`), `AdObject3D.cpp` (`GetBonePosition*`) | S | 14 |
 | 18 | **Scripting surface.** The remaining methods and properties of section 11, scene lights/camera/fog/nodes, game shadow properties, the `CBObject` shadow members on every object. **Done**. | `AdActor3DX.cpp`, `AdObject3D.cpp`, `AdScene.cpp`, `AdGame.cpp`, `BGame.cpp`, `BObject.cpp` | M | 14, 15, 17 |
 | 19 | **Saved games.** 8.7 into `save.rs`, geometry state, animation channels, attachments, material overrides. **Done** (layout version 14); the open path request is not kept. | `Persist` functions of the files above | M | 18 |
-| 20 | **Material scripting.** `SetTexture` with images and sprites, `SetTheoraTexture`; `EFFECT` ignored. **Done** as data (`MaterialOverride`); the drawing step loads the files and hands the frames to the mesh pass (10.5). | `XModel.cpp` (`SetMaterial*`), `3DMaterial.cpp` | S | 11, 18 |
+| 20 | **Material scripting.** `SetTexture` with images and sprites, `SetTheoraTexture`; `EFFECT` ignored. **Done** (`MaterialOverride`; the drawing step loads the files and textures the materials with their frames, 10.5). | `XModel.cpp` (`SetMaterial*`), `3DMaterial.cpp` | S | 11, 18 |
 
 ### Order
 
@@ -1819,10 +1932,12 @@ models are not part of it.
    actors black; verify on the demo (it has four lights).
 6. **Untextured materials and the simple shadow's lighting.** What the
    fixed-function pipeline did exactly is not visible in the sources.
-7. **Flat shadow pixel details** (alpha of the silhouette, the 0.5-texel
-   nudge): an approximation by a planar projection of the vertices onto
-   `y = actor.y` is much simpler (no pre-pass) and probably close; is the
-   difference acceptable?
+   Decided for now: untextured materials draw their lit colour, the
+   simple shadow is drawn unlit (10.4); to be checked against the demo.
+7. **Flat shadow pixel details.** Decided: the planar projection of the
+   posed vertices onto `y = actor.y` with a stencil mask (10.4), no
+   pre-pass; the 250-unit cut and the texture filtering of the original
+   are not reproduced. Revisit if a game shows the difference.
 8. **Path-finder time budget.** Closed: the original's 15 ms budget is
    dead code (9.3), the request always runs to completion in one game
    loop, and `PathFinder::run` does the same.
@@ -1843,7 +1958,8 @@ models are not part of it.
     `.png`, all loaded by `luma_formats::Image`; power-of-two limits do not
     apply on modern GPUs.
 13. **`ShowGeometry` overlay** is a debugging aid; is it wanted in the
-    player's UI or only in tests?
+    player's UI or only in tests? Not drawn yet (12.4): the original's is
+    a wireframe and the renderer has no line pipeline.
 
 ## 17. Index of source locations
 
