@@ -847,6 +847,18 @@ fn fade_script() -> Vec<u8> {
     store(&mut a, "fadeT1");
     call(&mut a, "Game", "GetFadeColor", &[]);
     store(&mut a, "fadeColor");
+    // The scene's own fade, not waited for: its colour is read at once,
+    // before the first update, so with no alpha yet.
+    a.def_glob_var("Scene");
+    call(
+        &mut a,
+        "Scene",
+        "FadeOutAsync",
+        &[Arg::Int(100), Arg::Int(1), Arg::Int(2), Arg::Int(3)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "Scene", "GetFadeColor", &[]);
+    store(&mut a, "sceneFadeColor");
     a.push_bool(true);
     store(&mut a, "faded");
     a.emit(Instruction::Ret);
@@ -2201,6 +2213,20 @@ fn mouse_keyboard_cursors_and_fades() {
     assert_eq!(
         result(&runtime, "fadeColor"),
         Value::Int(luma_script::rgba(10, 20, 30, 255))
+    );
+    assert_eq!(runtime.world.fader().color().unwrap().a, 255);
+    // The scene's fader is separate from the game's and runs on its own.
+    assert_eq!(
+        result(&runtime, "sceneFadeColor"),
+        Value::Int(luma_script::rgba(1, 2, 3, 0))
+    );
+    for _ in 0..10 {
+        runtime.tick(16);
+    }
+    let scene_fade = runtime.world.scene_fader().color().unwrap();
+    assert_eq!(
+        (scene_fade.r, scene_fade.g, scene_fade.b, scene_fade.a),
+        (1, 2, 3, 255)
     );
     assert_eq!(runtime.world.fader().color().unwrap().a, 255);
     std::fs::remove_dir_all(&dir).unwrap();

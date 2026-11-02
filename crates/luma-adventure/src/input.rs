@@ -826,6 +826,23 @@ impl World {
             });
         }
     }
+
+    /// Draws the scene fader's colour over the scene viewport
+    /// (`CBFader::Display` through `FadeToColor`, which fills the
+    /// current viewport).
+    pub fn draw_scene_fade<'a>(&self, list: &mut DrawList<'a>, white: &'a luma_render::Texture) {
+        if let Some(color) = self.scene_fader.color() {
+            let (x, y, w, h) = self.viewport();
+            list.push(Quad {
+                texture: white,
+                dst: Rect::new(x as f32, y as f32, w as f32, h as f32),
+                src: None,
+                tint: color,
+                flip_x: false,
+                flip_y: false,
+            });
+        }
+    }
 }
 
 /// The area a sub-frame drawn with its hotspot at `(x, y)` is registered

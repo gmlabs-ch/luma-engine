@@ -48,7 +48,8 @@ A saved game holds:
 - the sounds: each object's sound and the music channels, by file,
   position, looping, volume and whether they play or are paused; the
   crossfade in progress; the speech directories;
-- the fader, the cursors chosen, the mouse and the keyboard state;
+- the game's fader and the scene's, the cursors chosen, the mouse and
+  the keyboard state;
 - the game's own settings a script may change: name, caption,
   subtitles, talk and video skip buttons, `Interactive`, the main
   object, `TextEncoding`, `StartupScene`, the mouse lock rectangle,

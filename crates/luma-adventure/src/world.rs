@@ -130,6 +130,10 @@ pub struct World {
     pub(crate) hits: Vec<HitArea>,
     pub(crate) fader: Fader,
     pub(crate) fader_id: NativeId,
+    /// The scene's fader (`Scene.FadeOut`), drawn over the scene
+    /// viewport under the windows; reset with every scene.
+    pub(crate) scene_fader: Fader,
+    pub(crate) scene_fader_id: NativeId,
     pub(crate) ui: Ui,
     /// The dialogue response box and its state.
     pub(crate) responses: crate::responses::Responses,
@@ -221,6 +225,7 @@ impl World {
         let response_box_id = objects.insert(Kind::ResponseBox);
         let scene_id = objects.insert(Kind::Scene);
         let fader_id = objects.insert(Kind::Fader);
+        let scene_fader_id = objects.insert(Kind::SceneFader);
         let personal_savegames = game_file.personal_savegames;
         let startup_scene = game_file.startup_scene.clone();
         let scene_viewport = game_file.scene_viewport.map(|[x, y, w, h]| (x, y, w, h));
@@ -270,6 +275,8 @@ impl World {
             hits: Vec::new(),
             fader: Fader::default(),
             fader_id,
+            scene_fader: Fader::default(),
+            scene_fader_id,
             ui: Ui::default(),
             responses: crate::responses::Responses::default(),
             response_box_id,
@@ -885,7 +892,7 @@ impl World {
             Some(Kind::Sprite(_)) => "sprite".to_string(),
             Some(Kind::Frame { .. }) => "frame".to_string(),
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
-            Some(Kind::Fader) => "fader".to_string(),
+            Some(Kind::Fader) | Some(Kind::SceneFader) => "fader".to_string(),
             Some(Kind::Actor) => self
                 .actor(id)
                 .map(|a| a.def.name.clone())
@@ -1240,6 +1247,11 @@ impl World {
         }
         if let Some(view) = &self.scene {
             view.draw_with(list, camera, &self.drawables());
+            // The scene's fader covers the scene viewport, under the
+            // windows (`CAdScene::TraverseNodes` displays it last).
+            if let Some(white) = white {
+                self.draw_scene_fade(list, white);
+            }
         }
         self.draw_windows(list, true, white);
         self.draw_inventory(list, white);
@@ -1385,6 +1397,8 @@ impl World {
         self.active_object = None;
         self.hits.clear();
         self.scene = Some(view);
+        // Every scene has its own fader (`CAdScene::m_Fader`).
+        self.scene_fader = Fader::default();
         self.restore_scene_state();
         self.hide_taken_item_entities();
         for (_, actor) in &mut self.actors {
@@ -1486,6 +1500,11 @@ impl World {
     /// The fader's handle, for scripts to wait on.
     pub fn fader_id(&self) -> NativeId {
         self.fader_id
+    }
+
+    /// The current scene's fader (`Scene.FadeOut`), over the scene only.
+    pub fn scene_fader(&self) -> &Fader {
+        &self.scene_fader
     }
 
     /// The fonts loaded.
@@ -1995,7 +2014,7 @@ impl Natives for World {
             Some(Kind::Frame { .. }) => "frame".to_string(),
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
-            Some(Kind::Fader) => "fader".to_string(),
+            Some(Kind::Fader) | Some(Kind::SceneFader) => "fader".to_string(),
             Some(Kind::Control) => self
                 .control(id)
                 .map_or("control", Control::type_name)
@@ -2130,6 +2149,7 @@ impl Host for World {
                 .is_none_or(|v| !v.is_talking(*r) && !v.is_playing_anim(*r)),
             Some(Kind::Scene) => self.is_scrolled(),
             Some(Kind::Fader) => self.fader.ready,
+            Some(Kind::SceneFader) => self.scene_fader.ready,
             Some(Kind::ResponseBox) => self.responses.waiting.is_none(),
             Some(Kind::Control) => self
                 .control(id)
@@ -2307,6 +2327,7 @@ impl Runtime {
         self.world.update_speech();
         let (timer, clock) = (self.world.timer, self.world.clock);
         self.world.fader.update(timer, clock);
+        self.world.scene_fader.update(timer, clock);
         self.engine.tick(&mut self.world);
         self.world.update_scene();
         self.world.update_actors();

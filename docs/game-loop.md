@@ -183,6 +183,14 @@ game still fades. `GetFadeColor` reads the colour laid over the frame.
 A scene change fades in from black over 200 ms unless `ChangeScene` is
 told not to.
 
+The scene has a fader of its own (`Scene.FadeOut`, `FadeIn`, their
+`Async` forms and `Scene.GetFadeColor`, same arguments): its colour
+covers the scene viewport only, drawn after the scene's objects and
+under the windows, the inventory, the sentences and the cursor
+(`CAdScene::TraverseNodes` displays it last). It runs on the game timer
+(there is no `System` form) and every scene gets a fresh one, as the
+engine creates a `CBFader` per `CAdScene`.
+
 ## Scene state between visits
 
 A scene marked `PERSISTENT_STATE` (see

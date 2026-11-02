@@ -110,6 +110,11 @@ impl World {
                 "Ready" => Some(Value::Bool(self.fader.ready)),
                 _ => None,
             },
+            Kind::SceneFader => match name {
+                "Type" => Some(Value::from("fader")),
+                "Ready" => Some(Value::Bool(self.scene_fader.ready)),
+                _ => None,
+            },
             Kind::Scene => self.scene_get(name),
             Kind::Layer(index) => self.layer_get(index, name),
             Kind::Entity(r) => self.entity_get(r, name),
@@ -157,6 +162,7 @@ impl World {
             | Kind::Math
             | Kind::ResponseBox
             | Kind::Fader
+            | Kind::SceneFader
             | Kind::Inert(_)
             | Kind::Class(_) => false,
         }
@@ -199,7 +205,7 @@ impl World {
             },
             Kind::Math => math_call(name, args).map(Return::value),
             Kind::ResponseBox => None,
-            Kind::Fader => None,
+            Kind::Fader | Kind::SceneFader => None,
             Kind::Scene => self.scene_call(name, args, ctx),
             Kind::Layer(index) => self.layer_call(index, name, args),
             Kind::Entity(r) => self.entity_call(id, r, name, args),
@@ -1119,11 +1125,42 @@ impl World {
                 self.stub(&format!("Scene.{name}"));
                 Return::null()
             }
-            "DeleteLayer" | "SetViewport" | "FadeOut" | "FadeOutAsync" | "FadeIn"
-            | "FadeInAsync" => {
+            "DeleteLayer" | "SetViewport" => {
                 self.stub(&format!("Scene.{name}"));
                 Return::null()
             }
+            // The scene's own fader, over the scene viewport only; it
+            // runs on the game timer (`CAdScene::ScCallMethod`).
+            "FadeOut" | "FadeOutAsync" | "FadeIn" | "FadeInAsync" => {
+                let duration = match arg(0) {
+                    Value::Null => 500,
+                    v => u64::try_from(v.get_int(self)).unwrap_or(0),
+                };
+                let channel = |n: usize, default: i32| match arg(n) {
+                    Value::Null => default,
+                    v => v.get_int(self),
+                };
+                let color = Rgba {
+                    r: channel(1, 0).clamp(0, 255) as u8,
+                    g: channel(2, 0).clamp(0, 255) as u8,
+                    b: channel(3, 0).clamp(0, 255) as u8,
+                    a: channel(4, 255).clamp(0, 255) as u8,
+                };
+                let (timer, clock) = (self.timer(), self.clock);
+                if name.starts_with("FadeOut") {
+                    self.scene_fader
+                        .fade_out(color, duration, false, timer, clock);
+                } else {
+                    self.scene_fader
+                        .fade_in(color, duration, false, timer, clock);
+                }
+                if name.ends_with("Async") {
+                    Return::null()
+                } else {
+                    Return::effect(Effect::WaitFor(self.scene_fader_id))
+                }
+            }
+            "GetFadeColor" => Return::value(self.scene_fader.color_int()),
             _ => return None,
         })
     }
