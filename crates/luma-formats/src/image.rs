@@ -11,8 +11,8 @@ use std::io::Cursor;
 
 use crate::error::{Error, Result};
 
-/// An opaque colour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// An opaque colour; the default is black.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Rgb {
     /// Red.
