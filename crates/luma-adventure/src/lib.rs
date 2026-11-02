@@ -29,6 +29,8 @@
 //!   game, with its sound and subtitles.
 //! - [`SceneState`]: what a persistent scene remembers of its nodes
 //!   between visits.
+//! - [`Emitter`]: a particle emitter attached to an entity or an actor
+//!   (`CreateParticleEmitter`), its particles and forces.
 //! - [`World`]: the game as scripts see it (`Game`, `Scene`, layers,
 //!   entities, regions, sprites, actors), the script engine's host.
 //! - [`Runtime`]: a script engine and a world, driven once per frame.
@@ -51,11 +53,13 @@ mod natives;
 mod natives_actor;
 mod natives_item;
 mod natives_object;
+mod natives_particles;
 mod natives_region;
 mod natives_sound;
 mod natives_sprite;
 mod natives_ui;
 pub mod objects;
+pub mod particles;
 pub mod path;
 pub mod registry;
 pub mod responses;
@@ -78,6 +82,7 @@ pub use input::{Cursors, Keyboard, Mouse};
 pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;
 pub use objects::{Attachment, Kind, Native, ObjectInventory, ObjectState, Objects};
+pub use particles::Emitter;
 pub use path::Floor;
 pub use responses::{Response, ResponseKind, Responses};
 pub use save::{SAVE_EXTENSION, SaveHeader, read_save_header};

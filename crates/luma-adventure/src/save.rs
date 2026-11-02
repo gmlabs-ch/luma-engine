@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -173,6 +173,7 @@ world_state! {
     last_scroll_x: u64,
     last_scroll_y: u64,
     actors: Vec<(NativeId, Actor)>,
+    emitters: Vec<(NativeId, crate::particles::Emitter)>,
     pending_events: Vec<(NativeId, String)>,
     system_font: Option<String>,
     subtitles: bool,
@@ -630,6 +631,9 @@ impl World {
         self.game_view.reload_sprites(&self.vfs);
         for (_, actor) in &mut self.actors {
             actor.reload_sprites(&self.vfs);
+        }
+        for (_, emitter) in &mut self.emitters {
+            emitter.reload_sprites(&self.vfs);
         }
         let mut fonts: Vec<String> = Vec::new();
         fonts.extend(self.system_font.clone());

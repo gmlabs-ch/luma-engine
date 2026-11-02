@@ -11,9 +11,6 @@ use luma_script::{Context, Effect, NativeId, Return, Value, rgba};
 use crate::objects::Kind;
 use crate::world::World;
 
-/// Methods of later milestones that actors accept and log once.
-const ACTOR_STUBS: &[&str] = &["CreateParticleEmitter", "DeleteParticleEmitter"];
-
 fn color_int(c: luma_formats::Rgba) -> i32 {
     rgba(
         i32::from(c.r),
@@ -76,7 +73,8 @@ impl World {
             "SubtitlesPosRelative" => Value::Bool(actor.subtitles.relative),
             "SubtitlesPosXCenter" => Value::Bool(actor.subtitles.x_center),
             "NumItems" => Value::Int(self.taken_items_of(id).len() as i32),
-            "ParticleEmitter" | "Item" => Value::Null,
+            "ParticleEmitter" => self.emitter_of(id).map_or(Value::Null, Value::Native),
+            "Item" => Value::Null,
             _ => return None,
         })
     }
@@ -330,9 +328,8 @@ impl World {
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
                 return Some(self.inventory_call(id, name, args));
             }
-            _ if ACTOR_STUBS.contains(&name) => {
-                self.stub(&format!("Actor.{name}"));
-                Return::null()
+            "CreateParticleEmitter" | "DeleteParticleEmitter" => {
+                self.emitter_owner_call(id, name, args)
             }
             _ => return None,
         })

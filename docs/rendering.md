@@ -81,7 +81,10 @@ row and column when scaled, which the original engine does as well.
 - Texture atlases: one texture per image is enough for the games of the
   era and keeps streaming simple; an atlas can come when draw-call counts
   matter.
-- Rotation (`ROTATABLE` entities) and 3D actors.
+- Rotation (`ROTATABLE` entities, the rotation of particles) and 3D
+  actors.
 - Mouse hit testing from pixels (`PRECISE` sprites): the adventure layer
   will do it on the CPU from the decoded alpha channel.
-- Render-to-texture effects, lighting, particles.
+- Render-to-texture effects, lighting. Particles are drawn as plain
+  quads by `luma-adventure` (see [particles.md](particles.md)); they
+  need no renderer feature beyond rotation.

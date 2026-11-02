@@ -56,13 +56,6 @@ const GAME_STUBS: &[&str] = &[
     "DisableScriptProfiling",
 ];
 
-const OBJECT_STUBS: &[&str] = &[
-    "PlayAnim",
-    "PlayAnimAsync",
-    "CreateParticleEmitter",
-    "DeleteParticleEmitter",
-];
-
 impl World {
     /// A built-in property of a native, if the native defines it.
     pub(crate) fn native_get(&self, id: NativeId, name: &str) -> Option<Value> {
@@ -115,6 +108,7 @@ impl World {
             Kind::Actor => self.actor_get(id, name),
             Kind::Control => self.control_get(id, name),
             Kind::Item => self.item_get(id, name),
+            Kind::Emitter(_) => self.emitter_get(id, name),
             Kind::Inert(kind) => match name {
                 "Type" => Some(Value::from(kind.to_ascii_lowercase())),
                 "Name" => Some(Value::from(kind)),
@@ -156,6 +150,7 @@ impl World {
             Kind::Actor => self.actor_set(id, name, value),
             Kind::Control => self.control_set(id, name, value),
             Kind::Item => self.item_set(id, name, value),
+            Kind::Emitter(_) => self.emitter_set(id, name, value),
             Kind::Keyboard
             | Kind::Math
             | Kind::ResponseBox
@@ -221,6 +216,7 @@ impl World {
             Kind::Actor => self.actor_call(id, name, args, ctx),
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
+            Kind::Emitter(_) => self.emitter_call(id, name, args),
             Kind::Class(_) => None,
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
@@ -1381,7 +1377,7 @@ impl World {
                 self.node_id(r)
                     .map_or(0, |id| self.taken_items_of(id).len() as i32),
             ),
-            "ParticleEmitter" => Value::Null,
+            "ParticleEmitter" => native_or_null(self.node_id(r).and_then(|id| self.emitter_of(id))),
             "Item" => e.item.clone().map_or(Value::Null, Value::from),
             "Subtype" => Value::from(match e.kind {
                 luma_formats::EntityKind::Sound => "sound",
@@ -1593,9 +1589,8 @@ impl World {
             }
             "CreateRegion" => Return::value(native_or_null(self.create_entity_region(id))),
             "DeleteRegion" => Return::value(self.delete_entity_region(id)),
-            _ if OBJECT_STUBS.contains(&name) => {
-                self.stub(&format!("Entity.{name}"));
-                Return::null()
+            "CreateParticleEmitter" | "DeleteParticleEmitter" => {
+                self.emitter_owner_call(id, name, args)
             }
             _ => return None,
         })

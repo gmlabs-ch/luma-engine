@@ -546,6 +546,17 @@ impl DrawItem {
     }
 }
 
+/// Quads drawn right after an object of the scene, in its layer: the
+/// particles of its emitter (`CAdEntity::Display`, `CAdActor::Display`
+/// draw the emitter after the sprite).
+#[derive(Default)]
+pub struct Overlays<'a> {
+    /// By entity, for the scene's entities.
+    pub entities: HashMap<EntityRef, Vec<Quad<'a>>>,
+    /// By index among the other objects given to the drawing (actors).
+    pub others: HashMap<usize, Vec<Quad<'a>>>,
+}
+
 /// A scene and everything needed to run and draw it.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SceneView {
@@ -1241,6 +1252,27 @@ impl SceneView {
         attached: &HashMap<EntityRef, AttachedDraws<'a>>,
         free_stick: impl Fn(usize) -> Option<(usize, usize)>,
     ) {
+        self.draw_with_overlays(
+            list,
+            camera,
+            others,
+            attached,
+            &Overlays::default(),
+            free_stick,
+        );
+    }
+
+    /// Like [`SceneView::draw_with`], with the `overlays` of the objects
+    /// (their particles) pushed right after each object, in its layer.
+    pub fn draw_with_overlays<'a>(
+        &'a self,
+        list: &mut DrawList<'a>,
+        camera: &Camera,
+        others: &[Drawable<'a>],
+        attached: &HashMap<EntityRef, AttachedDraws<'a>>,
+        overlays: &Overlays<'a>,
+        free_stick: impl Fn(usize) -> Option<(usize, usize)>,
+    ) {
         let scene = &self.scene;
         let positions: Vec<FreeObject> = others
             .iter()
@@ -1269,7 +1301,7 @@ impl SceneView {
                 let (ox, oy) = camera.layer_offset(scene, &scene.layers[layer]);
                 list.set_offset(-ox, -oy);
             }
-            match item {
+            let overlay = match item {
                 DrawItem::Node { layer, index } => {
                     let r = EntityRef::Node { layer, index };
                     if let Some(SceneNode::Entity(entity)) = self.node(layer, index) {
@@ -1277,6 +1309,7 @@ impl SceneView {
                             draw_entity(list, r, &d);
                         }
                     }
+                    overlays.entities.get(&r)
                 }
                 DrawItem::Free { index, .. } => {
                     let r = EntityRef::Free(index);
@@ -1287,12 +1320,17 @@ impl SceneView {
                     {
                         draw_entity(list, r, &d);
                     }
+                    overlays.entities.get(&r)
                 }
                 DrawItem::Other { index, .. } => {
                     if let Some(d) = others.get(index) {
                         draw_object(list, d);
                     }
+                    overlays.others.get(&index)
                 }
+            };
+            for quad in overlay.into_iter().flatten() {
+                list.push(*quad);
             }
         }
         list.set_offset(0.0, 0.0);

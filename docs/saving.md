@@ -48,6 +48,10 @@ A saved game holds:
   `Game.LoadEntity`, `AddAttachment`) with their sprites' state;
 - the actors with their position, direction, state, path, animation and
   sentence;
+- the particle emitters of the entities and actors, with their
+  parameters, sprite files, forces and every particle, live or dead
+  (see [particles.md](particles.md)); their sprites are loaded again
+  from the files;
 - the inventory: the items as the scripts modified them, those taken
   (the game's and each object's own), the selected item, the object
   whose inventory the box shows, the box's window and scroll;
@@ -230,7 +234,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `7` today |
+| 4 | layout version, little-endian; `8` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -243,7 +247,7 @@ of The White Chamber is a few kilobytes). The header is read alone by
 layout version: a change of the state's shape bumps `VERSION`, and
 files of another version are then refused rather than misread (the
 header still reads, so a slot of an older file keeps its description).
-Version 7, after 6, added the objects' runtime state and the content
+Version 8, after 7, added the objects' runtime state and the content
 created at run time (entities, layers, nodes, attachments, the game's
 own entities, per-object inventories).
 
