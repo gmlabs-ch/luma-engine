@@ -1,11 +1,16 @@
-# 3D actors on 2D backgrounds (study)
+# 3D actors on 2D backgrounds
 
-Status: **study for planning, no code yet.** This note collects what the
+Status: **study, partly implemented.** This note collects what the
 Wintermute Engine 1.x sources do for 3D characters standing on painted 2D
-backgrounds ("2.5D"), what Luma Engine would need to do the same, and a
-proposed split into tasks. It is not a format specification yet; the
-specifications (`docs/formats/actor3d.md`, `geometry.md`, `xfile.md`) come
-with the tasks that implement them.
+backgrounds ("2.5D"), what Luma Engine does to do the same, and the split
+into tasks. The parts marked **as implemented** are the specification of
+the code in `crates/luma-3d` (the module `luma::three_d`, feature `3d`):
+the conventions (section 2), the scene keys (3.1), the geometry file and
+its classification (3.2, 3.3, specified in
+[formats/geometry.md](formats/geometry.md)), the camera and the 2D/3D
+mapping (section 4) and the floor height (9.1). The rest is still the
+plan; the remaining specifications (`docs/formats/actor3d.md`,
+`xfile.md`) come with the tasks that implement them.
 
 ## 0. Sources and rules
 
@@ -105,6 +110,15 @@ not a concern.
 
 ## 2. Conventions of the original (read this first)
 
+**As implemented** in `luma_3d::math`: `Vec3`, `Mat4` (row-major, row
+vectors), `Quat`, `Plane`, the D3DX functions listed in 12.2 and the three
+helpers of `3DUtils.cpp` (`intersect_triangle`, `pick_get_intersect`,
+`decompose_simple`), all in `f32` like D3DX, with no math crate (the types
+are a few hundred lines and the row-vector convention is then explicit
+everywhere). `Mat4::to_cols_array` gives a matrix to a column-vector GPU
+shader: that matrix is the transpose, so its column-major floats are
+simply the rows in order.
+
 Everything in WME 3D is plain Direct3D 8/9 fixed-function, and numbers only
 come out right with the same conventions:
 
@@ -136,6 +150,14 @@ come out right with the same conventions:
 
 ### 3.1 Scene keys
 
+**As implemented** in `luma_formats::scene::Scene` (fields `geometry`,
+`camera`, `fov_override`, `near_clipping_plane`, `far_clipping_plane`,
+`waypoint_height`, `pathfinding_2d`, `max_shadow_type`,
+`scroll_3d_compatibility`, `ambient_light_color`; the optional floats keep
+the value as written, negative included, since "negative" and "absent"
+mean the same to the consumers) and specified in
+[formats/scene.md](formats/scene.md#3d-keys).
+
 Parsed in `AdScene.cpp` (`CAdScene::LoadBuffer`). These are the 3D keys of a
 `SCENE { ... }` block; the 2D keys are in
 [formats/scene.md](formats/scene.md).
@@ -151,11 +173,19 @@ Parsed in `AdScene.cpp` (`CAdScene::LoadBuffer`). These are the 3D keys of a
 | `MAX_SHADOW_TYPE` | int 0..3 | 2 (flat) | Highest shadow type allowed in the scene. |
 | `SCROLL_3D_COMPATIBILITY` | bool | false | Pre-1.7 behaviour: the camera sees only the top-left screenful of the scene, whatever the layer size (section 4.1). |
 | `AMBIENT_LIGHT_COLOR` | `{ r,g,b }` | `0,0,0` | The scene's ambient light. |
-| `EDITOR_SHOW_GEOMETRY`, `EDITOR_RESOLUTION_WIDTH/HEIGHT` | | | Editor only. The runtime uses the game's resolution, not these. |
+| `EDITOR_SHOW_GEOMETRY`, `EDITOR_RESOLUTION_WIDTH/HEIGHT` | | | Editor only. The runtime uses the game's resolution, not these (the renderer reads `CBGame::m_EditorResolutionWidth`, which only the editor sets; the scene's own copy of the key is never handed to the game). |
 
 Fog is set by script (`Scene.EnableFog`), not by a key.
 
 ### 3.2 The `.3ds` geometry file
+
+**As implemented** in `luma_3d::three_ds` (`File::parse`, with a `Builder`
+for fixtures) and specified in
+[formats/geometry.md](formats/geometry.md), which is now the reference for
+the chunk subset; the table below is kept as the summary. The reader
+follows the original on every well-formed file and differs only on
+malformed input (bounds-checked reads give an error with the chunk id and
+offset; a mesh chunk before any named object is skipped).
 
 `3DLoader3DS.cpp` is a flat chunk walker, not a general 3DS reader. Chunk
 header: `u16 id`, `u32 length` (including the 6 bytes of the header), little
@@ -201,6 +231,15 @@ Derived values:
 
 ### 3.3 Naming: which mesh is what
 
+**As implemented** in `luma_3d::node_patterns` (`NodePatterns::parse`,
+`load`, `classify`, the wildcard matcher `matches_pattern`) and
+`luma_3d::scene_geometry::SceneGeometry::load_3ds`, specified in
+[formats/geometry.md](formats/geometry.md). Two details found while
+implementing: the original's sidecar parser **fails on any key it does
+not know** and the geometry then falls back to the three built-in nodes
+alone (reproduced by `NodePatterns::load`); and a light without a colour
+chunk has an undefined colour in the original, white in Luma.
+
 After parsing, each mesh is matched by name against the **node list** of
 the optional sidecar `<geometry name>.geometry` (same directory, same base
 name, extension `.geometry`) followed by three built-in nodes. First match
@@ -240,8 +279,10 @@ a `.geometry` file only these three exist, so a `.3ds` of only `walk_`,
 - **Generic** (`CAdGeneric`): any other matched mesh; only useful as a
   shadow receiver (and for the debug overlay, colour `0x7000FF00`).
 - Walk planes, blocks and generics have an `active` flag, switched by
-  `Scene.EnableNode3D` / `DisableNode3D` by mesh name (case-insensitive),
-  and saved with the scene.
+  `Scene.EnableNode3D` / `DisableNode3D` by mesh name (case-insensitive;
+  every node of that name changes, and `IsNode3DEnabled` reads the first
+  match among blocks, then planes, then generics: `SceneGeometry::
+  set_node_enabled`, `is_node_enabled`), and saved with the scene.
 
 The sample geometry (`install/source/projects/wme_demo_3d/data/scenes/
 Front/geometry.3DS`, 30 KB): one `walk_01`, five `blk_*`, ten `wpt_*`, twelve
@@ -273,29 +314,45 @@ object can override the ambient colour (`AmbientLightColor` property).
 
 ## 4. Camera and the 2D/3D mapping
 
+**As implemented** in `luma_3d::camera` (`Projection::new`, `project`,
+`project_f32`, `pick_ray`, with `CameraSettings` for the scene's
+`FOV_OVERRIDE` and clipping planes and `ViewSetup` for the 2D side) and
+`luma_3d::scene_geometry::SceneGeometry` (`convert_2d_to_3d`,
+`convert_2d_to_3d_tolerant`). This section is the specification; the
+tests of `camera.rs` check the hand-computed values below.
+
 This is the heart of "2.5D": a point of the painted background and a point
 of the 3D world are tied by one perspective camera whose image plane is the
 **main layer** of the scene.
 
 ### 4.1 Projection
 
-Parameters (`BRenderD3D.cpp`, `GetProjectionParams`; `AdGame.cpp`,
-`GetLayerSize`):
+Parameters (`BRenderD3D.cpp`, `SetProjection`, `GetProjectionParams`;
+`AdGame.cpp`, `GetLayerSize`), all in logical pixels:
 
 - `R = (RW, RH)`: the game's resolution (the runtime ignores the editor
-  resolution keys).
+  resolution keys, section 3.1).
 - `L = (LW, LH)`: the size of the scene's main layer (`R` instead when
-  `SCROLL_3D_COMPATIBILITY`).
-- `V = (VW, VH)` and margins `mleft, mright, mtop, mbottom`: the current
-  viewport (the whole screen unless `SCENE_VIEWPORT` is set).
-- `Off = (OffX, OffY)`: the scroll offset of the layer being drawn (for the
-  main layer, the scene offset).
+  `SCROLL_3D_COMPATIBILITY`; `ViewSetup::for_scene` applies the rule).
+- `V = (VX, VY, VW, VH)`: the viewport the scene is drawn in (the whole
+  screen unless the scene's `VIEWPORT` or the game's scene viewport is
+  set), with margins `mleft = VX`, `mright = RW - VW - VX`, `mtop = VY`,
+  `mbottom = RH - VH - VY`.
+- `Scroll = (ScrollX, ScrollY)`: the scene's scroll offset, what a scene
+  coordinate loses to become a screen coordinate of the main layer.
+  `Off = Scroll - (VX, VY)` is the original's `Game->m_OffsetX/Y` while the
+  main layer is drawn.
 - `ModW = max(0, (LW - RW) / 2)`, `ModH = max(0, (LH - RH) / 2)`; if
   `LH < RH`: `ModH -= (RH - LH) / 2` and `LH = RH` ("a layer shorter than the
-  screen is not scrolled, the camera sees the whole screen").
+  screen is not scrolled, the camera sees the whole screen"; there is no
+  equivalent for the width).
 - `S = max(LW / RW, LH / RH) * (RH / VH)`.
+- `fov`: the scene's `FOV_OVERRIDE` when it is `>= 0`, else the camera's
+  (`1900 / lens` degrees); `near`, `far`: the scene's clipping planes when
+  `>= 0`, else **90 and 10000**.
 
-The projection matrix is `PerspectiveFovLH(fov, VW/VH, near, far)` with
+The view matrix is the camera's (section 3.2). The projection matrix is
+`PerspectiveFovLH(fov, VW/VH, near, far)` with
 
 ```
 _11 *= S            _22 *= S
@@ -303,46 +360,67 @@ _31  = -(OffX + (mleft - mright)/2 - ModW) / VW * 2
 _32  =  (OffY + (mtop - mbottom)/2 - ModH) / VH * 2
 ```
 
-With the typical `V = R`, no margins, the main layer, a world point in
-camera space `(x, y, z)` lands at **scene (layer) pixel**
+(`(mleft - mright)/2` is an integer division). These two matrices are what
+the GPU draws with; they put a 3D point on the screen exactly where a 2D
+object at the same scene position would be drawn, scroll and viewport
+included. In the original the window's letterbox offset also enters and
+cancels out; Luma's logical coordinates have none.
+
+A world point in camera space `(x, y, z)` lands at **scene (layer) pixel**
 
 ```
-px = LW/2 + (RW/2) * S * x / (z * aspect * tan(fov/2))      aspect = RW/RH
-py = LH/2 - (RH/2) * S * y / (z *          tan(fov/2))
+px = RW/2 + ModW + (VH/2) * S * x / (z * tan(fov/2))
+py = RH/2 + ModH - (VH/2) * S * y / (z * tan(fov/2))
 ```
 
-(`px, py` are screen pixels plus the scroll offset; the matrix shift cancels
-the scroll, so an actor's scene position does not depend on it.) So the
-optical axis passes through the **centre of the layer**, and the vertical
-field of view spans the layer's height when the layer has the screen's
-aspect ratio (otherwise the larger ratio decides, `S`).
+that is, with `S * VH = max(LW/RW, LH/RH) * RH`, a position that depends on
+the resolution and the layer only: **not on the scroll** (the matrix shift
+cancels it) and **not on the viewport** (the aspect ratio and the viewport
+height cancel). With a layer at least as tall as the screen this is
+`px = LW/2 + ...`, `py = LH/2 - ...`: the optical axis passes through the
+**centre of the layer**, and the vertical field of view spans the layer's
+height when the layer has the screen's aspect ratio (otherwise the larger
+ratio decides, `S`). Hand-computed check used by the tests: camera at
+`(0, 0, -1000)` looking at the origin, `fov = 90°`, `R = L = 800x600`: the
+origin lands at `(400, 300)` and `(100, 0, 0)` at `(430, 300)`; with
+`L = 1600x600` they land at `(800, 300)` and `(860, 300)`, scrolled or not.
 
 ### 4.2 The inverse and the object's 2D position
 
-- **2D to 3D** (`AdSceneGeometry.cpp`, `Convert2Dto3D`): take scene pixel
-  `(X, Y)`; subtract `(mleft + mright)/2 + ModW` from `X` and `(mtop +
-  mbottom)/2 + ModH` from `Y`; the ray in camera space is
+- **2D to 3D** (`AdSceneGeometry.cpp`, `Convert2Dto3D`;
+  `Projection::pick_ray` then `SceneGeometry::convert_2d_to_3d`): take scene
+  pixel `(X, Y)`; subtract `(mleft + mright)/2 + ModW` from `X` and `(mtop +
+  mbottom)/2 + ModH` from `Y` (integer division of the margins, the result
+  truncated back to an `int` pixel); the ray in camera space is
   `((2X/VW - 1) / P11, -(2Y/VH - 1) / P22, 1)`; rotate it by the inverse
-  view matrix, origin at the camera position; the answer is the **nearest
-  hit on any walk plane** (by distance from the camera). It fails (false)
+  view matrix (3x3 part), origin at the camera position; the answer is the
+  **nearest hit on any walk plane**, enabled or not (by distance from the
+  camera to the hit point, so a hit behind the camera counts). It fails
   when the ray misses every walk plane. Hits use the single-sided
   Moeller-Trumbore test of `C3DUtils::IntersectTriangle` (section 9.2), so
   **walk plane triangles must face up toward the ray** (the 3DS loader's
   winding flip makes a plane that faces up in the 3D package face up here).
-- **Tolerant** (`Convert2Dto3DTolerant`): if the exact conversion fails,
-  scan in steps of 10 pixels (up to 1000) to the left, right, up and down for
-  the first pixel that converts. For each axis keep the nearer of its two
-  directions; shift the point along the axis with the smaller shift (the
-  vertical one when equal) and convert that pixel. No hit in any direction
-  fails. Used for every walking target.
-- **3D to 2D** (`Convert3Dto2D`, `CAdObject3D::Convert3DTo2D`): project with
-  the same matrices, add the scroll offset, truncate to `int`. An object's
-  `X`/`Y` are the projection of its **origin** (the feet) computed in
-  `CAdObject3D::Update` whenever its 3D position changed; these `X`/`Y`
-  drive the drawing order, the region it stands in, auto-scroll and speech
-  position.
+- **Tolerant** (`Convert2Dto3DTolerant`, `convert_2d_to_3d_tolerant`): if
+  the exact conversion fails, scan in steps of 10 pixels (up to 1000) to the
+  left, right, up and down for the first pixel that converts. For each axis
+  keep the nearer of its two directions (the positive one on a tie); shift
+  the point along the axis with the smaller shift (the vertical one when
+  equal) and convert that pixel. No hit in any direction fails. Used for
+  every walking target.
+- **3D to 2D** (`Convert3Dto2D`, `CAdObject3D::Convert3DTo2D`;
+  `Projection::project`): project with the same matrices into the viewport
+  (`D3DXVec3Project`), add `Scroll - (VX, VY)`, truncate to `int` (toward
+  zero; a value such as 199.99998 becomes 199, in Luma as in the original).
+  An object's `X`/`Y` are the projection of its **origin** (the feet)
+  computed in `CAdObject3D::Update` whenever its 3D position changed; these
+  `X`/`Y` drive the drawing order, the region it stands in, auto-scroll and
+  speech position.
 - Bone positions in 2D (`GetBonePosition2D`, particles) go through the
   same function.
+- The scene integration (task 13) owns the `ViewSetup` of the frame: the
+  resolution, the main layer, the scene viewport and the scroll of the
+  main layer, rebuilt whenever one of them changes, as the original
+  rebuilds its projection on each `Setup3D`.
 
 ### 4.3 Scrolling
 
@@ -751,15 +829,20 @@ hundred triangles).
 
 ### 9.1 Floor height
 
+**As implemented** by `SceneGeometry::height_at(pos, tolerance)`, which
+returns `None` instead of the unchanged `y` (callers that want the
+original's behaviour write `unwrap_or(pos.y)`, as `drop_waypoints` does).
+
 `GetHeightAt(pos, tolerance)`: the start is `pos` raised by `tolerance`. A
 walk plane triangle is a candidate when the vertical line through the start
 meets it from above (single-sided, the triangle must face up) and the height
 `h` of the plane there is not above `start.y + tolerance` (the line is not a
 ray: planes above the start count within that margin). The candidate nearest
-in height to the start wins. With no candidate the input `y` is returned
-unchanged. The `active` flag of walk planes is **not** consulted here, nor in
-picking and path tests; only the debug rendering and the shadow-receiver
-pass skip inactive planes.
+in height to the **raised** start wins: between a floor 20 below the point
+and one 30 above it, a tolerance of 40 picks the upper one. With no
+candidate the input `y` is returned unchanged. The `active` flag of walk
+planes is **not** consulted here, nor in picking and path tests; only the
+debug rendering and the shadow-receiver pass skip inactive planes.
 
 ### 9.2 Triangle tests
 
@@ -1057,19 +1140,18 @@ the core crates:
 
 | Piece | Home | Why |
 |-------|------|-----|
-| Math with the D3D conventions (matrices, quaternions, project/unproject, the D3DX functions listed in 12.2) | `luma-3d` | New crate. |
-| `.X` reader (text, optional binary), `.3ds` reader, `.geometry`, `.act3d`, `.anim` parsers: pure data | `luma-3d` (a `formats` module) or `luma-formats` | They are file formats, like sprites. `luma-formats` is the natural home by the existing rule, but it should not grow 3D-only code that every game compiles; recommended: the module crate, re-exported by `luma` under the `3d` feature. To decide (open question 1). |
+| Math with the D3D conventions (matrices, quaternions, project/unproject, the D3DX functions listed in 12.2) | `luma-3d` | **Done**: `luma_3d::math`. |
+| `.X` reader (text, optional binary), `.3ds` reader, `.geometry`, `.act3d`, `.anim` parsers: pure data | `luma-3d` | **Decided**: the module crate, re-exported by `luma` as `luma::three_d` under the `3d` feature; `luma-formats` only parses the scene keys (done). `.3ds` and `.geometry` are done (`luma_3d::three_ds`, `node_patterns`). |
 | Model, skeleton, animation channels, CPU skinning, geometry queries, path finder, camera projection, picking | `luma-3d` | No GPU, no game logic, unit-testable. |
 | The 3D pass on wgpu (pipelines, lights, shadows) | `luma-3d::render`, depending on `luma-render` for `Gpu`/`Target` | The 2D `luma-render` stays small. |
 | A small generic extension point in `luma-render` | `luma-render` | See 12.3. |
 | `Actor3D` object, its state machine, 2D/3D scene glue, scripts | `luma-adventure`, behind a Cargo feature `3d` | Genre behaviour. |
 | Feature `3d` in `luma` (off by default) that enables `luma-3d` and `luma-adventure/3d` | `luma` | `docs/modules.md`. |
 
-New third-party dependencies to pick (licences to state in the commit):
-a math crate, **`glam`** (MIT OR Apache-2.0) with `default-features =
-false`, would give `Mat4`, `Quat`, `perspective_lh`, `look_at_lh`; the row
-versus column vector difference is handled once, in `luma-3d::math`, by
-transposing at the boundary. Decompression for MSZIP-compressed `.X`:
+New third-party dependencies: none so far. The maths is a few plain types
+in `luma_3d::math` rather than a math crate (`glam` was considered): the
+row-vector convention stays explicit and the D3DX functions are written
+from their documentation. Decompression for MSZIP-compressed `.X`:
 `flate2` is already in the workspace (raw deflate with a preset dictionary).
 No crate is needed for `.X` or `.3ds`.
 
@@ -1222,14 +1304,14 @@ read first.
 
 | # | Task | WME files to read | Size | After |
 |---|------|-------------------|------|-------|
-| 1 | **Crate and conventions.** `luma-3d` with a feature in `luma`, `README.md` and `docs/modules.md` rows, the `math` module (D3D conventions, the functions of 12.2), `docs/3d.md` skeleton. | `3DUtils.cpp`, `3DCamera.cpp`, `BObject.cpp` (`GetMatrix`), `dcgf.h` (`DegToRad`) | S | |
+| 1 | **Crate and conventions.** `luma-3d` with a feature in `luma`, `README.md` and `docs/modules.md` rows, the `math` module (D3D conventions, the functions of 12.2). **Done.** | `3DUtils.cpp`, `3DCamera.cpp`, `BObject.cpp` (`GetMatrix`), `dcgf.h` (`DegToRad`) | S | |
 | 2 | **`.X` text container.** Tokenizer and template-aware reader to a generic object tree (`xof 0303txt`, 32- and 64-bit floats, named templates, nested data, data references, comments). `docs/formats/xfile.md`. | `XFile.cpp`, `XModel.cpp` (`LoadFromFile`), `XFrameNode.cpp` (`LoadFromXData`); samples `trinity.x`, `teapot.x` | M | 1 |
 | 3 | **`.X` to model.** Frames, `FrameTransformMatrix`, meshes (triangulation, normal and UV vertex splitting, materials, `TextureFilename`), `SkinWeights` and the bind matrices, position-welded adjacency, `AnimTicksPerSecond`, animation sets with the four key types, `AnimationOptions`, merging, material naming. | `XMesh.cpp`, `SkinMeshHelper.cpp`, `XAnimation.cpp` (`Load`, `LoadAnimationKeyData`), `XAnimationSet.cpp`, `3DMaterial.cpp` | L | 2 |
 | 4 | **`.X` binary and compressed.** `bin `, `tzip`/`bzip` (MSZIP) with `flate2`. Only if a real game needs it; check first which variant the games use. | (public DirectX documentation **[ext]**) | M | 2 |
-| 5 | **`.3ds` geometry and `.geometry`.** The chunk walker of 3.2 into planes, blocks, generics, waypoint points, cameras, lights; the node patterns; scene keys of 3.1 in `luma_formats::scene`. `docs/formats/geometry.md`. | `3DLoader3DS.cpp`, `3DS_chunks.h`, `AdSceneGeometry.cpp` (`LoadFile`), `AdGeomExt*.cpp`, `AdWaypointGroup3D.cpp`, `3DMesh.cpp`, `3DLight.cpp` | M | 1 |
+| 5 | **`.3ds` geometry and `.geometry`.** The chunk walker of 3.2 into planes, blocks, generics, waypoint points, cameras, lights; the node patterns; scene keys of 3.1 in `luma_formats::scene`. `docs/formats/geometry.md`. **Done** (`luma_3d::three_ds`, `node_patterns`, `scene_geometry`). | `3DLoader3DS.cpp`, `3DS_chunks.h`, `AdSceneGeometry.cpp` (`LoadFile`), `AdGeomExt*.cpp`, `AdWaypointGroup3D.cpp`, `3DMesh.cpp`, `3DLight.cpp` | M | 1 |
 | 6 | **`.act3d` and `.anim`.** Parser to a typed definition, TEMPLATE, defaults, `ANIMATION`/`EVENT`, obsolete keys. `docs/formats/actor3d.md`. | `AdActor3DX.cpp` (`LoadBuffer`, `ParseEffect`, `MergeAnimations2`), `XModel.cpp` (`ParseAnim`, `ParseEvent`), `AdActor3D.cpp` (`IsActorX`) | S | |
-| 7 | **Camera and the 2D/3D mapping.** View and projection of 4.1 for a scene (`Camera`, viewport, scroll, layer size, `SCROLL_3D_COMPATIBILITY`, `FOV_OVERRIDE`, clip planes), `convert_2d_to_3d` (exact and tolerant), `convert_3d_to_2d`, the object's 2D position. | `BRenderD3D.cpp` (`SetProjection`, `GetProjectionParams`), `AdSceneGeometry.cpp` (`Convert*`, `StoreDrawingParams`), `AdObject3D.cpp`, `AdGame.cpp` (`GetLayerSize`), `AdScene.cpp` (`ScrollTo`) | M | 1, 5 |
-| 8 | **Geometry queries and the 3D path finder.** `GetHeightAt`, `DirectPathExists`, `GetBlockIntersection`, `DropWaypoints`, Dijkstra with the alternate-target rerun, node enabling. Decide per quirk (9.2, 9.3) whether to reproduce. | `AdSceneGeometry.cpp`, `3DUtils.cpp` (`IntersectTriangle`, `PickGetIntersect`), `AdPath3D.cpp`, `AdPathPoint3D.cpp` | M | 5 |
+| 7 | **Camera and the 2D/3D mapping.** View and projection of 4.1 for a scene (`Camera`, viewport, scroll, layer size, `SCROLL_3D_COMPATIBILITY`, `FOV_OVERRIDE`, clip planes), `convert_2d_to_3d` (exact and tolerant), `convert_3d_to_2d`, the object's 2D position. **Done** (`luma_3d::camera`; the object's 2D position is `Projection::project` of its origin, to be called by task 14). | `BRenderD3D.cpp` (`SetProjection`, `GetProjectionParams`), `AdSceneGeometry.cpp` (`Convert*`, `StoreDrawingParams`), `AdObject3D.cpp`, `AdGame.cpp` (`GetLayerSize`), `AdScene.cpp` (`ScrollTo`) | M | 1, 5 |
+| 8 | **Geometry queries and the 3D path finder.** `DirectPathExists`, `GetBlockIntersection`, Dijkstra with the alternate-target rerun. Decide per quirk (9.2, 9.3) whether to reproduce. Already done with task 5: `GetHeightAt` (`SceneGeometry::height_at`), `DropWaypoints`, node enabling, the triangle tests of 9.2 (`math::intersect_triangle`, `pick_get_intersect`). | `AdSceneGeometry.cpp`, `3DUtils.cpp` (`IntersectTriangle`, `PickGetIntersect`), `AdPath3D.cpp`, `AdPathPoint3D.cpp` | M | 5 |
 | 9 | **Skeleton animation and skinning.** Frame hierarchy and matrices, channels, active animations, blending slots, events, transition-time table, looping and finish rules, CPU skinning, bounding box, ray/triangle picking of a posed model, bone matrices and positions. | `XFrameNode.cpp`, `XModel.cpp`, `XAnimationChannel.cpp`, `XActiveAnimation.cpp`, `XAnimation.cpp` (`Update`), `XAnimationSet.cpp`, `XMesh.cpp` (`Update`, `PickPoly`) | L | 3 |
 
 ### Phase B: drawing
@@ -1283,9 +1365,9 @@ models are not part of it.
 
 ## 16. Open questions
 
-1. **Crate topology.** A new `luma-3d` crate (recommended) or the formats
-   in `luma-formats` and the pass in `luma-render`? The rule "core stays
-   small" suggests the first, the maintainer decides.
+1. **Crate topology.** Decided: a new `luma-3d` crate, feature `3d` of
+   `luma`, re-exported as `luma::three_d`; `luma-formats` only gained the
+   scene keys.
 2. **Which games to validate against.** The local test games (The White
    Chamber, OpenQuest) are 2D as far as we know. The WME demo is the only 3D data at hand;
    is a real commercial 3D game available for local tests? Are the sample

@@ -81,6 +81,8 @@ no code copied):
   crates/luma-3d/src/math.rs
   crates/luma-3d/src/three_ds.rs
   crates/luma-3d/src/node_patterns.rs
+  crates/luma-3d/src/scene_geometry.rs
+  crates/luma-3d/src/camera.rs
 
 -------------------------------------------------------------------------------
 Dependencies under the Mozilla Public License 2.0

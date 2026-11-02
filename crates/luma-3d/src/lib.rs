@@ -13,19 +13,27 @@
 //! - [`three_ds`]: the `.3ds` chunk subset the original reads (named
 //!   meshes, cameras, lights, the camera roll of the keyframer);
 //! - [`node_patterns`]: the `.geometry` sidecar that says which mesh is a
-//!   walk plane, a block, a waypoint or a generic shadow receiver.
+//!   walk plane, a block, a waypoint or a generic shadow receiver;
+//! - [`scene_geometry`]: the classified geometry of a scene and the
+//!   queries on it;
+//! - [`camera`]: the scene camera, the projection that maps the layer onto
+//!   the 3D world, and the conversions between scene pixels and 3D points.
 //!
 //! The behaviour follows `docs/3d-actors.md`, which is the specification;
 //! `docs/formats/geometry.md` describes the files. The crate is an optional
 //! module of the engine: `luma` re-exports it as `luma::three_d` behind its
 //! `3d` feature.
 
+pub mod camera;
 pub mod math;
 pub mod node_patterns;
+pub mod scene_geometry;
 pub mod three_ds;
 
+pub use camera::{CameraSettings, Projection, Ray, ViewSetup, Viewport};
 pub use math::{Mat4, Plane, Quat, Vec3};
 pub use node_patterns::{NodeKind, NodePattern, NodePatterns};
+pub use scene_geometry::{Camera, Light, MeshNode, SceneGeometry, TriangleMesh};
 
 /// The file extension of scene geometry files, without the dot. The
 /// original accepts no other geometry format.
