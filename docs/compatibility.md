@@ -110,7 +110,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BObject.cpp
 - Hierarchy and Luma: CBScriptHolder → CBObject; Luma: game, entities, actors (sound, position, flags); controls, regions, layers have their own subsets
-- Count: 45 done, 27 todo, 0 no-op
+- Count: 47 done, 25 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -130,8 +130,8 @@ How the list was made. For every class with a script interface, the names tested
 | `SetSoundVolume`, `GetSoundVolume` | method | **done** | Sets / reads the sound's volume (percent). |
 | `SetShadowImage`, `GetShadowImage` | method | **todo** | Sets / reads the image used for the object's 3D simple shadow. |
 | `SetLightPosition` | method | **todo** | Sets the position of the light attached to a 3D object. |
-| `SoundFXNone` | method | **done** | Removes sound effects from the object's sound (nothing to do in Luma). |
-| `SoundFXEcho`, `SoundFXReverb` | method | **todo** | Applies an echo / reverb effect to the object's sound. Logged and ignored. |
+| `SoundFXNone` | method | **done** | Removes the effect from the object's sounds. |
+| `SoundFXEcho`, `SoundFXReverb` | method | **done** | Applies an echo / reverb effect to the object's sounds, now and next, with the engine's parameters mapped onto Kira's delay and reverb (`docs/audio.md`); an approximation of the DirectSound effects. |
 | `Type` | get | **done** | Class name of the object. |
 | `Caption` | get/set | **done** | Object caption (expanded through the string table on set). |
 | `X`, `Y` | get/set | **done** | Position in scene coordinates. |
@@ -1031,7 +1031,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Global variables | 4 | 1 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
-| CBObject | 45 | 27 | 0 | 72 |
+| CBObject | 47 | 25 | 0 | 72 |
 | CBGame | 123 | 23 | 19 | 165 |
 | CAdGame | 59 | 6 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
@@ -1071,9 +1071,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **750** | **372** | **31** | **1153** |
+| **All** | **752** | **370** | **31** | **1153** |
 
-Of the total, 21 are events (21 done) and the rest are methods, properties, functions, constructors and global variables: 729 done, 372 todo, 31 no-op.
+Of the total, 21 are events (21 done) and the rest are methods, properties, functions, constructors and global variables: 731 done, 370 todo, 31 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1105,11 +1105,10 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Script library | 16 | The `Directory` object, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. (`String`, `Array`, `Date`, `File` and `MemBuffer` are done.) |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
-| Sound effects | 2 | `SoundFXEcho`, `SoundFXReverb` (also listed in `docs/audio.md`). |
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **372** | |
+| **All** | **370** | |
 
 ## Members in Luma that WME 1.x does not define
 

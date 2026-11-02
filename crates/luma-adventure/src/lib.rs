@@ -84,7 +84,7 @@ pub use scene_view::{
     SpriteBank, draw_object, drawn_subframes, frame_height, is_drawn, place,
 };
 pub use settings::{GameSettings, SETTINGS_FILE};
-pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, Sounds};
+pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, SfxEffect, Sounds};
 pub use talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
 pub use text::{BitmapFont, Font, FontBank, TrueTypeFont};
 pub use ui::{

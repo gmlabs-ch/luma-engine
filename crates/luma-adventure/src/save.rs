@@ -28,7 +28,7 @@ use crate::inventory::Inventory;
 use crate::objects::Objects;
 use crate::scene_state::SceneState;
 use crate::scene_view::SceneView;
-use crate::sound::{Crossfade, MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound};
+use crate::sound::{Crossfade, MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, SfxEffect};
 use crate::talk::TalkSkipButton;
 use crate::ui::{ControlKind, Ui};
 use crate::world::World;
@@ -84,7 +84,7 @@ pub struct SoundState {
 }
 
 /// An object's sound state as saved.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ObjectSoundState {
     /// The sound, if the object has one.
     pub sound: Option<SoundState>,
@@ -92,10 +92,12 @@ pub struct ObjectSoundState {
     pub start_ms: u64,
     /// The object's sound volume.
     pub volume: i32,
+    /// The object's sound effect.
+    pub effect: Option<SfxEffect>,
 }
 
 /// Everything the world plays, as saved.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SoundsState {
     /// The objects' sounds.
     pub objects: Vec<(NativeId, ObjectSoundState)>,
@@ -509,6 +511,7 @@ impl World {
                             .map(|s| state(s.id, &s.filename, s.event.clone())),
                         start_ms: sfx.start_ms,
                         volume: sfx.volume,
+                        effect: sfx.effect,
                     },
                 )
             })
@@ -574,12 +577,18 @@ impl World {
                         event: s.event,
                     })
             });
+            if let Some(id) = sound.as_ref().map(|s| s.id) {
+                self.sounds
+                    .audio
+                    .set_effect(id, saved.effect.map(Into::into));
+            }
             self.sounds.objects.insert(
                 owner,
                 ObjectSfx {
                     sound,
                     start_ms: saved.start_ms,
                     volume: saved.volume,
+                    effect: saved.effect,
                 },
             );
         }

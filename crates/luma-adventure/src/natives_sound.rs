@@ -9,7 +9,7 @@
 use luma_audio::SoundType;
 use luma_script::{NativeId, Return, Value};
 
-use crate::sound::MUSIC_CHANNELS;
+use crate::sound::{MUSIC_CHANNELS, SfxEffect};
 use crate::world::World;
 
 impl World {
@@ -64,10 +64,32 @@ impl World {
                 Return::value(self.set_sfx_volume(id, percent))
             }
             "GetSoundVolume" => Return::value(self.sfx_volume(id)),
-            "SoundFXNone" | "SoundFXEcho" | "SoundFXReverb" => {
-                if name != "SoundFXNone" {
-                    self.stub(&format!("{name} (sound effects)"));
-                }
+            "SoundFXNone" => {
+                self.set_sfx_effect(id, None);
+                Return::null()
+            }
+            "SoundFXEcho" | "SoundFXReverb" => {
+                // The engine's defaults for the arguments left out.
+                let param = |world: &World, n: usize, default: f32| match arg(n) {
+                    Value::Null => default,
+                    v => v.get_float(world) as f32,
+                };
+                let effect = if name == "SoundFXEcho" {
+                    SfxEffect::Echo {
+                        wet_dry_mix: param(self, 0, 0.0),
+                        feedback: param(self, 1, 0.0),
+                        left_delay_ms: param(self, 2, 333.0),
+                        right_delay_ms: param(self, 3, 333.0),
+                    }
+                } else {
+                    SfxEffect::Reverb {
+                        in_gain_db: param(self, 0, 0.0),
+                        reverb_mix_db: param(self, 1, 0.0),
+                        reverb_time_ms: param(self, 2, 1000.0),
+                        high_freq_rt_ratio: param(self, 3, 0.001),
+                    }
+                };
+                self.set_sfx_effect(id, Some(effect));
                 Return::null()
             }
             _ => return None,

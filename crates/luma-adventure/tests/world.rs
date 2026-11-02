@@ -689,6 +689,18 @@ fn sound_script() -> Vec<u8> {
     a.emit(Instruction::PopEmpty);
     call(&mut a, "hum", "IsSoundPlaying", &[]);
     store(&mut a, "humPlaying1");
+    // hum.SoundFXEcho(40, 30, 200, 300); Game.SoundFXReverb();
+    call(
+        &mut a,
+        "hum",
+        "SoundFXEcho",
+        &[Arg::Int(40), Arg::Int(30), Arg::Int(200), Arg::Int(300)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "Game", "SoundFXReverb", &[]);
+    a.emit(Instruction::PopEmpty);
+    call(&mut a, "hum", "IsSoundPlaying", &[]);
+    store(&mut a, "humPlaying2");
     a.def_var("lamp");
     call(&mut a, "Scene", "GetNode", &[Arg::Str("lamp")]);
     a.pop_var("lamp");
@@ -2137,6 +2149,27 @@ fn sounds_music_and_speech_play_on_the_game_clock() {
     assert_eq!(result(&runtime, "humVol"), Value::Int(50));
     assert_eq!(result(&runtime, "humPlaying0"), Value::Bool(false));
     assert_eq!(result(&runtime, "humPlaying1"), Value::Bool(true));
+    // The effects: kept on the object, applied to its playing sound,
+    // with the engine's defaults for the arguments left out.
+    assert_eq!(result(&runtime, "humPlaying2"), Value::Bool(true));
+    let echo = luma_adventure::SfxEffect::Echo {
+        wet_dry_mix: 40.0,
+        feedback: 30.0,
+        left_delay_ms: 200.0,
+        right_delay_ms: 300.0,
+    };
+    assert_eq!(runtime.world.sounds().objects[&hum].effect, Some(echo));
+    let hum_sound = runtime.world.sfx_of(hum).unwrap().id;
+    assert_eq!(runtime.world.audio().effect(hum_sound), Some(echo.into()));
+    assert_eq!(
+        runtime.world.sounds().objects[&game].effect,
+        Some(luma_adventure::SfxEffect::Reverb {
+            in_gain_db: 0.0,
+            reverb_mix_db: 0.0,
+            reverb_time_ms: 1000.0,
+            high_freq_rt_ratio: 0.001,
+        })
+    );
     assert_eq!(result(&runtime, "eventStarted"), Value::Bool(true));
     assert_eq!(result(&runtime, "musicStarted"), Value::Bool(true));
     assert_eq!(result(&runtime, "music"), Value::Bool(true));
