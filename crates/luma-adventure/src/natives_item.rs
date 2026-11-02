@@ -4,6 +4,7 @@
 use luma_formats::font::TextAlign;
 use luma_script::{NativeId, Return, Value};
 
+use crate::objects::CursorSlot;
 use crate::world::World;
 
 impl World {
@@ -142,15 +143,22 @@ impl World {
                 }
                 Return::value(ok)
             }
-            "GetHoverSpriteObject"
-            | "GetNormalCursorObject"
-            | "GetHoverCursorObject"
-            | "Talk"
-            | "TalkAsync"
-            | "StopTalk"
-            | "PlayAnim"
-            | "PlayAnimAsync"
-            | "Reset" => {
+            "GetHoverSpriteObject" => Return::value(
+                self.hover_sprite_object(id)
+                    .map_or(Value::Null, Value::Native),
+            ),
+            "GetNormalCursorObject" | "GetHoverCursorObject" => {
+                let slot = if name == "GetNormalCursorObject" {
+                    CursorSlot::ItemNormal
+                } else {
+                    CursorSlot::ItemHover
+                };
+                Return::value(
+                    self.cursor_sprite_object(id, slot)
+                        .map_or(Value::Null, Value::Native),
+                )
+            }
+            "Talk" | "TalkAsync" | "StopTalk" | "PlayAnim" | "PlayAnimAsync" | "Reset" => {
                 self.stub(&format!("Item.{name}"));
                 Return::null()
             }

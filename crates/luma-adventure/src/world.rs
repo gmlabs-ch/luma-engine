@@ -932,9 +932,12 @@ impl World {
             Some(Kind::Keyboard) => "keyboard".to_string(),
             Some(Kind::Math) => "math".to_string(),
             Some(Kind::ResponseBox) => "response box".to_string(),
-            Some(Kind::Sprite(_) | Kind::CursorSprite(_) | Kind::ControlImage { .. }) => {
-                "sprite".to_string()
-            }
+            Some(
+                Kind::Sprite(_)
+                | Kind::HoverSprite(_)
+                | Kind::CursorSprite { .. }
+                | Kind::ControlImage { .. },
+            ) => "sprite".to_string(),
             Some(Kind::EntityRegion(owner)) => self
                 .region_ref(crate::natives_region::RegionRef::Entity(*owner))
                 .map(|r| r.name.clone())
@@ -1699,9 +1702,10 @@ impl World {
                 Kind::Entity(_) | Kind::Actor => is_scene_object(*id),
                 // The sprite, cursor and region objects of the scene's
                 // objects, their frames and sub-frames go with them.
-                Kind::Sprite(owner) | Kind::CursorSprite(owner) | Kind::EntityRegion(owner) => {
-                    is_scene_object(owner)
-                }
+                Kind::Sprite(owner)
+                | Kind::HoverSprite(owner)
+                | Kind::CursorSprite { owner, .. }
+                | Kind::EntityRegion(owner) => is_scene_object(owner),
                 Kind::ControlImage { .. } => false,
                 Kind::Frame { sprite, .. } | Kind::SubFrame { sprite, .. } => {
                     match self.objects.get(sprite).map(|n| &n.kind) {
@@ -2517,9 +2521,12 @@ impl Natives for World {
             Some(Kind::Entity(_)) => "entity".to_string(),
             Some(Kind::Region { .. } | Kind::EntityRegion(_)) => "region".to_string(),
             Some(Kind::WaypointGroup(_)) => "waypoint-group".to_string(),
-            Some(Kind::Sprite(_) | Kind::CursorSprite(_) | Kind::ControlImage { .. }) => {
-                "sprite".to_string()
-            }
+            Some(
+                Kind::Sprite(_)
+                | Kind::HoverSprite(_)
+                | Kind::CursorSprite { .. }
+                | Kind::ControlImage { .. },
+            ) => "sprite".to_string(),
             Some(Kind::Frame { .. }) => "frame".to_string(),
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Emitter(_)) => "particle-emitter".to_string(),
@@ -2546,7 +2553,9 @@ impl Natives for World {
             }
             Some(Kind::Actor) => "[actor object]".to_string(),
             Some(Kind::Control | Kind::Item) => format!("[{}]", self.describe(id)),
-            Some(Kind::Sprite(_) | Kind::ControlImage { .. }) => "[sprite]".to_string(),
+            Some(Kind::Sprite(_) | Kind::HoverSprite(_) | Kind::ControlImage { .. }) => {
+                "[sprite]".to_string()
+            }
             Some(Kind::Frame { .. }) => "[frame]".to_string(),
             Some(Kind::SubFrame { .. }) => "[subframe]".to_string(),
             Some(Kind::Object) => "[object]".to_string(),

@@ -171,8 +171,10 @@ interactive; the active object's own `CURSOR`; the `ACTIVE_CURSOR` over
 any active object; the `CURSOR`. A cursor that was not shown last frame
 restarts its animation. `Game.SetActiveCursor`, `RemoveActiveCursor`,
 `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`,
-`GetActiveCursor` and `GetWaitCursor` change and read them. The system
-cursor is hidden over the window.
+`GetActiveCursor` and `GetWaitCursor` change and read them;
+`GetActiveCursorObject` and `GetWaitCursorObject` return them as
+sprite objects (see below), `null` without one. The system cursor is
+hidden over the window.
 
 An object's own cursor comes from its `CURSOR` key, or from `SetCursor`
 on the object (entities, actors and controls; `false` when the sprite
@@ -188,7 +190,10 @@ item's `CURSOR` is drawn at the mouse, over the cursor above when the
 item's `CURSOR_COMBINED` is on, instead of it otherwise; over an entity,
 an actor or an item its `CURSOR_HOVER` is drawn instead (only over
 objects that handle the item's event when `Game.SmartItemCursor` is
-on).
+on). The item's `GetNormalCursorObject` and `GetHoverCursorObject`
+return those two cursors as sprite objects, and `GetHoverSpriteObject`
+its hover image (`SPRITE_HOVER`), the one the inventory box shows under
+the mouse, with the animation it plays there.
 
 ## Keyboard
 

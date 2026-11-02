@@ -51,9 +51,9 @@ impl World {
 
     /// The owner of a sprite object, the bank its sprite is in and the
     /// sprite's path (`World::own_sprite_path`): an entity's sprite, the
-    /// sprite `SetSprite` gave an actor, an item's image, or the image in
-    /// a slot of a control (the controls' images live in the windows'
-    /// bank).
+    /// sprite `SetSprite` gave an actor, an item's image or hover image,
+    /// or the image in a slot of a control (the items' and controls'
+    /// images live in the windows' bank).
     fn sprite_home(&self, sprite: NativeId) -> Option<(NativeId, Home, String)> {
         match self.native(sprite)?.kind {
             Kind::Sprite(owner) => {
@@ -70,6 +70,10 @@ impl World {
             Kind::ControlImage { control, slot } => {
                 let path = self.control(control)?.image_in(slot)?.to_string();
                 Some((control, Home::Ui, path))
+            }
+            Kind::HoverSprite(item) => {
+                let path = self.item(item)?.def.sprite_hover.clone()?;
+                Some((item, Home::Ui, path))
             }
             _ => None,
         }
