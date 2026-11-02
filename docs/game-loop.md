@@ -25,7 +25,8 @@ in this order (`Runtime::tick`):
    a sprite frame that becomes current plays its `SOUND`, stops the
    sprite's earlier frame sounds when marked `KILL_SOUND`, raises
    `FrameChanged` on the sprite object and its `APPLY_EVENT`s on the
-   object showing the sprite;
+   object showing the sprite; the particle emitters of the entities and
+   actors follow their owner and emit (see [particles.md](particles.md));
 6. the view scrolls towards the main object; the objects' sounds follow
    them;
 7. the object under the mouse is found and becomes the **active
@@ -36,8 +37,8 @@ in this order (`Runtime::tick`):
 9. the events raised during the frame reach their scripts (they run
    next frame).
 
-The frame is then drawn: the scene with the actors, the windows marked
-`IN_GAME`, the other windows, the sentences, the cursor, the fader's
+The frame is then drawn: the scene with the actors (each object's
+particles right after it), the windows marked `IN_GAME`, the other windows, the sentences, the cursor, the fader's
 colour over everything, the loading icon (see
 [saving.md](saving.md#loading-and-saving-screens-loading-icon)), and
 last the messages of `Game.Msg`: short
@@ -92,8 +93,13 @@ exclusive window or a menu a shield covering the whole screen. The
 object under the mouse is the **last one drawn** whose area contains the
 point: a region by its polygon (in scene coordinates), a sprite by its
 rectangle on screen, and, when the sprite is `PRECISE` (the default),
-only where the pixel's alpha is above 128, with the sprite's scale and
-mirroring applied.
+only where the pixel's alpha is above 128, with the sprite's scale (per
+axis, `ScaleX`/`ScaleY`) and mirroring applied. A rotated sprite
+(`Rotatable`, see [scene.md](formats/scene.md#rotation-of-an-object)) is
+hit where it is seen: the point is turned back around the hotspot before
+the tests. The original engine registers the unrotated rectangle and
+hits a turned sprite where it would be unrotated; Luma follows the
+transform instead, deliberately.
 
 While the game is not interactive there is no active object, so a
 click skips the sentences and nothing else (per `TALK_SKIP_BUTTON`).
@@ -177,6 +183,14 @@ not wait and the `System` forms run on the wall clock, so that a frozen
 game still fades. `GetFadeColor` reads the colour laid over the frame.
 A scene change fades in from black over 200 ms unless `ChangeScene` is
 told not to.
+
+The scene has a fader of its own (`Scene.FadeOut`, `FadeIn`, their
+`Async` forms and `Scene.GetFadeColor`, same arguments): its colour
+covers the scene viewport only, drawn after the scene's objects and
+under the windows, the inventory, the sentences and the cursor
+(`CAdScene::TraverseNodes` displays it last). It runs on the game timer
+(there is no `System` form) and every scene gets a fresh one, as the
+engine creates a `CBFader` per `CAdScene`.
 
 ## Scene state between visits
 

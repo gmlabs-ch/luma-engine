@@ -3,9 +3,9 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use luma_adventure::{Camera, GameSettings, SceneView, place};
+use luma_adventure::{Camera, GameSettings, SceneView, Transform, place, place_transformed};
 use luma_archive::{PackageBuilder, Vfs};
-use luma_formats::{Image, Rgba, SubFrame};
+use luma_formats::{BlendMode, Image, Rgba, SubFrame};
 use luma_render::{DrawList, Gpu, Offscreen, Renderer};
 
 fn temp_dir() -> std::path::PathBuf {
@@ -140,6 +140,32 @@ fn places_subframes_like_the_engine() {
     );
     assert_eq!(q.tint, tinted.tint, "the sub-frame's own tint wins");
     assert!(q.flip_x && !q.flip_y);
+
+    // A scale per axis around the hotspot, which is the pivot of the
+    // rotation (`CBSubFrame::Draw` hands it to `DisplayTransform`).
+    let (q, attrs) = place_transformed(
+        &sub,
+        &texture,
+        100,
+        300,
+        Transform {
+            scale_x: 200.0,
+            scale_y: 50.0,
+            rotation: 30.0,
+        },
+        owner,
+    );
+    assert_eq!(
+        (q.dst.x, q.dst.y, q.dst.w, q.dst.h),
+        (96.0, 290.0, 20.0, 10.0)
+    );
+    assert_eq!(attrs.rotation, 30.0);
+    assert_eq!(attrs.pivot, (100.0, 300.0));
+    assert_eq!(
+        attrs.blend,
+        BlendMode::Normal,
+        "the caller sets the owner's"
+    );
 }
 
 #[test]
@@ -206,6 +232,52 @@ fn loads_and_draws_a_scene_from_a_package() {
         (0, 0, 255),
         "free entity is off screen at offset 0"
     );
+
+    // Turned a quarter clockwise around its hotspot at (8, 12) and
+    // added to the background, the prop's red lands on x 8..12, y
+    // 12..16 as magenta.
+    let prop_ref = {
+        let (layer, index) = view.find_node("prop").unwrap();
+        luma_adventure::EntityRef::Node { layer, index }
+    };
+    {
+        let prop = view.entity_mut(prop_ref).unwrap();
+        prop.rotatable = true;
+        prop.rotate = Some(90.0);
+        prop.blend_mode = BlendMode::Additive;
+    }
+    let mut list = DrawList::new(32.0, 32.0);
+    view.draw(&mut list, &camera);
+    // The prop is drawn after the floor region and the free entity in it.
+    let attrs = list.attributes()[2];
+    assert_eq!(attrs.rotation, 90.0);
+    assert_eq!(attrs.pivot, (8.0, 12.0));
+    assert_eq!(attrs.blend, BlendMode::Additive);
+    renderer
+        .render(
+            target.target(),
+            Rgba {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            &list,
+        )
+        .unwrap();
+    let out = target.read(renderer.gpu()).unwrap();
+    let px = |x, y| {
+        let p = out.pixel(x, y).unwrap();
+        (p.r, p.g, p.b)
+    };
+    assert_eq!(px(9, 9), (0, 0, 255), "nothing where the prop was");
+    assert_eq!(px(9, 13), (255, 0, 255), "turned prop, added to the blue");
+    {
+        let prop = view.entity_mut(prop_ref).unwrap();
+        prop.rotatable = false;
+        prop.rotate = None;
+        prop.blend_mode = BlendMode::Normal;
+    }
 
     // Scroll to the right: the free entity (drawn by the floor region)
     // and the second frame of the prop come into view.

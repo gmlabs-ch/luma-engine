@@ -2,7 +2,9 @@
 //! machine has no graphics adapter (some CI runners).
 
 use luma_formats::{Image, Rgba};
-use luma_render::{DrawList, Gpu, Offscreen, Quad, Rect, Renderer};
+use luma_render::{
+    Attributes, BlendMode, DrawList, Gpu, Offscreen, Quad, Rect, Renderer, rotated_corners,
+};
 
 fn renderer() -> Option<Renderer> {
     match Gpu::headless() {
@@ -249,5 +251,153 @@ fn handles_many_quads_and_empty_lists() {
         target.read(gpu).unwrap().pixel(8, 8).unwrap(),
         rgba(0, 255, 0, 255),
         "last quad: white tinted green",
+    );
+}
+
+#[test]
+fn rotates_a_quad_around_its_pivot() {
+    let Some(renderer) = renderer() else { return };
+    let gpu = renderer.gpu();
+    let target = Offscreen::new(gpu, 64, 64);
+    let image = renderer.texture("quad", &quad_image());
+
+    // A 32x16 quad at (32, 32), turned a quarter clockwise around its
+    // top-left corner: it lands over x 16..32, y 32..64, its top edge
+    // (red, green) now running down its right side.
+    let mut list = DrawList::new(64.0, 64.0);
+    list.push_with(
+        Quad {
+            texture: &image,
+            dst: Rect::new(32.0, 32.0, 32.0, 16.0),
+            src: None,
+            tint: Rgba::OPAQUE_WHITE,
+            flip_x: false,
+            flip_y: false,
+        },
+        Attributes {
+            rotation: 90.0,
+            pivot: (32.0, 32.0),
+            blend: BlendMode::Normal,
+        },
+    );
+    renderer.render(target.target(), BLACK, &list).unwrap();
+    let out = target.read(gpu).unwrap();
+
+    close(
+        out.pixel(28, 36).unwrap(),
+        rgba(255, 0, 0, 255),
+        "red corner",
+    );
+    close(
+        out.pixel(28, 60).unwrap(),
+        rgba(0, 255, 0, 255),
+        "green below",
+    );
+    close(
+        out.pixel(18, 36).unwrap(),
+        rgba(0, 0, 255, 255),
+        "blue left",
+    );
+    close(
+        out.pixel(18, 60).unwrap(),
+        rgba(255, 255, 255, 255),
+        "white",
+    );
+    close(out.pixel(40, 40).unwrap(), BLACK, "nothing where it was");
+    close(out.pixel(24, 28).unwrap(), BLACK, "nothing above the pivot");
+
+    // The corners the renderer computes are the ones drawn.
+    let corners = rotated_corners(
+        Rect::new(32.0, 32.0, 32.0, 16.0),
+        &Attributes {
+            rotation: 90.0,
+            pivot: (32.0, 32.0),
+            blend: BlendMode::Normal,
+        },
+    );
+    let round = |(x, y): (f32, f32)| (x.round() as i32, y.round() as i32);
+    assert_eq!(corners.map(round), [(32, 32), (32, 64), (16, 64), (16, 32)]);
+    // The offset moves the pivot with the quad.
+    let mut list = DrawList::new(64.0, 64.0);
+    list.set_offset(-32.0, 0.0);
+    list.push_with(
+        Quad {
+            texture: &image,
+            dst: Rect::new(32.0, 32.0, 32.0, 16.0),
+            src: None,
+            tint: Rgba::OPAQUE_WHITE,
+            flip_x: false,
+            flip_y: false,
+        },
+        Attributes {
+            rotation: 90.0,
+            pivot: (32.0, 32.0),
+            blend: BlendMode::Normal,
+        },
+    );
+    assert_eq!(list.attributes()[0].pivot, (0.0, 32.0));
+    assert_eq!(list.quads()[0].dst.x, 0.0);
+}
+
+#[test]
+fn blends_additively_and_subtractively() {
+    let Some(renderer) = renderer() else { return };
+    let gpu = renderer.gpu();
+    let target = Offscreen::new(gpu, 32, 32);
+    let white = renderer.white();
+    let grey = rgba(100, 100, 100, 255);
+
+    let mut list = DrawList::new(32.0, 32.0);
+    let stripe = |x: f32, color: Rgba, blend: BlendMode| {
+        (
+            Quad {
+                texture: white,
+                dst: Rect::new(x, 0.0, 8.0, 32.0),
+                src: None,
+                tint: color,
+                flip_x: false,
+                flip_y: false,
+            },
+            Attributes {
+                rotation: 0.0,
+                pivot: (0.0, 0.0),
+                blend,
+            },
+        )
+    };
+    let mut fill = |x: f32, color: Rgba, blend: BlendMode| {
+        let (quad, attributes) = stripe(x, color, blend);
+        list.push_with(quad, attributes);
+    };
+    // Additive: the source, weighted by its alpha, adds to the grey.
+    fill(0.0, rgba(60, 0, 0, 255), BlendMode::Additive);
+    fill(8.0, rgba(60, 0, 0, 128), BlendMode::Additive);
+    // Subtractive: the grey keeps `1 - src` of each channel.
+    fill(16.0, rgba(255, 0, 0, 255), BlendMode::Subtractive);
+    fill(24.0, rgba(128, 128, 128, 255), BlendMode::Subtractive);
+    // A normal quad after them still blends normally.
+    fill(0.0, rgba(0, 0, 200, 128), BlendMode::Normal);
+    renderer.render(target.target(), grey, &list).unwrap();
+    let out = target.read(gpu).unwrap();
+
+    close(
+        out.pixel(4, 4).unwrap(),
+        rgba(80, 50, 150, 255),
+        "normal over the additive result",
+    );
+    close(
+        out.pixel(12, 4).unwrap(),
+        rgba(130, 100, 100, 255),
+        "half additive",
+    );
+    close(
+        out.pixel(20, 4).unwrap(),
+        rgba(0, 100, 100, 255),
+        "red subtracted",
+    );
+    close(
+        out.pixel(28, 4).unwrap(),
+        rgba(50, 50, 50, 255),
+        "half subtracted",
     );
 }

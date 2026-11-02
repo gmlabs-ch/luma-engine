@@ -52,6 +52,11 @@ no code copied):
   crates/luma-script/src/script.rs
   crates/luma-script/src/engine.rs
   crates/luma-script/src/snapshot.rs
+  docs/compiler.md
+  crates/luma-compiler/src/lexer.rs
+  crates/luma-compiler/src/parser.rs
+  crates/luma-compiler/src/symbols.rs
+  crates/luma-compiler/src/codegen.rs
   crates/luma-script/src/classes/mod.rs
   crates/luma-script/src/classes/string.rs
   crates/luma-script/src/classes/array.rs
@@ -70,11 +75,14 @@ no code copied):
   crates/luma-adventure/src/natives_sound.rs
   crates/luma-adventure/src/natives_sprite.rs
   crates/luma-adventure/src/input.rs
+  crates/luma-render/src/renderer.rs
   crates/luma-adventure/src/fader.rs
   crates/luma-adventure/src/ui.rs
   crates/luma-adventure/src/natives_ui.rs
   crates/luma-adventure/src/inventory.rs
   crates/luma-adventure/src/natives_item.rs
+  crates/luma-adventure/src/particles.rs
+  crates/luma-adventure/src/natives_particles.rs
   docs/game-loop.md
   docs/audio.md
   docs/video.md

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use luma_archive::{Package, PackageBuilder, PackagedFile, Vfs};
+use luma_compiler::{Compiler, GameDirs, Natives};
 use luma_formats::{Document, Scene, SceneNode, Sprite};
 use luma_script::Program;
 
@@ -24,6 +25,8 @@ COMMANDS:
     sprite <game> <name>   Describe a sprite and the images it uses
     scene <game> <name>    Describe a scene: layers, entities, regions
     script <game> <name>   Disassemble a compiled script
+    script <file>          Same, for a compiled script on disk
+    compile <source>       Compile a script source to the engine's bytecode
     lumen check <story>    Check a Lumen story (a folder or a .lumen file)
     lumen play <story>     Play a Lumen story as text in the terminal
     help                   Show this message
@@ -31,6 +34,12 @@ COMMANDS:
 
 <game> is a game directory (its *.dcp packages, and those of its `data`
 sub-directory, are read the way the engine does) or a single .dcp file.
+
+compile takes -o <file> for the output (standard output otherwise),
+--game <dir> for the project root that #include names and the script's
+own name are relative to (the source's directory otherwise), and
+--native <name> to add a function or class the engine provides beyond
+the standard ones (repeatable, for plugins).
 
 lumen play takes --start <knot> to begin elsewhere than the manifest's
 start knot, --seed <n> for the random functions, and --choose <n,n,...>
@@ -69,9 +78,11 @@ fn main() -> ExitCode {
             _ => usage_error("scene takes exactly two arguments: <game> <name>"),
         },
         Some("script") => match args.as_slice() {
-            [_, game, name] => script(Path::new(game), name),
-            _ => usage_error("script takes exactly two arguments: <game> <name>"),
+            [_, game, name] => script(Path::new(game), Some(name)),
+            [_, file] => script(Path::new(file), None),
+            _ => usage_error("script takes <game> <name> or <file>"),
         },
+        Some("compile") => compile(&args[1..]),
         Some("lumen") => lumen::run(&args[1..]),
         Some("dump") => match args.as_slice() {
             [_, file] => dump(Path::new(file), None),
@@ -357,9 +368,103 @@ fn sprite(game: &Path, name: &str) -> Result<(), Failure> {
     Ok(())
 }
 
-fn script(game: &Path, name: &str) -> Result<(), Failure> {
-    let vfs = open(game)?;
-    let bytes = vfs.read(name)?;
+/// `compile <source> [-o <file>] [--game <dir>] [--native <name>]...`
+fn compile(args: &[String]) -> Result<(), Failure> {
+    let mut source: Option<PathBuf> = None;
+    let mut output: Option<PathBuf> = None;
+    let mut game: Option<PathBuf> = None;
+    let mut natives = Natives::wme();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-o" | "--output" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Failure::Usage("-o takes a file".to_string()))?;
+                output = Some(PathBuf::from(value));
+            }
+            "--game" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Failure::Usage("--game takes a directory".to_string()))?;
+                game = Some(PathBuf::from(value));
+            }
+            "--native" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| Failure::Usage("--native takes a name".to_string()))?;
+                natives = natives.function(value);
+            }
+            other if other.starts_with('-') => {
+                return usage_error(&format!("compile: unknown option `{other}`"));
+            }
+            _ if source.is_none() => source = Some(PathBuf::from(arg)),
+            _ => return usage_error("compile takes one source file"),
+        }
+    }
+    let Some(source) = source else {
+        return usage_error("compile takes a source file");
+    };
+    let root = match game {
+        Some(dir) => dir,
+        None => source
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from(".")),
+    };
+    // The name in the header is the path relative to the project root
+    // with backslashes, as the original tools write it; a source outside
+    // the root keeps its own path.
+    let relative = source
+        .canonicalize()
+        .ok()
+        .zip(root.canonicalize().ok())
+        .and_then(|(source, root)| source.strip_prefix(&root).ok().map(Path::to_path_buf))
+        .unwrap_or_else(|| source.clone());
+    let name = relative
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("\\");
+    let text =
+        fs::read(&source).map_err(|err| Failure::Error(format!("{}: {err}", source.display())))?;
+    let mut includes = GameDirs::new(&root);
+    let bytes = Compiler::new(natives)
+        .compile(&text, &name, &mut includes)
+        .map_err(|err| Failure::Error(err.to_string()))?;
+    match output {
+        Some(path) => {
+            fs::write(&path, &bytes)
+                .map_err(|err| Failure::Error(format!("{}: {err}", path.display())))?;
+            eprintln!(
+                "Compiled {} ({} bytes) to {}",
+                source.display(),
+                bytes.len(),
+                path.display()
+            );
+        }
+        None => {
+            let stdout = io::stdout();
+            let mut out = stdout.lock();
+            out.write_all(&bytes)?;
+            out.flush()?;
+        }
+    }
+    Ok(())
+}
+
+fn script(game: &Path, name: Option<&str>) -> Result<(), Failure> {
+    let (name, bytes) = match name {
+        Some(name) => {
+            let vfs = open(game)?;
+            (name.to_string(), vfs.read(name)?)
+        }
+        None => (
+            game.display().to_string(),
+            fs::read(game).map_err(|err| Failure::Error(format!("{}: {err}", game.display())))?,
+        ),
+    };
     let program = Program::parse(bytes).map_err(|err| Failure::Error(format!("{name}: {err}")))?;
     let stdout = io::stdout();
     let mut out = BufWriter::new(stdout.lock());

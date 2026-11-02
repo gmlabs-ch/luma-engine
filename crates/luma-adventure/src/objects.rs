@@ -59,12 +59,19 @@ pub enum Kind {
     Actor,
     /// The screen fader scripts wait for (`Game.FadeOut`).
     Fader,
+    /// The current scene's own fader, over the scene only
+    /// (`Scene.FadeOut`); a new one with every scene, as in the engine.
+    SceneFader,
     /// A window or one of its controls (`Game.LoadWindow`, `GetWidget`);
     /// its state lives in the world's UI.
     Control,
     /// An inventory item (`ITEMS`); its state lives in the world's
     /// inventory.
     Item,
+    /// The particle emitter of an entity or an actor
+    /// (`CreateParticleEmitter`), by its owner; its state lives in the
+    /// world's emitter list.
+    Emitter(NativeId),
     /// A stand-in that keeps the properties scripts set and answers every
     /// method with `null`: windows, actors and other objects of later
     /// milestones.

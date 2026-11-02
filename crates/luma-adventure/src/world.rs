@@ -25,7 +25,7 @@ use crate::inventory::Inventory;
 use crate::objects::{Kind, Native, Objects};
 use crate::path::Floor;
 use crate::scene_state::SceneState;
-use crate::scene_view::{Camera, Drawable, SceneView};
+use crate::scene_view::{Camera, Drawable, Overlays, SceneView};
 use crate::settings::GameSettings;
 use crate::sound::Sounds;
 use crate::talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
@@ -114,6 +114,8 @@ pub struct World {
     pub(crate) last_scroll_x: u64,
     pub(crate) last_scroll_y: u64,
     pub(crate) actors: Vec<(NativeId, Actor)>,
+    /// The particle emitters of entities and actors, by handle.
+    pub(crate) emitters: Vec<(NativeId, crate::particles::Emitter)>,
     pub(crate) pending_events: Vec<(NativeId, String)>,
     pub(crate) sounds: Sounds,
     pub(crate) fonts: FontBank,
@@ -130,6 +132,10 @@ pub struct World {
     pub(crate) hits: Vec<HitArea>,
     pub(crate) fader: Fader,
     pub(crate) fader_id: NativeId,
+    /// The scene's fader (`Scene.FadeOut`), drawn over the scene
+    /// viewport under the windows; reset with every scene.
+    pub(crate) scene_fader: Fader,
+    pub(crate) scene_fader_id: NativeId,
     pub(crate) ui: Ui,
     /// The dialogue response box and its state.
     pub(crate) responses: crate::responses::Responses,
@@ -182,6 +188,9 @@ pub struct World {
     /// (`m_TempDisableSaveState`).
     pub(crate) temp_disable_save_state: bool,
     pub(crate) timer: u64,
+    /// How much the timer advanced this frame (`m_TimerDelta`); 0 while
+    /// frozen.
+    pub(crate) timer_delta: u64,
     pub(crate) clock: u64,
     log: Vec<String>,
     stubs: HashSet<String>,
@@ -221,6 +230,7 @@ impl World {
         let response_box_id = objects.insert(Kind::ResponseBox);
         let scene_id = objects.insert(Kind::Scene);
         let fader_id = objects.insert(Kind::Fader);
+        let scene_fader_id = objects.insert(Kind::SceneFader);
         let personal_savegames = game_file.personal_savegames;
         let startup_scene = game_file.startup_scene.clone();
         let scene_viewport = game_file.scene_viewport.map(|[x, y, w, h]| (x, y, w, h));
@@ -254,6 +264,7 @@ impl World {
             last_scroll_x: 0,
             last_scroll_y: 0,
             actors: Vec::new(),
+            emitters: Vec::new(),
             pending_events: Vec::new(),
             sounds: Sounds::new(audio),
             fonts: FontBank::new(),
@@ -270,6 +281,8 @@ impl World {
             hits: Vec::new(),
             fader: Fader::default(),
             fader_id,
+            scene_fader: Fader::default(),
+            scene_fader_id,
             ui: Ui::default(),
             responses: crate::responses::Responses::default(),
             response_box_id,
@@ -299,6 +312,7 @@ impl World {
             mouse_lock: (0, 0, 0, 0),
             temp_disable_save_state: false,
             timer: 0,
+            timer_delta: 0,
             clock: 0,
             log: Vec::new(),
             stubs: HashSet::new(),
@@ -472,8 +486,11 @@ impl World {
     /// Advances the clocks by `dt` milliseconds, and counts the frame
     /// for `Game.FPS`: the frames of each whole second (`InitLoop`).
     pub fn advance_time(&mut self, dt: u64) {
-        if !self.ui.frozen {
+        if self.ui.frozen {
+            self.timer_delta = 0;
+        } else {
             self.timer += dt;
+            self.timer_delta = dt;
         }
         self.clock += dt;
         self.fps_time += dt;
@@ -885,7 +902,8 @@ impl World {
             Some(Kind::Sprite(_)) => "sprite".to_string(),
             Some(Kind::Frame { .. }) => "frame".to_string(),
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
-            Some(Kind::Fader) => "fader".to_string(),
+            Some(Kind::Emitter(_)) => "particle emitter".to_string(),
+            Some(Kind::Fader) | Some(Kind::SceneFader) => "fader".to_string(),
             Some(Kind::Actor) => self
                 .actor(id)
                 .map(|a| a.def.name.clone())
@@ -1210,13 +1228,47 @@ impl World {
 
     /// The actors as drawn this frame, the game's then the scene's.
     pub fn drawables(&self) -> Vec<Drawable<'_>> {
+        self.scene_draw_parts().0
+    }
+
+    /// The actors as drawn this frame, and the particles of the scene's
+    /// objects, drawn right after their owner (`CAdEntity::Display`,
+    /// `CAdActor::Display`: the emitter after the sprite, through the
+    /// entity's region when the emitter uses it).
+    pub fn scene_draw_parts(&self) -> (Vec<Drawable<'_>>, Overlays<'_>) {
         let Some(view) = &self.scene else {
-            return Vec::new();
+            return (Vec::new(), Overlays::default());
         };
-        self.actors
-            .iter()
-            .filter_map(|(_, a)| a.drawable(&view.scene))
-            .collect()
+        let mut drawables = Vec::new();
+        let mut overlays = Overlays::default();
+        for (id, actor) in &self.actors {
+            let Some(drawable) = actor.drawable(&view.scene) else {
+                continue;
+            };
+            if let Some(emitter) = self.emitter_of(*id).and_then(|e| self.emitter(e)) {
+                let quads = emitter.quads(None);
+                if !quads.is_empty() {
+                    overlays.others.insert(drawables.len(), quads);
+                }
+            }
+            drawables.push(drawable);
+        }
+        for (_, emitter) in &self.emitters {
+            let Some(Kind::Entity(r)) = self.native(emitter.owner).map(|n| &n.kind) else {
+                continue;
+            };
+            let Some(entity) = view.entity(*r) else {
+                continue;
+            };
+            if !entity.active {
+                continue;
+            }
+            let quads = emitter.quads(entity.region.as_ref());
+            if !quads.is_empty() {
+                overlays.entities.insert(*r, quads);
+            }
+        }
+        (drawables, overlays)
     }
 
     /// Fills a draw list with the frame as the engine composes it: the
@@ -1239,7 +1291,13 @@ impl World {
             return;
         }
         if let Some(view) = &self.scene {
-            view.draw_with(list, camera, &self.drawables());
+            let (drawables, overlays) = self.scene_draw_parts();
+            view.draw_with_overlays(list, camera, &drawables, &overlays);
+            // The scene's fader covers the scene viewport, under the
+            // windows (`CAdScene::TraverseNodes` displays it last).
+            if let Some(white) = white {
+                self.draw_scene_fade(list, white);
+            }
         }
         self.draw_windows(list, true, white);
         self.draw_inventory(list, white);
@@ -1268,6 +1326,9 @@ impl World {
         }
         for (_, actor) in &mut self.actors {
             actor.bank.upload(&self.vfs, renderer);
+        }
+        for (_, emitter) in &mut self.emitters {
+            emitter.bank.upload(&self.vfs, renderer);
         }
         self.cursors.bank.upload(&self.vfs, renderer);
         self.ui.bank.upload(&self.vfs, renderer);
@@ -1319,6 +1380,8 @@ impl World {
                         _ => true,
                     }
                 }
+                // The particle emitters of the scene's objects go too.
+                Kind::Emitter(owner) => is_scene_entity(owner) || scene_actors.contains(&owner),
                 _ => scene_actors.contains(id),
             })
             .map(|(id, _)| id)
@@ -1344,6 +1407,7 @@ impl World {
         for id in gone {
             self.objects.remove(id);
         }
+        self.emitters.retain(|(id, _)| self.objects.contains(*id));
         self.drop_orphan_sounds();
         if let Some(scene) = self.objects.get_mut(self.scene_id) {
             scene.props.clear();
@@ -1385,6 +1449,8 @@ impl World {
         self.active_object = None;
         self.hits.clear();
         self.scene = Some(view);
+        // Every scene has its own fader (`CAdScene::m_Fader`).
+        self.scene_fader = Fader::default();
         self.restore_scene_state();
         self.hide_taken_item_entities();
         for (_, actor) in &mut self.actors {
@@ -1486,6 +1552,11 @@ impl World {
     /// The fader's handle, for scripts to wait on.
     pub fn fader_id(&self) -> NativeId {
         self.fader_id
+    }
+
+    /// The current scene's fader (`Scene.FadeOut`), over the scene only.
+    pub fn scene_fader(&self) -> &Fader {
+        &self.scene_fader
     }
 
     /// The fonts loaded.
@@ -1994,8 +2065,9 @@ impl Natives for World {
             Some(Kind::Sprite(_)) => "sprite".to_string(),
             Some(Kind::Frame { .. }) => "frame".to_string(),
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
+            Some(Kind::Emitter(_)) => "particle-emitter".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
-            Some(Kind::Fader) => "fader".to_string(),
+            Some(Kind::Fader) | Some(Kind::SceneFader) => "fader".to_string(),
             Some(Kind::Control) => self
                 .control(id)
                 .map_or("control", Control::type_name)
@@ -2019,6 +2091,7 @@ impl Natives for World {
             Some(Kind::Sprite(_)) => "[sprite]".to_string(),
             Some(Kind::Frame { .. }) => "[frame]".to_string(),
             Some(Kind::SubFrame { .. }) => "[subframe]".to_string(),
+            Some(Kind::Emitter(_)) => "[particle emitter]".to_string(),
             Some(_) => "[native object]".to_string(),
             None => "[invalid object]".to_string(),
         }
@@ -2130,6 +2203,7 @@ impl Host for World {
                 .is_none_or(|v| !v.is_talking(*r) && !v.is_playing_anim(*r)),
             Some(Kind::Scene) => self.is_scrolled(),
             Some(Kind::Fader) => self.fader.ready,
+            Some(Kind::SceneFader) => self.scene_fader.ready,
             Some(Kind::ResponseBox) => self.responses.waiting.is_none(),
             Some(Kind::Control) => self
                 .control(id)
@@ -2307,9 +2381,11 @@ impl Runtime {
         self.world.update_speech();
         let (timer, clock) = (self.world.timer, self.world.clock);
         self.world.fader.update(timer, clock);
+        self.world.scene_fader.update(timer, clock);
         self.engine.tick(&mut self.world);
         self.world.update_scene();
         self.world.update_actors();
+        self.world.update_emitters();
         self.world.scroll_step();
         self.world.update_sounds();
         self.world.collect_hits();

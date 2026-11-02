@@ -13,7 +13,7 @@ use luma_formats::{Rgba, Scene};
 
 use crate::error::{Error, Result};
 use crate::path::Floor;
-use crate::scene_view::{AnimState, Drawable, SpriteBank, frame_height, key};
+use crate::scene_view::{AnimState, Drawable, SpriteBank, Transform, frame_height, key};
 use crate::talk::{Sentence, SubtitleMods};
 
 /// What an actor is doing (`TObjectState`).
@@ -892,14 +892,22 @@ impl Actor {
         }
     }
 
-    /// Scale in percent at the actor's position (`CAdObject::GetScale`).
-    pub fn scale(&self, scene: &Scene) -> f32 {
-        if !self.def.scalable {
-            return 100.0;
+    /// Scale per axis and rotation at the actor's position
+    /// (`CAdObject::GetScale`, the rotation of `CAdActor::Display`).
+    pub fn transform(&self, scene: &Scene) -> Transform {
+        let def = &self.def;
+        let (scale_x, scale_y) = scene.object_scale(
+            (self.x, self.y),
+            def.scalable,
+            def.scale,
+            (def.scale_x, def.scale_y),
+            def.relative_scale,
+        );
+        Transform {
+            scale_x,
+            scale_y,
+            rotation: scene.object_rotation(self.x, def.rotatable, def.rotate, def.relative_rotate),
         }
-        self.def
-            .scale
-            .unwrap_or_else(|| scene.zoom_at(self.x, self.y) + self.def.relative_scale)
     }
 
     /// Tint at the actor's position.
@@ -941,8 +949,9 @@ impl Actor {
             sprite: Some(loaded),
             bank: &self.bank,
             frame: self.frame_of(path),
-            scale: self.scale(scene),
+            transform: self.transform(scene),
             tint: self.tint(scene),
+            blend: self.def.blend_mode,
         })
     }
 

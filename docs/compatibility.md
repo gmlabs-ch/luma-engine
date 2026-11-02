@@ -110,7 +110,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BObject.cpp
 - Hierarchy and Luma: CBScriptHolder → CBObject; Luma: game, entities, actors (sound, position, flags); controls, regions, layers have their own subsets
-- Count: 45 done, 27 todo, 0 no-op
+- Count: 55 done, 17 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -141,14 +141,14 @@ How the list was made. For every class with a script interface, the names tested
 | `Registrable` | get/set | **done** | Whether the object is registered for mouse interaction (same as `Interactive`). |
 | `Interactive` | get/set | **done** | Whether the object reacts to the mouse. |
 | `Zoomable`, `Scalable` | get/set | **done** | Whether the scene's scale levels apply to the object. |
-| `Rotatable` | get/set | **done** | Whether the scene's rotation levels apply. The flag is stored; rotation is not rendered. |
+| `Rotatable` | get/set | **done** | Whether the scene's rotation levels (and `Rotate`, `RelativeRotate`) apply; the sprite turns around its hotspot. |
 | `AlphaColor` | get/set | **done** | Tint colour and alpha (0xAARRGGBB). |
-| `BlendMode` | get/set | **todo** | Blend mode (normal / additive / subtractive). Luma reads 0, ignores the set; no blend modes in the renderer. |
+| `BlendMode` | get/set | **done** | Blend mode (0 normal, 1 additive, 2 subtractive; another value is normal). Pipeline states of the renderer, see `docs/rendering.md`. |
 | `Scale` | get/set | **done** | Absolute scale in percent (null = use the scene's scale). |
-| `ScaleX`, `ScaleY` | get/set | **todo** | Independent horizontal / vertical scale. Luma reads null, ignores the set. |
+| `ScaleX`, `ScaleY` | get/set | **done** | Independent horizontal / vertical scale in percent (null = unset); when either is set they replace `Scale` and the scene's, the other axis at 100 (`CAdObject::GetScale`). The hit area follows. |
 | `RelativeScale` | get/set | **done** | Scale adjustment in percent added to the scene's scale. |
-| `Rotate` | get/set | **todo** | Absolute rotation in degrees. Luma reads null, ignores the set. |
-| `RelativeRotate` | get/set | **todo** | Rotation added to the scene's rotation level. Luma reads 0, ignores the set. |
+| `Rotate` | get/set | **done** | Absolute rotation in degrees (null = use the scene's), applied when `Rotatable`. Luma also hit-tests the sprite where it is drawn turned; WME tests it where it would be unrotated. |
+| `RelativeRotate` | get/set | **done** | Rotation added to the scene's rotation level, when `Rotatable` and no `Rotate` is set. |
 | `Colorable` | get/set | **done** | Whether the scene's ambient colour tints the object. |
 | `SoundPanning` | get/set | **done** | Whether the object's sound pans with its screen position. |
 | `SaveState` | get/set | **done** | Whether the object is saved with the scene state (entities; actors always read true and ignore the set). |
@@ -325,7 +325,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdScene.cpp
 - Hierarchy and Luma: CBObject → CAdScene; Luma: scene (`scene_call`, `scene_get`, `scene_set`, `scene_view.rs`)
-- Count: 46 done, 35 todo, 2 no-op
+- Count: 51 done, 30 todo, 2 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -345,8 +345,8 @@ How the list was made. For every class with a script interface, the names tested
 | `IsBlockedAt`, `IsWalkableAt` | method | **done** | Walkplane tests at a point. |
 | `GetScaleAt`, `GetRotationAt` | method | **done** | Scale / rotation level at a point. |
 | `IsScrolling` | method | **done** | True while the view scrolls. |
-| `FadeOut`, `FadeOutAsync`, `FadeIn`, `FadeInAsync` | method | **todo** | Fades only the scene (not the UI). Stubbed. |
-| `GetFadeColor` | method | **todo** | Colour of the scene fade. |
+| `FadeOut`, `FadeOutAsync`, `FadeIn`, `FadeInAsync` | method | **done** | Fades only the scene viewport (not the UI), on the game timer; the scene's own fader, new with every scene. |
+| `GetFadeColor` | method | **done** | Colour of the scene fade (0xAARRGGBB, the alpha as it is now). |
 | `IsPointInViewport` | method | **done** | True when a point is inside the scene viewport. |
 | `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled` | method | **todo** | Shows / hides / queries a mesh node of the scene's 3D geometry. |
 | `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `GetLightColor`, `GetLightPosition` | method | **todo** | Controls the lights of the scene's 3D geometry. |
@@ -435,7 +435,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdObject.cpp
 - Hierarchy and Luma: CBObject → CAdObject → CAdTalkHolder / CAdObject3D; Luma: entities, actors (`entity_call`, `actor_call`)
-- Count: 30 done, 11 todo, 0 no-op
+- Count: 33 done, 8 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -448,8 +448,8 @@ How the list was made. For every class with a script interface, the names tested
 | `StickToRegion` | method | **todo** | Constrains a free object to move only inside a region. Stubbed. |
 | `SetFont`, `GetFont` | method | **done** | Sets / reads the font used for the object's speech. |
 | `TakeItem`, `DropItem`, `GetItem`, `HasItem` | method | **done** | Inventory handling (shared inventory in Luma). |
-| `CreateParticleEmitter` | method | **todo** | Creates a particle emitter attached to the object. Particles are not implemented. |
-| `DeleteParticleEmitter` | method | **todo** | Deletes the object's emitter. |
+| `CreateParticleEmitter` | method | **done** | Creates the object's particle emitter (one per object; a second call only changes how it follows), optionally following the object at a scaled offset. See `docs/particles.md`. |
+| `DeleteParticleEmitter` | method | **done** | Deletes the object's emitter; its handle becomes invalid. |
 | `AddAttachment` | method | **todo** | Attaches a sprite or 3D model to the object (file, bone/offset, ...). Stubbed. |
 | `RemoveAttachment` | method | **todo** | Removes an attachment. |
 | `GetAttachment` | method | **todo** | Returns an attachment by index or name. Luma returns null. |
@@ -459,7 +459,7 @@ How the list was made. For every class with a script interface, the names tested
 | `SceneIndependent` | get/set | **todo** | Object stays in the scene tree across scene changes. Luma reads false, ignores the set. |
 | `SubtitlesWidth`, `SubtitlesPosRelative`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosXCenter` | get/set | **done** | Placement of the object's subtitles. |
 | `NumItems` | get | **done** | Number of items in the object's inventory. |
-| `ParticleEmitter` | get | **todo** | The object's particle emitter. Luma reads null. |
+| `ParticleEmitter` | get | **done** | The object's particle emitter, `null` without one. |
 | `NumAttachments` | get | **todo** | Number of attachments. Luma reads 0. |
 
 ### CAdTalkHolder (base of actors, entities, items)
@@ -876,28 +876,28 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 ### CPartEmitter (particle emitter)
 
 - WME source: src/engine_core/wme_base/PartEmitter.cpp
-- Hierarchy and Luma: CBObject → CPartEmitter; Luma: absent (no particles)
-- Count: 0 done, 79 todo, 0 no-op
+- Hierarchy and Luma: CBObject → CPartEmitter; Luma: luma-adventure/src/particles.rs, natives_particles.rs (`emitter_call`, `emitter_get`, `emitter_set`); see `docs/particles.md`. Of the inherited CBObject members, `BlendMode` is implemented on the emitter (its particles blend with it); the others are not exposed on emitters.
+- Count: 79 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `SetBorder`, `SetBorderThickness` | method | **todo** | Sets the emitter's bounding rectangle and its soft border. |
-| `AddSprite`, `RemoveSprite` | method | **todo** | Adds / removes a particle image. |
-| `Start`, `Stop`, `Pause`, `Resume` | method | **todo** | Controls emission. |
-| `AddGlobalForce`, `AddPointForce`, `RemoveForce` | method | **todo** | Adds a wind-like force or point attractor / removes it. |
-| `Type` | get | **todo** | `particle-emitter`. |
-| `X`, `Y`, `Width`, `Height` | get/set | **todo** | Emission rectangle. |
-| `Scale1`, `Scale2`, `ScaleZBased` | get/set | **todo** | Particle scale range, optionally by depth. |
-| `Velocity1`, `Velocity2`, `VelocityZBased` | get/set | **todo** | Speed range. |
-| `LifeTime1`, `LifeTime2`, `LifeTimeZBased` | get/set | **todo** | Lifetime range. |
-| `Angle1`, `Angle2`, `AngVelocity1`, `AngVelocity2`, `Rotation1`, `Rotation2` | get/set | **todo** | Direction, spin and initial rotation ranges. |
-| `Alpha1`, `Alpha2`, `AlphaTimeBased` | get/set | **todo** | Opacity range. |
-| `MaxParticles`, `GenerationInterval`, `GenerationAmount`, `MaxBatches` | get/set | **todo** | Emission rate and caps. |
-| `NumLiveParticles` | get | **todo** | Particles alive now. |
-| `FadeInTime`, `FadeOutTime` | get/set | **todo** | Fade durations. |
-| `GrowthRate1`, `GrowthRate2`, `ExponentialGrowth` | get/set | **todo** | Size growth. |
-| `UseRegion` | get/set | **todo** | Emits inside a region instead of the rectangle. |
-| `EmitEvent` | get/set | **todo** | Script event raised on the owner at each emission. |
+| `SetBorder`, `SetBorderThickness` | method | **done** | The rectangle particles fade out on leaving, and how much it shrinks for the nearest particles. |
+| `AddSprite`, `RemoveSprite` | method | **done** | Adds / removes a particle sprite file; `AddSprite` fails on a missing file. |
+| `Start`, `Stop`, `Pause`, `Resume` | method | **done** | Controls emission; `Start(overhead)` runs ahead in steps of 500 ms. |
+| `AddGlobalForce`, `AddPointForce`, `RemoveForce` | method | **done** | Adds a wind-like force / removes it. As in WME 1.x, `AddPointForce` creates a global force (its `ScCallMethod` passes `FORCE_GLOBAL`); Luma reproduces this. |
+| `Type` | get | **done** | `particle-emitter`. |
+| `X`, `Y`, `Width`, `Height` | get/set | **done** | Emission rectangle. |
+| `Scale1`, `Scale2`, `ScaleZBased` | get/set | **done** | Particle scale range, optionally by depth. |
+| `Velocity1`, `Velocity2`, `VelocityZBased` | get/set | **done** | Speed range. |
+| `LifeTime1`, `LifeTime2`, `LifeTimeZBased` | get/set | **done** | Lifetime range. |
+| `Angle1`, `Angle2`, `AngVelocity1`, `AngVelocity2`, `Rotation1`, `Rotation2` | get/set | **done** | Direction, spin and initial rotation ranges; each particle turns around its position. |
+| `Alpha1`, `Alpha2`, `AlphaTimeBased` | get/set | **done** | Opacity range, clamped to 0..255 on set. |
+| `MaxParticles`, `GenerationInterval`, `GenerationAmount`, `MaxBatches` | get/set | **done** | Emission rate and caps. |
+| `NumLiveParticles` | get | **done** | Particles alive now. |
+| `FadeInTime`, `FadeOutTime` | get/set | **done** | Fade durations. |
+| `GrowthRate1`, `GrowthRate2`, `ExponentialGrowth` | get/set | **done** | Size growth. |
+| `UseRegion` | get/set | **done** | Only the particles inside the owner's region are drawn. |
+| `EmitEvent` | get/set | **done** | Script event raised on the owner at each emission. |
 
 ## 10. 3D objects
 
@@ -1000,7 +1000,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 ### Events raised on objects (`on "Name" { ... }` handlers)
 
 - WME source: src/engine_core/wme_base/BGame.cpp, wme_ad/AdGame.cpp, wme_ad/AdObject.cpp, wme_base/UIButton.cpp, wme_base/BSprite.cpp (search `ApplyEvent("`)
-- Hierarchy and Luma: luma-adventure/src/world.rs (`mouse_event`, `key_down`), ui.rs, scene_state.rs
+- Hierarchy and Luma: luma-adventure/src/world.rs (`mouse_event`, `key_down`), ui.rs, scene_state.rs, natives_particles.rs
 - Count: 15 done, 6 todo, 0 no-op
 
 | WME name | Kind | State | Note |
@@ -1020,7 +1020,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | (sound event name) | event | **done** | The name given to `PlaySoundEvent`, raised on the object when the sound ends. |
 | `FrameChanged` | event | **done** | Raised on a sprite object when its current frame changes (the sprite of an entity, an actor or a control); only scripts attached to the sprite object with `AttachScript` can handle it, since Luma does not attach a sprite file's own `SCRIPT`s yet. |
 | (frame event names) | event | **done** | Events attached to a frame (`APPLY_EVENT` in sprite files, `AddEvent`), raised on the sprite's owner (entity, actor, control) when the frame becomes current; the frame's `SOUND` plays and `KILL_SOUND` stops the sprite's earlier frame sounds at the same time. |
-| (emit event name) | event | **todo** | The particle emitter's `EmitEvent`, raised on its owner at each emission. |
+| (emit event name) | event | **done** | The particle emitter's `EmitEvent`, raised on its owner each frame a batch is born (not during the run-ahead of `Start`). |
 
 ## Summary per class
 
@@ -1031,16 +1031,16 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Global variables | 4 | 1 | 0 | 5 |
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
-| CBObject | 45 | 27 | 0 | 72 |
+| CBObject | 55 | 17 | 0 | 72 |
 | CBGame | 123 | 24 | 18 | 165 |
 | CAdGame | 59 | 6 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
-| CAdScene | 46 | 35 | 2 | 83 |
+| CAdScene | 51 | 30 | 2 | 83 |
 | CAdLayer | 13 | 5 | 0 | 18 |
 | CBRegion | 7 | 4 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
 | CAdWaypointGroup | 0 | 3 | 0 | 3 |
-| CAdObject | 30 | 11 | 0 | 41 |
+| CAdObject | 33 | 8 | 0 | 41 |
 | CAdTalkHolder | 3 | 4 | 0 | 7 |
 | CAdActor | 23 | 0 | 0 | 23 |
 | CAdEntity | 11 | 9 | 0 | 20 |
@@ -1065,15 +1065,15 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CSXMemBuffer | 19 | 0 | 3 | 22 |
 | CSXTcpClient | 0 | 0 | 1 | 1 |
 | CSXPluginObject | 0 | 0 | 1 | 1 |
-| CPartEmitter | 0 | 79 | 0 | 79 |
+| CPartEmitter | 79 | 0 | 0 | 79 |
 | CAdObject3D | 0 | 38 | 0 | 38 |
 | CAdActor3D | 0 | 40 | 0 | 40 |
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 6 | 0 | 21 |
-| **All** | **728** | **395** | **30** | **1153** |
+| **All** | **825** | **298** | **30** | **1153** |
 
-Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 713 done, 389 todo, 30 no-op.
+Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 810 done, 292 todo, 30 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1085,7 +1085,6 @@ These classes have no done member in Luma: the object does not exist for scripts
 | `CBFrame` | A frame of a sprite (delay, sound, move, sub-frames, events) | 21 |
 | `CBSubFrame` | The image part of a frame (hotspot, mirror, alpha) | 20 |
 | `CSXDirectory` | `Directory` | 9 |
-| `CPartEmitter` | Particle emitter | 79 |
 | `CAdObject3D` | Base of 3D objects: position, velocity, shadows, bones, ignored lights | 38 |
 | `CAdActor3D` | Legacy 3D actor (MS3D/3DS models) | 40 |
 | `CAdActor3DX` | 3D actor with X-file models and skeletal animation, effects, attachments | 67 |
@@ -1104,15 +1103,14 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Game services | 8 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
 | Script library | 16 | The `Directory` object, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. (`String`, `Array`, `Date`, `File` and `MemBuffer` are done.) |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
-| Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
+| Rendering features | 0 | Done: rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades (see `docs/rendering.md`). |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
 | Video | 7 | Entity-bound Theora video (`PlayTheora` on an entity and its pause/stop family), AVI for the deprecated `PlayVideo`. |
 | Sound effects | 2 | `SoundFXEcho`, `SoundFXReverb` (also listed in `docs/audio.md`). |
 | Input and system events | 6 | Wheel, middle and right-double-click events, the `QuitGame` event. |
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
-| Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **395** | |
+| **All** | **297** | |
 
 ## Members in Luma that WME 1.x does not define
 

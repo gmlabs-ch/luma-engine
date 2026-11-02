@@ -7,7 +7,7 @@ includes when it enables them.
 
 ## One crate to depend on: `luma`
 
-`crates/luma` is the engine as a game sees it. It re-exports the six
+`crates/luma` is the engine as a game sees it. It re-exports the six run-time
 core crates under short names and the modules behind Cargo features:
 
 | Path | Crate | Always there? |
@@ -21,6 +21,12 @@ core crates under short names and the modules behind Cargo features:
 | `luma::adventure` | `luma-adventure`: the point-and-click adventure game as Wintermute runs it | feature `adventure`, on by default |
 | `luma::lumen` | `luma-lumen`: the Lumen scenario format for games made for Luma (parser, checker, text runner; see [lumen.md](lumen.md)) | feature `lumen`, off by default |
 | `luma::three_d` | `luma-3d`: 3D characters on painted backgrounds, as Wintermute's 3D actors (the `.3ds` scene geometry, the camera that maps scene pixels to the 3D world, the `.x` models with their skin and animation sets, the Direct3D maths conventions; see [3d-actors.md](3d-actors.md)). The feature is `3d`; the module path needs a name that can start an identifier. | feature `3d`, off by default |
+
+One more core crate is not re-exported: `luma-compiler`, the compiler
+from script sources to the bytecode `luma::script` runs (see
+[compiler.md](compiler.md)). It is a build tool, used by `luma compile`
+and by tests; games ship compiled scripts and never need it at run time,
+so a game does not pay for it.
 
 Two more features configure the core rather than add a module:
 `audio-device` plays the sounds on the default output device (without
