@@ -46,6 +46,7 @@ AD_GAME {
 | | `CURSOR`, `ACTIVE_CURSOR`, `NONINTERACTIVE_CURSOR` | The mouse cursor sprites: normal, over an interactive object, while the game is not interactive. |
 | | `SUBTITLES`, `SUBTITLES_SPEED`, `VIDEO_SUBTITLES` | Whether speech and videos are subtitled, and how long a subtitle stays per character (default 70 ms). |
 | | `PERSONAL_SAVEGAMES`, `LOCAL_SAVE_DIR` | Where saved games go. |
+| | `SAVE_IMAGE`, `SAVE_IMAGE_X`, `SAVE_IMAGE_Y`, `LOAD_IMAGE`, `LOAD_IMAGE_X`, `LOAD_IMAGE_Y` | The images shown while the game saves or loads, and where (see [../saving.md](../saving.md#loading-and-saving-screens-loading-icon)). |
 | | `THUMBNAIL_WIDTH`, `THUMBNAIL_HEIGHT` | The size of the picture `Game.StoreSaveThumbnail` keeps for the next saved game; none when absent (see [../saving.md](../saving.md#thumbnails)). |
 | | `PROPERTY { NAME VALUE }` | Script properties of the game object. |
 | `AD_GAME` | `RESPONSE_BOX`, `INVENTORY_BOX`, `ITEMS` | The dialogue, inventory and item definition files. |

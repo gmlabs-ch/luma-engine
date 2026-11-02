@@ -43,9 +43,10 @@ A saved game holds:
 - the fader, the cursors chosen, the mouse and the keyboard state;
 - the game's own settings a script may change: name, caption,
   subtitles, talk and video skip buttons, `Interactive`, the main
-  object, `TextEncoding`, `StartupScene`, the mouse lock rectangle
-  and whether `Game.Reset` asked not to remember the scene left next;
-  the game timer and the wall clock; the random generator.
+  object, `TextEncoding`, `StartupScene`, the mouse lock rectangle,
+  the loading and saving screens and whether `Game.Reset` asked not to
+  remember the scene left next; the game timer and the wall clock; the
+  random generator.
 
 What a saved game does **not** hold, and what happens to it:
 
@@ -148,6 +149,34 @@ gives a PNG, any other a 24-bit BMP as the original engine writes.
 Both return `true` once the request is recorded; a file that cannot be
 written is logged when the frame comes.
 
+## Loading and saving screens, loading icon
+
+`Game.SetLoadingScreen(file, x, y)` names an image drawn while a saved
+game loads, `SetSavingScreen(file, x, y)` one drawn while the game
+saves; `null` removes it. The game file sets them first (`LOAD_IMAGE`,
+`LOAD_IMAGE_X`, `LOAD_IMAGE_Y`, `SAVE_IMAGE`, `SAVE_IMAGE_X`,
+`SAVE_IMAGE_Y`, see [formats/game.md](formats/game.md)), and both
+travel with a saved game, as in the original engine. The original
+engine draws them over black while it writes or reads the file, with
+its progress indicator (`INDICATOR_*`, which Luma reads and ignores).
+In Luma:
+
+- the **loading screen** is drawn over black in the frame between
+  `Game.LoadGame` and the load, which happens at the start of the next
+  frame: the player sees it for one frame, longer when the load takes
+  time;
+- the **saving screen** is never seen: a save completes inside the
+  frame that asks for it, with no frame drawn in between. The value is
+  kept, read back and saved all the same.
+
+`Game.DisplayLoadingIcon(sprite, x, y, persistent)` shows a sprite over
+everything else (after the fader, before the messages of `Game.Msg`),
+for the one frame that follows the call, or until
+`Game.HideLoadingIcon()` when `persistent` is true, animating
+meanwhile; the original engine deletes a non-persistent icon after its
+first display too. A sprite that does not load shows nothing. The icon
+is not part of a saved game.
+
 ## Private settings
 
 `Game.RegWriteNumber(key, value)`, `RegWriteString(key, value)`,
@@ -182,7 +211,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `4` today |
+| 4 | layout version, little-endian; `5` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -215,7 +244,5 @@ button, a slot, "Save" again, type a name and click "OK".
 ## Not yet
 
 - The `savegame:` images (a saved game's thumbnail shown by a window).
-- The saving and loading screens (`SetSavingScreen`,
-  `SetLoadingScreen`, `DisplayLoadingIcon`).
 - `Game.AutoSaveOnExit` and `AutoSaveSlot`.
 - A video being played is not kept.

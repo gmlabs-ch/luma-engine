@@ -994,6 +994,64 @@ fn shots_script() -> Vec<u8> {
     a.build()
 }
 
+fn screens_script() -> Vec<u8> {
+    // The loading and saving screens and the loading icon.
+    let mut a = Assembler::new("screens.script");
+    call(
+        &mut a,
+        "Game",
+        "SetLoadingScreen",
+        &[Arg::Str("art\\green.png"), Arg::Int(2), Arg::Int(3)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "SetSavingScreen",
+        &[Arg::Str("art\\red.png"), Arg::Int(4), Arg::Int(5)],
+    );
+    a.emit(Instruction::PopEmpty);
+    call(
+        &mut a,
+        "Game",
+        "DisplayLoadingIcon",
+        &[Arg::Str("art\\prop.sprite"), Arg::Int(6), Arg::Int(7)],
+    );
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::Ret);
+    // on "Persistent": Game.DisplayLoadingIcon("art\prop.sprite", 1, 1, true);
+    a.event("Persistent");
+    a.emit(Instruction::Scope);
+    a.push_bool(true);
+    a.push_int(1);
+    a.push_int(1);
+    a.push_string("art\\prop.sprite");
+    a.push_int(4);
+    a.push_var("Game");
+    a.push_string("DisplayLoadingIcon");
+    a.emit(Instruction::CallByExp);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    a.event("Hide");
+    a.emit(Instruction::Scope);
+    call(&mut a, "Game", "HideLoadingIcon", &[]);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    // on "ClearLoad": Game.SetLoadingScreen(null, 0, 0);
+    a.event("ClearLoad");
+    a.emit(Instruction::Scope);
+    a.push_int(0);
+    a.push_int(0);
+    a.emit(Instruction::PushNull);
+    a.push_int(3);
+    a.push_var("Game");
+    a.push_string("SetLoadingScreen");
+    a.emit(Instruction::CallByExp);
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    a.build()
+}
+
 fn hall_init_script() -> Vec<u8> {
     // Records the state the hall's nodes arrive in, then changes it.
     let mut a = Assembler::new("scenes\\hall\\hall_init.script");
@@ -1189,6 +1247,7 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     pkg.add_file("services.script", services_script());
     pkg.add_file("misc.script", misc_script());
     pkg.add_file("shots.script", shots_script());
+    pkg.add_file("screens.script", screens_script());
     pkg.add_file(
         "inv2.def",
         b"INVENTORY_BOX {
@@ -3167,4 +3226,97 @@ fn screenshots_and_save_thumbnails_come_from_the_next_frame() {
     runtime.save_game(7, "no thumb", false).unwrap();
     let header = luma_adventure::read_save_header(&dir.join("saves").join("save007.dsv")).unwrap();
     assert_eq!(header.thumbnail, None);
+}
+
+#[test]
+fn loading_screens_and_the_loading_icon() {
+    use luma_adventure::ScreenImage;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    assert_eq!(runtime.world.loading_screen(), None);
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "screens.script")
+    );
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.loading_screen(),
+        Some(&ScreenImage {
+            path: "art\\green.png".into(),
+            x: 2,
+            y: 3
+        })
+    );
+    assert_eq!(
+        runtime.world.saving_screen(),
+        Some(&ScreenImage {
+            path: "art\\red.png".into(),
+            x: 4,
+            y: 5
+        })
+    );
+    // The icon shows for the frame that follows the call, then goes.
+    let icon = runtime.world.loading_icon().unwrap();
+    assert_eq!((icon.x, icon.y, icon.persistent), (6, 7, false));
+    assert!(icon.shown);
+    runtime.tick(16);
+    assert!(runtime.world.loading_icon().is_none());
+
+    // A persistent icon stays and animates until hidden.
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Persistent", false);
+    runtime.tick(16);
+    for _ in 0..10 {
+        runtime.tick(16);
+    }
+    let icon = runtime.world.loading_icon().unwrap();
+    assert!(icon.persistent);
+    assert_eq!(icon.anim.current_frame, 1, "the prop sprite's second frame");
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Hide", false);
+    runtime.tick(16);
+    assert!(runtime.world.loading_icon().is_none());
+
+    // The screens travel with a saved game; null removes one.
+    runtime.save_game(8, "screens", false).unwrap();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "ClearLoad", false);
+    runtime.tick(16);
+    assert_eq!(runtime.world.loading_screen(), None);
+    runtime.load_game(8).unwrap();
+    assert_eq!(
+        runtime.world.loading_screen().map(|s| s.path.as_str()),
+        Some("art\\green.png")
+    );
+
+    // A game file's own images are set at start.
+    let dir2 = temp_dir();
+    let mut pkg = PackageBuilder::new("data");
+    pkg.add_file(
+        "default.game",
+        b"GAME { NAME=\"T\" LOAD_IMAGE=\"a.png\" LOAD_IMAGE_X=5 LOAD_IMAGE_Y=6 SAVE_IMAGE=\"a.png\" }".to_vec(),
+    );
+    pkg.add_file("a.png", png(4, 4, [0, 0, 255, 255]));
+    std::fs::write(dir2.join("data.dcp"), pkg.build()).unwrap();
+    let runtime = Runtime::with_audio(Vfs::open_game(&dir2).unwrap(), Audio::null()).unwrap();
+    assert_eq!(
+        runtime.world.loading_screen(),
+        Some(&ScreenImage {
+            path: "a.png".into(),
+            x: 5,
+            y: 6
+        })
+    );
+    assert_eq!(
+        runtime.world.saving_screen().map(|s| (s.x, s.y)),
+        Some((0, 0))
+    );
 }

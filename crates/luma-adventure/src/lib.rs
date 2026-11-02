@@ -91,4 +91,4 @@ pub use ui::{
     WindowState,
 };
 pub use video::{Subtitle, Subtitler, VideoPlayback, VideoPlayer, parse_subtitles};
-pub use world::{Runtime, World};
+pub use world::{LoadingIcon, QuickMessage, Runtime, ScreenImage, World};

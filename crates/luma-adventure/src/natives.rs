@@ -47,10 +47,6 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 
 /// Methods the engine has that later milestones implement.
 const GAME_STUBS: &[&str] = &[
-    "SetLoadingScreen",
-    "SetSavingScreen",
-    "DisplayLoadingIcon",
-    "HideLoadingIcon",
     "ShowStatusLine",
     "HideStatusLine",
     "LoadEntity",
@@ -664,6 +660,30 @@ impl World {
                 };
                 self.request_screenshot_sized(&filename, w, h);
                 Return::value(true)
+            }
+            "SetLoadingScreen" | "SetSavingScreen" => {
+                let path = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let (x, y) = (arg(1).get_int(self), arg(2).get_int(self));
+                if name == "SetLoadingScreen" {
+                    self.set_loading_screen(path.as_deref(), x, y);
+                } else {
+                    self.set_saving_screen(path.as_deref(), x, y);
+                }
+                Return::null()
+            }
+            "DisplayLoadingIcon" => {
+                let path = arg(0).get_string(self);
+                let (x, y) = (arg(1).get_int(self), arg(2).get_int(self));
+                let persistent = arg(3).get_bool(self);
+                self.display_loading_icon(&path, x, y, persistent);
+                Return::null()
+            }
+            "HideLoadingIcon" => {
+                self.hide_loading_icon();
+                Return::null()
             }
             "StoreSaveThumbnail" => Return::value(self.store_save_thumbnail()),
             "DeleteSaveThumbnail" => {

@@ -34,7 +34,9 @@ in this order (`Runtime::tick`):
 
 The frame is then drawn: the scene with the actors, the windows marked
 `IN_GAME`, the other windows, the sentences, the cursor, the fader's
-colour over everything, and last the messages of `Game.Msg`: short
+colour over everything, the loading icon (see
+[saving.md](saving.md#loading-and-saving-screens-loading-icon)), and
+last the messages of `Game.Msg`: short
 texts in the system font from 20 pixels down the left edge, each for
 three seconds of the game timer, five at most (the oldest goes), as the
 original engine's `QuickMessage`; nothing shows without a system font.

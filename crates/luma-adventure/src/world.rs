@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use luma_archive::Vfs;
-use luma_formats::Entity;
+use luma_formats::{Entity, Rgba};
 use luma_formats::{GameFile, Scene, StringTable};
 use luma_script::{Context, Engine, Host, NativeId, Natives, Return, State, Value};
 
@@ -41,6 +41,36 @@ pub struct QuickMessage {
     pub start: u64,
     /// Its height in the system font, over the screen's width.
     pub height: i32,
+}
+
+/// An image shown while the game saves or loads (`SetSavingScreen`,
+/// `SetLoadingScreen`, `SAVE_IMAGE` and `LOAD_IMAGE` of the game file).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ScreenImage {
+    /// The image or sprite file.
+    pub path: String,
+    /// Where it is drawn.
+    pub x: i32,
+    /// See `x`.
+    pub y: i32,
+}
+
+/// The sprite `Game.DisplayLoadingIcon` shows (`m_LoadingIcon`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadingIcon {
+    /// The sprite file.
+    pub path: String,
+    /// Where it is drawn.
+    pub x: i32,
+    /// See `x`.
+    pub y: i32,
+    /// Whether it stays until `HideLoadingIcon`; else it shows for one
+    /// frame, as the original engine deletes it after its first display.
+    pub persistent: bool,
+    /// Whether a frame showed it since it was asked.
+    pub shown: bool,
+    /// Its animation.
+    pub anim: crate::scene_view::AnimState,
 }
 
 /// How long a quick message stays (`QUICK_MSG_DURATION`).
@@ -133,6 +163,12 @@ pub struct World {
     pub(crate) quick_messages: Vec<QuickMessage>,
     /// Screenshots and thumbnails asked for, done with the next frame.
     pub(crate) captures: Vec<crate::capture::Capture>,
+    /// The image shown while a saved game loads (`m_LoadImageName`).
+    pub(crate) loading_screen: Option<ScreenImage>,
+    /// The image shown while the game saves (`m_SaveImageName`).
+    pub(crate) saving_screen: Option<ScreenImage>,
+    /// The loading icon shown over the frame.
+    pub(crate) loading_icon: Option<LoadingIcon>,
     /// The thumbnail the next saved game carries (PNG), from
     /// `Game.StoreSaveThumbnail`.
     pub(crate) save_thumbnail: Option<Vec<u8>>,
@@ -253,6 +289,9 @@ impl World {
             fps_frames: 0,
             quick_messages: Vec::new(),
             captures: Vec::new(),
+            loading_screen: None,
+            saving_screen: None,
+            loading_icon: None,
             save_thumbnail: None,
             mouse_lock: (0, 0, 0, 0),
             temp_disable_save_state: false,
@@ -300,6 +339,14 @@ impl World {
             .as_deref()
             .map_or(TalkSkipButton::Left, TalkSkipButton::parse);
         world.load_cursors();
+        let (load, save) = (
+            world.game_file.load_image.clone(),
+            world.game_file.save_image.clone(),
+        );
+        let (lx, ly) = (world.game_file.load_image_x, world.game_file.load_image_y);
+        let (sx, sy) = (world.game_file.save_image_x, world.game_file.save_image_y);
+        world.set_loading_screen(load.as_deref(), lx, ly);
+        world.set_saving_screen(save.as_deref(), sx, sy);
         Ok(world)
     }
 
@@ -438,6 +485,138 @@ impl World {
     /// Frames drawn in the last whole second (`Game.FPS`).
     pub fn fps(&self) -> i32 {
         self.fps
+    }
+
+    /// Sets the image shown while a saved game loads
+    /// (`Game.SetLoadingScreen`); `None` removes it. It is drawn over
+    /// black during the frame between `Game.LoadGame` and the load.
+    pub fn set_loading_screen(&mut self, path: Option<&str>, x: i32, y: i32) {
+        self.loading_screen = path.map(|path| {
+            self.load_ui_image(path);
+            ScreenImage {
+                path: path.to_string(),
+                x,
+                y,
+            }
+        });
+    }
+
+    /// Sets the image shown while the game saves (`Game.SetSavingScreen`);
+    /// `None` removes it. A Luma save completes inside the frame that
+    /// asks for it, so the image is kept but never on screen.
+    pub fn set_saving_screen(&mut self, path: Option<&str>, x: i32, y: i32) {
+        self.saving_screen = path.map(|path| {
+            self.load_ui_image(path);
+            ScreenImage {
+                path: path.to_string(),
+                x,
+                y,
+            }
+        });
+    }
+
+    /// The loading screen, if set.
+    pub fn loading_screen(&self) -> Option<&ScreenImage> {
+        self.loading_screen.as_ref()
+    }
+
+    /// The saving screen, if set.
+    pub fn saving_screen(&self) -> Option<&ScreenImage> {
+        self.saving_screen.as_ref()
+    }
+
+    /// Shows a sprite over the frame (`Game.DisplayLoadingIcon`): for
+    /// one frame, or until [`World::hide_loading_icon`] when
+    /// `persistent`. Whether the sprite loaded.
+    pub fn display_loading_icon(&mut self, path: &str, x: i32, y: i32, persistent: bool) -> bool {
+        self.loading_icon = None;
+        if !self.load_ui_image(path) {
+            return false;
+        }
+        self.loading_icon = Some(LoadingIcon {
+            path: path.to_string(),
+            x,
+            y,
+            persistent,
+            shown: false,
+            anim: crate::scene_view::AnimState::new(path),
+        });
+        true
+    }
+
+    /// Removes the loading icon (`Game.HideLoadingIcon`).
+    pub fn hide_loading_icon(&mut self) {
+        self.loading_icon = None;
+    }
+
+    /// The loading icon shown, if any.
+    pub fn loading_icon(&self) -> Option<&LoadingIcon> {
+        self.loading_icon.as_ref()
+    }
+
+    /// Ends a frame for the loading icon: one that is not persistent
+    /// goes after the frame that showed it (`CAdGame::DisplayContent`
+    /// deletes it after its first display); a persistent one animates.
+    pub(crate) fn update_loading_icon(&mut self) {
+        let timer = self.timer;
+        let Some(icon) = self.loading_icon.as_mut() else {
+            return;
+        };
+        if icon.shown && !icon.persistent {
+            self.loading_icon = None;
+            return;
+        }
+        icon.shown = true;
+        if let Some(loaded) = self.ui.bank.sprite(&icon.path) {
+            icon.anim.step(&loaded.sprite, timer);
+        }
+    }
+
+    /// Draws the loading screen over black, when a load is scheduled
+    /// and the game has one (`DisplayIndicator`); whether it did.
+    fn draw_loading_screen<'a>(
+        &'a self,
+        list: &mut luma_render::DrawList<'a>,
+        white: Option<&'a luma_render::Texture>,
+    ) -> bool {
+        let (Some(screen), true) = (&self.loading_screen, self.scheduled_load.is_some()) else {
+            return false;
+        };
+        if let Some(white) = white {
+            list.fill(
+                white,
+                luma_render::Rect::new(0.0, 0.0, list.width, list.height),
+                Rgba {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 255,
+                },
+            );
+        }
+        self.draw_ui_image(
+            list,
+            &screen.path,
+            0,
+            screen.x,
+            screen.y,
+            Rgba::OPAQUE_WHITE,
+        );
+        true
+    }
+
+    /// Draws the loading icon at its current frame.
+    fn draw_loading_icon<'a>(&'a self, list: &mut luma_render::DrawList<'a>) {
+        if let Some(icon) = &self.loading_icon {
+            self.draw_ui_image(
+                list,
+                &icon.path,
+                icon.anim.current_frame,
+                icon.x,
+                icon.y,
+                Rgba::OPAQUE_WHITE,
+            );
+        }
     }
 
     /// Posts a short message drawn over the frame for three seconds
@@ -1000,6 +1179,9 @@ impl World {
         camera: &Camera,
         white: Option<&'a luma_render::Texture>,
     ) {
+        if self.draw_loading_screen(list, white) {
+            return;
+        }
         if self.is_video_playing() {
             // Only the video is drawn while it plays (`DisplayContent`).
             self.draw_video(list);
@@ -1023,6 +1205,7 @@ impl World {
         if let Some(white) = white {
             self.draw_fade(list, white);
         }
+        self.draw_loading_icon(list);
         self.draw_quick_messages(list);
     }
 
@@ -1987,6 +2170,7 @@ impl Runtime {
         self.world.update_inventory(&mut self.engine);
         self.world.prepare_inventory_texts();
         self.world.update_quick_messages();
+        self.world.update_loading_icon();
         self.world.update_cursor();
         self.world.update_item_cursor(&self.engine);
         self.world.apply_pending_events(&mut self.engine);
