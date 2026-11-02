@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use luma_archive::Vfs;
 use luma_formats::scene::{Entity, EntityKind, Layer, Region, SceneNode};
-use luma_formats::{Rgb, Rgba, Scene, Sprite, SubFrame};
+use luma_formats::{Frame, Rgb, Rgba, Scene, Sprite, SubFrame};
 use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
 
 use crate::error::{Error, Result};
@@ -1028,6 +1028,20 @@ pub fn regions_at(scene: &Scene, x: i32, y: i32) -> Vec<(usize, usize)> {
         .collect()
 }
 
+/// Whether a sub-frame is drawn and hit-tested (`CBFrame::Draw`): the
+/// engine's `2D_ONLY` sub-frames are for its software renderer and its
+/// `3D_ONLY` ones for its accelerated renderer. Luma always draws with
+/// the GPU, so a `2D_ONLY` sub-frame is never drawn and a `3D_ONLY` one
+/// always is.
+pub fn is_drawn(sub: &SubFrame) -> bool {
+    !sub.only_2d
+}
+
+/// The sub-frames of a frame that are drawn, see [`is_drawn`].
+pub fn drawn_subframes(frame: &Frame) -> impl Iterator<Item = &SubFrame> {
+    frame.subframes.iter().filter(|sub| is_drawn(sub))
+}
+
 /// Draws an object's current frame.
 pub fn draw_object<'a>(list: &mut DrawList<'a>, d: &Drawable<'a>) {
     let Some(loaded) = d.sprite else { return };
@@ -1035,7 +1049,7 @@ pub fn draw_object<'a>(list: &mut DrawList<'a>, d: &Drawable<'a>) {
         return;
     }
     let frame = d.frame.min(loaded.sprite.frames.len() - 1);
-    for sub in &loaded.sprite.frames[frame].subframes {
+    for sub in drawn_subframes(&loaded.sprite.frames[frame]) {
         let Some(image) = &sub.image else { continue };
         let Some(texture) = d.bank.texture(image, sub.color_key) else {
             continue;

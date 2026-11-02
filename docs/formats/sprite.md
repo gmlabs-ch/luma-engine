@@ -96,7 +96,7 @@ plus every sub-frame key, which describes the frame's own sub-frame.
 | `ALPHA_COLOR` | `r,g,b` | `255,255,255` | Tint multiplied with the image. Together with `ALPHA` they form the modulation colour; `255,255,255,255` means "unchanged" and lets the owner's own alpha apply instead. |
 | `MIRROR_X`, `MIRROR_Y` | bool | false | Flip horizontally / vertically. |
 | `DECORATION` | bool | false | The sub-frame is not part of the clickable area. |
-| `2D_ONLY`, `3D_ONLY` | bool | false | Shown only when the owner is a 2D, respectively 3D, actor. |
+| `2D_ONLY`, `3D_ONLY` | bool | false | Which renderer draws the sub-frame (`CBFrame::Draw`): a `2D_ONLY` sub-frame only the engine's software renderer, a `3D_ONLY` one only its accelerated (Direct3D) renderer. A sub-frame that is not drawn is not hit-tested either. Luma always draws with the GPU, so it never draws `2D_ONLY` sub-frames and always draws `3D_ONLY` ones. |
 | `EDITOR_SELECTED`, `EDITOR_PROPERTY` | | | Editor state, ignored. |
 
 Numbers written as lists (`HOTSPOT {50, 25}`) and as unquoted values

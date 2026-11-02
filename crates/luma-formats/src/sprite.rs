@@ -106,9 +106,11 @@ pub struct SubFrame {
     pub mirror_y: bool,
     /// Not part of the clickable area.
     pub decoration: bool,
-    /// Shown only for 2D owners.
+    /// Drawn only by the engine's software renderer (`2D_ONLY`); an
+    /// accelerated renderer skips it.
     pub only_2d: bool,
-    /// Shown only for 3D owners.
+    /// Drawn only by the engine's accelerated renderer (`3D_ONLY`); the
+    /// software renderer skips it.
     pub only_3d: bool,
 }
 

@@ -2645,3 +2645,65 @@ fn load_items_reloads_the_items_as_the_original_engine_does() {
     assert_eq!(runtime.world.item_by_name("rock"), Some(rock));
     assert_eq!(names(&runtime), ["key", "rock"]);
 }
+
+#[test]
+fn two_d_only_subframes_are_neither_drawn_nor_hit() {
+    // `2D_ONLY` sub-frames are for the original engine's software
+    // renderer and `3D_ONLY` ones for its accelerated renderer
+    // (`CBFrame::Draw`); Luma always draws with the GPU, so the first
+    // are skipped, hit areas included, and the second always shown.
+    let dir = temp_dir();
+    let mut pkg = PackageBuilder::new("data");
+    pkg.add_file(
+        "startup.settings",
+        b"SETTINGS { GAME=\"default.game\" RESOLUTION { 32,32 } }".to_vec(),
+    );
+    pkg.add_file("default.game", b"GAME { NAME=\"Flags\" }".to_vec());
+    pkg.add_file("art\\red.png", png(4, 4, [255, 0, 0, 255]));
+    pkg.add_file("art\\green.png", png(4, 4, [0, 255, 0, 255]));
+    pkg.add_file(
+        "art\\flags.sprite",
+        b"SPRITE { FRAME { IMAGE=\"art\\red.png\" 2D_ONLY=TRUE SUBFRAME { IMAGE=\"art\\green.png\" HOTSPOT {-8, 0} 3D_ONLY=TRUE } } }".to_vec(),
+    );
+    pkg.add_file(
+        "scenes\\flags.scene",
+        b"SCENE {
+  NAME=\"Flags\"
+  LAYER {
+    NAME=\"main\" MAIN=TRUE WIDTH=32 HEIGHT=32
+    ENTITY { NAME=\"flags\" X=2 Y=2 SPRITE=\"art\\flags.sprite\" }
+  }
+}"
+        .to_vec(),
+    );
+    std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.change_scene("scenes\\flags.scene").unwrap();
+    runtime.tick(16);
+    runtime.tick(16);
+    let flags = runtime.world.find_node("flags").unwrap();
+    assert_eq!(
+        runtime.world.object_at(3, 3),
+        None,
+        "the 2D_ONLY sub-frame (red, at 2..6) is not drawn"
+    );
+    assert_eq!(
+        runtime.world.object_at(11, 3),
+        Some(flags),
+        "the 3D_ONLY sub-frame (green, at 10..14) is"
+    );
+    let frame = &runtime
+        .world
+        .scene()
+        .unwrap()
+        .sprite("art\\flags.sprite")
+        .unwrap()
+        .sprite
+        .frames[0];
+    let drawn: Vec<_> = luma_adventure::drawn_subframes(frame)
+        .map(|s| s.image.clone())
+        .collect();
+    assert_eq!(drawn, [Some("art\\green.png".to_string())]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

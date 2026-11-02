@@ -74,7 +74,7 @@ pub use save::{SAVE_EXTENSION, SaveHeader, read_save_header};
 pub use scene_state::{NodeState, SceneState, state_key};
 pub use scene_view::{
     AnimState, Camera, DrawItem, Drawable, EntityRef, EntityTalk, LoadedSprite, Mask, SceneView,
-    SpriteBank, draw_object, frame_height, place,
+    SpriteBank, draw_object, drawn_subframes, frame_height, is_drawn, place,
 };
 pub use settings::{GameSettings, SETTINGS_FILE};
 pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, Sounds};

@@ -2306,7 +2306,7 @@ impl World {
         };
         let (x, y) = (ox + control.x + entity.def.x, oy + control.y + entity.def.y);
         let tint = entity.def.tint.unwrap_or(tint);
-        for sub in &frame.subframes {
+        for sub in crate::scene_view::drawn_subframes(frame) {
             let Some(image) = &sub.image else { continue };
             let Some(texture) = self.ui.bank.texture(image, sub.color_key) else {
                 continue;
@@ -2544,7 +2544,7 @@ impl World {
         else {
             return;
         };
-        for sub in &frame.subframes {
+        for sub in crate::scene_view::drawn_subframes(frame) {
             let Some(image) = &sub.image else { continue };
             let Some(texture) = self.ui.bank.texture(image, sub.color_key) else {
                 continue;
