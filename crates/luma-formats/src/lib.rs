@@ -47,7 +47,7 @@ pub use font::{
     BitmapFontDef, BitmapLayout, BitmapLine, FontFile, FontLayer, TextAlign, TrueTypeFontDef,
 };
 pub use game::GameFile;
-pub use image::{DEFAULT_COLOR_KEY, Image, Rgb, Rgba};
+pub use image::{BlendMode, DEFAULT_COLOR_KEY, Image, Rgb, Rgba};
 pub use scene::{
     Direction, Entity, EntityKind, Layer, Point, Property, Region, RotationLevel, ScaleLevel,
     Scene, SceneNode, WaypointGroup,

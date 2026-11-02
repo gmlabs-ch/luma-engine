@@ -5,27 +5,12 @@
 //! `AdObject.cpp` and `BObject.cpp` of WME Lite (MIT License, Copyright
 //! (c) 2011 Jan Nedoma); see `NOTICE`.
 
+use luma_formats::BlendMode;
 use luma_formats::scene::Direction;
 use luma_script::{Context, Effect, NativeId, Return, Value, rgba};
 
 use crate::objects::Kind;
 use crate::world::World;
-
-/// Methods of later milestones that actors accept and log once.
-const ACTOR_STUBS: &[&str] = &[
-    "ForceTalkAnim",
-    "AddTalkSprite",
-    "RemoveTalkSprite",
-    "SetTalkSprite",
-    "SetCursor",
-    "RemoveCursor",
-    "StickToRegion",
-    "CreateParticleEmitter",
-    "DeleteParticleEmitter",
-    "AddAttachment",
-    "RemoveAttachment",
-    "SetCaption",
-];
 
 fn color_int(c: luma_formats::Rgba) -> i32 {
     rgba(
@@ -66,34 +51,42 @@ impl World {
             "TurnLeftAnimName" => Value::from(actor.turn_left_anim.clone()),
             "TurnRightAnimName" => Value::from(actor.turn_right_anim.clone()),
             "Active" => Value::Bool(actor.def.active),
-            "Movable" => Value::Bool(true),
             "Registrable" | "Interactive" => Value::Bool(actor.def.interactive),
             "Zoomable" | "Scalable" => Value::Bool(actor.def.scalable),
             "Rotatable" => Value::Bool(actor.def.rotatable),
             "AlphaColor" => Value::Int(actor.def.tint.map_or(0, color_int)),
-            "BlendMode" => Value::Int(0),
+            "BlendMode" => Value::Int(actor.def.blend_mode.to_int()),
             "Scale" => actor
                 .def
                 .scale
                 .map_or(Value::Null, |s| Value::Float(f64::from(s))),
-            "ScaleX" | "ScaleY" | "Rotate" => Value::Null,
+            "ScaleX" => actor
+                .def
+                .scale_x
+                .map_or(Value::Null, |s| Value::Float(f64::from(s))),
+            "ScaleY" => actor
+                .def
+                .scale_y
+                .map_or(Value::Null, |s| Value::Float(f64::from(s))),
             "RelativeScale" => Value::Float(f64::from(actor.def.relative_scale)),
-            "RelativeRotate" => Value::Float(0.0),
+            "Rotate" => actor
+                .def
+                .rotate
+                .map_or(Value::Null, |r| Value::Float(f64::from(r))),
+            "RelativeRotate" => Value::Float(f64::from(actor.def.relative_rotate)),
             "Colorable" => Value::Bool(actor.def.colorable),
             "SoundPanning" => Value::Bool(actor.def.sound_panning),
             "SaveState" => Value::Bool(true),
-            "NonIntMouseEvents" => Value::Bool(false),
             "AccCaption" => Value::Null,
             "IgnoreItems" => Value::Bool(actor.def.ignore_items),
-            "SceneIndependent" => Value::Bool(false),
             "SubtitlesWidth" => Value::Int(actor.subtitles.width),
             "SubtitlesPosX" => Value::Int(actor.subtitles.x),
             "SubtitlesPosY" => Value::Int(actor.subtitles.y),
             "SubtitlesPosRelative" => Value::Bool(actor.subtitles.relative),
             "SubtitlesPosXCenter" => Value::Bool(actor.subtitles.x_center),
-            "NumItems" => Value::Int(self.inventory.taken.len() as i32),
-            "NumAttachments" => Value::Int(0),
-            "ParticleEmitter" | "Item" => Value::Null,
+            "NumItems" => Value::Int(self.taken_items_of(id).len() as i32),
+            "ParticleEmitter" => self.emitter_of(id).map_or(Value::Null, Value::Native),
+            "Item" => Value::Null,
             _ => return None,
         })
     }
@@ -137,8 +130,13 @@ impl World {
             "Zoomable" | "Scalable" => actor.def.scalable = flag,
             "Rotatable" => actor.def.rotatable = flag,
             "AlphaColor" => actor.def.tint = Some(color_of(int)),
+            "BlendMode" => actor.def.blend_mode = BlendMode::from_int(int),
             "Scale" => actor.def.scale = if is_null { None } else { Some(float as f32) },
+            "ScaleX" => actor.def.scale_x = if is_null { None } else { Some(float as f32) },
+            "ScaleY" => actor.def.scale_y = if is_null { None } else { Some(float as f32) },
             "RelativeScale" => actor.def.relative_scale = float as f32,
+            "Rotate" => actor.def.rotate = if is_null { None } else { Some(float as f32) },
+            "RelativeRotate" => actor.def.relative_rotate = float as f32,
             "Colorable" => actor.def.colorable = flag,
             "SoundPanning" => actor.def.sound_panning = flag,
             "IgnoreItems" => actor.def.ignore_items = flag,
@@ -147,8 +145,7 @@ impl World {
             "SubtitlesPosY" => actor.subtitles.y = int,
             "SubtitlesPosRelative" => actor.subtitles.relative = flag,
             "SubtitlesPosXCenter" => actor.subtitles.x_center = flag,
-            "Movable" | "BlendMode" | "ScaleX" | "ScaleY" | "Rotate" | "RelativeRotate"
-            | "SaveState" | "NonIntMouseEvents" | "AccCaption" | "SceneIndependent" => {}
+            "SaveState" | "AccCaption" => {}
             _ => return false,
         }
         true
@@ -279,14 +276,23 @@ impl World {
                     .map_or(Value::Null, Value::from),
             ),
             "GetSpriteObject" => {
-                self.stub("Actor.GetSpriteObject");
-                Return::null()
+                Return::value(self.sprite_object(id).map_or(Value::Null, Value::Native))
             }
-            "Caption" => Return::value(
-                self.actor(id)
-                    .map(|a| a.def.caption.clone())
-                    .unwrap_or_default(),
-            ),
+            "AddTalkSprite" | "SetTalkSprite" | "RemoveTalkSprite" => {
+                // In Wintermute 1.x an actor's talk sprites are sprite sets
+                // of its own (`CAdActor::m_TalkSprites`), which hide the
+                // list these methods edit (`CAdTalkHolder::m_TalkSprites`),
+                // so the call loads the file and changes nothing else.
+                let path = arg(0).get_string(self);
+                let ok = name == "RemoveTalkSprite"
+                    || self
+                        .actor_and_vfs(id)
+                        .is_some_and(|(vfs, actor)| actor.bank.add_sprite(vfs, &path));
+                if !ok {
+                    self.log(format!("{name} method failed for file '{path}'"));
+                }
+                Return::value(ok)
+            }
             "MergeAnims" => {
                 let path = arg(0).get_string(self);
                 let ok = self
@@ -336,13 +342,10 @@ impl World {
                     .map_or(Value::Null, Value::from),
             ),
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
-                return Some(self.inventory_call(name, args));
+                return Some(self.inventory_call(id, name, args));
             }
-            "HasCursor" => Return::value(false),
-            "GetCursor" | "GetCursorObject" | "GetAttachment" => Return::null(),
-            _ if ACTOR_STUBS.contains(&name) => {
-                self.stub(&format!("Actor.{name}"));
-                Return::null()
+            "CreateParticleEmitter" | "DeleteParticleEmitter" => {
+                self.emitter_owner_call(id, name, args)
             }
             _ => return None,
         })

@@ -13,7 +13,7 @@ use luma_formats::{Rgba, Scene};
 
 use crate::error::{Error, Result};
 use crate::path::Floor;
-use crate::scene_view::{AnimState, Drawable, SpriteBank, frame_height, key};
+use crate::scene_view::{AnimState, Drawable, SpriteBank, Transform, frame_height, key};
 use crate::talk::{Sentence, SubtitleMods};
 
 /// What an actor is doing (`TObjectState`).
@@ -119,6 +119,9 @@ pub struct Actor {
     pub subtitles: SubtitleMods,
     /// Whether the sentence is shown this frame.
     pub show_sentence: bool,
+    /// The sprite `ForceTalkAnim` asked for the current sentence, played
+    /// as its first stance.
+    pub forced_talk: Option<String>,
     anims: HashMap<String, AnimState>,
     /// The sprite set by `SetSprite`, shown instead of `STAND`.
     sprite_override: Option<String>,
@@ -208,6 +211,7 @@ impl Actor {
             sentence: None,
             subtitles: SubtitleMods::default(),
             show_sentence: false,
+            forced_talk: None,
             anims: HashMap::new(),
             sprite_override: None,
             anim_sprite: None,
@@ -243,6 +247,7 @@ impl Actor {
             &self.anim_sprite2,
             &self.temp_sprite2,
             &self.current_sprite,
+            &self.forced_talk,
         ]
         .into_iter()
         .flatten()
@@ -301,6 +306,11 @@ impl Actor {
                 true
             }
         }
+    }
+
+    /// The animation state of a sprite path, if it was shown.
+    pub fn anim_state(&self, path: &str) -> Option<&AnimState> {
+        self.anims.get(&key(path))
     }
 
     /// The animation state of a sprite path, created at its first frame.
@@ -468,9 +478,11 @@ impl Actor {
     }
 
     /// Starts saying a sentence (`CAdObject::Talk`), already placed by
-    /// the world.
-    pub fn talk(&mut self, sentence: Sentence) {
+    /// the world; `forced` is the sprite `ForceTalkAnim` named, already
+    /// loaded, played as the first stance.
+    pub fn talk(&mut self, sentence: Sentence, forced: Option<String>) {
         self.sentence = Some(sentence);
+        self.forced_talk = forced;
         self.temp_sprite2 = None;
         self.state = ActorState::Talking;
         self.ready = false;
@@ -561,8 +573,13 @@ impl Actor {
                 self.state = self.next_state;
                 self.next_state = ActorState::Ready;
             } else {
+                // The forced sprite is the first stance (`GetTalkStance`);
+                // the sentence's stance list still advances.
                 let stance = self.sentence.as_mut().and_then(|s| s.next_stance());
-                self.temp_sprite2 = self.talk_stance(stance.as_deref(), random);
+                self.temp_sprite2 = self
+                    .forced_talk
+                    .take()
+                    .or_else(|| self.talk_stance(stance.as_deref(), random));
                 if let Some(path) = self.temp_sprite2.clone() {
                     self.anim(&path).reset();
                     self.current_sprite = Some(path);
@@ -652,6 +669,14 @@ impl Actor {
     /// Forgets the regions the actor stood in (a scene change).
     pub fn invalidate_regions(&mut self) {
         self.current_regions.clear();
+    }
+
+    /// Renumbers the regions the actor stands in, after a node was
+    /// inserted in or deleted from a layer.
+    pub(crate) fn remap_regions(&mut self, f: impl Fn((usize, usize)) -> (usize, usize)) {
+        for region in &mut self.current_regions {
+            *region = f(*region);
+        }
     }
 
     /// Raises `ActorEntry` and `ActorLeave` for the regions of the main
@@ -892,14 +917,22 @@ impl Actor {
         }
     }
 
-    /// Scale in percent at the actor's position (`CAdObject::GetScale`).
-    pub fn scale(&self, scene: &Scene) -> f32 {
-        if !self.def.scalable {
-            return 100.0;
+    /// Scale per axis and rotation at the actor's position
+    /// (`CAdObject::GetScale`, the rotation of `CAdActor::Display`).
+    pub fn transform(&self, scene: &Scene) -> Transform {
+        let def = &self.def;
+        let (scale_x, scale_y) = scene.object_scale(
+            (self.x, self.y),
+            def.scalable,
+            def.scale,
+            (def.scale_x, def.scale_y),
+            def.relative_scale,
+        );
+        Transform {
+            scale_x,
+            scale_y,
+            rotation: scene.object_rotation(self.x, def.rotatable, def.rotate, def.relative_rotate),
         }
-        self.def
-            .scale
-            .unwrap_or_else(|| scene.zoom_at(self.x, self.y) + self.def.relative_scale)
     }
 
     /// Tint at the actor's position.
@@ -941,8 +974,12 @@ impl Actor {
             sprite: Some(loaded),
             bank: &self.bank,
             frame: self.frame_of(path),
-            scale: self.scale(scene),
+            transform: self.transform(scene),
             tint: self.tint(scene),
+            stick: None,
+            before: Vec::new(),
+            after: Vec::new(),
+            blend: self.def.blend_mode,
         })
     }
 
@@ -1030,9 +1067,11 @@ fn entity_mimic_scale(scene: &Scene, entity: &Entity) -> f32 {
 /// floor the actors walk on.
 pub fn scene_obstacles(scene: &Scene) -> (Vec<Vec<Point>>, Vec<Point>) {
     let mut blockers = Vec::new();
+    // A group a script switched off (`WaypointGroup.Active`) is left out.
     let mut waypoints: Vec<Point> = scene
         .waypoint_groups
         .iter()
+        .filter(|g| g.active)
         .flat_map(|g| g.points.iter().copied())
         .collect();
     let entities = scene

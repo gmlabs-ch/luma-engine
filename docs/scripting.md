@@ -149,12 +149,12 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 
 | Object | Properties | Methods |
 |--------|------------|---------|
-| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `ActiveObject`, `MouseX`, `MouseY`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`, `SubtitlesSpeed`, `TalkSkipButton`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadItems`, `CreateItem`, `DeleteItem`, `LoadActor`, `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
-| `Scene` | `Name`, `Width`, `Height`, `NumLayers`, `MainLayer`, `OffsetX`, `OffsetY`, `MouseX`, `MouseY`, `NumFreeNodes`, `AutoScroll`, `ScrollPixelsX`, `ScrollSpeedX`... | `GetNode`, `GetLayer`, `GetFreeNode`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `SkipTo`, `ScrollTo`, `ScrollToAsync`, `IsScrolling`, `IsPointInViewport`, `LoadActor`, `UnloadObject` |
-| Layers | `Name`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active` | `GetNode` |
-| Entities | `Name`, `Caption`, `X`, `Y`, `Height`, `Active`, `Interactive`, `Scalable`, `Scale`, `RelativeScale`, `AlphaColor`, `Colorable`, `Item`, `Subtype`, `WalkToX`, `WalkToY`, `WalkToDirection`, `SaveState`, `IgnoreItems`... | `SkipTo`, `SetSprite`, `GetSprite`, `GetSpriteObject`, `Reset`, `Caption`, `PlayAnim`, `PlayAnimAsync` (a sprite shown in place of the entity's: one that does not loop gives the entity its own back at its end, a looping one plays on, moving the entity by its frames' `MOVE`; `PlayAnim` waits for the end, `Reset` or a sentence cuts it: talking is the entity's state then, and it is ready when the sentence ends), `PlayTheora`, `StopTheora`, `PauseTheora`, `ResumeTheora`, `IsTheoraPlaying`, `IsTheoraPaused` (a video in the entity's place, see [docs/video.md](video.md#entityplaytheora)) |
+| `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `ActiveObject`, `MouseX`, `MouseY`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`, `SubtitlesSpeed`, `TalkSkipButton`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadItems`, `CreateItem`, `DeleteItem`, `LoadActor`, `CreateEntity`, `LoadEntity` (entities of the game, kept across scenes; see [formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments)), `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |
+| `Scene` | `Name`, `Width`, `Height`, `NumLayers`, `MainLayer`, `OffsetX`, `OffsetY`, `MouseX`, `MouseY`, `NumFreeNodes`, `AutoScroll`, `ScrollPixelsX`, `ScrollSpeedX`... | `GetNode`, `GetLayer`, `GetFreeNode`, `GetWaypointGroup`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `SkipTo`, `ScrollTo`, `ScrollToAsync`, `IsScrolling`, `IsPointInViewport`, `FadeOut`, `FadeIn` (and their `Async` forms, over the scene viewport only), `GetFadeColor`, `LoadActor`, `UnloadObject`, `CreateEntity`, `LoadEntity`, `AddLayer`, `InsertLayer`, `DeleteLayer` (see [formats/scene.md](formats/scene.md#scenes-changed-by-scripts)) |
+| Layers | `Name`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active` | `GetNode`, `AddEntity`, `AddRegion`, `InsertEntity`, `InsertRegion`, `DeleteNode` |
+| Entities | `Name`, `Caption`, `X`, `Y`, `Height`, `Active`, `Interactive`, `Scalable`, `Scale`, `ScaleX`, `ScaleY`, `RelativeScale`, `Rotatable`, `Rotate`, `RelativeRotate`, `BlendMode`, `AlphaColor`, `Colorable`, `Item`, `Subtype`, `WalkToX`, `WalkToY`, `WalkToDirection`, `SaveState`, `IgnoreItems`, `Region`... | `SkipTo`, `SetSprite`, `GetSprite`, `GetSpriteObject`, `Reset`, `Caption`, `CreateRegion`, `DeleteRegion`, `StickToRegion` (actors too), `PlayAnim`, `PlayAnimAsync` (a sprite shown in place of the entity's: one that does not loop gives the entity its own back at its end, a looping one plays on, moving the entity by its frames' `MOVE`; `PlayAnim` waits for the end, `Reset` or a sentence cuts it: talking is the entity's state then, and it is ready when the sentence ends), `PlayTheora`, `StopTheora`, `PauseTheora`, `ResumeTheora`, `IsTheoraPlaying`, `IsTheoraPaused` (a video in the entity's place, see [docs/video.md](video.md#entityplaytheora)) |
 | Actors (`Game.LoadActor`, `Scene.LoadActor`) | The entities' properties, plus `Direction`, `Ready`, `ActorIsBlocked`, `TalkAnimName`, `IdleAnimName`, `WalkAnimName`, `TurnLeftAnimName`, `TurnRightAnimName` | `GoTo`, `GoToAsync`, `GoToObject`, `GoToObjectAsync`, `TurnTo`, `TurnToAsync`, `IsWalking`, `SkipTo`, `Reset`, `PlayAnim`, `PlayAnimAsync`, `SetSprite`, `GetSprite`, `HasAnim`, `MergeAnims`, `UnloadAnim`, `SetStopOnBlocked`, `GetStopOnBlocked` |
-| Actors and entities, speech | `SubtitlesWidth`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosRelative`, `SubtitlesPosXCenter` | `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`, `SetFont`, `GetFont` |
+| Actors and entities, speech | `SubtitlesWidth`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosRelative`, `SubtitlesPosXCenter` | `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`, `SetFont`, `GetFont`, `ForceTalkAnim`, `AddTalkSprite`, `RemoveTalkSprite`, `SetTalkSprite` (see [formats/font.md](formats/font.md#speech)); `GetSpriteObject` on entities, actors (the sprite `SetSprite` gave) and items (their image) |
 | `Game`, actors and entities, sound | `SoundPanning` | `LoadSound`, `PlaySound`, `PlaySoundEvent`, `StopSound`, `PauseSound`, `ResumeSound`, `IsSoundPlaying`, `SetSoundPosition`, `GetSoundPosition`, `SetSoundVolume`, `GetSoundVolume`, `SoundFXEcho`, `SoundFXReverb`, `SoundFXNone` (see [docs/audio.md](audio.md#sound-effects)) |
 | `Game`, input and fades | `Keyboard.KeyCode`, `Key`, `Printable`, `IsShift`, `IsAlt`, `IsControl` | `Keyboard.IsKeyDown`, `SetMousePos`, `FadeOut`, `FadeIn` (and their `Async` and `System` forms), `GetFadeColor`, `SetActiveCursor`, `RemoveActiveCursor`, `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`, `GetActiveCursor`, `GetWaitCursor`, `HideCursor`, `ShowCursor` |
 | `Math` (a global) | `PI` | `Abs`, `Acos`, `Asin`, `Atan`, `Atan2`, `Ceil`, `Cos`, `Cosh`, `Exp`, `Floor`, `Log`, `Log10`, `Pow`, `Sin`, `Sinh`, `Tan`, `Tanh`, `Sqrt`, `DegToRad`, `RadToDeg`; every one returns a float, `Floor` and `Ceil` included, as in the original engine |
@@ -169,12 +169,25 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | `Game`, system | `FPS`, `CurrentTime`, `WindowsTime`, `SoundAvailable`, `WindowedMode`, `AcceleratedMode`, `TextEncoding`, `SFXVolume`, `SpeechVolume`, `MusicVolume`, `MasterVolume`, `StartupScene` | `Caption`, `RunScript`, `GetFileChecksum`, `OpenDocument`, `Reset`, `LockMouseRect`, `LoadInventoryBox` (see [game-loop.md](game-loop.md#a-frame)) |
 | `Game`, saved games and settings | `SaveDirectory`, `MostRecentSaveSlot` | `SaveGame`, `LoadGame`, `IsSaveSlotUsed`, `GetSaveSlotDescription`, `EmptySaveSlot`, `StoreSaveThumbnail`, `DeleteSaveThumbnail`, `Screenshot`, `ScreenshotEx`, `SetLoadingScreen`, `SetSavingScreen`, `DisplayLoadingIcon`, `HideLoadingIcon`, `RegReadNumber`, `RegReadString`, `RegWriteNumber`, `RegWriteString` (see [saving.md](saving.md)) |
 | `Game`, actors and entities, inventory | `Game.SelectedItem`, `InventoryVisible`, `InventoryScrollOffset`, `NumItems`, `TotalNumItems`, `SmartItemCursor` | `TakeItem`, `DropItem`, `HasItem`, `GetItem`, `Game.IsItemTaken`, `Game.QueryItem`, `Game.GetInventoryWindow` |
-| Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` | `GetPoint`, `SkipTo` |
-| Sprite objects (`GetSpriteObject` of an entity, in a scene or in an entity container; `GetImageObject` of a control, `GetInactiveImageObject` of a window, `Get<State>ImageObject` of a button) | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner`, `Filename` | `Reset`, `Pause`, `Play`, `GetFrame`, `AddFrame`, `InsertFrame`, `DeleteFrame` (by index or by frame object) |
+| Regions | `Name`, `Active`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`, `NumPoints` (an entity's `Region` has only the first two and `NumPoints`) | `GetPoint`, `SkipTo`, `AddPoint`, `InsertPoint`, `SetPoint`, `RemovePoint` (see [formats/scene.md](formats/scene.md#region)) |
+| Waypoint groups (`Scene.GetWaypointGroup`) | `Name`, `Active` | |
+| Sprite objects (`GetSpriteObject` of an entity, in a scene, in an entity container or the game's own, of an actor, the sprite `SetSprite` gave it, or of an item, its image; `GetImageObject` of a control, `GetInactiveImageObject` of a window, `Get<State>ImageObject` of a button) | `NumFrames`, `CurrentFrame`, `Looping`, `Finished`, `Paused`, `PixelPerfect`, `Owner`, `Filename` | `Reset`, `Pause`, `Play`, `GetFrame`, `AddFrame`, `InsertFrame`, `DeleteFrame` (by index or by frame object) |
 | Frames (`Sprite.GetFrame`, `AddFrame`, `InsertFrame`) | `Delay`, `Keyframe`, `KillSounds`, `MoveX`, `MoveY`, `NumSubframes`, `NumEvents` | `GetSound`, `SetSound`, `GetSubframe`, `AddSubframe`, `InsertSubframe`, `DeleteSubframe`, `AddEvent`, `DeleteEvent`; a frame with a single sub-frame answers for it (`frame.MirrorX`, `frame.SetImage(...)`) |
+| Particle emitters (`CreateParticleEmitter`, `ParticleEmitter` of an entity or an actor; `DeleteParticleEmitter` removes it) | `X`, `Y`, `Width`, `Height`, `Angle1`, `Angle2`, `Velocity1`, `Velocity2`, `VelocityZBased`, `Scale1`, `Scale2`, `ScaleZBased`, `LifeTime1`, `LifeTime2`, `LifeTimeZBased`, `Rotation1`, `Rotation2`, `AngVelocity1`, `AngVelocity2`, `GrowthRate1`, `GrowthRate2`, `ExponentialGrowth`, `Alpha1`, `Alpha2`, `AlphaTimeBased`, `MaxParticles`, `GenerationInterval`, `GenerationAmount`, `MaxBatches`, `FadeInTime`, `FadeOutTime`, `UseRegion`, `EmitEvent`, `NumLiveParticles` | `AddSprite`, `RemoveSprite`, `Start`, `Stop`, `Pause`, `Resume`, `SetBorder`, `SetBorderThickness`, `AddGlobalForce`, `AddPointForce`, `RemoveForce` (see [docs/particles.md](particles.md)) |
 | Sub-frames (`Frame.GetSubframe`, `AddSubframe`, `InsertSubframe`) | `HotspotX`, `HotspotY`, `MirrorX`, `MirrorY`, `Decoration`, `AlphaColor`, `TransparentColor` (read only), `Is2DOnly`, `Is3DOnly` | `GetImage`, `SetImage` |
 | Every script holder | `Type`, script-set properties | `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript`, `IsScriptRunning` |
 | `String`, `Array`, `Date`, `File`, `MemBuffer` objects | see [Script library classes](#script-library-classes) | |
+| Every object (`CBObject`, `CAdObject`) | `Movable`, `SceneIndependent`, `NonIntMouseEvents` (see below); `NumAttachments` on actors and entities | `SetCursor`, `RemoveCursor`, `GetCursor`, `GetCursorObject`, `HasCursor` (see [game-loop.md](game-loop.md#cursors)); `SetCaption(text, slot)` and `Caption(slot)`: slot 1 (or 0) is the object's caption, slots 2 to 7 are extra captions, all expanded through the string table; on actors and entities `AddAttachment`, `RemoveAttachment`, `GetAttachment` (see [formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments)) |
+
+Every object carries the flags of the original engine's base object
+(`ObjectState`, saved with the object): `Movable`, which Wintermute 1.x
+only consults when a sprite with an owner is drawn through
+`CBSprite::Draw`, a path no scene object takes, so it is kept for the
+scripts and changes nothing on screen; `SceneIndependent`, which places
+the object's speech as if its position were on the screen rather than
+in the scrolled scene (entity containers set it on their entities);
+and `NonIntMouseEvents`, described in
+[game-loop.md](game-loop.md#the-active-object).
 
 When a frame of an object's sprite becomes current, its `SOUND` plays,
 `FrameChanged` is raised on the sprite object (a script attached to it
@@ -255,12 +268,21 @@ its speech file, which then times it. The sounds advance with the game
 clock when no audio device is there, so scripts behave the same in
 headless runs.
 
-The inventory (see [docs/formats/window.md](formats/window.md)) is one
-list of taken items shared by the game, the actors and the entities
-(the engine gives each object its own, switched with
-`Game.InventoryObject`); taking an item hides the scene entities whose
-`ITEM` names it, dropping it shows them again, and the selected item
-draws its cursor. `Game.LoadItems(file, merge)` loads another items
+The inventory (see [docs/formats/window.md](formats/window.md)): the
+game has its own list of taken items (`Game.TakeItem`, `DropItem`,
+`GetItem`, `HasItem`, `NumItems`), and every actor and entity gets one
+of its own the first time a script uses these methods on it
+(`CAdObject::GetInventory`). The inventory box shows the game's by
+default; `Game.InventoryObject = object` switches it to the object's
+(`null` or the game itself goes back), keeping the box's scroll
+position per inventory, and `Game.InventoryObject` reads the object
+shown. `Game.IsItemTaken(name)` looks in every inventory, as does the
+hiding of a scene's entities whose `ITEM` is taken when the scene
+loads. Taking an item, into any inventory, hides the scene entities
+whose `ITEM` names it, dropping it shows them again, and the selected
+item draws its cursor; deleting an item takes it out of every
+inventory. An object's inventory goes with the object, and the box
+goes back to the game's when its owner goes. `Game.LoadItems(file, merge)` loads another items
 file: without `merge` the items are replaced and what the inventory
 held is lost, as in the original engine (a language menu does this
 before anything is taken, so that the captions expand with the string
@@ -327,10 +349,7 @@ Deliberate differences from the original:
 
 ## Not yet
 
-- `Scene.GetWaypointGroup` and `WaypointGroup.Active`: every waypoint
-  group of a scene is used.
-- `GetSpriteObject` on actors.
-- `.talk` files timing talk sprites to a sound, `ForceTalkAnim`, and
-  `AddTalkSprite`; text in UTF-8 string tables is drawn as Latin-1.
+- `.talk` files timing talk sprites to a sound; text in UTF-8 string
+  tables is drawn as Latin-1.
 - Streaming of long sounds.
 - The debugger protocol (`DBG_LINE` is read but only used for messages).

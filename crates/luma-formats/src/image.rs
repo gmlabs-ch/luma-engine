@@ -11,8 +11,8 @@ use std::io::Cursor;
 
 use crate::error::{Error, Result};
 
-/// An opaque colour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// An opaque colour; the default is black.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Rgb {
     /// Red.
@@ -45,6 +45,38 @@ impl Rgba {
         b: 255,
         a: 255,
     };
+}
+
+/// How a sprite is blended with what is under it (`TSpriteBlendMode`,
+/// the `BlendMode` property of objects): the values are the engine's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(u8)]
+pub enum BlendMode {
+    /// Alpha blending: `src * a + dst * (1 - a)`.
+    #[default]
+    Normal = 0,
+    /// Added to what is under: `src * a + dst`.
+    Additive = 1,
+    /// Darkens what is under by the sprite's colour: `dst * (1 - src)`.
+    Subtractive = 2,
+}
+
+impl BlendMode {
+    /// The mode of the engine's integer; an unknown value is `Normal`,
+    /// as in `CBObject::ScSetProperty`.
+    pub fn from_int(value: i32) -> BlendMode {
+        match value {
+            1 => BlendMode::Additive,
+            2 => BlendMode::Subtractive,
+            _ => BlendMode::Normal,
+        }
+    }
+
+    /// The engine's integer for the mode.
+    pub fn to_int(self) -> i32 {
+        self as i32
+    }
 }
 
 /// The engine's default colour key: magenta.

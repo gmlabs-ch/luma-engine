@@ -490,8 +490,7 @@ impl World {
                 .filter(|a| a.def.active && a.def.sound_panning)
                 .map(|a| a.x),
             Some(Kind::Entity(r)) => self
-                .scene()
-                .and_then(|v| v.entity(r))
+                .entity_def(r)
                 .filter(|e| e.active && e.sound_panning)
                 .map(|e| e.x),
             _ => None,
@@ -807,10 +806,12 @@ impl World {
                 }
             }
         }
-        if let Some(view) = self.scene.as_mut() {
+        let audio = &self.sounds.audio;
+        let views = self.scene.iter_mut().chain([&mut self.game_view]);
+        for view in views {
             for sentence in view.sentences_mut() {
                 if let Some(id) = sentence.sound {
-                    if !self.sounds.audio.is_playing(id) && !self.sounds.audio.is_paused(id) {
+                    if !audio.is_playing(id) && !audio.is_paused(id) {
                         sentence.finish();
                         finished.push(id);
                         sentence.sound = None;
@@ -834,7 +835,8 @@ impl World {
                 }
             }
         }
-        if let Some(view) = self.scene.as_mut() {
+        let views = self.scene.iter_mut().chain([&mut self.game_view]);
+        for view in views {
             for sentence in view.sentences_mut() {
                 if sentence.duration == 0 {
                     stopped.extend(sentence.sound.take());

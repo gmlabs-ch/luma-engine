@@ -24,12 +24,17 @@ A saved game holds:
   its threads, and the engine-wide globals; programs are named by the
   file they were loaded from;
 - the native objects and their handles, which stay the same after a
+  load, so that every reference in a script is still good, with the
+  script properties set on each and its runtime state (`ObjectState`:
+  the `Movable`, `SceneIndependent` and `NonIntMouseEvents` flags, the
+  extra caption slots, the forced talk animation);
   load, so that every reference in a script is still good; the script
   library objects (`new String`, `Array`, `Date`, `File`, `MemBuffer`)
   with their contents: a file open for reading keeps its content and
   position, one open for writing is closed, as in the original;
 - the current scene as the scripts left it (its entities, regions and
-  layers, the animation and the sentence of each entity), the previous
+  layers, those the scripts created at run time included, the
+  animation and the sentence of each entity), the previous
   scene's name, a scene change asked and not done yet, and the states
   remembered of the persistent scenes (see
   [game-loop.md](game-loop.md#scene-state-between-visits));
@@ -39,16 +44,24 @@ A saved game holds:
   engine writes every sprite of every object (`CBSprite::Persist`); Luma
   writes only the edited ones and reads the others from their files;
 - the view: scroll offset, target, auto-scroll settings;
+- the game's own entities and the attachments (`Game.CreateEntity`,
+  `Game.LoadEntity`, `AddAttachment`) with their sprites' state;
 - the actors with their position, direction, state, path, animation and
   sentence;
-- the inventory: the items as the scripts modified them, those taken,
-  the selected item, the box's window and scroll;
+- the particle emitters of the entities and actors, with their
+  parameters, sprite files, forces and every particle, live or dead
+  (see [particles.md](particles.md)); their sprites are loaded again
+  from the files;
+- the inventory: the items as the scripts modified them, those taken
+  (the game's and each object's own), the selected item, the object
+  whose inventory the box shows, the box's window and scroll;
 - the windows and their controls, the focused window, what the mouse
   captured, whether the game is frozen and by how many windows;
 - the sounds: each object's sound and the music channels, by file,
   position, looping, volume and whether they play or are paused; the
   crossfade in progress; the speech directories;
-- the fader, the cursors chosen, the mouse and the keyboard state;
+- the game's fader and the scene's, the cursors chosen, the mouse and
+  the keyboard state;
 - the game's own settings a script may change: name, caption,
   subtitles, talk and video skip buttons, `Interactive`, the main
   object, `TextEncoding`, `StartupScene`, the mouse lock rectangle,
@@ -222,7 +235,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `7` today |
+| 4 | layout version, little-endian; `10` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -233,7 +246,16 @@ of The White Chamber is a few kilobytes). The header is read alone by
 `GetSaveSlotDescription`, without decompressing the body. Because
 `postcard` is positional, the fields of the state are versioned by the
 layout version: a change of the state's shape bumps `VERSION`, and
-older files are then refused rather than misread.
+files of another version are then refused rather than misread (the
+header still reads, so a slot of an older file keeps its description).
+Version 7 added the particle emitters; version 8 the per-axis scale,
+rotation and blend mode of objects and emitters, and the scene's fader;
+version 9, after 8, the objects' runtime state and the content created
+at run time (entities, layers, nodes, attachments, the game's own
+entities, per-object inventories). Version 10, after 9, added the
+animations of the controls' state images, the container entities'
+`Freezable` flag and the windows' pending mode changes, the right click
+kept for double clicks, and the objects' sound effects.
 
 ## Checking a game
 

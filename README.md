@@ -47,20 +47,23 @@ Luma Engine reads the same game data with a new engine built for today:
 | `luma-archive` | Game packages (`.dcp`) and a virtual file system | `flate2` |
 | `luma-formats` | Definition files, sprites, scenes, actors, fonts and images | `image` (`serde` with the `serde` feature) |
 | `luma-script` | Virtual machine for compiled game scripts | nothing (`serde` with the `serde` feature) |
+| `luma-compiler` | Compiler from script sources to the bytecode `luma-script` runs, byte for byte as the original | `luma-script` |
 | `luma-render` | 2D/2.5D renderer on wgpu | `luma-formats`, `wgpu`, `winit` |
 | `luma-audio` | Music, sound effects and voice | `kira` (Symphonia for decoding, `cpal` with the `device` feature) |
 | `luma-video` | Ogg Theora videos decoded to frames | `ogg`, `oxideav-theora`, `oxideav-core` |
-| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six core crates, `fontdue`, `serde`, `postcard`, `flate2` |
+| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves | the six run-time core crates, `fontdue`, `serde`, `postcard`, `flate2` |
 | `luma-lumen` | Lumen, the scenario format for games made for Luma: parser, checker, text runner | nothing |
-| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen` |
-| `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script`, `luma` (feature `lumen`) |
+| `luma-3d` | 3D characters on painted backgrounds: `.3ds` scene geometry, the camera mapping, `.x` models with their skin and animations, the Direct3D maths conventions | `luma-formats` |
+| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen`, `luma-3d` with `3d` |
+| `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script`, `luma-compiler`, `luma` (feature `lumen`) |
 | `luma-player` | The desktop player | `luma` (features `adventure`, `audio-device`) |
 
-The first six are the core; `luma-adventure` and `luma-lumen` are the
-optional modules. A game or a front-end depends on `luma` and enables the
-modules it needs through its features (`adventure` is on by default,
-`lumen` is off, `audio-device` plays the sounds, `serde` serializes the
-core); see [docs/modules.md](docs/modules.md).
+The first six are the run-time core and `luma-compiler` a build tool (games
+ship compiled scripts, so `luma` does not re-export it); `luma-adventure`,
+`luma-lumen` and `luma-3d` are the optional modules. A game or a front-end depends on `luma` and
+enables the modules it needs through its features (`adventure` is on by
+default, `lumen` and `3d` are off, `audio-device` plays the sounds,
+`serde` serializes the core); see [docs/modules.md](docs/modules.md).
 
 ## Building
 
@@ -100,7 +103,20 @@ luma scene path/to/game scenes/room/room.scene
 
 # Disassemble a compiled script: tables, then one line per instruction
 luma script path/to/game scenes/room/scr/scene_init.script
+luma script path/to/compiled.script
+
+# Compile a script source to the engine's bytecode, exactly as the original
+# compiler would (see docs/compiler.md); --game is the project root that
+# #include names are relative to, and the script's name in the output
+luma compile path/to/project/scripts/scene.script --game path/to/project -o scene.script
 ```
+
+`luma compile` knows the functions and variables the Wintermute 1.x
+adventure runtime gives every script (`Sleep`, `Random`, `Game`, `Math`,
+`new Object`, ...); a game built with a plugin that adds classes names
+them with `--native <name>`, once per class. Everything else a script
+uses must be declared by the script or its includes, as the original
+required.
 
 For games written for Luma, `luma lumen` checks and plays a story in the
 [Lumen](docs/lumen.md) scenario format, as text, without the player:

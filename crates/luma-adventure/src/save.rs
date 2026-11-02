@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 10;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -157,7 +157,9 @@ world_state! {
     scene_viewport: Option<(i32, i32, i32, i32)>,
     scene_id: NativeId,
     fader_id: NativeId,
+    scene_fader_id: NativeId,
     scene: Option<SceneView>,
+    game_view: SceneView,
     prev_scene_name: String,
     prev_scene_filename: String,
     scheduled_scene: Option<(String, bool)>,
@@ -174,6 +176,7 @@ world_state! {
     last_scroll_x: u64,
     last_scroll_y: u64,
     actors: Vec<(NativeId, Actor)>,
+    emitters: Vec<(NativeId, crate::particles::Emitter)>,
     pending_events: Vec<(NativeId, String)>,
     system_font: Option<String>,
     subtitles: bool,
@@ -185,6 +188,7 @@ world_state! {
     selected_item: Option<NativeId>,
     cursors: Cursors,
     fader: Fader,
+    scene_fader: Fader,
     ui: Ui,
     ui_entities: Vec<crate::ui::UiEntity>,
     responses: crate::responses::Responses,
@@ -280,6 +284,12 @@ pub fn read_save_header(path: &Path) -> Result<SaveHeader, String> {
 fn read_file(path: &Path) -> Result<(SaveHeader, Vec<u8>), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let (header, offset) = read_header_bytes(&bytes)?;
+    let version = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+    if version != VERSION {
+        return Err(format!(
+            "saved game version {version} is older than this engine's ({VERSION})"
+        ));
+    }
     let mut body = Vec::new();
     ZlibDecoder::new(&bytes[offset..])
         .read_to_end(&mut body)
@@ -629,8 +639,12 @@ impl World {
         if let Some(view) = self.scene.as_mut() {
             view.reload_sprites(&self.vfs);
         }
+        self.game_view.reload_sprites(&self.vfs);
         for (_, actor) in &mut self.actors {
             actor.reload_sprites(&self.vfs);
+        }
+        for (_, emitter) in &mut self.emitters {
+            emitter.reload_sprites(&self.vfs);
         }
         let mut fonts: Vec<String> = Vec::new();
         fonts.extend(self.system_font.clone());
@@ -702,7 +716,7 @@ impl World {
             cursors.extend(actor.def.cursor.clone());
             fonts.extend(actor.sentence.as_ref().and_then(|s| s.font.clone()));
         }
-        if let Some(view) = &self.scene {
+        for view in self.scene.iter().chain([&self.game_view]) {
             for r in view.entity_refs() {
                 if let Some(e) = view.entity(r) {
                     fonts.extend(e.font.clone());

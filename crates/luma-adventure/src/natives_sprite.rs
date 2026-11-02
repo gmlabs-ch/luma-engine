@@ -26,8 +26,13 @@ use crate::world::World;
 enum Home {
     /// The scene's bank (scene entities).
     Scene,
-    /// The windows' bank (the entities of entity containers).
+    /// The windows' bank (the entities of entity containers, the items'
+    /// images).
     Ui,
+    /// The game's own view (game-level entities and attachments).
+    Game,
+    /// An actor's own bank.
+    Actor(NativeId),
 }
 
 impl World {
@@ -45,18 +50,20 @@ impl World {
     }
 
     /// The owner of a sprite object, the bank its sprite is in and the
-    /// sprite's path: an entity's sprite, or the image in a slot of a
-    /// control (the controls' images live in the windows' bank).
+    /// sprite's path (`World::own_sprite_path`): an entity's sprite, the
+    /// sprite `SetSprite` gave an actor, an item's image, or the image in
+    /// a slot of a control (the controls' images live in the windows'
+    /// bank).
     fn sprite_home(&self, sprite: NativeId) -> Option<(NativeId, Home, String)> {
         match self.native(sprite)?.kind {
             Kind::Sprite(owner) => {
-                let Kind::Entity(r) = self.native(owner)?.kind else {
-                    return None;
-                };
-                let path = self.entity_def(r)?.sprite.clone()?;
-                let home = match r {
-                    EntityRef::Ui(_) => Home::Ui,
-                    _ => Home::Scene,
+                let path = self.own_sprite_path(owner)?;
+                let home = match self.native(owner)?.kind {
+                    Kind::Entity(EntityRef::Ui(_)) | Kind::Item => Home::Ui,
+                    Kind::Entity(EntityRef::Game(_)) => Home::Game,
+                    Kind::Entity(_) => Home::Scene,
+                    Kind::Actor => Home::Actor(owner),
+                    _ => return None,
                 };
                 Some((owner, home, path))
             }
@@ -82,6 +89,8 @@ impl World {
         let bank = match home {
             Home::Scene => &self.scene()?.bank,
             Home::Ui => &self.ui.bank,
+            Home::Game => &self.game_view.bank,
+            Home::Actor(actor) => &self.actor(actor)?.bank,
         };
         bank.sprite(&path).map(|l| &l.sprite)
     }
@@ -93,16 +102,24 @@ impl World {
         match home {
             Home::Scene => self.scene.as_mut()?.bank.edit_sprite(&path),
             Home::Ui => self.ui.bank.edit_sprite(&path),
+            Home::Game => self.game_view.bank.edit_sprite(&path),
+            Home::Actor(actor) => self.actor_mut(actor)?.bank.edit_sprite(&path),
         }
     }
 
     /// The animation state of a sprite object's sprite, if it has been
     /// shown.
     fn sprite_anim(&self, sprite: NativeId) -> Option<&AnimState> {
-        let (owner, _, _) = self.sprite_home(sprite)?;
+        let (owner, _, path) = self.sprite_home(sprite)?;
         match self.native(owner)?.kind {
             Kind::Entity(EntityRef::Ui(i)) => self.ui_entities.get(i)?.anim.as_ref(),
-            Kind::Entity(r) => self.scene()?.anim(r),
+            Kind::Entity(r) => self.view_of(r)?.anim(r),
+            Kind::Actor => self.actor(owner)?.anim_state(&path),
+            Kind::Item => self
+                .item(owner)?
+                .anim
+                .as_ref()
+                .filter(|a| a.sprite == key(&path)),
             Kind::Control => self.control(owner)?.anim_in(self.sprite_slot(sprite)?),
             _ => None,
         }
@@ -114,7 +131,9 @@ impl World {
         let slot = self.sprite_slot(sprite);
         let anim = match self.native(owner)?.kind {
             Kind::Entity(EntityRef::Ui(i)) => &mut self.ui_entities.get_mut(i)?.anim,
-            Kind::Entity(r) => return self.scene_mut()?.anim_mut(r),
+            Kind::Entity(r) => return self.view_of_mut(r)?.anim_mut(r),
+            Kind::Actor => return Some(self.actor_mut(owner)?.anim(&path)),
+            Kind::Item => &mut self.item_mut(owner)?.anim,
             Kind::Control => self.control_mut(owner)?.anim_slot_mut(slot?)?,
             _ => return None,
         };
@@ -125,9 +144,10 @@ impl World {
         Some(anim)
     }
 
-    /// Restarts a sprite object's animation (`Reset`): the entity's, or
-    /// the control image's, with the sprite's frame sounds stopped
-    /// (`CBSprite::Reset`).
+    /// Restarts a sprite object's animation (`Reset`, `CBSprite::Reset`):
+    /// an entity's `Reset` ends a `PlayAnim` too; a control image's
+    /// starts over with the sprite's frame sounds stopped; the others go
+    /// back to their first frame.
     fn reset_sprite_anim(&mut self, sprite: NativeId) {
         let Some((owner, _, _)) = self.sprite_home(sprite) else {
             return;
@@ -143,7 +163,11 @@ impl World {
                 }
                 self.kill_frame_sounds(owner);
             }
-            _ => {}
+            _ => {
+                if let Some(anim) = self.sprite_anim_mut(sprite) {
+                    anim.reset();
+                }
+            }
         }
     }
 

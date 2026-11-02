@@ -51,6 +51,12 @@ pub struct Inventory {
     /// Show the hover cursor only over objects that handle the item
     /// (`Game.SmartItemCursor`).
     pub smart_item_cursor: bool,
+    /// The object whose inventory the box shows (`Game.InventoryObject`);
+    /// `None` is the game's own.
+    pub owner: Option<NativeId>,
+    /// Where the box was scrolled when it last showed the game's own
+    /// inventory, while it shows another object's.
+    pub own_scroll_offset: i32,
 }
 
 impl World {
@@ -91,9 +97,84 @@ impl World {
             .map(|(id, _)| *id)
     }
 
-    /// The items taken, in order.
+    /// The items in the game's own inventory, in order.
     pub fn taken_items(&self) -> &[NativeId] {
         &self.inventory.taken
+    }
+
+    /// The items in an object's inventory (`CAdObject::GetInventory`):
+    /// the game's own for the game, else the object's, empty until a
+    /// script used it.
+    pub fn taken_items_of(&self, owner: NativeId) -> &[NativeId] {
+        if owner == self.game_id {
+            return &self.inventory.taken;
+        }
+        self.object_state(owner)
+            .and_then(|s| s.inventory.as_ref())
+            .map_or(&[], |inv| inv.taken.as_slice())
+    }
+
+    /// An object's inventory, mutable, created on first use; the game's
+    /// own has no such list, so `None` for the game.
+    fn object_inventory_mut(
+        &mut self,
+        owner: NativeId,
+    ) -> Option<&mut crate::objects::ObjectInventory> {
+        if owner == self.game_id {
+            return None;
+        }
+        self.object_state_mut(owner)
+            .map(|s| s.inventory.get_or_insert_with(Default::default))
+    }
+
+    /// The object whose inventory the box shows (`Game.InventoryObject`):
+    /// the game itself by default.
+    pub fn inventory_owner(&self) -> NativeId {
+        self.inventory
+            .owner
+            .filter(|id| self.objects.contains(*id))
+            .unwrap_or(self.game_id)
+    }
+
+    /// Shows another object's inventory in the box (`Game.InventoryObject`
+    /// set): the box's scroll position is kept per inventory, as the
+    /// original engine does. The game itself, or an invalid object, goes
+    /// back to the game's own.
+    pub fn set_inventory_owner(&mut self, owner: Option<NativeId>) {
+        let previous = self.inventory_owner();
+        let offset = self.inventory.scroll_offset;
+        if previous == self.game_id {
+            self.inventory.own_scroll_offset = offset;
+        } else if let Some(inv) = self.object_inventory_mut(previous) {
+            inv.scroll_offset = offset;
+        }
+        let owner = owner.filter(|id| *id != self.game_id && self.objects.contains(*id));
+        self.inventory.owner = owner;
+        self.inventory.scroll_offset = match owner {
+            None => self.inventory.own_scroll_offset,
+            Some(id) => self
+                .object_inventory_mut(id)
+                .map_or(0, |inv| inv.scroll_offset),
+        };
+    }
+
+    /// The items the box shows: the owner's.
+    fn shown_items(&self) -> &[NativeId] {
+        self.taken_items_of(self.inventory_owner())
+    }
+
+    /// Whether an item is in any inventory (`CAdGame::IsItemTaken`).
+    pub fn is_item_taken(&self, name: &str) -> bool {
+        let Some(id) = self.item_by_name(name) else {
+            return false;
+        };
+        self.inventory.taken.contains(&id)
+            || self.objects.iter().any(|(_, n)| {
+                n.state
+                    .inventory
+                    .as_ref()
+                    .is_some_and(|inv| inv.taken.contains(&id))
+            })
     }
 
     /// The item in use (`Game.SelectedItem`).
@@ -174,10 +255,16 @@ impl World {
         }
         self.handle_item_associations(&name, false);
         self.inventory.taken.retain(|t| *t != id);
+        for (_, native) in self.objects.iter_mut() {
+            if let Some(inv) = native.state.inventory.as_mut() {
+                inv.taken.retain(|t| *t != id);
+            }
+        }
         for script in engine.scripts_of(id) {
             engine.finish(script, true);
         }
         self.inventory.items.remove(index);
+        self.forget_owned(id);
         self.objects.remove(id);
         true
     }
@@ -277,36 +364,71 @@ impl World {
         true
     }
 
-    /// Puts an item in the inventory (`TakeItem`): again if it was
-    /// there, after the named item or at the end. `false` when there is
-    /// no such item.
+    /// Puts an item in the game's own inventory (`Game.TakeItem`): again
+    /// if it was there, after the named item or at the end. `false` when
+    /// there is no such item.
     pub fn take_item(&mut self, name: &str, after: Option<&str>) -> bool {
+        let game = self.game_id;
+        self.take_item_for(game, name, after)
+    }
+
+    /// Puts an item in an object's inventory (`TakeItem` on the object;
+    /// `CAdInventory::InsertItem`): again if it was there, after the named
+    /// item or at the end. The scene entities tied to the item hide
+    /// whoever takes it. `false` when there is no such item.
+    pub fn take_item_for(&mut self, owner: NativeId, name: &str, after: Option<&str>) -> bool {
         let Some(id) = self.item_by_name(name) else {
             return false;
         };
         let after_id = after.and_then(|a| self.item_by_name(a));
-        self.inventory.taken.retain(|t| *t != id);
+        let game = self.game_id;
+        let taken = if owner == game {
+            &mut self.inventory.taken
+        } else {
+            match self.object_inventory_mut(owner) {
+                Some(inv) => &mut inv.taken,
+                None => return false,
+            }
+        };
+        taken.retain(|t| *t != id);
         let index = after_id
-            .and_then(|a| self.inventory.taken.iter().position(|t| *t == a))
+            .and_then(|a| taken.iter().position(|t| *t == a))
             .map(|i| i + 1);
         match index {
-            Some(i) => self.inventory.taken.insert(i, id),
-            None => self.inventory.taken.push(id),
+            Some(i) => taken.insert(i, id),
+            None => taken.push(id),
         }
         self.handle_item_associations(name, false);
         true
     }
 
-    /// Takes an item out of the inventory (`DropItem`), deselecting it.
-    /// `false` when it was not there.
+    /// Takes an item out of the game's own inventory (`Game.DropItem`),
+    /// deselecting it. `false` when it was not there.
     pub fn drop_item(&mut self, name: &str) -> bool {
+        let game = self.game_id;
+        self.drop_item_for(game, name)
+    }
+
+    /// Takes an item out of an object's inventory (`DropItem` on the
+    /// object), deselecting it; the scene entities tied to the item show
+    /// again. `false` when it was not there.
+    pub fn drop_item_for(&mut self, owner: NativeId, name: &str) -> bool {
         let Some(id) = self.item_by_name(name) else {
             return false;
         };
-        let Some(index) = self.inventory.taken.iter().position(|t| *t == id) else {
+        let game = self.game_id;
+        let taken = if owner == game {
+            &mut self.inventory.taken
+        } else {
+            match self.object_inventory_mut(owner) {
+                Some(inv) => &mut inv.taken,
+                None => return false,
+            }
+        };
+        let Some(index) = taken.iter().position(|t| *t == id) else {
             return false;
         };
-        self.inventory.taken.remove(index);
+        taken.remove(index);
         if self.selected_item == Some(id) {
             self.selected_item = None;
         }
@@ -314,10 +436,17 @@ impl World {
         true
     }
 
-    /// Whether an item is in the inventory (`HasItem`, `IsItemTaken`).
+    /// Whether an item is in the game's own inventory (`Game.HasItem`).
     pub fn has_item(&self, name: &str) -> bool {
         self.item_by_name(name)
             .is_some_and(|id| self.inventory.taken.contains(&id))
+    }
+
+    /// Whether an item is in an object's inventory (`HasItem` on the
+    /// object).
+    pub fn has_item_for(&self, owner: NativeId, name: &str) -> bool {
+        self.item_by_name(name)
+            .is_some_and(|id| self.taken_items_of(owner).contains(&id))
     }
 
     /// Sets the item in use from a script value (`Game.SelectedItem`):
@@ -351,14 +480,14 @@ impl World {
         }
     }
 
-    /// Hides the entities of a freshly loaded scene whose item is taken
-    /// (`CAdEntity::LoadBuffer`).
+    /// Hides the entities of a freshly loaded scene whose item is taken,
+    /// in any inventory (`CAdEntity::LoadBuffer`, `IsItemTaken`).
     pub(crate) fn hide_taken_item_entities(&mut self) {
         let taken: Vec<String> = self
-            .inventory
-            .taken
-            .iter()
-            .filter_map(|id| self.item(*id).map(|i| i.def.name.clone()))
+            .item_ids()
+            .into_iter()
+            .filter_map(|id| self.item(id).map(|i| i.def.name.clone()))
+            .filter(|name| self.is_item_taken(name))
             .collect();
         for name in taken {
             self.handle_item_associations(&name, false);
@@ -385,7 +514,7 @@ impl World {
                 let index = self.inventory.scroll_offset + row * columns + col;
                 let Some(id) = usize::try_from(index)
                     .ok()
-                    .and_then(|i| self.inventory.taken.get(i).copied())
+                    .and_then(|i| self.shown_items().get(i).copied())
                 else {
                     continue;
                 };
@@ -418,7 +547,7 @@ impl World {
             return;
         };
         let (columns, rows) = def.grid();
-        let taken = self.inventory.taken.len() as i32;
+        let taken = self.shown_items().len() as i32;
         let offset = self.inventory.scroll_offset;
         if let Some(window) = self.inventory.window {
             if let Some(prev) = self.widget(window, "prev") {

@@ -8,7 +8,7 @@
 
 use crate::def::{Document, Node, Nodes};
 use crate::error::{Error, Result};
-use crate::image::Rgba;
+use crate::image::{BlendMode, Rgb, Rgba};
 use crate::sprite::Rect;
 
 /// A point in scene coordinates.
@@ -144,8 +144,35 @@ pub struct Scene {
     pub cursor: Option<String>,
     /// Part of the window the scene is drawn in.
     pub viewport: Option<Rect>,
-    /// Name of the active 3D camera; meaningless for 2D scenes.
+    /// Name of the active 3D camera of the geometry (`CAMERA`); an
+    /// unknown name keeps the geometry's first camera.
     pub camera: Option<String>,
+    /// The `.3ds` scene geometry file (`GEOMETRY`); `None` for a 2D scene.
+    pub geometry: Option<String>,
+    /// Field of view in **radians** replacing the active camera's
+    /// (`FOV_OVERRIDE`); absent or negative keeps the camera's.
+    pub fov_override: Option<f32>,
+    /// Near clipping distance in world units (`NEAR_CLIPPING_PLANE`);
+    /// absent or negative means the renderer's default (90).
+    pub near_clipping_plane: Option<f32>,
+    /// Far clipping distance in world units (`FAR_CLIPPING_PLANE`); absent
+    /// or negative means the renderer's default (10000).
+    pub far_clipping_plane: Option<f32>,
+    /// Height of the 3D waypoints above the floor (`WAYPOINT_HEIGHT`);
+    /// absent or negative keeps the geometry's default (10).
+    pub waypoint_height: Option<f32>,
+    /// 3D actors path-find on the scene's 2D regions and waypoints
+    /// (`2D_PATHFINDING`); the geometry then only maps 2D to 3D.
+    pub pathfinding_2d: bool,
+    /// Highest shadow type allowed in the scene, 0 none, 1 simple, 2 flat,
+    /// 3 stencil (`MAX_SHADOW_TYPE`, clamped; default 2).
+    pub max_shadow_type: u8,
+    /// Pre-1.7 framing: the camera sees the top-left screenful of the
+    /// scene whatever the layer size (`SCROLL_3D_COMPATIBILITY`).
+    pub scroll_3d_compatibility: bool,
+    /// Ambient light colour for 3D actors (`AMBIENT_LIGHT_COLOR`), black
+    /// by default.
+    pub ambient_light_color: Rgb,
     /// The layers, in drawing order.
     pub layers: Vec<Layer>,
     /// Waypoint groups for path finding.
@@ -259,8 +286,20 @@ pub struct Entity {
     pub scale: Option<f32>,
     /// Added to the scene's scale, in percent.
     pub relative_scale: f32,
+    /// Horizontal scale in percent set by a script (`ScaleX`); with
+    /// `scale_y`, it replaces `scale` and the scene's.
+    pub scale_x: Option<f32>,
+    /// See `scale_x`.
+    pub scale_y: Option<f32>,
     /// Follows the scene's rotation levels.
     pub rotatable: bool,
+    /// Fixed rotation in degrees set by a script (`Rotate`), overriding
+    /// the scene's; only applies when rotatable.
+    pub rotate: Option<f32>,
+    /// Added to the scene's rotation, in degrees (`RelativeRotate`).
+    pub relative_rotate: f32,
+    /// How the sprite is blended (`BlendMode`).
+    pub blend_mode: BlendMode,
     /// Reacts to the mouse (`INTERACTIVE`).
     pub interactive: bool,
     /// Takes the tint of the region it stands in (`COLORABLE`).
@@ -317,7 +356,12 @@ impl Default for Entity {
             scalable: true,
             scale: None,
             relative_scale: 0.0,
+            scale_x: None,
+            scale_y: None,
             rotatable: false,
+            rotate: None,
+            relative_rotate: 0.0,
+            blend_mode: BlendMode::Normal,
             interactive: true,
             colorable: true,
             tint: None,
@@ -439,7 +483,7 @@ impl Region {
 }
 
 /// A group of waypoints for path finding.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WaypointGroup {
     /// Name used by scripts.
@@ -450,6 +494,21 @@ pub struct WaypointGroup {
     pub points: Vec<Point>,
     /// Script properties.
     pub properties: Vec<Property>,
+    /// Whether path finding uses the group (`WaypointGroup.Active`); a
+    /// runtime flag scripts set, not a file key.
+    pub active: bool,
+}
+
+impl Default for WaypointGroup {
+    fn default() -> Self {
+        WaypointGroup {
+            name: String::new(),
+            template: None,
+            points: Vec::new(),
+            properties: Vec::new(),
+            active: true,
+        }
+    }
 }
 
 /// A scale level: the scale at a `y`, interpolated between levels.
@@ -485,6 +544,7 @@ impl Scene {
         })?;
         let mut scene = Scene {
             persistent_state_sprites: true,
+            max_shadow_type: 2,
             ..Scene::default()
         };
         for node in root.nodes() {
@@ -498,6 +558,22 @@ impl Scene {
                 "PERSISTENT_STATE_SPRITES" => scene.persistent_state_sprites = boolean(node),
                 "CURSOR" => scene.cursor = node.as_str().map(str::to_string),
                 "CAMERA" => scene.camera = node.as_str().map(str::to_string),
+                "GEOMETRY" => scene.geometry = node.as_str().map(str::to_string),
+                "FOV_OVERRIDE" => scene.fov_override = float(node),
+                "NEAR_CLIPPING_PLANE" => scene.near_clipping_plane = float(node),
+                "FAR_CLIPPING_PLANE" => scene.far_clipping_plane = float(node),
+                "WAYPOINT_HEIGHT" => scene.waypoint_height = float(node),
+                "2D_PATHFINDING" => scene.pathfinding_2d = boolean(node),
+                "MAX_SHADOW_TYPE" => scene.max_shadow_type = integer(node).clamp(0, 3) as u8,
+                "SCROLL_3D_COMPATIBILITY" => scene.scroll_3d_compatibility = boolean(node),
+                "AMBIENT_LIGHT_COLOR" => {
+                    let v = ints(node);
+                    scene.ambient_light_color = Rgb {
+                        r: clamp_channel(v.first().copied().unwrap_or(0)),
+                        g: clamp_channel(v.get(1).copied().unwrap_or(0)),
+                        b: clamp_channel(v.get(2).copied().unwrap_or(0)),
+                    };
+                }
                 "VIEWPORT" => {
                     let v = ints(node);
                     scene.viewport = Some(Rect {
@@ -586,9 +662,10 @@ impl Scene {
         blocked
     }
 
-    /// Scale in percent an entity is drawn at: its own `SCALE`, else the
-    /// scene's scale at its position plus `RELATIVE_SCALE`; `100` when it
-    /// is not scalable.
+    /// Scale in percent an entity is drawn at when it has no per-axis
+    /// scale: its own `SCALE`, else the scene's scale at its position
+    /// plus `RELATIVE_SCALE`; `100` when it is not scalable. See
+    /// [`Scene::entity_scale_xy`] for the whole rule.
     pub fn entity_scale(&self, entity: &Entity) -> f32 {
         if !entity.scalable {
             return 100.0;
@@ -596,6 +673,63 @@ impl Scene {
         entity
             .scale
             .unwrap_or_else(|| self.zoom_at(entity.x, entity.y) + entity.relative_scale)
+    }
+
+    /// Scale per axis, in percent, an entity is drawn at
+    /// (`CAdObject::GetScale`): `ScaleX` and `ScaleY` when either is set
+    /// (the other axis at 100), else [`Scene::entity_scale`]; `100` on
+    /// both axes when the entity is not scalable.
+    pub fn entity_scale_xy(&self, entity: &Entity) -> (f32, f32) {
+        self.object_scale(
+            (entity.x, entity.y),
+            entity.scalable,
+            entity.scale,
+            (entity.scale_x, entity.scale_y),
+            entity.relative_scale,
+        )
+    }
+
+    /// Scale per axis, in percent, of an object at `position` with the
+    /// scale settings of `CBObject` (`CAdObject::GetScale`): `(100, 100)`
+    /// unless `scalable`; `scale_xy` when either axis is set, the other
+    /// axis at 100; else `scale`; else the scene's scale at the position
+    /// plus `relative_scale`.
+    pub fn object_scale(
+        &self,
+        position: (i32, i32),
+        scalable: bool,
+        scale: Option<f32>,
+        scale_xy: (Option<f32>, Option<f32>),
+        relative_scale: f32,
+    ) -> (f32, f32) {
+        if !scalable {
+            return (100.0, 100.0);
+        }
+        match scale_xy {
+            (None, None) => {
+                let s =
+                    scale.unwrap_or_else(|| self.zoom_at(position.0, position.1) + relative_scale);
+                (s, s)
+            }
+            (x, y) => (x.unwrap_or(100.0), y.unwrap_or(100.0)),
+        }
+    }
+
+    /// Rotation in degrees of an object at `x` with the rotation
+    /// settings of `CBObject` (`CAdEntity::Display`, `CAdActor::Display`):
+    /// `0` unless `rotatable`; `rotate` when set; else the scene's
+    /// rotation at `x` plus `relative_rotate`.
+    pub fn object_rotation(
+        &self,
+        x: i32,
+        rotatable: bool,
+        rotate: Option<f32>,
+        relative_rotate: f32,
+    ) -> f32 {
+        if !rotatable {
+            return 0.0;
+        }
+        rotate.unwrap_or_else(|| self.rotation_at(x) + relative_rotate)
     }
 
     /// Tint an entity is drawn with: its own, else the scene's tint at
@@ -608,14 +742,16 @@ impl Scene {
         }
     }
 
-    /// Rotation in degrees an entity is drawn with: the scene's rotation
-    /// at its position when rotatable, else `0`.
+    /// Rotation in degrees an entity is drawn with: its `Rotate` when
+    /// set, else the scene's rotation at its position plus
+    /// `RelativeRotate`, when rotatable; else `0`.
     pub fn entity_rotation(&self, entity: &Entity) -> f32 {
-        if entity.rotatable {
-            self.rotation_at(entity.x)
-        } else {
-            0.0
-        }
+        self.object_rotation(
+            entity.x,
+            entity.rotatable,
+            entity.rotate,
+            entity.relative_rotate,
+        )
     }
 
     /// Every entity of the scene: layer nodes in order, then free
@@ -808,7 +944,7 @@ impl Region {
     /// Parses a region block. Scene regions (`scene == true`) read the
     /// blocking, decoration, scale and tint keys; the hotspot of an entity
     /// reads only the base keys, like the engine.
-    pub(crate) fn from_node(node: &Node, scene: bool) -> Result<Region> {
+    pub fn from_node(node: &Node, scene: bool) -> Result<Region> {
         let mut region = Region::default();
         let (mut r, mut g, mut b, mut alpha) = (255i64, 255i64, 255i64, 255i64);
         for child in node.nodes() {
@@ -853,7 +989,9 @@ impl Region {
 }
 
 impl WaypointGroup {
-    pub(crate) fn from_node(node: &Node) -> Result<WaypointGroup> {
+    /// Parses a `WAYPOINTS` block (a scene's, or the private one of an
+    /// actor definition).
+    pub fn from_node(node: &Node) -> Result<WaypointGroup> {
         let mut group = WaypointGroup::default();
         for child in node.nodes() {
             match child.key.to_ascii_uppercase().as_str() {
@@ -945,6 +1083,10 @@ fn integer(node: &Node) -> i32 {
     node.as_int()
         .unwrap_or(0)
         .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
+fn float(node: &Node) -> Option<f32> {
+    node.as_float().map(|f| f as f32)
 }
 
 fn ints(node: &Node) -> Vec<i64> {
@@ -1330,6 +1472,43 @@ SCENE {
             ..actor.clone()
         };
         assert_eq!(scene.entity_scale(&fixed), 33.0);
+        assert_eq!(scene.entity_scale_xy(&fixed), (33.0, 33.0));
+
+        // A per-axis scale replaces `Scale` and the scene's; the other
+        // axis is 100, as in `CAdObject::GetScale`.
+        let wide = Entity {
+            scale_x: Some(150.0),
+            ..fixed.clone()
+        };
+        assert_eq!(scene.entity_scale_xy(&wide), (150.0, 100.0));
+        let both = Entity {
+            scale_y: Some(50.0),
+            ..wide.clone()
+        };
+        assert_eq!(scene.entity_scale_xy(&both), (150.0, 50.0));
+        let flat = Entity {
+            scalable: false,
+            ..both.clone()
+        };
+        assert_eq!(scene.entity_scale_xy(&flat), (100.0, 100.0));
+
+        // `RelativeRotate` adds to the levels; `Rotate` replaces them;
+        // neither applies to an object that is not rotatable.
+        let leaning = Entity {
+            relative_rotate: 2.5,
+            ..actor.clone()
+        };
+        assert_eq!(scene.entity_rotation(&leaning), 7.5);
+        let fixed_rotation = Entity {
+            rotate: Some(-90.0),
+            ..leaning.clone()
+        };
+        assert_eq!(scene.entity_rotation(&fixed_rotation), -90.0);
+        let upright = Entity {
+            rotatable: false,
+            ..fixed_rotation.clone()
+        };
+        assert_eq!(scene.entity_rotation(&upright), 0.0);
     }
 
     #[test]
@@ -1370,6 +1549,59 @@ SCENE {
         assert!(matches!(err, Error::Syntax(_)), "{err}");
         let err = Entity::parse(b"SCENE { }").unwrap_err();
         assert!(matches!(err, Error::Invalid { .. }), "{err}");
+    }
+
+    #[test]
+    fn reads_the_3d_keys_with_their_defaults() {
+        let scene = Scene::parse(b"SCENE { NAME=\"flat\" }").unwrap();
+        assert_eq!(scene.geometry, None);
+        assert_eq!(scene.camera, None);
+        assert_eq!(scene.fov_override, None);
+        assert_eq!(scene.near_clipping_plane, None);
+        assert_eq!(scene.far_clipping_plane, None);
+        assert_eq!(scene.waypoint_height, None);
+        assert!(!scene.pathfinding_2d);
+        assert_eq!(scene.max_shadow_type, 2);
+        assert!(!scene.scroll_3d_compatibility);
+        assert_eq!(scene.ambient_light_color, Rgb { r: 0, g: 0, b: 0 });
+
+        let scene = Scene::parse(
+            br#"SCENE {
+  NAME="Warehouse"
+  GEOMETRY="scenes\front\geometry.3ds"
+  CAMERA="Camera01"
+  MAX_SHADOW_TYPE=7
+  FOV_OVERRIDE=1.25
+  NEAR_CLIPPING_PLANE=-1
+  FAR_CLIPPING_PLANE=5000
+  WAYPOINT_HEIGHT=12.5
+  2D_PATHFINDING=TRUE
+  SCROLL_3D_COMPATIBILITY=TRUE
+  AMBIENT_LIGHT_COLOR { 300, 20, -5 }
+  EDITOR_RESOLUTION_WIDTH=800
+}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            scene.geometry.as_deref(),
+            Some("scenes\\front\\geometry.3ds")
+        );
+        assert_eq!(scene.camera.as_deref(), Some("Camera01"));
+        assert_eq!(scene.max_shadow_type, 3);
+        assert_eq!(scene.fov_override, Some(1.25));
+        assert_eq!(scene.near_clipping_plane, Some(-1.0));
+        assert_eq!(scene.far_clipping_plane, Some(5000.0));
+        assert_eq!(scene.waypoint_height, Some(12.5));
+        assert!(scene.pathfinding_2d);
+        assert!(scene.scroll_3d_compatibility);
+        assert_eq!(
+            scene.ambient_light_color,
+            Rgb {
+                r: 255,
+                g: 20,
+                b: 0
+            }
+        );
     }
 
     #[test]
