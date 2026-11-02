@@ -1,7 +1,9 @@
 //! A synthetic 3D game: a scene with geometry (a floor, a wall, four
 //! waypoints, a camera, a light), a 3D actor with a tiny `.X` model, and
 //! scripts that load the actor, walk it around the wall, turn it, play an
-//! animation, save and load. Runs only with the `3d` feature.
+//! animation, save and load; a second test attaches a model to a bone,
+//! replaces a texture, hangs a particle emitter on a bone and saves.
+//! Runs only with the `3d` feature.
 
 #![cfg(feature = "3d")]
 
@@ -9,7 +11,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use luma_3d::Vec3;
 use luma_3d::three_ds::Builder;
-use luma_adventure::{Actor3dState, Audio, Kind, Runtime};
+use luma_adventure::actor3d::world_matrix;
+use luma_adventure::{Actor3dState, Audio, Kind, MaterialOverride, MaterialTexture, Runtime};
 use luma_archive::{PackageBuilder, Vfs};
 use luma_script::asm::Assembler;
 use luma_script::{Instruction, Value};
@@ -203,6 +206,118 @@ fn room_script() -> Vec<u8> {
     store(&mut a, "readyWhileWaving");
     a.emit(Instruction::RetEvent);
 
+    // on "attach": the attachment, texture, bone emitter and shadow
+    // members (see `attachments_textures_and_bone_emitters`).
+    a.event("attach");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.def_glob_var("bob");
+    a.def_glob_var("Scene");
+    call(
+        &mut a,
+        "bob",
+        "AddAttachment",
+        &[Arg::Str("actors\\hat.x"), Arg::Str("hat"), Arg::Str("Root")],
+    );
+    store(&mut a, "added");
+    call(
+        &mut a,
+        "bob",
+        "AddAttachment",
+        &[Arg::Str("actors\\hat.x"), Arg::Str("x"), Arg::Str("Nope")],
+    );
+    store(&mut a, "badBone");
+    call(
+        &mut a,
+        "bob",
+        "AddAttachment",
+        &[
+            Arg::Str("actors\\missing.x"),
+            Arg::Str("y"),
+            Arg::Str("Root"),
+        ],
+    );
+    store(&mut a, "badFile");
+    a.def_var("att");
+    call(&mut a, "bob", "GetAttachment", &[Arg::Str("HAT")]);
+    a.pop_var("att");
+    a.push_var("att");
+    store(&mut a, "att");
+    call(&mut a, "bob", "GetAttachment", &[Arg::Int(0)]);
+    store(&mut a, "att0");
+    get(&mut a, "att", "Type");
+    store(&mut a, "attType");
+    get(&mut a, "att", "Name");
+    store(&mut a, "attName");
+    get(&mut a, "att", "Bone");
+    store(&mut a, "attBone");
+    get(&mut a, "bob", "NumAttachments");
+    store(&mut a, "numAtt");
+    a.push_float(4.0);
+    set(&mut a, "att", "PosY");
+    call(&mut a, "att", "PlayAnimAsync", &[Arg::Str("spin")]);
+    store(&mut a, "attPlay");
+    call(
+        &mut a,
+        "bob",
+        "SetTexture",
+        &[Arg::Str("body"), Arg::Str("actors\\tex.png")],
+    );
+    store(&mut a, "tex");
+    call(
+        &mut a,
+        "bob",
+        "SetTexture",
+        &[Arg::Str("body"), Arg::Str("actors\\missing.png")],
+    );
+    store(&mut a, "texBad");
+    call(
+        &mut a,
+        "bob",
+        "SetTheoraTexture",
+        &[Arg::Str("screen"), Arg::Str("actors\\clip.ogv")],
+    );
+    store(&mut a, "theora");
+    call(
+        &mut a,
+        "bob",
+        "CreateParticleEmitterBone",
+        &[Arg::Str("Root"), Arg::Int(0), Arg::Int(1), Arg::Int(0)],
+    );
+    store(&mut a, "emitter");
+    call(
+        &mut a,
+        "Scene",
+        "SetShadowImage",
+        &[Arg::Str("actors\\tex.png")],
+    );
+    store(&mut a, "sceneShadowSet");
+    call(&mut a, "Scene", "GetShadowImage", &[]);
+    store(&mut a, "sceneShadowImg");
+    call(
+        &mut a,
+        "Scene",
+        "SetLightPosition",
+        &[Arg::Int(1), Arg::Int(2), Arg::Int(3)],
+    );
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+
+    // on "detach": the attachment goes, with its object.
+    a.event("detach");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.def_glob_var("bob");
+    call(&mut a, "bob", "RemoveAttachment", &[Arg::Str("hat")]);
+    store(&mut a, "removed");
+    call(&mut a, "bob", "RemoveAttachment", &[Arg::Str("hat")]);
+    store(&mut a, "removedAgain");
+    call(&mut a, "bob", "GetAttachment", &[Arg::Str("hat")]);
+    store(&mut a, "gone");
+    call(&mut a, "Game", "ValidObject", &[Arg::Result("att")]);
+    store(&mut a, "attValid");
+    a.emit(Instruction::RetEvent);
+
     // on "SaveIt": result.saved = Game.SaveGame(3, "mid walk");
     a.event("SaveIt");
     a.emit(Instruction::Scope);
@@ -367,6 +482,35 @@ AnimationSet wave {
 }
 "#;
 
+/// A hat for the actor: one quad, 1 wide and 1 high, standing on its
+/// origin, with a one-second `spin` animation that lifts it.
+const HAT: &str = r#"xof 0303txt 0032
+
+AnimTicksPerSecond { 4800; }
+
+Frame HatRoot {
+ FrameTransformMatrix { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; }
+ Mesh hat {
+  4;
+  -0.5;0.0;0.0;,
+  0.5;0.0;0.0;,
+  0.5;1.0;0.0;,
+  -0.5;1.0;0.0;;
+  2;
+  3;0,2,1;,
+  3;0,3,2;;
+  MeshNormals { 1; 0.0;0.0;-1.0;; 2; 3;0,0,0;, 3;0,0,0;; }
+ }
+}
+
+AnimationSet spin {
+ Animation {
+  AnimationKey { 2; 2; 0;3;0.0,0.0,0.0;;, 4800;3;0.0,0.5,0.0;;; }
+  { HatRoot }
+ }
+}
+"#;
+
 const ACTOR: &str = r#"ACTOR3DX
 {
   NAME = "bob"
@@ -421,6 +565,11 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("scenes\\geo.3ds", geometry());
     pkg.add_file("actors\\bob.x", MODEL.as_bytes().to_vec());
     pkg.add_file("actors\\bob.act3d", ACTOR.as_bytes().to_vec());
+    pkg.add_file("actors\\hat.x", HAT.as_bytes().to_vec());
+    // Only looked up, never decoded: a texture and a video for the
+    // material overrides and the shadow image.
+    pkg.add_file("actors\\tex.png", b"not an image".to_vec());
+    pkg.add_file("actors\\clip.ogv", b"not a video".to_vec());
     std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
     dir
 }
@@ -724,5 +873,176 @@ fn a_3d_actor_walks_turns_animates_and_survives_a_save() {
         Value::Bool(true),
         "the saved script resumed"
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Starts the game and runs it until the scene script has loaded the
+/// actor; the actor's handle.
+fn start(runtime: &mut Runtime) -> luma_script::NativeId {
+    runtime.start();
+    runtime.tick(16);
+    set_result(runtime, "steps", Value::Int(0));
+    runtime.tick(16);
+    result(runtime, "bob").as_native().expect("the actor")
+}
+
+#[test]
+fn attachments_textures_and_bone_emitters() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    let bob = start(&mut runtime);
+    let projection = runtime.world.projection_3d().expect("a camera");
+
+    raise(&mut runtime, "attach");
+    let log = runtime.tick(16);
+    // The bad bone and the missing file raise the original's errors.
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Bone 'Nope' cannot be found")),
+        "{log:?}"
+    );
+    assert!(
+        log.iter().any(|l| l.contains("Error adding attachment")),
+        "{log:?}"
+    );
+    assert_eq!(result(&runtime, "added"), Value::Bool(true));
+    assert_eq!(result(&runtime, "badBone"), Value::Bool(false));
+    assert_eq!(result(&runtime, "badFile"), Value::Bool(false));
+    let att = result(&runtime, "att").as_native().expect("the attachment");
+    assert_eq!(result(&runtime, "att0"), Value::Native(att), "by index too");
+    assert_eq!(
+        runtime.world.objects().get(att).unwrap().kind,
+        Kind::Attachment3D(bob)
+    );
+    assert_eq!(result(&runtime, "attType"), Value::from("attachment"));
+    assert_eq!(result(&runtime, "attName"), Value::from("hat"));
+    assert_eq!(result(&runtime, "attBone"), Value::from("Root"));
+    assert_eq!(result(&runtime, "numAtt"), Value::Int(1));
+    assert_eq!(result(&runtime, "attPlay"), Value::Bool(true));
+    assert_eq!(result(&runtime, "tex"), Value::Bool(true));
+    assert_eq!(result(&runtime, "texBad"), Value::Bool(false));
+    assert_eq!(result(&runtime, "theora"), Value::Bool(true));
+    assert_eq!(result(&runtime, "sceneShadowSet"), Value::Bool(true));
+    assert_eq!(
+        result(&runtime, "sceneShadowImg"),
+        Value::from("actors\\tex.png")
+    );
+    let scene = runtime.world.scene_id();
+    let state = runtime.world.object_state(scene).unwrap();
+    assert_eq!(state.shadow_image.as_deref(), Some("actors\\tex.png"));
+    assert_eq!(state.shadow_light, Some([1.0, 2.0, 3.0]));
+
+    // The attachment follows the bone: its matrix is its own offset, the
+    // bone's combined matrix, the actor's world matrix; it animates on
+    // its own channel.
+    let actor = runtime.world.actor3d(bob).unwrap();
+    assert_eq!(actor.attachments.len(), 1);
+    let hat = actor.attachment("hat").expect("the hat");
+    assert_eq!(hat.id, att);
+    assert_eq!(hat.position, Vec3::new(0.0, 4.0, 0.0));
+    let bone = *actor.model().unwrap().bone_matrix("Root").unwrap();
+    let expected = world_matrix(Vec3::new(0.0, 4.0, 0.0), 0.0, 1.0) * bone * actor.world_matrix();
+    assert_eq!(hat.world_matrix(), expected);
+    assert_eq!(hat.model().unwrap().current_animation(0), Some("spin"));
+    // The hat stands on the body's top: its rectangle is above the body's
+    // and the actor is clickable through it.
+    let (_, body_top, _, _) = actor.bounding_rect().unwrap();
+    let (l, t, r, b) = hat.bounding_rect().expect("projected hat");
+    let (cx, cy) = ((l + r) / 2, (t + b) / 2);
+    assert!(
+        cy < body_top,
+        "hat {t}..{b} above the body's top {body_top}"
+    );
+    assert!(!actor.is_transparent_at(&projection, cx, cy));
+    assert_eq!(actor.hit_rects().len(), 2);
+    assert_eq!(runtime.world.object_at(cx, cy), Some(bob));
+
+    // The drawing step gets the attachment and the material overrides.
+    let (_, draws) = runtime.world.three_d_draws().expect("a 3D frame");
+    assert_eq!(draws.len(), 1);
+    assert_eq!(draws[0].attachments.len(), 1);
+    assert_eq!(draws[0].attachments[0].id, att);
+    assert_eq!(draws[0].attachments[0].bone, "Root");
+    assert_eq!(draws[0].attachments[0].world, expected);
+    assert_eq!(
+        draws[0].materials,
+        &[
+            MaterialOverride {
+                material: "body".to_string(),
+                texture: MaterialTexture::Sprite("actors\\tex.png".to_string()),
+            },
+            MaterialOverride {
+                material: "screen".to_string(),
+                texture: MaterialTexture::Theora("actors\\clip.ogv".to_string()),
+            },
+        ]
+    );
+
+    // The emitter follows the bone's projected position, offset by one
+    // unit up the bone.
+    let emitter = result(&runtime, "emitter")
+        .as_native()
+        .expect("the emitter");
+    let actor = runtime.world.actor3d(bob).unwrap();
+    assert_eq!(actor.part_bone.as_deref(), Some("Root"));
+    let bone_point = actor
+        .bone_position("Root", Vec3::new(0.0, 1.0, 0.0))
+        .unwrap();
+    let e = runtime.world.emitter(emitter).expect("the emitter lives");
+    assert_eq!((e.x, e.y), projection.project(bone_point));
+    assert_ne!((e.x, e.y), (actor.x, actor.y), "not the actor's own point");
+
+    // Save, play on, load: the attachment, its offset and animation, the
+    // overrides and the bone emitter come back.
+    raise(&mut runtime, "SaveIt");
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "saved"), Value::Bool(true));
+    for _ in 0..5 {
+        runtime.tick(16);
+    }
+    raise(&mut runtime, "LoadIt");
+    runtime.tick(16);
+    let log = runtime.tick(16);
+    assert!(log.iter().all(|l| !l.contains("Error")), "{log:?}");
+    let actor = runtime.world.actor3d(bob).expect("the actor came back");
+    assert_eq!(actor.attachments.len(), 1);
+    let hat = &actor.attachments[0];
+    assert_eq!((hat.name.as_str(), hat.bone.as_str()), ("hat", "Root"));
+    assert_eq!(hat.id, att);
+    assert_eq!(hat.position, Vec3::new(0.0, 4.0, 0.0));
+    assert!(hat.model().is_some(), "the hat's model was read again");
+    assert!(hat.model().unwrap().is_playing(0, Some("spin")));
+    let bone = *actor.model().unwrap().bone_matrix("Root").unwrap();
+    assert_eq!(
+        hat.world_matrix(),
+        world_matrix(Vec3::new(0.0, 4.0, 0.0), 0.0, 1.0) * bone * actor.world_matrix()
+    );
+    assert_eq!(actor.materials.len(), 2);
+    assert_eq!(actor.part_bone.as_deref(), Some("Root"));
+    assert_eq!(
+        runtime.world.objects().get(att).unwrap().kind,
+        Kind::Attachment3D(bob)
+    );
+    let e = runtime
+        .world
+        .emitter(emitter)
+        .expect("the emitter came back");
+    let bone_point = actor
+        .bone_position("Root", Vec3::new(0.0, 1.0, 0.0))
+        .unwrap();
+    assert_eq!((e.x, e.y), projection.project(bone_point));
+
+    // Removal drops the attachment and its object.
+    raise(&mut runtime, "detach");
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "removed"), Value::Bool(true));
+    assert_eq!(result(&runtime, "removedAgain"), Value::Bool(false));
+    assert_eq!(result(&runtime, "gone"), Value::Null);
+    assert_eq!(result(&runtime, "attValid"), Value::Bool(false));
+    assert!(runtime.world.actor3d(bob).unwrap().attachments.is_empty());
+    assert!(runtime.world.objects().get(att).is_none());
+    let (_, draws) = runtime.world.three_d_draws().unwrap();
+    assert!(draws[0].attachments.is_empty());
     std::fs::remove_dir_all(&dir).unwrap();
 }

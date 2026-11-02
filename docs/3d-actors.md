@@ -16,11 +16,12 @@ runtime (section 9: floor height, segment tests, path finder), the
 mesh pass of the renderer (sections 10.1 and 12.3, specified in
 [rendering.md](rendering.md#3d-pass)) and, in `crates/luma-adventure`
 behind its `3d` feature (which `luma`'s `3d` feature turns on), the actor
-logic (section 8), the hit testing (10.3), the scripting surface (11) and
-the saved games (8.7): tasks 13 to 16, 18 and 19. The drawing hookup of
-the actors into the mesh pass, the shadows and the attachments (task 17)
-are still the plan; `World::three_d_draws` hands the drawing step what it
-needs.
+logic (section 8), the attachments (8.6), the hit testing (10.3), the
+textures set by script (10.5), the scripting surface (11) and the saved
+games (8.7): tasks 13 to 20, all but the drawing. The drawing hookup of
+the actors into the mesh pass and the shadows are still the plan;
+`World::three_d_draws` hands the drawing step what it needs, the
+attachments and the material overrides included.
 
 ## 0. Sources and rules
 
@@ -1017,6 +1018,38 @@ actor's clickable rectangle too (the actor is clickable through its
 attachments) and takes part in the actor's stencil shadow. Persisted with
 the actor.
 
+**As implemented** (`Attachment3d` in `luma_adventure::actor3d`, its
+script members in `natives_actor3d.rs`): an attachment is a script
+object of its own (`Kind::Attachment3D(owner)`) that the actor owns and
+that goes with it. `AddAttachment(file, name, bone)` needs a model, a
+bone that is a frame of it (exact name) and an `.x` file that parses;
+otherwise it raises the original's runtime errors (`Bone '...' cannot be
+found`, `Error adding attachment`) and returns `false`. The same name
+(ignoring ASCII case) replaces the attachment in place, and the replaced
+one's script object dies as the original deletes it. `RemoveAttachment`
+removes by name; `GetAttachment` finds by name or, a Luma extension, by
+index, and `NumAttachments` counts them (in the original the inherited
+property counts the 2D attachments of `CAdObject`, always 0 on a 3D
+actor). Each update, after the actor's model, every active attachment
+computes its full matrix `own GetMatrix * bone combined matrix * actor
+world matrix` (the own matrix from its `PosX/Y/Z`, `Angle`, `Scale`),
+animates its model on its own channels (the events crossed are raised on
+the actor, whose scripts own the attachment's model in the original) and
+projects its box. An attachment whose bone is unknown still animates but
+is not drawn, as `DisplayAttachments` skips it. The attachment's
+`PlayAnim` family passes transition time 0 and forces a restart; when the
+channel already plays something the owner actor's pair table and default
+transition time decide, as the model's owner does in the original
+(`Attachment3d::play_anim`). The attachment is always `Ready`, so the
+blocking `PlayAnim` returns at the next tick, as in the original. The
+active attachments' projected rectangles are hit areas of the actor, and
+the pick through them confirms it (10.3). The drawing step gets them in
+`Actor3dDraw::attachments` (`AttachmentDraw`: the posed model, the full
+matrix, the backface flag) and draws them after the actor's model, lit as
+it is, and extrudes their triangles into the actor's stencil shadow
+volume (10.4). `SetTexture` is the actor's only; the original has no
+material members on `CAdAttach3DX`.
+
 ### 8.7 Persistence (what a saved game stores)
 
 `Persist` of the actor, object and model: position vector and its last
@@ -1032,7 +1065,7 @@ scene's geometry saves the active camera and light/node states by name, plus
 the pending path request. Luma has its own save format
 ([saving.md](saving.md)), which needs these fields, not WME's layout.
 
-**As implemented** (layout version 12): `Actor3d` serializes with
+**As implemented** (layout version 14): `Actor3d` serializes with
 `serde` like the 2D actor: the definition values scripts may change
 (name, caption, flags, speeds, scale, shadow settings, light position,
 ambient override, ignored lights), the position and its last value, the
@@ -1041,10 +1074,13 @@ the 3D path with its cursor and the 2D path, the five animation names,
 the talk channel, the state channel, the direct-control modes and
 parameters, the tolerance, the sentence, and the model's
 `AnimationState` (section 7) in place of the model, plus the `MODEL`
-files, the files `MergeAnims` added and the sets `UnloadAnim` removed.
-After a load the actor file and its models are read again, the merges
-and removals replayed and the animation state restored
-(`Actor3d::reload`). `Scene3d` saves the geometry file, the waypoint
+files, the files `MergeAnims` added and the sets `UnloadAnim` removed;
+the attachments (script object, name, bone, model file, offset, flags
+and their model's `AnimationState`), the textures set by script on the
+materials (10.5, by material name) and the bone and offset of the
+particle emitter. After a load the actor file and its models are read
+again, the merges and removals replayed, the attachments' models read
+again and every animation state restored (`Actor3d::reload`). `Scene3d` saves the geometry file, the waypoint
 height, the active camera, every light's active flag and colour and
 every node's active flag by name, and the fog; the geometry is read
 again and the state put back (`Scene3d::reload`). The path finder's
@@ -1276,8 +1312,10 @@ registers it as a `HitArea` of the actor in the drawing order of the
 frame, and `World::object_at` confirms a point inside it with
 `Actor3d::is_transparent_at` (the pick ray of the pixel moved to model
 space by the inverse world matrix, `AnimatedModel::pick`). `GetHeight`
-is `Y - top - 5` of that rectangle. The attachments' rectangles wait for
-task 17.
+is `Y - top - 5` of that rectangle. Each active attachment adds its own
+projected rectangle as a hit area of the actor (`Actor3d::hit_rects`),
+and a point inside one is confirmed by the pick into the attachment's
+model, through the inverse of its full matrix.
 
 Each drawn, registrable 3D actor adds a **precise** clickable rectangle (the
 screen-space bounds of the 8 corners of the model's current bounding box,
@@ -1356,16 +1394,33 @@ texture: current frame's image, frame delays honoured, the sprite's other
 properties ignored); `SetTheoraTexture(material, file)` plays a Theora video
 as a looping texture. Both are looked up by material name (section 6.3).
 
+**As implemented**: the actor keeps the overrides as data
+(`MaterialOverride { material, texture: MaterialTexture::Sprite(file) |
+Theora(file) }`, one per material name, compared ignoring ASCII case; a
+later call on the same name replaces the earlier), and the drawing step
+gets them in `Actor3dDraw::materials`. As in the original
+(`CXModel::SetMaterialSprite/Theora`) the call fails only when the file
+cannot be loaded (Luma checks that it exists) or the actor has no model;
+a material name no mesh uses is accepted and has no effect. The model's
+data is not changed: when drawing, every mesh material whose name matches
+is textured with the override instead of its `.x` texture. The drawing
+step loads the image or the `.sprite` and advances its frames with the
+game timer, or opens the Theora video, plays it in a loop and hands each
+decoded frame to the mesh pass as the texture; the video is not an entity
+video and has no sound. The overrides are saved with the actor (8.7) and
+the files are opened again after a load. Attachments have no material
+members.
+
 ## 11. The scripting surface
 
 **As implemented** in `luma_adventure::natives_actor3d` (the actor) and
 `luma_adventure::scene3d` (the scene's 3D members), with the game's
 shadow members in `natives.rs`; `docs/compatibility.md` has the row of
-each. Not implemented yet, and answered as the original answers a
-failure: `AddAttachment`, `RemoveAttachment`, `GetAttachment`,
-`AddMesh`, `RemoveMesh`, `CreateParticleEmitterBone` (task 17),
-`SetTexture`, `SetTheoraTexture` (task 20); `SetEffect` and the effect
-parameters return `false` for good (section 13). `Scene.EnableFog` is
+each. Everything below is implemented but `SetEffect` and the effect
+parameters, which return `false` for good (section 13). The `CBObject`
+members `SetShadowImage`, `GetShadowImage` and `SetLightPosition` exist
+on every object, as in the original (`natives_object.rs`, kept in the
+object's state); only a 3D actor's shadow uses them. `Scene.EnableFog` is
 stored for the drawing step. `Game.MaxActiveLights` answers 8,
 `Game.SupportsRealTimeShadows` true and `Game.IsShadowTypeSupported`
 true for the four types: Luma's renderer has what the original asked the
@@ -1398,14 +1453,14 @@ success and `false` on failure.
 | `IsWalking()` | State is following a path. |
 | `DirectWalk([velocity, [anim]])`, `DirectWalkBack(...)`, `DirectWalkStop()` | Direct control (8.4); `null` parameters mean the defaults. |
 | `DirectTurnLeft([velocity, [anim]])`, `DirectTurnRight(...)`, `DirectTurnStop()` | Same for turning. |
-| `AddAttachment(file, name, bone)` (alias `AddMesh`, logs obsolete) | Attach a model to a bone. |
-| `RemoveAttachment(name)` (alias `RemoveMesh`) | Remove it. |
-| `GetAttachment(name)` | The attachment object or `null`. |
+| `AddAttachment(file, name, bone)` (alias `AddMesh`, logs obsolete) | Attach a model to a bone (8.6); a runtime error and `false` when the bone or the file is missing. |
+| `RemoveAttachment(name)` (alias `RemoveMesh`) | Remove it; whether there was one. |
+| `GetAttachment(name)` | The attachment object or `null`; Luma also accepts an index. |
 | `SetTexture(material, file)` | Replace a material's texture (image or sprite). |
 | `SetTheoraTexture(material, video)` | Replace it by a video. |
 | `SetEffect(material, fxFile)`, `RemoveEffect(material)` | HLSL effect on a material (not planned, section 13). |
 | `SetEffectParam(material, name, value)`, `SetEffectParamVector(material, name, x, y, z, w)`, `SetEffectParamColor(material, name, color)` | Effect parameters (not planned). |
-| `CreateParticleEmitterBone(bone, ox, oy, oz)` | Particle emitter following a bone; returns the emitter. Needs the particle system. |
+| `CreateParticleEmitterBone(bone, ox, oy, oz)` | The actor's particle emitter (created if needed, `CreateParticleEmitter(true)`), placed each frame at the projected position of the bone plus the offset in the bone's space (`UpdatePartEmitter`; an unknown bone leaves it at the actor's position, where the original uses an uninitialised point); returns the emitter. A later `CreateParticleEmitter` forgets the bone. |
 | inherited from `CAdObject3D`: `SkipTo(x, y)` | Place at the scene point (exact conversion; fails silently off the walk planes). |
 | `SkipTo3D(x, y, z)` | Place at a 3D point. |
 | `GetBonePosition2D(bone)` | Object `{X, Y}` in scene pixels, or no members on failure. |
@@ -1436,6 +1491,7 @@ success and `false` on failure.
 | `TalkAnimChannel` | int | Channel of talk animations (default 0). |
 | `AnimTransitionTime`, `AnimStopTransitionTime` | int ms | Defaults 200, 200. |
 | `GoToTolerance` | int px | Default 2. |
+| `NumAttachments` (RO) | int | The bone attachments (Luma; the original's inherited property counts the 2D attachments, always 0 here). |
 | plus the inherited object properties (`Ready`, `Caption`, `Active`, `Registrable`, `Height`, `AlphaColor`, `BlendMode`, `Scale...` of 2D objects where meaningful). |
 
 ### 11.3 The attachment object
@@ -1447,6 +1503,20 @@ owner is the actor, so when the channel already plays something the actor's
 transition table decides, as in section 7), the properties
 of `CAdObject3D` (`PosX/Y/Z`, `Angle`, `Scale`, `Active`...), `Type` =
 `"attachment"`.
+
+**As implemented** (`natives_actor3d.rs`, `attachment3d_*`): `Type`
+(`attachment`), `Name`, `Filename` (the model file), `Active`, `Ready`
+(always true), `PosX`, `PosY`, `PosZ`, `Angle`, `DirectionAngle`/`DirAngle`
+(normalised on set), `Scale` (percent), `DrawBackfaces`, and `Bone`, the
+parent bone, a Luma extension (the original keeps it private); the six
+animation methods above (`false` when the model has no such set; the
+blocking forms wait for the attachment, which is always ready), `SkipTo3D`
+(the offset from the bone), `GetBonePosition2D/3D` (a bone of the
+attachment's own model through its full matrix) and the members every
+object has (cursor, captions, `SetShadowImage`...). The string form is
+`[attachment object]`. The other `CAdObject3D` members (speeds, drop to
+floor, the shadow and light settings) have no effect on an attachment in
+the original and are not exposed.
 
 ### 11.4 Scene and game methods for 3D
 
@@ -1599,7 +1669,11 @@ saved games keep their shape):
 - Hit areas: 10.3.
 - Scripts: `natives_actor3d.rs`, `scene3d.rs`, the game's shadow rows in
   `natives.rs`.
-- Saving: 8.7, layout version 12.
+- Attachments (8.6) and the textures set by script (10.5): data on the
+  actor, handed to the drawing step in `Actor3dDraw::attachments`
+  (`AttachmentDraw`, with the full matrix) and `Actor3dDraw::materials`;
+  the bone emitter through the particle system (`natives_particles.rs`).
+- Saving: 8.7, layout version 14.
 - The headless player loads and runs 3D scenes as they are; only the
   drawing needs the 3D pass.
 
@@ -1689,10 +1763,10 @@ read first.
 | 14 | **`Actor3D` core.** Load, idle, `PlayAnim` family, drop to floor, `SkipTo`, `X`/`Y`, direction, scale; `Game.LoadActor3D`/`Scene.LoadActor3D`/`Unload*`. **Done** (`luma_adventure::actor3d`). | `AdActor3DX.cpp`, `AdObject3D.cpp`, `AdActor3D.cpp` (`CreateFromFile`) | M | 6, 9, 13 |
 | 15 | **Walking, turning, direct control, talking.** 8.2 to 8.4 over tasks 8 and the existing 2D path module for `2D_PATHFINDING`; blocked region and waypoints of the actor. **Done**; the actor's own blocked region and waypoints are parsed and not yet handed to the 2D floor of the other actors. | `AdActor3DX.cpp` (`Update`, `GoTo*`, `FollowPath*`, `GetNextStep*`, `PrepareTurn`, `TurnToStep`) | L | 8, 14 |
 | 16 | **Hit testing and captions.** Projected rectangle and polygon pick, registration order, `GetHeight`. **Done** (10.3). | `XModel.cpp` (`IsTransparentAt`, `UpdateBoundingRect`), `XMesh.cpp` (`PickPoly`), `BRenderer.cpp` (`GetObjectAt`) | S | 9, 14 |
-| 17 | **Attachments and bones.** `AddAttachment`, `GetAttachment`, the attachment object, `GetBonePosition2D/3D`. `GetBonePosition2D/3D` are done (`Actor3d::bone_position`); the attachments are not. | `AdAttach3DX.cpp`, `AdObject3D.cpp` (`GetBonePosition*`) | S | 14 |
-| 18 | **Scripting surface.** The remaining methods and properties of section 11, scene lights/camera/fog/nodes, game shadow properties. **Done** except the attachment, texture and bone-emitter methods (section 11). | `AdActor3DX.cpp`, `AdObject3D.cpp`, `AdScene.cpp`, `AdGame.cpp`, `BGame.cpp`, `BObject.cpp` | M | 14, 15, 17 |
-| 19 | **Saved games.** 8.7 into `save.rs`, geometry state, animation channels. **Done** (layout version 12); the open path request is not kept. | `Persist` functions of the files above | M | 18 |
-| 20 | **Material scripting.** `SetTexture` with images and sprites; later `SetTheoraTexture`; ignore `EFFECT`. | `XModel.cpp` (`SetMaterial*`), `3DMaterial.cpp` | S | 11, 18 |
+| 17 | **Attachments and bones.** `AddAttachment`, `GetAttachment`, the attachment object, `GetBonePosition2D/3D`, `CreateParticleEmitterBone`. **Done** (`Attachment3d`, `AttachmentDraw`; the drawing of the attachments and their stencil volumes is the mesh pass's, task 12). | `AdAttach3DX.cpp`, `AdActor3DX.cpp` (`UpdateAttachments`, `DisplayAttachments`, `UpdatePartEmitter`), `AdObject3D.cpp` (`GetBonePosition*`) | S | 14 |
+| 18 | **Scripting surface.** The remaining methods and properties of section 11, scene lights/camera/fog/nodes, game shadow properties, the `CBObject` shadow members on every object. **Done**. | `AdActor3DX.cpp`, `AdObject3D.cpp`, `AdScene.cpp`, `AdGame.cpp`, `BGame.cpp`, `BObject.cpp` | M | 14, 15, 17 |
+| 19 | **Saved games.** 8.7 into `save.rs`, geometry state, animation channels, attachments, material overrides. **Done** (layout version 14); the open path request is not kept. | `Persist` functions of the files above | M | 18 |
+| 20 | **Material scripting.** `SetTexture` with images and sprites, `SetTheoraTexture`; `EFFECT` ignored. **Done** as data (`MaterialOverride`); the drawing step loads the files and hands the frames to the mesh pass (10.5). | `XModel.cpp` (`SetMaterial*`), `3DMaterial.cpp` | S | 11, 18 |
 
 ### Order
 
@@ -1781,7 +1855,9 @@ models are not part of it.
 | Turning | `AdActor3DX.cpp`, `PrepareTurn`, `TurnToStep`, `DirToAngle`, `AngleToDir` |
 | Scripts | `AdActor3DX.cpp` and `AdObject3D.cpp`, `ScCallMethod`/`ScGetProperty`/`ScSetProperty`; `BObject.cpp` (`SetLightPosition`, `SetShadowImage`) |
 | 2D position, drop to floor | `AdObject3D.cpp`, `Update`, `Convert3DTo2D` |
-| Attachments | `AdAttach3DX.cpp` |
+| Attachments | `AdAttach3DX.cpp`; `AdActor3DX.cpp`, `UpdateAttachments`, `DisplayAttachments`, `AddAttachment` in `ScCallMethod` |
+| Bone emitter | `AdActor3DX.cpp`, `CreateParticleEmitter`, `UpdatePartEmitter` |
+| Material textures | `XModel.cpp`, `SetMaterialSprite`, `SetMaterialTheora`; `XMesh.cpp`, `3DMaterial.cpp` |
 | Scene geometry | `AdSceneGeometry.cpp` (all) |
 | Geometry sidecar | `AdGeomExt.cpp`, `AdGeomExtNode.cpp` |
 | 3DS chunks | `3DLoader3DS.cpp`, `3DS_chunks.h` |

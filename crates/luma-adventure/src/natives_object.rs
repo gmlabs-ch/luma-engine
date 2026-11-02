@@ -130,6 +130,20 @@ impl World {
         }
     }
 
+    /// Removes the script objects of a 3D actor's attachments, once the
+    /// actor is gone.
+    pub(crate) fn forget_attachments3d(&mut self, owner: NativeId) {
+        let owned: Vec<NativeId> = self
+            .objects
+            .iter()
+            .filter(|(_, n)| matches!(n.kind, Kind::Attachment3D(o) if o == owner))
+            .map(|(id, _)| id)
+            .collect();
+        for id in owned {
+            self.objects.remove(id);
+        }
+    }
+
     /// A caption slot of an object (`CBObject::GetCaption`): slot 1 (or
     /// 0) is the caption, slots 2 to 7 are the extra ones `SetCaption`
     /// fills; anything else, or an empty slot, is `""`.
@@ -298,6 +312,45 @@ impl World {
                 Return::null()
             }
             "Caption" => Return::value(self.caption_of(id, arg(0).get_int(self))),
+            // The shadow members of `CBObject`: every object has them; the
+            // game and the 3D actors, whose shadows use them, answer for
+            // themselves.
+            "SetShadowImage" | "GetShadowImage" | "SetLightPosition"
+                if !matches!(
+                    self.objects.get(id).map(|n| &n.kind),
+                    Some(Kind::Game | Kind::Actor3D)
+                ) =>
+            {
+                match name {
+                    "SetShadowImage" => {
+                        let image = match arg(0) {
+                            Value::Null => None,
+                            v => Some(v.get_string(self)),
+                        };
+                        let ok = image.as_deref().is_none_or(|p| self.vfs.exists(p));
+                        if let Some(state) = self.object_state_mut(id) {
+                            state.shadow_image = if ok { image } else { None };
+                        }
+                        Return::value(ok)
+                    }
+                    "GetShadowImage" => Return::value(
+                        self.object_state(id)
+                            .and_then(|s| s.shadow_image.clone())
+                            .map_or(Value::Null, Value::from),
+                    ),
+                    _ => {
+                        let light = [
+                            arg(0).get_float(self) as f32,
+                            arg(1).get_float(self) as f32,
+                            arg(2).get_float(self) as f32,
+                        ];
+                        if let Some(state) = self.object_state_mut(id) {
+                            state.shadow_light = Some(light);
+                        }
+                        Return::null()
+                    }
+                }
+            }
             "StickToRegion"
                 if matches!(
                     self.objects.get(id).map(|n| &n.kind),

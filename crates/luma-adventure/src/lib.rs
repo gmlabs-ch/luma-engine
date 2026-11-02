@@ -94,7 +94,10 @@ pub use accessibility::{
 };
 pub use actor::{Actor, ActorEvent, ActorState, WalkContext};
 #[cfg(feature = "3d")]
-pub use actor3d::{Actor3d, Actor3dDraw, Actor3dState, ThreeDFrame};
+pub use actor3d::{
+    Actor3d, Actor3dDraw, Actor3dState, Attachment3d, AttachmentDraw, MaterialOverride,
+    MaterialTexture, ThreeDFrame,
+};
 pub use error::{Error, Result};
 pub use fader::{Fader, SCENE_FADE_MS};
 pub use input::{Cursors, Keyboard, Mouse};

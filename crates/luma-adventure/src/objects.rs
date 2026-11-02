@@ -110,6 +110,10 @@ pub enum Kind {
     /// (`CreateParticleEmitter`), by its owner; its state lives in the
     /// world's emitter list.
     Emitter(NativeId),
+    /// A model attached to a bone of a 3D actor (`AddAttachment` on a 3D
+    /// actor, `GetAttachment`), by its owner; its state lives in the
+    /// owner's attachment list, which only the `3d` feature fills.
+    Attachment3D(NativeId),
     /// A stand-in that keeps the properties scripts set and answers every
     /// method with `null`: windows, actors and other objects of later
     /// milestones.
@@ -180,6 +184,13 @@ pub struct ObjectState {
     /// `AccCaption`: the text the accessibility text-to-speech reads for
     /// the object in place of its caption (`m_AccessCaption`).
     pub access_caption: Option<String>,
+    /// `SetShadowImage`: the image of the object's simple 3D shadow
+    /// (`CBObject::m_ShadowImage`). Every object has the member; only a 3D
+    /// actor's shadow uses it, and the 3D actor keeps its own copy.
+    pub shadow_image: Option<String>,
+    /// `SetLightPosition`: the shadow light relative to the object
+    /// (`CBObject::m_ShadowLightPos`), as `x, y, z`; `None` until set.
+    pub shadow_light: Option<[f32; 3]>,
 }
 
 /// The inventory of an object other than the game (`CAdInventory`).
@@ -216,6 +227,8 @@ impl Default for ObjectState {
             attached_to: None,
             inventory: None,
             access_caption: None,
+            shadow_image: None,
+            shadow_light: None,
         }
     }
 }

@@ -1009,6 +1009,13 @@ impl World {
             Some(Kind::Frame { .. }) => "frame".to_string(),
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Emitter(_)) => "particle emitter".to_string(),
+            #[cfg(feature = "3d")]
+            Some(Kind::Attachment3D(_)) => self
+                .attachment3d(id)
+                .map(|(_, a)| a.name.clone())
+                .unwrap_or_default(),
+            #[cfg(not(feature = "3d"))]
+            Some(Kind::Attachment3D(_)) => String::new(),
             Some(Kind::Fader) | Some(Kind::SceneFader) => "fader".to_string(),
             Some(Kind::Actor) => self
                 .actor(id)
@@ -1149,6 +1156,7 @@ impl World {
         self.sounds.objects.remove(&id);
         self.actors.retain(|(i, _)| *i != id);
         self.actors3d.retain(|(i, _)| *i != id);
+        self.forget_attachments3d(id);
         if self.main_object == Some(id) {
             self.main_object = None;
         }
@@ -1832,8 +1840,9 @@ impl World {
                         _ => true,
                     }
                 }
-                // The particle emitters of the scene's objects go too.
-                Kind::Emitter(owner) => is_scene_object(owner),
+                // The particle emitters of the scene's objects go too, and
+                // the attachments of the scene's 3D actors.
+                Kind::Emitter(owner) | Kind::Attachment3D(owner) => is_scene_object(owner),
                 _ => false,
             })
             .map(|(id, _)| id)
@@ -2732,6 +2741,7 @@ impl Natives for World {
             Some(Kind::Emitter(_)) => "particle-emitter".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
             Some(Kind::Actor3D) => "actor3dx".to_string(),
+            Some(Kind::Attachment3D(_)) => "attachment".to_string(),
             Some(Kind::Fader) | Some(Kind::SceneFader) => "fader".to_string(),
             Some(Kind::Control) => self
                 .control(id)
@@ -2754,6 +2764,7 @@ impl Natives for World {
             }
             Some(Kind::Actor) => "[actor object]".to_string(),
             Some(Kind::Actor3D) => "[actor3dx object]".to_string(),
+            Some(Kind::Attachment3D(_)) => "[attachment object]".to_string(),
             Some(Kind::Control | Kind::Item) => format!("[{}]", self.describe(id)),
             Some(Kind::Sprite(_) | Kind::HoverSprite(_) | Kind::ControlImage { .. }) => {
                 "[sprite]".to_string()
