@@ -774,9 +774,21 @@ impl Engine {
     }
 
     fn apply_return(&mut self, i: usize, host: &mut dyn Host, ret: Return) {
+        if ret.effect == Effect::Construct {
+            // `new Class(...)`: the compiler pushed a placeholder object and
+            // made it `this`; the constructor fills it and yields null.
+            match self.scripts[i].this_stack.last().cloned().flatten() {
+                Some(var) => {
+                    self.write_var(&var, |object| *object = ret.value);
+                    self.push(i, Value::Null);
+                }
+                None => self.push(i, ret.value),
+            }
+            return;
+        }
         self.push(i, ret.value);
         match ret.effect {
-            Effect::None => {}
+            Effect::None | Effect::Construct => {}
             Effect::Sleep(ms) => self.sleep(i, host, u64::from(ms)),
             Effect::WaitFor(object) => self.wait_for(i, host, object),
             Effect::WaitForExclusive(object) => {
@@ -853,6 +865,9 @@ impl Engine {
             "ToFloat" => Return::value(arg(0).get_float(host)),
             "ToBool" => Return::value(arg(0).get_bool(host)),
             "Debug" => Return::null(),
+            // `new Object()`: the placeholder the compiler created is the
+            // object; the constructor has nothing to add.
+            "Object" => Return::null(),
             _ => return None,
         })
     }
