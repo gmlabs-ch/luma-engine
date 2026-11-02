@@ -10,3 +10,6 @@
 # Local session notes: never commit.
 /handoff-*.md
 /reprise-*.md
+
+# Worktrees the desktop app and its agents create.
+/.claude/worktrees/
