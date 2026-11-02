@@ -88,8 +88,8 @@ pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, Sounds};
 pub use talk::{Sentence, SentenceDraw, SubtitleMods, TalkSkipButton};
 pub use text::{BitmapFont, Font, FontBank, TrueTypeFont};
 pub use ui::{
-    ButtonListener, ButtonState, Control, ControlKind, EditState, StaticState, Ui, WindowMode,
-    WindowState,
+    ButtonListener, ButtonState, Control, ControlKind, EditState, ImageSlot, StaticState, Ui,
+    WindowMode, WindowState,
 };
 pub use video::{Subtitle, Subtitler, VideoPlayback, VideoPlayer, parse_subtitles};
 pub use world::{LoadingIcon, QuickMessage, Runtime, ScreenImage, World};

@@ -7,6 +7,7 @@ use luma_script::classes::ClassObject;
 use luma_script::{NativeId, Properties};
 
 use crate::scene_view::EntityRef;
+use crate::ui::ImageSlot;
 
 /// What a native object is.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -35,6 +36,14 @@ pub enum Kind {
     },
     /// The sprite object of an entity (`GetSpriteObject`).
     Sprite(NativeId),
+    /// The sprite object of one of a control's images (`GetImageObject`,
+    /// `GetInactiveImageObject`, `GetHoverImageObject`...).
+    ControlImage {
+        /// The window or control.
+        control: NativeId,
+        /// Which of its images.
+        slot: ImageSlot,
+    },
     /// A frame of a sprite object (`Sprite.GetFrame`, `AddFrame`), by
     /// position; the position follows the frame when others are added or
     /// deleted before it.

@@ -846,7 +846,20 @@ impl World {
             ));
             return true;
         }
-        engine.run_script(self, path, Some(owner)).is_some()
+        let Some(script) = engine.run_script(self, path, Some(owner)) else {
+            return false;
+        };
+        // A new script takes its owner's freezability (`AddScript`); only
+        // a container's entity can be non-freezable in Luma.
+        if let Some(Kind::Entity(crate::scene_view::EntityRef::Ui(index))) =
+            self.objects.get(owner).map(|n| &n.kind)
+        {
+            let freezable = self.ui_entities.get(*index).is_none_or(|e| e.freezable);
+            if let Some(script) = engine.script_mut(script) {
+                script.set_freezable(freezable);
+            }
+        }
+        true
     }
 
     /// A name for an object, for messages.
@@ -882,7 +895,7 @@ impl World {
             Some(Kind::Keyboard) => "keyboard".to_string(),
             Some(Kind::Math) => "math".to_string(),
             Some(Kind::ResponseBox) => "response box".to_string(),
-            Some(Kind::Sprite(_)) => "sprite".to_string(),
+            Some(Kind::Sprite(_) | Kind::ControlImage { .. }) => "sprite".to_string(),
             Some(Kind::Frame { .. }) => "frame".to_string(),
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Fader) => "fader".to_string(),
@@ -1075,10 +1088,26 @@ impl World {
     /// (`CBFrame::OneTimeDisplay`). The events reach their scripts with
     /// the others raised during the frame.
     pub(crate) fn frame_shown(&mut self, owner: NativeId, frame: &luma_formats::Frame) {
+        self.frame_shown_in(owner, crate::ui::ImageSlot::Image, frame);
+    }
+
+    /// [`World::frame_shown`] for the sprite in a slot of a control: the
+    /// `FrameChanged` goes to that slot's sprite object.
+    pub(crate) fn frame_shown_in(
+        &mut self,
+        owner: NativeId,
+        slot: crate::ui::ImageSlot,
+        frame: &luma_formats::Frame,
+    ) {
         if frame.kill_sound {
             self.kill_frame_sounds(owner);
         }
-        if let Some(sprite) = self.objects.find(|k| *k == Kind::Sprite(owner)) {
+        let sprite = self.objects.find(|k| match k {
+            Kind::Sprite(o) => *o == owner,
+            Kind::ControlImage { control, slot: s } => *control == owner && *s == slot,
+            _ => false,
+        });
+        if let Some(sprite) = sprite {
             self.queue_event(sprite, "FrameChanged".to_string());
         }
         if let Some(file) = &frame.sound {
@@ -1313,9 +1342,11 @@ impl World {
                 // The sprite objects of the scene's entities, their frames
                 // and sub-frames go with them.
                 Kind::Sprite(owner) => is_scene_entity(owner),
+                Kind::ControlImage { .. } => false,
                 Kind::Frame { sprite, .. } | Kind::SubFrame { sprite, .. } => {
                     match self.objects.get(sprite).map(|n| &n.kind) {
                         Some(Kind::Sprite(owner)) => is_scene_entity(*owner),
+                        Some(Kind::ControlImage { .. }) => false,
                         _ => true,
                     }
                 }
@@ -1913,6 +1944,23 @@ impl World {
         self.sprite_object(owner)
     }
 
+    /// Removes a sprite object with its frame and sub-frame objects, as
+    /// when the owner goes.
+    pub(crate) fn drop_sprite_object(&mut self, sprite: NativeId) {
+        let parts: Vec<NativeId> = self
+            .objects
+            .iter()
+            .filter(|(_, n)| {
+                matches!(n.kind, Kind::Frame { sprite: s, .. } | Kind::SubFrame { sprite: s, .. } if s == sprite)
+            })
+            .map(|(id, _)| id)
+            .collect();
+        for part in parts {
+            self.objects.remove(part);
+        }
+        self.objects.remove(sprite);
+    }
+
     /// Creates an inert object of a kind (`LoadWindow`, `LoadActor`...).
     pub(crate) fn inert(&mut self, kind: &str) -> NativeId {
         self.objects.insert(Kind::Inert(kind.to_string()))
@@ -1991,7 +2039,7 @@ impl Natives for World {
             Some(Kind::Layer(_)) => "layer".to_string(),
             Some(Kind::Entity(_)) => "entity".to_string(),
             Some(Kind::Region { .. }) => "region".to_string(),
-            Some(Kind::Sprite(_)) => "sprite".to_string(),
+            Some(Kind::Sprite(_) | Kind::ControlImage { .. }) => "sprite".to_string(),
             Some(Kind::Frame { .. }) => "frame".to_string(),
             Some(Kind::SubFrame { .. }) => "subframe".to_string(),
             Some(Kind::Actor) => "actor".to_string(),
@@ -2016,7 +2064,7 @@ impl Natives for World {
             }
             Some(Kind::Actor) => "[actor object]".to_string(),
             Some(Kind::Control | Kind::Item) => format!("[{}]", self.describe(id)),
-            Some(Kind::Sprite(_)) => "[sprite]".to_string(),
+            Some(Kind::Sprite(_) | Kind::ControlImage { .. }) => "[sprite]".to_string(),
             Some(Kind::Frame { .. }) => "[frame]".to_string(),
             Some(Kind::SubFrame { .. }) => "[subframe]".to_string(),
             Some(_) => "[native object]".to_string(),

@@ -204,6 +204,56 @@ fn window_script() -> Vec<u8> {
     get(&mut a, "kb", "KeyCode");
     store(&mut a, "winKey");
     a.emit(Instruction::RetEvent);
+    // on "Probe": the state images as sprite objects, a container made
+    // at runtime, Freezable, and Exclusive written as a property.
+    a.event("Probe");
+    a.emit(Instruction::Scope);
+    a.def_glob_var("result");
+    a.def_var("ok");
+    a.def_var("h");
+    a.def_var("c");
+    call(&mut a, "self", "GetWidget", &[Arg::Str("ok")]);
+    a.pop_var("ok");
+    call(&mut a, "ok", "GetHoverImageObject", &[]);
+    a.pop_var("h");
+    get(&mut a, "h", "NumFrames");
+    store(&mut a, "hoverFrames");
+    get(&mut a, "h", "Owner");
+    store(&mut a, "hoverOwner");
+    get(&mut a, "h", "Type");
+    store(&mut a, "hoverType");
+    call(&mut a, "ok", "GetPressedImageObject", &[]);
+    store(&mut a, "pressedObj");
+    call(&mut a, "self", "GetInactiveImageObject", &[]);
+    store(&mut a, "inactiveObj");
+    call(
+        &mut a,
+        "self",
+        "CreateEntityContainer",
+        &[Arg::Str("extra")],
+    );
+    a.pop_var("c");
+    get(&mut a, "c", "Type");
+    store(&mut a, "containerType");
+    call(&mut a, "c", "SetEntity", &[Arg::Str("verb.entity")]);
+    a.emit(Instruction::PopEmpty);
+    get(&mut a, "c", "Freezable");
+    store(&mut a, "freezable0");
+    a.push_bool(true);
+    set(&mut a, "c", "Freezable");
+    get(&mut a, "c", "Freezable");
+    store(&mut a, "freezable1");
+    a.push_bool(true);
+    set(&mut a, "self", "Exclusive");
+    get(&mut a, "self", "Exclusive");
+    store(&mut a, "excl1");
+    a.push_bool(false);
+    set(&mut a, "self", "Exclusive");
+    get(&mut a, "self", "Exclusive");
+    store(&mut a, "excl2");
+    get(&mut a, "self", "Visible");
+    store(&mut a, "visAfter");
+    a.emit(Instruction::RetEvent);
     a.build()
 }
 
@@ -2203,6 +2253,95 @@ fn mouse_keyboard_cursors_and_fades() {
         Value::Int(luma_script::rgba(10, 20, 30, 255))
     );
     assert_eq!(runtime.world.fader().color().unwrap().a, 255);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn state_images_containers_and_modes_from_scripts() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let win = runtime.world.window_ids()[0];
+    let ok = runtime.world.widget(win, "ok").unwrap();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, win, "Probe", false);
+    runtime.tick(16);
+    // The hover image is a sprite object owned by the button; the states
+    // without an image, and a window without an inactive image, give null.
+    assert_eq!(result(&runtime, "hoverFrames"), Value::Int(1));
+    assert_eq!(result(&runtime, "hoverType"), Value::from("sprite"));
+    assert_eq!(result(&runtime, "hoverOwner"), Value::Native(ok));
+    assert_eq!(result(&runtime, "pressedObj"), Value::Null);
+    assert_eq!(result(&runtime, "inactiveObj"), Value::Null);
+    let hover = runtime
+        .world
+        .control_image_object(ok, luma_adventure::ImageSlot::Hover)
+        .unwrap();
+    assert_eq!(
+        runtime.world.get_property(hover, "CurrentFrame"),
+        Some(Value::Int(0))
+    );
+    // Its frames are the sprite's: a frame added shows in the count, and
+    // the same slot gives the same object.
+    assert_eq!(
+        runtime
+            .world
+            .control_image_object(ok, luma_adventure::ImageSlot::Hover),
+        Some(hover)
+    );
+    assert_eq!(
+        runtime
+            .world
+            .control_image_object(ok, luma_adventure::ImageSlot::Press),
+        None
+    );
+    // A container created at runtime, its entity loaded, not freezable
+    // until the script says so; the entity's scripts follow.
+    assert_eq!(
+        result(&runtime, "containerType"),
+        Value::from("entity container")
+    );
+    assert_eq!(result(&runtime, "freezable0"), Value::Bool(false));
+    assert_eq!(result(&runtime, "freezable1"), Value::Bool(true));
+    let extra = runtime.world.widget(win, "extra").unwrap();
+    let entity = runtime.world.container_entity(extra).unwrap();
+    assert!(
+        runtime.engine.scripts_of(entity).iter().all(|s| runtime
+            .engine
+            .script(*s)
+            .unwrap()
+            .is_freezable())
+    );
+    // Exclusive written: on, then off, which leaves the window visible.
+    assert_eq!(result(&runtime, "excl1"), Value::Bool(true));
+    assert_eq!(result(&runtime, "excl2"), Value::Bool(false));
+    assert_eq!(result(&runtime, "visAfter"), Value::Bool(true));
+    assert!(runtime.world.control(win).unwrap().visible);
+    // SystemExclusive written freezes the game at the next frame and
+    // writing it off unfreezes it.
+    runtime
+        .world
+        .set_property(win, "SystemExclusive", &Value::Bool(true));
+    assert!(!runtime.world.is_frozen());
+    runtime.tick(16);
+    assert!(runtime.world.is_frozen());
+    assert_eq!(
+        runtime.world.get_property(win, "SystemExclusive"),
+        Some(Value::Bool(true))
+    );
+    runtime
+        .world
+        .set_property(win, "SystemExclusive", &Value::Bool(false));
+    runtime.tick(16);
+    assert!(!runtime.world.is_frozen());
+    assert!(runtime.world.control(win).unwrap().visible);
+    // The sprite objects of a window go with it.
+    runtime.world.unload_object(&mut runtime.engine, win);
+    assert_eq!(runtime.world.get_property(hover, "Type"), None);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

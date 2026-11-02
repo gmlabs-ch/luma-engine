@@ -313,11 +313,11 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdGame.cpp
 - Hierarchy and Luma: adds a method to every window
-- Count: 0 done, 1 todo, 0 no-op
+- Count: 1 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `CreateEntityContainer` | method | **todo** | Window method: creates an entity container control (UIEntity) at runtime. Stubbed. |
+| `CreateEntityContainer` | method | **done** | Window method: creates an empty entity container control (UIEntity) at runtime; `SetEntity` then loads its entity. |
 
 ## 4. Scenes and adventure objects
 
@@ -629,13 +629,13 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 
 - WME source: src/engine_core/wme_base/UIWindow.cpp
 - Hierarchy and Luma: CUIObject → CUIWindow; Luma: windows (`natives_ui.rs`, `ui.rs`)
-- Count: 37 done, 3 todo, 0 no-op
+- Count: 40 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `GetWidget`, `GetControl` | method | **done** | A child control by name or index. |
 | `SetInactiveFont`, `SetInactiveImage`, `GetInactiveImage` | method | **done** | Font / image used while the window is not focused. |
-| `GetInactiveImageObject` | method | **todo** | The inactive image as a sprite object. Stubbed. |
+| `GetInactiveImageObject` | method | **done** | The inactive image as a sprite object (`null` without one). |
 | `Close` | method | **done** | Closes the window. |
 | `GoExclusive` | method | **done** | Opens the window modally; the script waits until it closes. |
 | `GoSystemExclusive` | method | **done** | Opens the window modally and freezes the game. |
@@ -646,7 +646,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | `Type` | get | **done** | `window`. |
 | `NumWidgets`, `NumControls` | get | **done** | Number of child controls. |
 | `Exclusive`, `SystemExclusive` | get | **done** | True while modal / system-modal. |
-| `Exclusive`, `SystemExclusive` | set | **todo** | Switches the window into / out of modal mode. Luma stores the value as a plain script property. |
+| `Exclusive`, `SystemExclusive` | set | **done** | `true` opens the window modally (as `GoExclusive` / `GoSystemExclusive`, without making the script wait), `false` closes it and leaves it visible. The freeze or unfreeze of the system-exclusive form happens at the next frame's window update. |
 | `Menu` | get/set | **done** | Window is a menu (closes when the game resumes). |
 | `InGame` | get/set | **done** | Window is drawn in the game view (not as system UI). |
 | `PauseMusic` | get/set | **done** | Pauses music while the window is open. |
@@ -659,14 +659,14 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 
 - WME source: src/engine_core/wme_base/UIButton.cpp
 - Hierarchy and Luma: CUIObject → CUIButton; Luma: buttons
-- Count: 22 done, 4 todo, 0 no-op
+- Count: 26 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `SetDisabledFont`, `SetHoverFont`, `SetPressedFont`, `SetFocusedFont` | method | **done** | Fonts for each button state. |
 | `SetDisabledImage`, `SetHoverImage`, `SetPressedImage`, `SetFocusedImage` | method | **done** | Images for each button state. |
 | `GetDisabledImage`, `GetHoverImage`, `GetPressedImage`, `GetFocusedImage` | method | **done** | Image files of each state. |
-| `GetDisabledImageObject`, `GetHoverImageObject`, `GetPressedImageObject`, `GetFocusedImageObject` | method | **todo** | Images of each state as sprite objects. Stubbed. |
+| `GetDisabledImageObject`, `GetHoverImageObject`, `GetPressedImageObject`, `GetFocusedImageObject` | method | **done** | Images of each state as sprite objects (`null` for a state without one); each state image animates while shown, as the engine's sprites do. |
 | `Press` | method | **done** | Presses the button from script. |
 | `Type` | get | **done** | `button`. |
 | `TextAlign` | get/set | **done** | Horizontal text alignment. |
@@ -707,14 +707,14 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 
 - WME source: src/engine_core/wme_ad/UIEntity.cpp
 - Hierarchy and Luma: CUIObject → CUIEntity; Luma: `ControlKind::EntityContainer`
-- Count: 3 done, 2 todo, 0 no-op
+- Count: 5 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `GetEntity` | method | **done** | The entity hosted by the container. |
 | `SetEntity` | method | **done** | Loads an entity file into the container. |
 | `Type` | get | **done** | `entity container`. |
-| `Freezable` | get/set | **todo** | Whether the entity freezes with the game. Luma reads false, ignores the set. |
+| `Freezable` | get/set | **done** | Whether the entity's scripts pause when the game freezes; off when the container loads its entity (`MakeFreezable(false)`). |
 
 ### CUIMarkup
 
@@ -1034,7 +1034,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CBObject | 45 | 27 | 0 | 72 |
 | CBGame | 123 | 24 | 18 | 165 |
 | CAdGame | 59 | 6 | 0 | 65 |
-| Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
+| Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
 | CAdScene | 46 | 35 | 2 | 83 |
 | CAdLayer | 13 | 5 | 0 | 18 |
 | CBRegion | 7 | 4 | 0 | 11 |
@@ -1049,11 +1049,11 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CBFrame | 21 | 0 | 0 | 21 |
 | CBSubFrame | 20 | 0 | 0 | 20 |
 | CUIObject | 27 | 0 | 0 | 27 |
-| CUIWindow | 37 | 3 | 0 | 40 |
-| CUIButton | 22 | 4 | 0 | 26 |
+| CUIWindow | 40 | 0 | 0 | 40 |
+| CUIButton | 26 | 0 | 0 | 26 |
 | CUIText | 7 | 0 | 0 | 7 |
 | CUIEdit | 16 | 0 | 0 | 16 |
-| CUIEntity | 3 | 2 | 0 | 5 |
+| CUIEntity | 5 | 0 | 0 | 5 |
 | CUIMarkup | 0 | 0 | 1 | 1 |
 | CBKeyboardState | 8 | 0 | 0 | 8 |
 | CSXMath | 22 | 0 | 0 | 22 |
@@ -1071,9 +1071,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 6 | 0 | 21 |
-| **All** | **728** | **395** | **30** | **1153** |
+| **All** | **738** | **385** | **30** | **1153** |
 
-Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 713 done, 389 todo, 30 no-op.
+Of the total, 21 are events (15 done, 6 todo) and the rest are methods, properties, functions, constructors and global variables: 723 done, 379 todo, 30 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1105,14 +1105,13 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Script library | 16 | The `Directory` object, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. (`String`, `Array`, `Date`, `File` and `MemBuffer` are done.) |
 | Object model (2D) | 47 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), per-object cursors, `SetCaption`, `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, per-object inventories, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
-| Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
 | Video | 7 | Entity-bound Theora video (`PlayTheora` on an entity and its pause/stop family), AVI for the deprecated `PlayVideo`. |
 | Sound effects | 2 | `SoundFXEcho`, `SoundFXReverb` (also listed in `docs/audio.md`). |
 | Input and system events | 6 | Wheel, middle and right-double-click events, the `QuitGame` event. |
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **395** | |
+| **All** | **385** | |
 
 ## Members in Luma that WME 1.x does not define
 
