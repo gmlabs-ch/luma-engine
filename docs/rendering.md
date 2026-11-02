@@ -10,6 +10,9 @@ Wintermute format; the formats are in [docs/formats](formats/README.md).
   sub-frames) in a fixed order, with alpha, additive and subtractive
   blending, tinting, mirroring, scaling per axis, rotation and scrolling
   layers. Nothing else is needed for milestone 2.
+- Draw the lit, textured meshes of 3D actors *between* those quads, in
+  the painter's order, as the original's fixed-function pipeline did
+  (see [3D pass](#3d-pass)), without the 2D path paying for it.
 - Run on Metal first (macOS, iOS), and on Vulkan, DirectX 12, OpenGL ES and
   WebGPU through [wgpu](https://wgpu.rs) without platform code.
 - Be testable without a window: every test renders into a texture and
@@ -22,10 +25,11 @@ Wintermute format; the formats are in [docs/formats](formats/README.md).
 | Type | Role |
 |------|------|
 | `Gpu` | Instance, adapter, device and queue. `Gpu::headless()` for tools and tests, `Gpu::with_surface()` for a window. |
-| `Texture` | A decoded `luma_formats::Image` uploaded as `Rgba8Unorm`. One texture per image; no atlas yet. |
-| `DrawList` | The quads of one frame, back to front, in *logical* pixels, with a logical size and a scroll offset applied to the quads pushed after `set_offset`; each quad has `Attributes` (rotation around a pivot, blend mode), the default ones unless pushed with `push_with`. |
-| `Renderer` | Owns the pipelines (one per target format and blend mode), the sampler, the vertex and index buffers and a bind group per texture; renders a `DrawList` into a `Target`. |
-| `Target` | Any texture view with its format and size: the window's swap chain texture or an `Offscreen`. |
+| `Texture` | A decoded `luma_formats::Image` uploaded as `Rgba8Unorm`. One texture per image; no atlas yet. `Renderer::mesh_texture` uploads it with a mipmap chain for meshes. |
+| `DrawList` | The quads of one frame, back to front, in *logical* pixels, with a logical size and a scroll offset applied to the quads pushed after `set_offset`; each quad has `Attributes` (rotation around a pivot, blend mode), the default ones unless pushed with `push_with`. `push_mesh` puts a `MeshDraw` at the current place in the order. |
+| `MeshHandle`, `MeshVertex`, `MeshDraw`, `Light`, `Lights`, `MeshMaterial`, `Fog` | A mesh uploaded once (`Renderer::upload_mesh`, `update_mesh` for skinning) and one draw of it: matrices, texture, material, lights, fog, culling, blend mode. |
+| `Renderer` | Owns the pipelines (quads: one per target format and blend mode; meshes: per format, blend mode and culling), the samplers, the vertex and index buffers, the uploaded meshes, the depth and stencil buffer and a bind group per texture; renders a `DrawList` into a `Target`. |
+| `Target` | Any texture view with its format and size: the window's swap chain texture or an `Offscreen`. The renderer keeps a depth and stencil buffer of the target's size. |
 | `Offscreen` | A render target whose pixels can be read back as an `Image`. |
 | `window::run` | A winit window with a swap chain; calls an `App` for events and for the draw list of every frame. |
 
@@ -37,11 +41,13 @@ Wintermute format; the formats are in [docs/formats](formats/README.md).
    [scene.md](formats/scene.md#drawing)).
 2. `Renderer::render` builds four vertices per quad (position, texture
    coordinates, colour), turned around the pivot when the quad's
-   attributes rotate it, uploads them, and records one render pass that
-   clears the target and draws the quads in list order with the pipeline
-   of each quad's blend mode (see [Transforms](#transforms)).
+   attributes rotate it, uploads them with the uniforms of every mesh
+   draw, and records one render pass that clears the target (colour,
+   depth and stencil) and draws the list in order: the quads with the
+   pipeline of each quad's blend mode (see [Transforms](#transforms)),
+   the meshes where they were pushed (see [3D pass](#3d-pass)).
    Consecutive quads with the same texture and blend mode are one draw
-   call.
+   call; a mesh between them ends the batch.
 3. The window presents the swap chain texture, unless the application
    answered `Flow::Skip` for this frame, which keeps the previous one on
    screen; an `Offscreen` can be read back.
@@ -114,13 +120,130 @@ keeps images whole and uses the sub-frame `RECT` as the source
 rectangle; the texels just outside a source rectangle bleed into its last
 row and column when scaled, which the original engine does as well.
 
+## 3D pass
+
+The 3D actors of a 2.5D scene are drawn in the middle of the 2D order
+(after the layers behind them, before the ones in front; see
+[3d-actors.md](3d-actors.md), section 10.2). The renderer therefore
+has no separate 3D stage: a `MeshDraw` is an item of the `DrawList`
+like a quad, pushed with `push_mesh` and drawn at that place. The
+state it is drawn with is the one `CBRenderD3D::Setup3D` set up in the
+original, so that a model lit by the fixed-function pipeline in 2003
+looks the same here.
+
+**Depth and stencil.** Every target gets a `Depth24PlusStencil8` buffer
+of its size, owned by the renderer and recreated when the size changes
+(a window resize). It is cleared with the colour, once per frame
+(`CBRenderD3D::Fill` clears target, depth and stencil together).
+Quads are drawn with the depth test off and no depth writes
+(`Setup2D`: `ZENABLE` false), so 2D drawing never touches the buffer;
+meshes test `<=` and write (`Setup3D`). The depth therefore only orders
+3D things among themselves in a frame: an actor behind another, later
+the shadow-receiving geometry; a 2D quad drawn after a mesh covers it
+regardless of depth, as a foreground layer must. The stencil is cleared
+to zero and unused so far; the stencil shadow volumes will use it.
+
+**Meshes.** `Renderer::upload_mesh(vertices, indices)` returns a
+`MeshHandle`; `MeshVertex` is position, normal and one UV in model
+space (`D3DFVF_XYZ | NORMAL | TEX1`), indices are `u32`, three per
+triangle, **front faces clockwise on screen** (the Direct3D convention,
+`wgpu::FrontFace::Cw`). `update_mesh(handle, vertices)` replaces the
+vertices (the CPU-skinned pose of this frame), growing the buffer when
+there are more; `free_mesh` releases it. A `MeshDraw` names the handle
+and, optionally, an index range (a material's subset of the mesh), the
+model-to-world `Matrix`, the world-to-clip `Matrix` (the camera's view
+times its projection), the texture or none, the `MeshMaterial`, the
+ambient colour, up to `MAX_LIGHTS` (8) `Light`s, optional `Fog`, whether
+to cull back faces and the blend mode. Matrices are plain
+`[[f32; 4]; 4]` in column-major order, as a WGSL `mat4x4<f32>` reads
+them; `luma_3d::math::Mat4::to_cols_array` produces the sixteen floats
+from a row-vector Direct3D matrix and `luma_render::matrix` groups them.
+Direct3D's clip space (depth `0..1`, `y` up, `w` the view depth for a
+perspective projection) is wgpu's, so the matrices of
+`D3DXMatrixLookAtLH` and `D3DXMatrixPerspectiveFovLH` are handed over
+as they are. Meshes use the quads' viewport, letterboxed or not.
+
+**Lighting** is per vertex (Gouraud), in the vertex shader `mesh.wgsl`,
+the fixed-function model with the values Wintermute set:
+
+```
+lit = emissive + ambient * diffuse + sum over lights (color * diffuse * max(n . l, 0) * cone)
+```
+
+- `diffuse` and `emissive` are the material's (`.X` `faceColor`,
+  `emissiveColor`); the material's ambient colour *is* its diffuse one
+  (`CXMesh` sets `Ambient = Diffuse`), and the lights carry no ambient or
+  specular colour (`C3DLight::SetLight` zeroes them), so the specular
+  colour and power of the material play no role although
+  `SPECULARENABLE` was on. A mesh without materials is grey `0.5`.
+- `ambient` is the scene's (`D3DRS_AMBIENT`), black by default: a model
+  in a scene without lights is black.
+- Normals are transformed by the upper 3x3 of the world matrix and
+  normalised (`NORMALIZENORMALS`); an actor's world matrix is a rotation,
+  a uniform scale and a translation, for which this is exact.
+- A `Light::Point` lights everything within `range` with **no distance
+  attenuation** (`Attenuation0 = 1`, the others `0`; the original's range
+  is `100000`); beyond the range it contributes nothing, a hard cut.
+- A `Light::Spot` adds the cone: with `rho` the cosine between the axis
+  and the direction to the vertex, full inside the inner cone (`rho >
+  cos(inner_angle / 2)`), nothing outside the outer one (`rho <=
+  cos(outer_angle / 2)`), `((rho - cos_outer) / (cos_inner -
+  cos_outer)) ^ falloff` between. The original's spots have `inner_angle
+  = 0.5`, `outer_angle = 1.0` radians, `falloff = 1` and `range = |target
+  - position|`.
+- A `Light::Directional` has no position or range; the original never
+  creates one, it is there for tools.
+- The result is clamped to `0..1` per channel before the texture
+  multiplies it. Light colours arrive as floats; the original divides
+  the `0..255` channels by **256**, the caller does the same.
+
+Which lights a draw gets (the nearest `MaxLights` to the object, the
+ignored names) is the scene's business (`AdSceneGeometry::EnableLights`),
+not the renderer's: `luma-3d` or the adventure module fills the
+`Lights`.
+
+**Texturing.** Stage 0 as `Setup3D` set it: colour = texture *
+lit colour (`MODULATE`), alpha = texture alpha **only** (`SELECTARG1`),
+so the material's alpha does not show through a texture; without a
+texture the lit colour and the material's alpha are used (the white
+texture is bound, so the shader is the same). The alpha test discards
+fragments below `8/255` (`ALPHAREF 8`, `GREATEREQUAL`); the magenta
+colour key is already alpha `0` in the decoded image, so keyed texels
+are cut out and the blend mode then composites the rest. Mesh textures
+are sampled with repeat addressing and trilinear filtering, the Direct3D
+defaults with `MIPFILTER LINEAR`; `Renderer::mesh_texture` builds the
+mipmap chain on the CPU (a box filter whose colours are weighted by
+alpha, so that transparent texels do not bleed a fringe into the smaller
+levels; `mip_level` is public for tests). 2D textures have no mipmaps
+and the 2D sampler clamps, as before.
+
+**Fog** is linear on the view depth (`D3DFOG_LINEAR` vertex fog):
+`f = clamp((end - depth) / (end - start), 0, 1)` per vertex, the
+depth being the clip `w`, interpolated and applied after texturing as
+`mix(fog_color, color, f)`.
+
+**Blending and culling.** The blend mode of a mesh draw uses the same
+pipeline states as the quads (an actor's `BlendMode` property). Back
+faces (counter-clockwise on screen) are culled only when the draw asks,
+as `CXModel::Render` sets `D3DCULL_CCW` only when `DrawBackfaces` is
+false; by default both sides are drawn.
+
+**Uniforms.** Each mesh draw has a 720-byte slot (two matrices, five
+`vec4`s, eight lights of four `vec4`s) in one uniform buffer, bound with
+a dynamic offset at the device's alignment (256 bytes); the buffer grows
+with the number of draws in a frame.
+
+Not in the renderer: shadows (simple, flat and stencil, tasks 12a to
+12c of [3d-actors.md](3d-actors.md)) and the geometry debug overlay;
+they will be built on this pass.
+
 ## Not yet
 
 - Texture atlases: one texture per image is enough for the games of the
   era and keeps streaming simple; an atlas can come when draw-call counts
   matter.
-- 3D actors.
-- Render-to-texture effects, lighting. Particles are quads pushed by
+- Shadows of 3D actors and the geometry overlay (see above).
+- Render-to-texture effects. Particles are quads pushed by
   `luma-adventure` with their rotation and their owner's blend mode (see
   [particles.md](particles.md)); they need no renderer feature of their
   own.

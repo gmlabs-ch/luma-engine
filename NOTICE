@@ -77,6 +77,7 @@ no code copied):
   crates/luma-adventure/src/natives_sprite.rs
   crates/luma-adventure/src/input.rs
   crates/luma-render/src/renderer.rs
+  crates/luma-render/src/mesh.wgsl
   crates/luma-adventure/src/fader.rs
   crates/luma-adventure/src/ui.rs
   crates/luma-adventure/src/natives_ui.rs
@@ -105,12 +106,14 @@ no code copied):
   crates/luma-3d/src/three_ds.rs
   crates/luma-3d/src/node_patterns.rs
   crates/luma-3d/src/scene_geometry.rs
+  crates/luma-3d/src/path3d.rs
   crates/luma-3d/src/camera.rs
   docs/formats/xfile.md
   crates/luma-3d/src/xfile.rs
   crates/luma-3d/src/model.rs
   docs/formats/actor3d.md
   crates/luma-3d/src/actor3d.rs
+  crates/luma-3d/src/animation.rs
 
 -------------------------------------------------------------------------------
 Dependencies under the Mozilla Public License 2.0

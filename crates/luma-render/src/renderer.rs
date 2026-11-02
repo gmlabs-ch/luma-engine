@@ -1,19 +1,32 @@
-//! The quad renderer: turns a [`DrawList`] into GPU work.
+//! The renderer: turns a [`DrawList`] into GPU work, quads and meshes in
+//! the list's order.
 //!
-//! The rotation of a quad around its pivot and the blend factors of each
-//! mode follow `BRenderD3D.cpp` of Wintermute Engine 1.x (MIT License,
+//! The rotation of a quad around its pivot, the blend factors of each
+//! mode and the 3D render state (depth test, alpha test, lighting)
+//! follow `BRenderD3D.cpp` of Wintermute Engine 1.x (MIT License,
 //! Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use luma_formats::Rgba;
 use wgpu::util::DeviceExt;
 
-use crate::draw::{Attributes, BlendMode, DrawList, Quad};
+use crate::draw::{
+    Attributes, BlendMode, DrawList, Light, MAX_LIGHTS, MeshDraw, MeshHandle, MeshVertex, Quad,
+};
 use crate::error::{Error, Result};
 use crate::gpu::Gpu;
 use crate::texture::Texture;
+
+/// The format of the depth and stencil buffer every target gets: 24-bit
+/// depth and 8-bit stencil (for the shadow volumes), as the original
+/// asked of Direct3D.
+pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+
+/// The alpha test reference of the 3D state (`D3DRS_ALPHAREF` 8): a
+/// fragment of a mesh with less alpha is discarded.
+pub const MESH_ALPHA_REFERENCE: f32 = 8.0 / 255.0;
 
 /// One vertex of a quad.
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -30,6 +43,33 @@ struct Globals {
     projection: [[f32; 4]; 4],
 }
 
+/// A light as the mesh shader reads it; see `mesh.wgsl`.
+#[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+struct GpuLight {
+    /// `xyz` position, `w` kind (0 none, 1 directional, 2 point, 3 spot).
+    position: [f32; 4],
+    /// `xyz` direction, `w` range.
+    direction: [f32; 4],
+    color: [f32; 4],
+    /// Cosine of the half inner angle, of the half outer angle, falloff.
+    cone: [f32; 4],
+}
+
+/// The uniforms of one mesh draw; see `mesh.wgsl`.
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+struct MeshUniforms {
+    world: [[f32; 4]; 4],
+    view_projection: [[f32; 4]; 4],
+    diffuse: [f32; 4],
+    emissive: [f32; 4],
+    ambient: [f32; 4],
+    fog_color: [f32; 4],
+    fog_params: [f32; 4],
+    lights: [GpuLight; MAX_LIGHTS],
+}
+
 /// A texture or surface to render into.
 #[derive(Debug, Clone, Copy)]
 pub struct Target<'a> {
@@ -43,18 +83,35 @@ pub struct Target<'a> {
     pub height: u32,
 }
 
-/// Draws textured quads into any target, blended as their attributes
-/// say.
+/// The depth and stencil buffer of the targets of a size.
+#[derive(Debug)]
+struct DepthBuffer {
+    width: u32,
+    height: u32,
+    view: wgpu::TextureView,
+}
+
+/// A mesh on the GPU.
+#[derive(Debug)]
+struct GpuMesh {
+    vertices: wgpu::Buffer,
+    vertex_capacity: usize,
+    indices: wgpu::Buffer,
+    index_count: u32,
+}
+
+/// Draws textured quads and lit meshes into any target, blended as
+/// their attributes say.
 ///
 /// Quads are batched: consecutive quads with the same texture and blend
 /// mode become one draw call, so sort them by texture when the order
-/// does not matter.
+/// does not matter. A mesh draw between two quads ends a batch.
 #[derive(Debug)]
 pub struct Renderer {
     gpu: Gpu,
     shader: wgpu::ShaderModule,
     pipeline_layout: wgpu::PipelineLayout,
-    /// One pipeline per target format and blend mode.
+    /// One quad pipeline per target format and blend mode.
     pipelines: RefCell<HashMap<(wgpu::TextureFormat, BlendMode), wgpu::RenderPipeline>>,
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -64,6 +121,22 @@ pub struct Renderer {
     indices: RefCell<(wgpu::Buffer, u32)>,
     white: Texture,
     bind_groups: RefCell<HashMap<u64, wgpu::BindGroup>>,
+    depth: RefCell<Option<DepthBuffer>>,
+
+    mesh_shader: wgpu::ShaderModule,
+    mesh_pipeline_layout: wgpu::PipelineLayout,
+    /// One mesh pipeline per target format, blend mode and culling.
+    mesh_pipelines: RefCell<HashMap<(wgpu::TextureFormat, BlendMode, bool), wgpu::RenderPipeline>>,
+    mesh_uniform_layout: wgpu::BindGroupLayout,
+    /// The uniforms of every mesh draw of the frame, one aligned slot
+    /// each, bound with a dynamic offset.
+    mesh_uniforms: RefCell<(wgpu::Buffer, wgpu::BindGroup)>,
+    mesh_uniform_stride: u64,
+    mesh_sampler: wgpu::Sampler,
+    /// Texture bindings with the mesh sampler.
+    mesh_bind_groups: RefCell<HashMap<u64, wgpu::BindGroup>>,
+    meshes: RefCell<HashMap<u64, GpuMesh>>,
+    next_mesh: Cell<u64>,
 }
 
 impl Renderer {
@@ -73,6 +146,10 @@ impl Renderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("quad shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("quad.wgsl").into()),
+        });
+        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mesh shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()),
         });
         let globals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("globals layout"),
@@ -113,6 +190,27 @@ impl Renderer {
             bind_group_layouts: &[Some(&globals_layout), Some(&texture_layout)],
             immediate_size: 0,
         });
+        let mesh_uniform_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mesh uniforms layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(
+                            std::mem::size_of::<MeshUniforms>() as u64,
+                        ),
+                    },
+                    count: None,
+                }],
+            });
+        let mesh_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mesh pipeline layout"),
+            bind_group_layouts: &[Some(&mesh_uniform_layout), Some(&texture_layout)],
+            immediate_size: 0,
+        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("bilinear clamp"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -121,6 +219,18 @@ impl Renderer {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+        // `Setup3D`: linear magnification and minification, linear mip
+        // filter, repeat addressing (the Direct3D default).
+        let mesh_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("trilinear repeat"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
@@ -144,6 +254,11 @@ impl Renderer {
             mapped_at_creation: false,
         });
         let indices = index_buffer(device, 256);
+        let alignment = u64::from(device.limits().min_uniform_buffer_offset_alignment);
+        let mesh_uniform_stride =
+            (std::mem::size_of::<MeshUniforms>() as u64).div_ceil(alignment) * alignment;
+        let mesh_uniforms =
+            mesh_uniform_buffer(device, &mesh_uniform_layout, mesh_uniform_stride, 16);
         let white = Texture::white(&gpu);
         Renderer {
             gpu,
@@ -158,6 +273,17 @@ impl Renderer {
             indices: RefCell::new(indices),
             white,
             bind_groups: RefCell::new(HashMap::new()),
+            depth: RefCell::new(None),
+            mesh_shader,
+            mesh_pipeline_layout,
+            mesh_pipelines: RefCell::new(HashMap::new()),
+            mesh_uniform_layout,
+            mesh_uniforms: RefCell::new(mesh_uniforms),
+            mesh_uniform_stride,
+            mesh_sampler,
+            mesh_bind_groups: RefCell::new(HashMap::new()),
+            meshes: RefCell::new(HashMap::new()),
+            next_mesh: Cell::new(1),
         }
     }
 
@@ -176,6 +302,16 @@ impl Renderer {
         Texture::from_image(&self.gpu, label, image)
     }
 
+    /// Uploads an image as a texture with its mipmap chain, for meshes:
+    /// the original engine let D3DX build mipmaps for the textures of
+    /// models and sampled them trilinearly. The chain is built on the CPU
+    /// with a box filter whose colours are weighted by alpha, so that the
+    /// transparent texels of a colour-keyed image do not bleed into their
+    /// neighbours.
+    pub fn mesh_texture(&self, label: &str, image: &luma_formats::Image) -> Texture {
+        Texture::from_image_mipmapped(&self.gpu, label, image)
+    }
+
     /// Uploads RGBA pixels as a texture.
     pub fn texture_from_rgba(&self, label: &str, width: u32, height: u32, rgba: &[u8]) -> Texture {
         Texture::from_rgba(&self.gpu, label, width, height, rgba)
@@ -187,8 +323,78 @@ impl Renderer {
         texture.write(&self.gpu, rgba);
     }
 
-    /// Renders a draw list into a target, clearing it first, and submits
-    /// the work. The GPU runs it asynchronously; see [`Gpu::wait`].
+    /// Uploads a mesh: vertices and the indices of its triangles (three
+    /// per triangle, front faces clockwise on screen). The vertices can be
+    /// replaced later with [`Renderer::update_mesh`], for skinning.
+    ///
+    /// # Panics
+    ///
+    /// Panics when there is no vertex or no index.
+    pub fn upload_mesh(&self, vertices: &[MeshVertex], indices: &[u32]) -> MeshHandle {
+        assert!(!vertices.is_empty(), "a mesh needs vertices");
+        assert!(!indices.is_empty(), "a mesh needs indices");
+        let device = &self.gpu.device;
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mesh vertices"),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mesh indices"),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        let id = self.next_mesh.get();
+        self.next_mesh.set(id + 1);
+        self.meshes.borrow_mut().insert(
+            id,
+            GpuMesh {
+                vertices: vertex_buffer,
+                vertex_capacity: vertices.len(),
+                indices: index_buffer,
+                index_count: indices.len() as u32,
+            },
+        );
+        MeshHandle(id)
+    }
+
+    /// Replaces the vertices of a mesh (the skinned positions and normals
+    /// of this frame). The indices stay; more vertices than uploaded grow
+    /// the buffer, fewer leave the rest as they were.
+    pub fn update_mesh(&self, mesh: MeshHandle, vertices: &[MeshVertex]) -> Result<()> {
+        let mut meshes = self.meshes.borrow_mut();
+        let gpu_mesh = meshes.get_mut(&mesh.0).ok_or_else(|| Error::Render {
+            reason: format!("unknown mesh {}", mesh.0),
+        })?;
+        if vertices.is_empty() {
+            return Ok(());
+        }
+        if vertices.len() > gpu_mesh.vertex_capacity {
+            gpu_mesh.vertices =
+                self.gpu
+                    .device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("mesh vertices"),
+                        contents: bytemuck::cast_slice(vertices),
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    });
+            gpu_mesh.vertex_capacity = vertices.len();
+        } else {
+            self.gpu
+                .queue
+                .write_buffer(&gpu_mesh.vertices, 0, bytemuck::cast_slice(vertices));
+        }
+        Ok(())
+    }
+
+    /// Releases a mesh. Drawing it afterwards is an error.
+    pub fn free_mesh(&self, mesh: MeshHandle) {
+        self.meshes.borrow_mut().remove(&mesh.0);
+    }
+
+    /// Renders a draw list into a target, clearing it first (colour,
+    /// depth and stencil), and submits the work. The GPU runs it
+    /// asynchronously; see [`Gpu::wait`].
     pub fn render(&self, target: Target<'_>, clear: Rgba, list: &DrawList<'_>) -> Result<()> {
         if target.width == 0 || target.height == 0 {
             return Err(Error::Render {
@@ -220,8 +426,40 @@ impl Renderer {
         for attributes in list.attributes() {
             self.ensure_pipeline(target.format, attributes.blend);
         }
+        let mesh_draws = list.meshes();
+        self.ensure_mesh_uniform_capacity(mesh_draws.len());
+        {
+            let meshes = self.meshes.borrow();
+            let mut uniforms = vec![0u8; mesh_draws.len() * self.mesh_uniform_stride as usize];
+            for (i, placed) in mesh_draws.iter().enumerate() {
+                let draw = &placed.draw;
+                if !meshes.contains_key(&draw.mesh.0) {
+                    return Err(Error::Render {
+                        reason: format!("unknown mesh {}", draw.mesh.0),
+                    });
+                }
+                self.ensure_mesh_bind_group(draw.texture.unwrap_or(&self.white));
+                self.ensure_mesh_pipeline(target.format, draw.blend, draw.cull_backfaces);
+                let start = i * self.mesh_uniform_stride as usize;
+                let slot = mesh_uniforms(draw);
+                let bytes = bytemuck::bytes_of(&slot);
+                uniforms[start..start + bytes.len()].copy_from_slice(bytes);
+            }
+            if !uniforms.is_empty() {
+                self.gpu
+                    .queue
+                    .write_buffer(&self.mesh_uniforms.borrow().0, 0, &uniforms);
+            }
+        }
+        self.ensure_depth(target.width, target.height);
         let pipelines = self.pipelines.borrow();
         let bind_groups = self.bind_groups.borrow();
+        let mesh_pipelines = self.mesh_pipelines.borrow();
+        let mesh_bind_groups = self.mesh_bind_groups.borrow();
+        let mesh_uniforms = self.mesh_uniforms.borrow();
+        let meshes = self.meshes.borrow();
+        let depth = self.depth.borrow();
+        let depth_view = &depth.as_ref().expect("depth buffer created above").view;
 
         let mut encoder = self
             .gpu
@@ -231,7 +469,7 @@ impl Renderer {
             });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("quads"),
+                label: Some("frame"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target.view,
                     depth_slice: None,
@@ -246,37 +484,86 @@ impl Renderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                // `CBRenderD3D::Fill`: depth and stencil are cleared once
+                // per frame, with the colour.
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
             pass.set_viewport(x, y, w, h, 0.0, 1.0);
-            pass.set_pipeline(&pipelines[&(target.format, BlendMode::Normal)]);
-            pass.set_bind_group(0, &self.globals_group, &[]);
-            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            pass.set_index_buffer(index_buffer.0.slice(..), wgpu::IndexFormat::Uint32);
-            let mut first = 0;
             let quads = list.quads();
             let attributes = list.attributes();
             let blend_of = |i: usize| attributes.get(i).map_or(BlendMode::Normal, |a| a.blend);
-            let mut blend = BlendMode::Normal;
-            while first < quads.len() {
+            // The quad state; `None` after meshes were drawn, so that it
+            // is set again before the next batch.
+            let mut quad_state: Option<BlendMode> = None;
+            let mut next_mesh = 0;
+            let mut first = 0;
+            loop {
+                // The meshes due before the quad `first` (all the remaining
+                // ones once the quads are done).
+                while next_mesh < mesh_draws.len() && mesh_draws[next_mesh].before_quad <= first {
+                    let draw = &mesh_draws[next_mesh].draw;
+                    let mesh = &meshes[&draw.mesh.0];
+                    pass.set_pipeline(
+                        &mesh_pipelines[&(target.format, draw.blend, draw.cull_backfaces)],
+                    );
+                    let offset = (next_mesh as u64 * self.mesh_uniform_stride) as u32;
+                    pass.set_bind_group(0, &mesh_uniforms.1, &[offset]);
+                    let texture = draw.texture.unwrap_or(&self.white);
+                    pass.set_bind_group(1, &mesh_bind_groups[&texture.id], &[]);
+                    pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                    pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    let range = match &draw.indices {
+                        Some(range) => {
+                            range.start.min(mesh.index_count)..range.end.min(mesh.index_count)
+                        }
+                        None => 0..mesh.index_count,
+                    };
+                    if !range.is_empty() {
+                        pass.draw_indexed(range, 0, 0..1);
+                    }
+                    quad_state = None;
+                    next_mesh += 1;
+                }
+                if first >= quads.len() {
+                    break;
+                }
+                // A batch of quads with one texture and blend mode, ending
+                // before the next mesh.
+                let limit = mesh_draws
+                    .get(next_mesh)
+                    .map_or(quads.len(), |m| m.before_quad.min(quads.len()));
                 let texture = quads[first].texture;
                 let batch_blend = blend_of(first);
                 let mut last = first + 1;
-                while last < quads.len()
+                while last < limit
                     && quads[last].texture.id == texture.id
                     && blend_of(last) == batch_blend
                 {
                     last += 1;
                 }
-                if batch_blend != blend {
-                    blend = batch_blend;
-                    pass.set_pipeline(&pipelines[&(target.format, blend)]);
+                if quad_state.is_none() {
+                    pass.set_bind_group(0, &self.globals_group, &[]);
+                    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    pass.set_index_buffer(index_buffer.0.slice(..), wgpu::IndexFormat::Uint32);
                 }
-                let group = &bind_groups[&texture.id];
-                pass.set_bind_group(1, group, &[]);
+                if quad_state != Some(batch_blend) {
+                    pass.set_pipeline(&pipelines[&(target.format, batch_blend)]);
+                    quad_state = Some(batch_blend);
+                }
+                pass.set_bind_group(1, &bind_groups[&texture.id], &[]);
                 pass.draw_indexed((first as u32 * 6)..(last as u32 * 6), 0, 0..1);
                 first = last;
             }
@@ -285,11 +572,12 @@ impl Renderer {
         Ok(())
     }
 
-    /// Forgets the cached binding of a texture that is no longer used.
+    /// Forgets the cached bindings of a texture that is no longer used.
     /// Optional: bindings are small, but a game that streams many images
     /// should release them.
     pub fn forget(&self, texture: &Texture) {
         self.bind_groups.borrow_mut().remove(&texture.id);
+        self.mesh_bind_groups.borrow_mut().remove(&texture.id);
     }
 
     fn ensure_capacity(&self, quads: usize) {
@@ -309,13 +597,71 @@ impl Renderer {
         }
     }
 
+    fn ensure_mesh_uniform_capacity(&self, draws: usize) {
+        let needed = draws.max(1) as u64 * self.mesh_uniform_stride;
+        let mut uniforms = self.mesh_uniforms.borrow_mut();
+        if uniforms.0.size() < needed {
+            *uniforms = mesh_uniform_buffer(
+                &self.gpu.device,
+                &self.mesh_uniform_layout,
+                self.mesh_uniform_stride,
+                draws.next_power_of_two(),
+            );
+        }
+    }
+
+    /// Recreates the depth and stencil buffer when the target size
+    /// changes.
+    fn ensure_depth(&self, width: u32, height: u32) {
+        let mut depth = self.depth.borrow_mut();
+        if depth
+            .as_ref()
+            .is_some_and(|d| d.width == width && d.height == height)
+        {
+            return;
+        }
+        let texture = self.gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("depth stencil"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        *depth = Some(DepthBuffer {
+            width,
+            height,
+            view,
+        });
+    }
+
     fn ensure_bind_group(&self, texture: &Texture) {
         let id = texture.id;
         if self.bind_groups.borrow().contains_key(&id) {
             return;
         }
-        let group = self
-            .gpu
+        let group = self.texture_bind_group(texture, &self.sampler);
+        self.bind_groups.borrow_mut().insert(id, group);
+    }
+
+    fn ensure_mesh_bind_group(&self, texture: &Texture) {
+        let id = texture.id;
+        if self.mesh_bind_groups.borrow().contains_key(&id) {
+            return;
+        }
+        let group = self.texture_bind_group(texture, &self.mesh_sampler);
+        self.mesh_bind_groups.borrow_mut().insert(id, group);
+    }
+
+    fn texture_bind_group(&self, texture: &Texture, sampler: &wgpu::Sampler) -> wgpu::BindGroup {
+        self.gpu
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("texture"),
@@ -327,11 +673,10 @@ impl Renderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        resource: wgpu::BindingResource::Sampler(sampler),
                     },
                 ],
-            });
-        self.bind_groups.borrow_mut().insert(id, group);
+            })
     }
 
     fn ensure_pipeline(&self, format: wgpu::TextureFormat, blend: BlendMode) {
@@ -361,7 +706,15 @@ impl Renderer {
                     cull_mode: None,
                     ..Default::default()
                 },
-                depth_stencil: None,
+                // `Setup2D`: no depth test, no depth writes; quads never
+                // touch the depth buffer.
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &self.shader,
@@ -379,6 +732,166 @@ impl Renderer {
         self.pipelines
             .borrow_mut()
             .insert((format, blend), pipeline);
+    }
+
+    fn ensure_mesh_pipeline(&self, format: wgpu::TextureFormat, blend: BlendMode, cull: bool) {
+        if self
+            .mesh_pipelines
+            .borrow()
+            .contains_key(&(format, blend, cull))
+        {
+            return;
+        }
+        let pipeline = self
+            .gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("meshes"),
+                layout: Some(&self.mesh_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &self.mesh_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[Some(wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
+                    })],
+                },
+                // Direct3D: front faces are clockwise on screen;
+                // `D3DCULL_CCW` drops the counter-clockwise (back) ones.
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Cw,
+                    cull_mode: cull.then_some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                // `Setup3D`: depth test `<=` with writes.
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.mesh_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(blend_state(blend)),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+        self.mesh_pipelines
+            .borrow_mut()
+            .insert((format, blend, cull), pipeline);
+    }
+}
+
+/// The uniform buffer of `slots` mesh draws and its bind group.
+fn mesh_uniform_buffer(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    stride: u64,
+    slots: usize,
+) -> (wgpu::Buffer, wgpu::BindGroup) {
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("mesh uniforms"),
+        size: stride * slots.max(1) as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("mesh uniforms"),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: &buffer,
+                offset: 0,
+                size: wgpu::BufferSize::new(std::mem::size_of::<MeshUniforms>() as u64),
+            }),
+        }],
+    });
+    (buffer, group)
+}
+
+/// The uniforms of a mesh draw as the shader reads them.
+fn mesh_uniforms(draw: &MeshDraw<'_>) -> MeshUniforms {
+    let mut lights = [GpuLight::default(); MAX_LIGHTS];
+    for (slot, light) in lights.iter_mut().zip(draw.lights.as_slice()) {
+        *slot = gpu_light(light);
+    }
+    let material = draw.material;
+    let [er, eg, eb] = material.emissive;
+    let [ar, ag, ab] = draw.ambient;
+    let (fog_color, fog_params) = match draw.fog {
+        Some(fog) => {
+            let [r, g, b] = fog.color;
+            (
+                [r, g, b, 1.0],
+                [fog.start, fog.end, MESH_ALPHA_REFERENCE, 0.0],
+            )
+        }
+        None => ([0.0; 4], [0.0, 0.0, MESH_ALPHA_REFERENCE, 0.0]),
+    };
+    MeshUniforms {
+        world: draw.world,
+        view_projection: draw.view_projection,
+        diffuse: material.diffuse,
+        emissive: [er, eg, eb, if draw.texture.is_some() { 1.0 } else { 0.0 }],
+        ambient: [ar, ag, ab, draw.lights.len() as f32],
+        fog_color,
+        fog_params,
+        lights,
+    }
+}
+
+fn gpu_light(light: &Light) -> GpuLight {
+    let with_w = |v: [f32; 3], w: f32| [v[0], v[1], v[2], w];
+    match *light {
+        Light::Directional { direction, color } => GpuLight {
+            position: [0.0, 0.0, 0.0, 1.0],
+            direction: with_w(direction, 0.0),
+            color: with_w(color, 0.0),
+            cone: [0.0; 4],
+        },
+        Light::Point {
+            position,
+            range,
+            color,
+        } => GpuLight {
+            position: with_w(position, 2.0),
+            direction: [0.0, 0.0, 1.0, range],
+            color: with_w(color, 0.0),
+            cone: [0.0; 4],
+        },
+        Light::Spot {
+            position,
+            direction,
+            range,
+            inner_angle,
+            outer_angle,
+            falloff,
+            color,
+        } => GpuLight {
+            position: with_w(position, 3.0),
+            direction: with_w(direction, range),
+            color: with_w(color, 0.0),
+            cone: [
+                (inner_angle / 2.0).cos(),
+                (outer_angle / 2.0).cos(),
+                falloff,
+                0.0,
+            ],
+        },
     }
 }
 
@@ -540,4 +1053,34 @@ pub fn letterbox(
     let w = (logical_width * scale).floor();
     let h = (logical_height * scale).floor();
     (((tw - w) / 2.0).floor(), ((th - h) / 2.0).floor(), w, h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mesh_uniforms_match_the_shader_layout() {
+        // Two matrices, five vec4s and eight lights of four vec4s.
+        assert_eq!(std::mem::size_of::<GpuLight>(), 64);
+        assert_eq!(std::mem::size_of::<MeshUniforms>(), 128 + 80 + 8 * 64);
+    }
+
+    #[test]
+    fn spot_cones_are_half_angle_cosines() {
+        let light = gpu_light(&Light::Spot {
+            position: [1.0, 2.0, 3.0],
+            direction: [0.0, -1.0, 0.0],
+            range: 10.0,
+            inner_angle: 0.5,
+            outer_angle: 1.0,
+            falloff: 1.0,
+            color: [1.0, 0.5, 0.25],
+        });
+        assert_eq!(light.position, [1.0, 2.0, 3.0, 3.0]);
+        assert_eq!(light.direction, [0.0, -1.0, 0.0, 10.0]);
+        assert!((light.cone[0] - 0.25f32.cos()).abs() < 1e-6);
+        assert!((light.cone[1] - 0.5f32.cos()).abs() < 1e-6);
+        assert_eq!(light.cone[2], 1.0);
+    }
 }

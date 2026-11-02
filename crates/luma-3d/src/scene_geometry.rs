@@ -4,9 +4,9 @@
 //!
 //! The runtime queries that only need the geometry live here too: the
 //! floor height under a point, the conversion of a scene pixel to the
-//! nearest point on a walk plane (with a [`Projection`]), node and light
-//! lookups by name. Path finding and the segment tests come with the path
-//! finder.
+//! nearest point on a walk plane (with a [`Projection`]), the segment
+//! tests against the planes and blocks, node and light toggles by name.
+//! The path finder over the waypoints is [`crate::path3d`].
 //!
 //! Written with reference to the MIT-licensed Wintermute Engine 1.x sources
 //! (`AdSceneGeometry.cpp`, `AdWaypointGroup3D.cpp`, `3DMesh.cpp`,
@@ -192,6 +192,19 @@ impl Light {
     }
 }
 
+/// A group of waypoints (`CAdWaypointGroup3D`). The loader puts every
+/// waypoint mesh of the file into one group; the path finder links the
+/// points of the active groups.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WaypointGroup {
+    /// The points: the bounding-box centre of each waypoint mesh, lifted
+    /// to `floor + waypoint_height` by [`SceneGeometry::drop_waypoints`].
+    pub points: Vec<Vec3>,
+    /// Whether the path finder uses the group. The original starts it
+    /// `true` and has no script or file that changes it.
+    pub active: bool,
+}
+
 /// The classified geometry of a scene.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneGeometry {
@@ -201,10 +214,10 @@ pub struct SceneGeometry {
     pub blocks: Vec<MeshNode>,
     /// The generic meshes, in file order.
     pub generics: Vec<MeshNode>,
-    /// The waypoints: the bounding-box centre of every waypoint mesh,
-    /// lifted to `floor + waypoint_height` by [`Self::drop_waypoints`].
-    /// The original keeps them in a single group.
-    pub waypoints: Vec<Vec3>,
+    /// The waypoint groups: empty for a file without waypoint meshes,
+    /// otherwise one group holding them all, in file order (the original
+    /// never creates a second one).
+    pub waypoint_groups: Vec<WaypointGroup>,
     /// The cameras, in file order.
     pub cameras: Vec<Camera>,
     /// The lights, in file order.
@@ -242,7 +255,7 @@ impl SceneGeometry {
             walkplanes: Vec::new(),
             blocks: Vec::new(),
             generics: Vec::new(),
-            waypoints: Vec::new(),
+            waypoint_groups: Vec::new(),
             cameras: Vec::new(),
             lights: Vec::new(),
             waypoint_height: Self::DEFAULT_WAYPOINT_HEIGHT,
@@ -262,9 +275,17 @@ impl SceneGeometry {
                 NodeKind::Walkplane => geometry.walkplanes.push(node()),
                 NodeKind::Blocked => geometry.blocks.push(node()),
                 NodeKind::Generic => geometry.generics.push(node()),
-                NodeKind::Waypoint => geometry
-                    .waypoints
-                    .push(TriangleMesh::from_3ds(mesh).center()),
+                NodeKind::Waypoint => {
+                    if geometry.waypoint_groups.is_empty() {
+                        geometry.waypoint_groups.push(WaypointGroup {
+                            points: Vec::new(),
+                            active: true,
+                        });
+                    }
+                    geometry.waypoint_groups[0]
+                        .points
+                        .push(TriangleMesh::from_3ds(mesh).center());
+                }
             }
         }
         geometry.cameras = file
@@ -289,11 +310,22 @@ impl SceneGeometry {
     pub fn drop_waypoints(&mut self) {
         let height = self.waypoint_height;
         let planes = std::mem::take(&mut self.walkplanes);
-        for point in &mut self.waypoints {
+        for point in self
+            .waypoint_groups
+            .iter_mut()
+            .flat_map(|group| group.points.iter_mut())
+        {
             let floor = height_at(&planes, *point, 0.0).unwrap_or(point.y);
             point.y = floor + height;
         }
         self.walkplanes = planes;
+    }
+
+    /// Every waypoint of every group, active or not, in file order.
+    pub fn waypoints(&self) -> impl Iterator<Item = &Vec3> {
+        self.waypoint_groups
+            .iter()
+            .flat_map(|group| group.points.iter())
     }
 
     /// Sets the waypoint height and drops the waypoints again, as the
@@ -310,6 +342,42 @@ impl SceneGeometry {
     /// height nearest to the raised start wins. `None` without a hit.
     pub fn height_at(&self, pos: Vec3, tolerance: f32) -> Option<f32> {
         height_at(&self.walkplanes, pos, tolerance)
+    }
+
+    /// Whether the straight segment `p1..p2` is free (`DirectPathExists`):
+    /// it is not when it pierces a triangle of any walk plane, enabled or
+    /// not, or of an **enabled** block. "Pierces" is the original's pair
+    /// of tests: the segment crosses the triangle's plane
+    /// ([`math::pick_get_intersect`], so a segment that only touches the
+    /// plane at one end counts) and the line through it meets the
+    /// triangle in one direction or the other ([`math::intersect_triangle`]
+    /// from `p1` along `p1 - p2`, then from `p2` along `p2 - p1`). A
+    /// segment that runs inside a plane never crosses it, so paths between
+    /// points lifted over one floor only meet blocks; a zero-length
+    /// segment is always free.
+    pub fn direct_path_exists(&self, p1: Vec3, p2: Vec3) -> bool {
+        let pierced = |nodes: &[MeshNode], enabled_only: bool| {
+            nodes
+                .iter()
+                .filter(|node| node.active || !enabled_only)
+                .flat_map(|node| node.mesh.triangles())
+                .any(|tri| segment_pierces(p1, p2, tri).is_some())
+        };
+        !(pierced(&self.walkplanes, false) || pierced(&self.blocks, true))
+    }
+
+    /// Where the segment `p1..p2` first pierces an enabled block
+    /// (`GetBlockIntersection`): the blocks in file order, their triangles
+    /// in face order, the first pierced one wins, whichever end of the
+    /// segment it is nearer to. `None` when no enabled block is pierced
+    /// (the original returns the origin, which the path finder treats as
+    /// "none").
+    pub fn block_intersection(&self, p1: Vec3, p2: Vec3) -> Option<Vec3> {
+        self.blocks
+            .iter()
+            .filter(|block| block.active)
+            .flat_map(|block| block.mesh.triangles())
+            .find_map(|tri| segment_pierces(p1, p2, tri))
     }
 
     /// The point of the walk planes under a scene pixel (`Convert2Dto3D`):
@@ -460,6 +528,50 @@ impl SceneGeometry {
             .iter_mut()
             .find(|l| l.name.eq_ignore_ascii_case(name))
     }
+
+    /// Switches every light of this name on or off (`EnableLight`),
+    /// ignoring ASCII case. Returns whether a light matched. The original
+    /// re-registers all lights with the device afterwards
+    /// (`CreateLights`); here the renderer reads the flags when it draws.
+    pub fn set_light_enabled(&mut self, name: &str, enabled: bool) -> bool {
+        let mut found = false;
+        for light in self.lights.iter_mut() {
+            if light.name.eq_ignore_ascii_case(name) {
+                light.active = enabled;
+                found = true;
+            }
+        }
+        found
+    }
+
+    /// Whether the first light of this name is on (`IsLightEnabled`);
+    /// `false` for an unknown name.
+    pub fn is_light_enabled(&self, name: &str) -> bool {
+        self.light(name).is_some_and(|light| light.active)
+    }
+
+    /// Sets the diffuse colour of every light of this name
+    /// (`SetLightColor`), ignoring ASCII case. Returns whether a light
+    /// matched.
+    pub fn set_light_color(&mut self, name: &str, color: Rgb) -> bool {
+        let mut found = false;
+        for light in self.lights.iter_mut() {
+            if light.name.eq_ignore_ascii_case(name) {
+                light.color = color;
+                found = true;
+            }
+        }
+        found
+    }
+}
+
+/// Where the segment `p1..p2` pierces a triangle, as the original tests
+/// it in `DirectPathExists` and `GetBlockIntersection`; see
+/// [`SceneGeometry::direct_path_exists`].
+fn segment_pierces(p1: Vec3, p2: Vec3, [v0, v1, v2]: [Vec3; 3]) -> Option<Vec3> {
+    math::pick_get_intersect(p1, p2, v0, v1, v2)?;
+    math::intersect_triangle(p1, p1 - p2, v0, v1, v2)
+        .or_else(|| math::intersect_triangle(p2, p2 - p1, v0, v1, v2))
 }
 
 /// `GetHeightAt` over a list of walk planes; see
@@ -484,7 +596,7 @@ fn height_at(planes: &[MeshNode], mut pos: Vec3, tolerance: f32) -> Option<f32> 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::three_ds::Builder;
 
@@ -501,6 +613,57 @@ mod tests {
             ],
             &[[0, 1, 2], [0, 2, 3]],
         )
+    }
+
+    /// A closed box of twelve triangles, faces in the order bottom, top,
+    /// `-z`, `+z`, `-x`, `+x` (the order matters to
+    /// `block_intersection`).
+    pub(crate) fn box_mesh(name: &str, lo: Vec3, hi: Vec3) -> Vec<u8> {
+        let v = [
+            Vec3::new(lo.x, lo.y, lo.z),
+            Vec3::new(hi.x, lo.y, lo.z),
+            Vec3::new(hi.x, lo.y, hi.z),
+            Vec3::new(lo.x, lo.y, hi.z),
+            Vec3::new(lo.x, hi.y, lo.z),
+            Vec3::new(hi.x, hi.y, lo.z),
+            Vec3::new(hi.x, hi.y, hi.z),
+            Vec3::new(lo.x, hi.y, hi.z),
+        ];
+        Builder::mesh(
+            name,
+            &v,
+            &[
+                [0, 1, 2],
+                [0, 2, 3],
+                [4, 6, 5],
+                [4, 7, 6],
+                [0, 4, 5],
+                [0, 5, 1],
+                [3, 6, 7],
+                [3, 2, 6],
+                [0, 7, 4],
+                [0, 3, 7],
+                [1, 5, 6],
+                [1, 6, 2],
+            ],
+        )
+    }
+
+    /// A floor with a wall across its middle: the block `blk_wall` spans
+    /// `x` 40..60, `z` 20..80, 30 high.
+    pub(crate) fn wall_scene() -> SceneGeometry {
+        let bytes = Builder::file(
+            &[
+                floor("walk_01", 0.0),
+                box_mesh(
+                    "blk_wall",
+                    Vec3::new(40.0, 0.0, 20.0),
+                    Vec3::new(60.0, 30.0, 80.0),
+                ),
+            ],
+            &[],
+        );
+        SceneGeometry::load_3ds(&bytes, &NodePatterns::standard()).unwrap()
     }
 
     fn cube(name: &str, lo: Vec3, hi: Vec3) -> Vec<u8> {
@@ -595,7 +758,9 @@ mod tests {
         assert_eq!(g.generics.len(), 1);
         assert_eq!(g.generics[0].name, "shadow_1");
         assert!(g.generics[0].receive_shadows);
-        assert_eq!(g.waypoints.len(), 2);
+        assert_eq!(g.waypoint_groups.len(), 1);
+        assert!(g.waypoint_groups[0].active);
+        assert_eq!(g.waypoints().count(), 2);
         assert_eq!(g.cameras.len(), 2);
         assert_eq!(g.lights.len(), 2);
         assert_eq!(g.active_camera, Some(0));
@@ -604,14 +769,24 @@ mod tests {
     #[test]
     fn waypoints_are_box_centres_dropped_to_the_floor() {
         let g = demo();
+        let points = &g.waypoint_groups[0].points;
         // Centre (15, 55, 15) dropped to the floor at 0 plus the height 10.
-        assert_eq!(g.waypoints[0], Vec3::new(15.0, 10.0, 15.0));
+        assert_eq!(points[0], Vec3::new(15.0, 10.0, 15.0));
         // Off the floor: keeps its own height, plus the waypoint height.
-        assert_eq!(g.waypoints[1], Vec3::new(205.0, 65.0, 205.0));
+        assert_eq!(points[1], Vec3::new(205.0, 65.0, 205.0));
         let mut g = g;
         g.set_waypoint_height(25.0);
-        assert_eq!(g.waypoints[0], Vec3::new(15.0, 25.0, 15.0));
-        assert_eq!(g.waypoints[1], Vec3::new(205.0, 90.0, 205.0));
+        let points = &g.waypoint_groups[0].points;
+        assert_eq!(points[0], Vec3::new(15.0, 25.0, 15.0));
+        assert_eq!(points[1], Vec3::new(205.0, 90.0, 205.0));
+    }
+
+    #[test]
+    fn a_file_without_waypoint_meshes_has_no_group() {
+        let bytes = Builder::file(&[floor("walk_01", 0.0)], &[]);
+        let g = SceneGeometry::load_3ds(&bytes, &NodePatterns::standard()).unwrap();
+        assert!(g.waypoint_groups.is_empty());
+        assert_eq!(g.waypoints().count(), 0);
     }
 
     #[test]
@@ -725,6 +900,65 @@ mod tests {
         g.light_mut("omni01").unwrap().active = false;
         assert!(!g.light("Omni01").unwrap().active);
         assert!(g.light("none").is_none());
+    }
+
+    #[test]
+    fn direct_paths_are_stopped_by_enabled_blocks() {
+        let mut g = wall_scene();
+        let s = Vec3::new(10.0, 10.0, 50.0);
+        let t = Vec3::new(90.0, 10.0, 50.0);
+        let a = Vec3::new(30.0, 10.0, 10.0);
+        assert!(!g.direct_path_exists(s, t));
+        assert!(!g.direct_path_exists(t, s));
+        assert!(g.direct_path_exists(s, a));
+        assert!(g.direct_path_exists(s, s));
+        // Ending inside the wall still pierces its near face.
+        assert!(!g.direct_path_exists(s, Vec3::new(50.0, 10.0, 50.0)));
+        // Over the wall.
+        assert!(g.direct_path_exists(Vec3::new(10.0, 40.0, 50.0), Vec3::new(90.0, 40.0, 50.0)));
+        // The first pierced face in face order wins, from either end: the
+        // -x face is listed before the +x face.
+        assert_eq!(
+            g.block_intersection(s, t),
+            Some(Vec3::new(40.0, 10.0, 50.0))
+        );
+        assert_eq!(
+            g.block_intersection(t, s),
+            Some(Vec3::new(40.0, 10.0, 50.0))
+        );
+        assert_eq!(g.block_intersection(s, a), None);
+        g.set_node_enabled("blk_wall", false);
+        assert!(g.direct_path_exists(s, t));
+        assert_eq!(g.block_intersection(s, t), None);
+    }
+
+    #[test]
+    fn walk_planes_stop_segments_that_pierce_them_whether_enabled_or_not() {
+        let mut g = wall_scene();
+        let above = Vec3::new(20.0, 10.0, 10.0);
+        let below = Vec3::new(20.0, -10.0, 10.0);
+        assert!(!g.direct_path_exists(above, below));
+        assert!(!g.direct_path_exists(below, above));
+        // Touching the floor at one end counts as piercing it.
+        assert!(!g.direct_path_exists(above, Vec3::new(20.0, 0.0, 10.0)));
+        // Running inside the floor's plane does not.
+        assert!(g.direct_path_exists(Vec3::new(20.0, 0.0, 10.0), Vec3::new(30.0, 0.0, 10.0)));
+        g.set_node_enabled("walk_01", false);
+        assert!(!g.direct_path_exists(above, below));
+    }
+
+    #[test]
+    fn lights_are_switched_by_name() {
+        let mut g = demo();
+        assert!(g.is_light_enabled("OMNI01"));
+        assert!(g.set_light_enabled("omni01", false));
+        assert!(!g.is_light_enabled("Omni01"));
+        assert!(!g.set_light_enabled("none", true));
+        assert!(!g.is_light_enabled("none"));
+        let red = Rgb { r: 255, g: 0, b: 0 };
+        assert!(g.set_light_color("spot01", red));
+        assert_eq!(g.light("Spot01").unwrap().color, red);
+        assert!(!g.set_light_color("none", red));
     }
 
     #[test]

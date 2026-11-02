@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use luma_3d::camera::{CameraSettings, Projection, ViewSetup};
 use luma_3d::math::deg_to_rad;
-use luma_3d::{NodeKind, NodePatterns, SceneGeometry, Vec3};
+use luma_3d::{NodeKind, NodePatterns, PathFinder, SceneGeometry, Vec3};
 
 fn demo_dir() -> Option<PathBuf> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -37,7 +37,9 @@ fn the_front_scene_of_the_demo_loads_as_the_study_describes() {
     assert_eq!(names(&geometry.walkplanes), vec!["walk_01"]);
     assert_eq!(geometry.blocks.len(), 5, "{:?}", names(&geometry.blocks));
     assert!(geometry.blocks.iter().all(|b| b.name.starts_with("blk_")));
-    assert_eq!(geometry.waypoints.len(), 10);
+    assert_eq!(geometry.waypoint_groups.len(), 1);
+    assert!(geometry.waypoint_groups[0].active);
+    assert_eq!(geometry.waypoint_groups[0].points.len(), 10);
     assert_eq!(
         geometry.generics.len(),
         12,
@@ -58,7 +60,7 @@ fn the_front_scene_of_the_demo_loads_as_the_study_describes() {
     assert_eq!(geometry.active_camera().unwrap().name, "Camera01");
 
     // Every waypoint sits 10 units over the walk plane.
-    for point in &geometry.waypoints {
+    for point in geometry.waypoints() {
         let floor = geometry.height_at(*point, 0.0).unwrap();
         assert!(
             (point.y - floor - 10.0).abs() < 1e-3,
@@ -95,4 +97,56 @@ fn the_front_scene_of_the_demo_loads_as_the_study_describes() {
     }
     // The sky is not a walk plane.
     assert!(geometry.convert_2d_to_3d(&projection, 400, 50).is_none());
+}
+
+#[test]
+fn paths_on_the_demo_geometry_link_the_waypoints() {
+    let Some(dir) = demo_dir() else { return };
+    let bytes = std::fs::read(dir.join("geometry.3DS")).unwrap();
+    let sidecar = std::fs::read(dir.join("geometry.geometry")).ok();
+    let geometry =
+        SceneGeometry::load_3ds(&bytes, &NodePatterns::load(sidecar.as_deref())).unwrap();
+    let points: Vec<Vec3> = geometry.waypoints().copied().collect();
+    assert!(points.len() >= 2);
+
+    // The segment test does not depend on the direction, and at least one
+    // pair of waypoints is separated by a crate (else they would be
+    // pointless).
+    let mut blocked_pairs = 0;
+    for a in &points {
+        for b in &points {
+            let free = geometry.direct_path_exists(*a, *b);
+            assert_eq!(free, geometry.direct_path_exists(*b, *a));
+            if !free {
+                blocked_pairs += 1;
+            }
+        }
+    }
+    assert!(blocked_pairs > 0);
+
+    // Every waypoint reaches every other one over free segments at the
+    // waypoint height, ending at the target.
+    for a in &points {
+        for b in &points {
+            if a == b {
+                continue;
+            }
+            let path = PathFinder::find_path(&geometry, *a, *b);
+            assert!(path.is_ready());
+            let steps = path.points();
+            assert!(!steps.is_empty(), "no path {a:?} -> {b:?}");
+            assert!(
+                (*steps.last().unwrap() - *b).length() < 1e-2,
+                "{a:?} -> {b:?} ends at {:?}",
+                steps.last().unwrap()
+            );
+            let mut prev = *a;
+            for p in steps {
+                assert!(geometry.direct_path_exists(prev, *p), "{prev:?} -> {p:?}");
+                let floor = geometry.height_at(*p, 0.0).unwrap();
+                assert!((p.y - floor - 10.0).abs() < 1e-2, "{p:?} over {floor}");
+                prev = *p;
+            }
+        }
+    }
 }

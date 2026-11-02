@@ -133,7 +133,7 @@ flag; a mesh matching nothing is **dropped**.
 |------|--------|----------------|
 | Walk plane | `SceneGeometry::walkplanes`: triangles an actor may stand on, used for picking a 3D point under a 2D point and for the floor height; also a barrier in segment tests. | `0x700000FF` |
 | Blocked | `SceneGeometry::blocks`: triangles that stop segments while the node is enabled. | `0x70FF0000` |
-| Waypoint | One point per mesh, the centre of its bounding box (`min + (max - min) / 2`), appended to `SceneGeometry::waypoints` (the original keeps a single group). After loading every waypoint is lifted to `floor height + waypoint height` (10 by default; the scene's `WAYPOINT_HEIGHT` re-lifts them). | the `wpt.sprite` marker |
+| Waypoint | One point per mesh, the centre of its bounding box (`min + (max - min) / 2`), appended to the points of the first **waypoint group** (`SceneGeometry::waypoint_groups`, a `WaypointGroup` with an `active` flag): the group is created at the first waypoint mesh, so a file without one has no group, and the original never creates a second. After loading every waypoint is lifted to `floor height + waypoint height` (10 by default; the scene's `WAYPOINT_HEIGHT` re-lifts them). Only the points of active groups enter the path finder; the flag starts `true` and nothing in the original changes it. | the `wpt.sprite` marker |
 | Generic | `SceneGeometry::generics`: only useful as a shadow receiver. | `0x7000FF00` |
 
 Walk planes, blocks and generics keep their mesh name and an `active`

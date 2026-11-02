@@ -10,9 +10,11 @@ its classification (3.2, 3.3, specified in
 [formats/geometry.md](formats/geometry.md)), the camera and the 2D/3D
 mapping (section 4), the actor definition file (section 5, specified in
 [formats/actor3d.md](formats/actor3d.md)), the `.X` model as data
-(section 6 and the sampling of 7, specified in
-[formats/xfile.md](formats/xfile.md)) and the floor height (9.1). The
-rest is still the plan.
+(section 6, specified in [formats/xfile.md](formats/xfile.md)), the
+animation and skinning at run time (section 7), the geometry at
+runtime (section 9: floor height, segment tests, path finder) and the
+mesh pass of the renderer (sections 10.1 and 12.3, specified in
+[rendering.md](rendering.md#3d-pass)). The rest is still the plan.
 
 ## 0. Sources and rules
 
@@ -615,17 +617,34 @@ What WME makes of the result:
   rewrites the positions and normals of a clone of the loaded mesh (the
   blended-mesh conversion is commented out). The result keeps the loaded
   vertex format (position, normal, UV) and is drawn per material subset
-  (D3DX attribute table).
+  (D3DX attribute table). **As implemented** (`luma_3d::animation`,
+  section 7): every vertex a bone weights starts from zero and
+  accumulates `weight * (position * palette)` and `weight * (normal *
+  palette's 3x3)`, the normals then normalised (what `UpdateSkinnedMesh`
+  does with a null inverse-transpose array, **[ext]**; the fixed-function
+  pipeline renormalises anyway, 10.1). A bone whose frame the model lacks
+  uses the identity for its combined matrix (the original dereferences an
+  unset pointer there). A vertex no bone weights keeps its loaded position
+  (what D3DX does with it is not known **[ext]**; the sample files weight
+  every vertex).
 - **Rigid meshes** (no bones) are transformed every frame by their parent
   frame's combined matrix: **positions only**; the normals stay as loaded, so
-  the lighting of rigid parts on moving frames is slightly off. A faithful
-  port can keep this or transform the normals as well.
+  the lighting of rigid parts on moving frames is slightly off. As
+  implemented, Luma transforms the normals as well (by the 3x3 part,
+  renormalised), a deliberate departure.
 - **Bounding box.** Recomputed from the skinned vertices every frame
-  (`D3DXComputeBoundingBox`, with a manual fallback when NaNs appear).
+  (`D3DXComputeBoundingBox`, with a manual fallback when NaNs appear). The
+  **model's** box (`UpdateBoundingRect`) starts at the origin and grows
+  around the meshes' boxes, so it always contains the model's origin; Luma
+  does the same (`AnimatedModel::bounding_box`), since the 2D bounding
+  rectangle and the hit test of task 16 are built on it.
 - **Adjacency.** Face-to-face adjacency for shadow volumes is regenerated on
   the clone with `GenerateAdjacency(0, ...)`: vertices at identical
   positions count as one point, so UV and normal seams do not open edges. A
-  Luma loader must weld by position.
+  Luma loader must weld by position. Nothing in the animation or skinning
+  needs it (the skinned vertices keep the loaded indices), so it is left
+  to the stencil shadows (task 12b), computed from
+  `SkinnedMesh::vertices` positions when the volumes are built.
 
 ### 6.4 Animation sets
 
@@ -672,71 +691,145 @@ the first key, and a zero gap met after a positive one resets the minimum
 
 ## 7. Animation at runtime
 
-All in `XModel.cpp`, `XAnimationChannel.cpp`, `XActiveAnimation.cpp`,
-`XAnimation.cpp`, `XFrameNode.cpp`.
+**As implemented** in `luma_3d::animation` (`AnimatedModel`, the
+`CXModel` of the original at run time, over the data of
+`luma_3d::model`), from `XModel.cpp`, `XAnimationChannel.cpp`,
+`XActiveAnimation.cpp`, `XAnimation.cpp`, `XAnimationSet.cpp` and
+`XFrameNode.cpp`. Times are milliseconds of a timer the caller advances
+(`update(delta_ms)`, the game timer in the original); the timer starts at
+0 and wraps like the original's `DWORD`.
 
-- **10 channels** (`X_NUM_ANIMATION_CHANNELS`), numbered 0..9. Channel 0
-  carries the standard animations the actor logic selects (idle, walk,
-  turn, talk-stance). Others are for scripts (`PlayAnimChannel`).
-- Each frame (`CXModel::Update`): reset every frame to its original local
-  matrix; update every channel in order 0..9, each of which **sets the local
-  transform of the frames its animation has tracks for**, later channels
-  overriding earlier ones on the same frame; compute combined matrices from
-  the root; skin the meshes. So a "wave" animation that only has tracks for
-  the arm bones, played in channel 1, replaces the arm of the walk cycle.
+- **10 channels** (`X_NUM_ANIMATION_CHANNELS`, `animation::NUM_CHANNELS`),
+  numbered 0..9. Channel 0 carries the standard animations the actor logic
+  selects (idle, walk, turn, talk-stance). Others are for scripts
+  (`PlayAnimChannel`). A channel holds up to two *active animations*: the
+  current one in slot 0 and, during a transition, the incoming one in
+  slot 1.
+- **Each update** (`CXModel::Update`, `AnimatedModel::update`): every frame
+  starts from its loaded local matrix; the channels update in order 0..9,
+  each writing the **sampled transform** (scale, rotation, position; not
+  a matrix) of every frame its animation has tracks for into one of the
+  frame's two **transformation slots** (`CXFrameNode::SetTransformation`),
+  later channels overriding earlier ones on the same frame and slot; then
+  the frames build their local matrix from the slots (below), the combined
+  matrices are computed from the root, the meshes are skinned (6.3) and
+  the boxes recomputed. So a "wave" animation that only has tracks for the
+  arm bones, played in channel 1, replaces the arm of the walk cycle.
+- **Frame slots** (`CXFrameNode::UpdateMatrices`): a frame whose slot 0 is
+  unused keeps its loaded matrix, **whatever slot 1 holds**; with slot 0
+  used alone its transform is applied as is; with both used the two
+  transforms are blended by **slot 0's** factor (`Lerp` for scale and
+  position, `Slerp` for rotation, `Transform::blend`), then `S * R * T`.
+  Both slots are cleared after use. Consequences the study missed: during
+  a transition a frame only the incoming animation animates stays at rest
+  until the transition ends, a frame only the outgoing one animates holds
+  the outgoing pose unblended, and a frame animated both by an earlier,
+  non-transitioning channel and by a later channel's incoming animation
+  only keeps the earlier channel's pose (its slot 0 carries a factor of
+  0).
 - **Sampling** one track at local time `t` (in ticks): find the first key
   with `time > t`; interpolate it with the previous one
   (`(t - t1) / (t2 - t1)`, `0` when equal times); `t` before the first key
   gives the first key. If *no* key is later than `t` the indices stay at
   **0 and 0**: the pose snaps to the **first** key (not the last). Callers
   keep `t` below the last key time (a finished animation uses
-  `total - 1` ms) so this is only reached by degenerate data. **As
-  implemented** by `Animation::sample` (one frame's `Transform`),
-  `AnimationSet::apply` (the sampled frames written over a list of local
-  matrices), `Model::rest_pose`, `Model::combine` and `Model::sample`
-  (rest pose, one set applied, combined matrices); a missing track leaves
-  position `0`, scale `1`, rotation identity, so a rotation-only track
-  also moves the frame to its parent's origin, as in the original. The
-  blend of the two transition slots is `Transform::blend`
-  (`Lerp`/`Slerp`/`Lerp`), the event selection of a frame change is
-  `AnimationSet::events_between`; the channels and active animations that
-  drive them are task 9.
-- **Active animation.** Started with the game timer; local time = elapsed
-  ms. If `elapsed > total`: looping wraps with `%`, a non-looping one
-  becomes *finished* and holds `total - 1`. `Looping` comes from the set
-  (`AnimationOptions` or the actor file's `LOOPING`).
-- **Events.** Frame index `= localTime / frameTime + 1`; when it changes
-  (not during a transition) `OnFrameChanged(current, previous)` fires every
-  event with `previous < FRAME <= current`, and after a wrap those with
-  `FRAME > previous` first. Event frames are clamped to `[1, totalFrames]`
-  when added. An event runs the owner's event handler by name
-  (`ApplyEvent("footstep")`, i.e. `on "footstep" { ... }` in the actor's
-  script).
-- **Transitions** (`PlayAnim(set, transitionTime, stopTransitionTime)`).
-  A channel holds up to two active animations. With transition time 0, or
-  when the channel is empty, the new one replaces the old at once. Otherwise
-  both poses are **frozen** for the duration: the old animation at the local
+  `total - 1` ms) so this is only reached by degenerate data.
+  `Animation::sample` (one frame's `Transform`), `AnimationSet::sample`
+  (the transforms of the resolved frames), `Model::rest_pose`,
+  `Model::combine` and `Model::sample` (rest pose, one set applied,
+  combined matrices) in `luma_3d::model`, [formats/xfile.md](formats/xfile.md)
+  2.4; a missing track leaves position `0`, scale `1`, rotation identity,
+  so a rotation-only track also moves the frame to its parent's origin, as
+  in the original. The millisecond local time becomes ticks by `ms *
+  (ticks_per_second / 1000)` truncated (`Model::ms_to_ticks`).
+- **Active animation** (`CXActiveAnimation`, `animation::ActiveAnimation`).
+  Started with the timer; local time = elapsed ms. If `elapsed > total`:
+  looping wraps with `%` (0 when the total is 0), a non-looping one
+  becomes *finished* and holds `total - 1` (which wraps to `u32::MAX` for
+  an empty set, as the original's `DWORD` does; the pose then snaps to the
+  first keys). `Looping` is read from the set when the animation starts
+  (`AnimationOptions` or the actor file's `LOOPING`, applied to the set by
+  `AnimationDef::apply`).
+- **Events.** Frame index `= localTime / frameTime + 1` (0 when the frame
+  time is 0; 1-based); when it changes `OnFrameChanged(current, previous)`
+  fires every event with `previous < FRAME <= current`, and after a wrap
+  (`previous > current`) those with `FRAME > previous` first
+  (`AnimationSet::events_between`). The index starts at -1, so the first
+  update of a freshly started animation fires the events of frame 1.
+  Event frames are clamped to `[1, totalFrames]` when added
+  (`AnimationSet::add_event`). No event fires while a pose is **frozen**
+  (transitions, below), but the frame index is still tracked, so the
+  events of the frame an incoming animation shows during a transition (its
+  frame 1) **never fire** once it starts. `AnimatedModel::update` returns
+  the event names in firing order; an event runs the owner's event handler
+  by name (`ApplyEvent("footstep")`, i.e. `on "footstep" { ... }` in the
+  actor's script, task 14).
+- **Transitions** (`PlayAnim(set, transitionTime, stopTransitionTime)`,
+  `AnimatedModel::play_with`). With transition time 0, or when the channel
+  is empty, the new animation replaces the old at once. Otherwise both
+  poses are **frozen** for the duration: the old animation at the local
   time it had reached (slot 0) and the new one at its first pose (slot 1,
-  because its local time is still 0). While `Game.timer - start < time`,
-  `UpdateMatrices` blends the two with `lerp = elapsed / time` (`Lerp` for
-  scale and position, `Slerp` for rotation, then `S * R * T`). At the end the
-  new animation becomes the only one, its start time is reset and it starts
-  playing from its beginning. No events fire during a transition. Asking for
-  the animation that already plays on the channel (same name) does nothing
-  unless the request forces a restart; the scripts' `PlayAnim` forces it, the
-  actor's own idle/walk/turn requests do not.
+  because its local time is still 0). While `timer - start < time`, the
+  frames blend the two with `lerp = elapsed / time` (through the frame
+  slots above). When `elapsed >= time` the new animation becomes the only
+  one, its start time is reset to the current timer (the transition time
+  is not counted) and it is updated at once from its beginning. Asking for
+  the animation the channel already **heads for** (the incoming one during
+  a transition, else the current one; names compared ignoring case) does
+  nothing unless the request forces a restart; the scripts' `PlayAnim`
+  forces it, the actor's own idle/walk/turn requests do not
+  (`force_restart`).
+- **Finishing and stopping** (`StopAnim(transitionTime)`,
+  `AnimatedModel::stop`). When a non-looping animation finishes, the
+  channel stops it with the *stop transition time* given when it was
+  played; `StopAnim` with a time does the same on demand: the current
+  animation is made non-looping, the incoming one (if any) is dropped, and
+  the current pose is **held, frozen, for that time** (so no event); then
+  the channel empties and the frames fall back to their loaded matrices.
+  There is no blend back to the rest pose: the hold only delays the snap.
+  With time 0, or an empty channel, the channel empties at once. On the
+  update where an animation finishes, the frame still shows its last pose
+  (`total - 1`); the stop takes effect from the next update. As in the
+  original, a 0 stop time therefore shows the rest pose one update after
+  the end.
 - **The transition time actually used** when switching from animation `A`
   to `B` on a channel is `Owner.GetAnimTransitionTime(A, B)`: the pair set
-  by `SetAnimTransitionTime`, else the actor's `AnimTransitionTime` (default
-  200 ms). The `AnimStopTransitionTime` (default 200 ms) is used when an
-  animation finishes or is stopped (`StopAnim`): the animation is made
-  non-looping, held for that time, then the channel empties and the frames
-  fall back to their original matrices (there is no blend back to the rest
-  pose in the code; the fade-out only delays the removal).
-- `IsAnimPending(channel, name)` is true while the channel's active
-  animation (the incoming one during a transition) is not finished and, when
-  a name is given, has that name (case-insensitive). The scripts'
-  `IsAnimPlaying` looks at **channel 0 only**.
+  by `SetAnimTransitionTime` (names compared ignoring case; a negative time
+  removes the pair), else the actor's `AnimTransitionTime` (default
+  **200 ms**, `animation::DEFAULT_TRANSITION_MS`). The
+  `AnimStopTransitionTime` (default 200 ms,
+  `DEFAULT_STOP_TRANSITION_MS`) is the stop transition time the actor
+  passes with every `PlayAnim` and `StopAnim`. In the original the pair
+  table lives in the actor and overrides whatever time the caller passed
+  whenever the channel has a current animation (so an attachment's
+  `PlayAnim`, which passes 0, still uses its owner actor's table and
+  default). Luma keeps the table and the two defaults on the
+  `AnimatedModel` (`set_transition_time`, `transition_time`,
+  `set_default_transition_ms`, `set_default_stop_transition_ms`);
+  `play(channel, name, force_restart)` resolves them as the actor does,
+  `play_with(channel, name, transition_ms, stop_transition_ms,
+  force_restart)` uses the times given.
+- `IsAnimPending(channel, name)` (`AnimatedModel::is_playing`) is true
+  while the channel has an **unfinished** animation in either slot and,
+  when a name is given, the animation it heads for has that name
+  (case-insensitive). A pose held after `StopAnim` still counts as playing
+  (the animation did not finish); a pose held after a natural end does
+  not. The scripts' `IsAnimPlaying` looks at **channel 0 only**;
+  `IsAnimPending(name)` over all channels is `is_playing_on_any_channel`.
+- **Unloading a set** (`UnloadAnim`, `AnimatedModel::remove_animation_set`)
+  drops it from every channel slot that plays it; a transition in progress
+  keeps running and ends on whatever is left.
+- **Outputs of an update**: the local and combined matrix of every frame
+  (`local_matrices`, `combined_matrices`, `bone_matrix(name)` for
+  attachments and `GetBonePosition*`), the skinned meshes
+  (`meshes()`: one `SkinnedMesh` per model mesh with a contiguous
+  `Vec<Vertex>` indexed like the model's, ready for a vertex buffer, and
+  its box), the model's box (`bounding_box`, containing the origin as in
+  6.3), and the posed-triangle pick (`pick(origin, direction)`,
+  `CXMesh::PickPoly` with the single-sided `IntersectTriangle` of 9.2; the
+  ray is in model space, the caller inverts the world matrix, task 16).
+  A new `AnimatedModel` is posed at rest once, so these are valid before
+  the first update.
 
 ## 8. Actor logic
 
@@ -905,6 +998,9 @@ debug rendering and the shadow-receiver pass skip inactive planes.
 
 ### 9.2 Triangle tests
 
+**As implemented** by `math::intersect_triangle`, `math::pick_get_intersect`,
+`SceneGeometry::direct_path_exists` and `SceneGeometry::block_intersection`.
+
 - `IntersectTriangle(origin, direction, v0, v1, v2)` is Moeller-Trumbore
   **without** the `t >= 0` check and **single-sided**: `det < 0.0001` fails,
   i.e. the triangle is hit only when the ray direction opposes the triangle's
@@ -913,52 +1009,126 @@ debug rendering and the shadow-receiver pass skip inactive planes.
   intersection), not barycentric coordinates.
 - `PickGetIntersect(a, b, v0, v1, v2)`: does the segment `a..b` cross the
   **plane** of the triangle (`0 <= t <= 1`, not parallel)? It does not test
-  containment.
-- `DirectPathExists(p1, p2)`: false if, for any walk plane triangle (active
-  or not) or **active** block triangle, the segment crosses the plane **and**
-  `IntersectTriangle(p1, p1 - p2)` or `IntersectTriangle(p2, p2 - p1)` hits
-  the triangle: that is, if the segment pierces the triangle in either
-  direction. Free segments between floor-height points do not pierce planes,
-  so walk planes mostly matter through picking and height, and blocks
-  through piercing. Staying inside a walk plane's outline is **not**
-  checked: it is the author's waypoints that keep paths on the floor.
+  containment. The closed range means a segment that only **touches** the
+  plane at one end crosses it.
+- `DirectPathExists(p1, p2)` (`direct_path_exists`): false if, for any walk
+  plane triangle (active or not) or **active** block triangle, the segment
+  crosses the plane **and** `IntersectTriangle(p1, p1 - p2)` or
+  `IntersectTriangle(p2, p2 - p1)` hits the triangle: that is, if the
+  segment pierces the triangle in either direction (the two single-sided
+  tests together make the test two-sided, so the winding of a block does
+  not matter). A segment running inside a plane never crosses it, so the
+  paths between points lifted over one floor only meet blocks; a segment
+  that ends **on** a walk plane coming from above does pierce it (the
+  touch counts) and is blocked, which is why path points are lifted; a
+  zero-length segment is always free. Staying inside a walk plane's
+  outline is **not** checked: it is the author's waypoints that keep paths
+  on the floor.
+- `GetBlockIntersection(p1, p2)` (`block_intersection`): the same test
+  over the **active blocks only**, returning the piercing point of the
+  first pierced triangle in file order (blocks in order, faces in order),
+  not the one nearest to `p1`: for a segment through a box both side
+  faces are pierced and the one listed first wins, from either end. With
+  no hit the original returns the origin, which its only caller then
+  treats as "no hit" (9.3); Luma returns `None`.
 
 ### 9.3 Path finder
 
-`GetPath(source, target, path)` starts a request, `PathFinderStep` advances
-it; the scene's `InitLoop` runs steps for up to `PFMaxTime = 15` ms per game
-loop. Only one request is open at a time (`GetPath` returns false while
-busy, and the actor asks again next frame).
+**As implemented** by `path3d::PathFinder` (the `m_PF*` state of
+`CAdSceneGeometry`: `request` is `GetPath`, `step` is `PathFinderStep`,
+`run` is `InitLoop`) and `path3d::Path3D` (`CAdPath3D`).
+
+`GetPath(source, target, path)` opens a request, `PathFinderStep` advances
+it, and the scene's `InitLoop` runs steps once per game loop. Only one
+request is open at a time (`GetPath` returns false while busy, and the
+actor asks again next frame).
+
+**Timing.** `InitLoop` means to spend at most `PFMaxTime = 15` ms per loop,
+but it measures with `Game->m_CurrentTime`, which `CBGame::InitLoop` sets
+once per frame and nothing refreshes during the loop: the elapsed time is
+always zero and the loop only ends when the request is done. A request is
+therefore always computed in full during the game loop after the one that
+accepted it; `PathFinder::run` does the same, and open question 8 is
+closed by this.
 
 1. Both ends are lifted: `y = GetHeightAt(p, waypointHeight) +
-   waypointHeight`.
-2. Nodes: source (distance 0), target (infinite), and every point of every
-   active waypoint group (infinite).
-3. A plain Dijkstra: take the unmarked node with the lowest distance; if it
-   is the target, build the path by following the origin links and **drop the
-   first point** (the start); otherwise relax every unmarked node whose
-   straight segment passes `DirectPathExists` (edge length = Euclidean
-   distance).
-4. **Fallback.** If the target was never reached, the request is rerun once
-   (`Rerun = true`) with an *alternate target*: while running, for every
-   edge from the current node to the target found blocked, the shortest such
-   edge supplies `GetBlockIntersection` (the first piercing point on the
-   blocks, in file order), moved back `30` units toward the node. The
-   alternate is also recomputed for edges that were visible but not
-   shorter; the original does this unconditionally, and when no block is
-   hit it produces a bogus point. A faithful port should keep the "blocked
-   edge" condition only and say so.
-5. The path is a list of 3D points; the actor walks them with 8.3.
+   waypointHeight` (a point over no walk plane keeps its own `y`, plus the
+   height).
+2. Nodes, in this order: source (distance 0), target (infinite), every
+   point of every **active** waypoint group (infinite), in file order.
+3. A plain Dijkstra with exact position comparisons: take the unmarked node
+   with the lowest finite distance (the first one on ties) and mark it. If
+   its position **equals** the target's (a waypoint sitting exactly on the
+   target counts), build the path by following the origin links and **drop
+   the first point** (the start); the path is ready. Otherwise, for every
+   unmarked node whose straight segment from the current node passes
+   `DirectPathExists`, relax it when strictly shorter (edge length =
+   Euclidean distance; ties keep the earlier origin).
+4. **Alternate target.** On the first pass, every edge from the current
+   node to a node at the target's position that did *not* relax it
+   (blocked, or free but not shorter) is a candidate: the shortest
+   candidate so far sets the alternate target to `GetBlockIntersection`
+   of that edge, moved `30` units back toward the current node
+   (`ALTERNATE_TARGET_BACKOFF`). When the edge pierces no active block,
+   the intersection is the origin and the alternate target becomes a
+   point 30 units from the origin toward the current node. For a free but
+   longer edge this is harmless, since the target is reached and the
+   alternate never used; for an edge blocked by a **walk plane** (the
+   segment to the target dips through the floor, as toward a target below
+   the plane's extension) that bogus point becomes the route. Reproduced
+   as written, sentinel included: an alternate target that is exactly the
+   origin counts as none. The study's earlier worry about the free-edge
+   case was unfounded; the walk-plane case is the real quirk.
+5. **Fallback.** When no unmarked node with a finite distance is left and
+   the target was never marked: on the first pass, if an alternate target
+   is set, the request is rerun once (`Rerun = true`) from the same source
+   toward it, both ends lifted again by step 1; the rerun computes no
+   alternate and, when it fails too, ends ready with an **empty** path.
+   With no alternate target the path is ready and empty at once. A target
+   inside a block, for instance, yields a walk to a point 30 units short
+   of the block along the shortest blocked approach, which may be the
+   source itself (empty path) or a point behind the actor.
+6. The path is a list of 3D points at waypoint height, the start excluded;
+   a free line gives a single point. The actor walks them with 8.3.
+
+**`CAdPath3D`** (`Path3D`): the points, a cursor starting at `-1` and a
+`ready` flag. `GetFirst` (`first`) rewinds to the first point, or returns
+null for an empty path and leaves the cursor; `GetNext` (`advance`) advances
+and returns the point there, or null past the end (from the initial cursor
+it returns the first point); `GetCurrent` (`current`) is the point under
+the cursor or null; `Reset` clears everything; `SetReady` returns the
+previous flag. A saved game stores the points, the cursor and the flag
+(`Path3D::from_parts`).
+
+**Ownership in Luma.** The original writes the result into the requester's
+own `CAdPath3D`. `PathFinder::request` returns a `Ticket` instead, `run`
+computes the open request, and the holder of the ticket collects the
+result with `take_path` (an actor in `WAITING_PATH` tries every frame; a
+later request supersedes the ticket). `PathFinder::find_path` does the
+three at once. The finder is a value of its own that borrows the
+`SceneGeometry`, owned by the scene beside its geometry; its state is part
+of what the scene saves (8.7).
 
 ### 9.4 Other geometry services
 
 - `Convert2Dto3D`, `Convert2Dto3DTolerant`, `Convert3Dto2D`: section 4.
-- `EnableLights`: section 3.4. `SetLightColor`, `EnableLight`: change the
-  light and re-register all lights.
-- `EnableNode`/`IsNodeEnabled`: by mesh name over blocks, planes and
-  generics.
-- `DropWaypoints`: re-lifts every waypoint (at load and when
-  `WaypointsHeight` changes).
+- `EnableLights`: section 3.4 (the renderer's, task 11). `SetLightColor`,
+  `EnableLight`, `IsLightEnabled`: **as implemented** by
+  `SceneGeometry::set_light_color`, `set_light_enabled` (every light of
+  that name, case-insensitive) and `is_light_enabled` (the first); the
+  original re-registers all lights with the device after a change, Luma's
+  renderer reads the flags when it draws.
+- `EnableNode`/`IsNodeEnabled`: **as implemented** by
+  `SceneGeometry::set_node_enabled` (every node of that name over blocks,
+  planes and generics) and `is_node_enabled` (the first match, blocks
+  first).
+- `DropWaypoints`: **as implemented** by `SceneGeometry::drop_waypoints`,
+  re-lifts every waypoint of every group (at load and when
+  `WaypointsHeight` changes, `set_waypoint_height`). Waypoint groups
+  (`CAdWaypointGroup3D`, `WaypointGroup`): the loader puts all waypoint
+  meshes into one group; a group has an `active` flag that the path
+  finder honours and that nothing in the original changes (no script
+  method, not saved).
 - `Render(showGeometry)`: the debug overlay (wireframes in the colours
   above and the waypoint marker sprite `wpt.sprite`); it also stores the
   matrices and scroll of the frame for the conversions.
@@ -968,6 +1138,10 @@ busy, and the actor asks again next frame).
 ## 10. Rendering
 
 ### 10.1 Render state in 3D
+
+**As implemented** in `luma-render` (the mesh pipelines and `mesh.wgsl`;
+see [rendering.md](rendering.md#3d-pass)); the actor's `BlendMode` is a
+field of each mesh draw, the lights of a draw are chosen by the caller.
 
 `CBRenderD3D::Setup3D` (called whenever a 3D object is about to update or
 draw, `Setup2D` for the others; the renderer tracks which one is current).
@@ -1201,9 +1375,9 @@ the core crates:
 |-------|------|-----|
 | Math with the D3D conventions (matrices, quaternions, project/unproject, the D3DX functions listed in 12.2) | `luma-3d` | **Done**: `luma_3d::math`. |
 | `.X` reader (text, optional binary), `.3ds` reader, `.geometry`, `.act3d`, `.anim` parsers: pure data | `luma-3d` | **Done** except binary `.X`: `luma_3d::three_ds`, `node_patterns`, `xfile`, `model`, `actor3d`; the module crate is re-exported by `luma` as `luma::three_d` under the `3d` feature; `luma-formats` only parses the scene keys. |
-| Model, skeleton, animation channels, CPU skinning, geometry queries, path finder, camera projection, picking | `luma-3d` | No GPU, no game logic, unit-testable. |
-| The 3D pass on wgpu (pipelines, lights, shadows) | `luma-3d::render`, depending on `luma-render` for `Gpu`/`Target` | The 2D `luma-render` stays small. |
-| A small generic extension point in `luma-render` | `luma-render` | See 12.3. |
+| Model, skeleton, animation channels, CPU skinning, geometry queries, path finder, camera projection, picking | `luma-3d` | No GPU, no game logic, unit-testable. **Done** for the skeleton, channels, skinning and the model pick (`luma_3d::animation`). |
+| The mesh pass on wgpu (depth buffer, pipelines, lighting shader, textures with mipmaps) | `luma-render` | **Done**: a `MeshDraw` item of the `DrawList`, see 12.3. Generic (plain matrices, vertices, lights); knows nothing of actors or scenes. |
+| Shadows, the geometry overlay, the conversion of models and lights into mesh draws | `luma-3d`, on the public API of `luma-render` | See 12.4. |
 | `Actor3D` object, its state machine, 2D/3D scene glue, scripts | `luma-adventure`, behind a Cargo feature `3d` | Genre behaviour. |
 | Feature `3d` in `luma` (off by default) that enables `luma-3d` and `luma-adventure/3d` | `luma` | `docs/modules.md`. |
 
@@ -1226,63 +1400,71 @@ wrote itself (`IntersectTriangle`, `PickGetIntersect`,
 
 ### 12.3 `luma-render`
 
-Today it draws a `DrawList` of textured quads in one pass, with no depth
-attachment. A 3D pass needs:
+**As implemented**; the specification is the "3D pass" section of
+[rendering.md](rendering.md#3d-pass). In short:
 
-1. **A depth (and stencil) attachment**, `Depth24PlusStencil8` or
-   `Depth32FloatStencil8`, created with the target, cleared once per frame.
-   2D quads draw with depth test and writes off.
-2. **A way to interleave 3D with the quads**, because a 3D actor is in the
-   middle of the 2D order. Options:
-   (a) the `DrawList` gets a second kind of item, an opaque **custom pass**
-   (`Box<dyn FnOnce(&mut CustomPassContext)>` or an index into a registry
-   the module owns), and the renderer splits the list into segments: a
-   render pass for each run of quads, and a callback for each custom item,
-   all with `LoadOp::Load` on colour and depth. A frame has a few passes,
-   which is fine for a 2D game (but each `Load`/`Store` costs bandwidth on
-   tiled GPUs).
-   (b) one render pass, the module records its draws into the same pass
-   through a callback receiving the `RenderPass`. Fewer passes, but the flat
-   shadow's render-to-texture must then be done *before* the pass.
-   Recommended: (a), with the module free to render its offscreen shadow
-   textures at the beginning of the callback of the first item (they are
-   independent of the visible frame).
-3. **The viewport of the 3D pass** equals the letterboxed rectangle and the
-   scene viewport (scissor) used by the quads, with the projection of 4.1
-   computed from the logical resolution.
-4. Offscreen tests as for 2D (`Offscreen`, read back).
+1. **A depth and stencil buffer** (`Depth24PlusStencil8`), owned by the
+   renderer at the target's size and cleared once per frame with the
+   colour (`CBRenderD3D::Fill`). Quads draw with the depth test and the
+   writes off (`Setup2D`); meshes test `<=` and write (`Setup3D`). The
+   stencil is cleared to zero for the shadow volumes to come.
+2. **Meshes are items of the `DrawList`**, interleaved with the quads:
+   `DrawList::push_mesh(MeshDraw)` records the draw before the quad with
+   the current index, and one render pass draws the list in order (the
+   study's option of a custom pass per segment was dropped: a single pass
+   with two pipelines is simpler and cheaper on tiled GPUs, and the
+   shadow textures of the flat shadows can be rendered before the pass).
+   A `MeshDraw` takes a `MeshHandle` (`Renderer::upload_mesh`, vertices
+   `position, normal, uv` and `u32` indices, front faces clockwise;
+   `update_mesh` for the skinned pose of the frame), an optional index
+   range for a material subset, the world and view-projection matrices as
+   column-major `[[f32; 4]; 4]` (`Mat4::to_cols_array` then
+   `luma_render::matrix`), the texture, the material (diffuse, emissive),
+   the ambient colour, up to 8 `Light`s (point, spot, directional, the
+   model of 3.4 without attenuation), fog, the culling flag and the blend
+   mode.
+3. **The viewport** of the meshes is the quads' (letterboxed or not), so
+   the projection of 4.1 is computed from the logical resolution and the
+   meshes land where the 2D mapping says.
+4. **Textures** for meshes are uploaded with a CPU-built mipmap chain
+   (`Renderer::mesh_texture`) and sampled trilinearly with repeat
+   addressing; the colour key is already alpha `0` and the alpha test cuts
+   it (`ALPHAREF 8`).
+5. Offscreen tests as for 2D (`crates/luma-render/tests/mesh.rs`): a lit
+   textured mesh with directional, ambient, point and spot lights, the
+   culling winding, index ranges, meshes between quads with the depth
+   test, a vertex update between two frames, the alpha test, fog and the
+   letterboxed viewport.
 
-Everything else (pipelines, vertex layouts, uniforms, shadow geometry) can
-live in `luma-3d`.
+`luma-render` does not depend on `luma-3d`: the conversion of a
+`luma_3d::model::Material` into a `MeshMaterial`, of a skinned mesh into
+`MeshVertex`es and of `C3DLight`s into `Light`s is the module's.
 
 ### 12.4 The 3D pass in `luma-3d`
 
-- **Mesh pipeline.** Vertex: position, normal, UV (CPU-skinned each frame
-  into a dynamic buffer); index buffer per mesh; one draw per material
-  subset. Uniforms: world, view-projection (the 4.1 matrix), the light list
-  (up to 8: kind, position, direction, range, spot angles, colour/256),
-  ambient, material (diffuse, emissive), fog, alpha reference, tint, blend
-  mode. Texture: repeat sampler, **trilinear with generated mipmaps** (the
-  2D textures have none), RGBA8 with the magenta key already applied by
-  the image loader.
-- **Lighting shader.** Per-vertex, to match the originals: `colour =
-  emissive + globalAmbient*ambientMat + sum(light terms)` with the
-  light model of 3.4 (no distance attenuation for point lights, spot cone
-  and range as above), `clamp`, then `texture * colour`, alpha from the
-  texture, `discard` below 8/255, then blend. Gouraud interpolation of the
-  vertex colour (do the lighting in the vertex shader). A per-pixel mode is
-  an option later.
-- **Depth.** `LessEqual`, writes on, with the stencil state for shadows.
-- **Fog:** linear on view depth.
+With the mesh pass in `luma-render`, the module's part is the glue and
+the shadows:
+
+- **Mesh conversion.** One `MeshHandle` per `.X` mesh, uploaded at load
+  with the bind-pose vertices; each frame, after skinning,
+  `update_mesh` with the `SkinnedMesh` vertices (already in model space),
+  then one `MeshDraw` per material subset (the index range of its
+  triangles; `triangle_materials` groups them). World matrix: `BObject::
+  GetMatrix` (section 2); view-projection: section 4.1. Light colours are
+  the `0..255` channels divided by 256 (3.4); the light list is the
+  scene's selection (`EnableLights`: all the active lights, or the nearest
+  8 to the object, minus the ignored names), ambient the scene's or the
+  object's override.
 - **Stencil shadows:** shadow volumes built on the CPU every frame from
   the skinned triangles (the algorithm of 10.4) into a dynamic buffer; two
   draws with `IncrementClamp`/`DecrementClamp` on depth pass (cull-mode
   switch), then a full-screen quad with stencil test `>= 1` and stencil pass
   op `Zero`, which clears the stencil without a clear call. The depth prepass
-  of receiver meshes is a depth-only pipeline.
+  of receiver meshes is a depth-only pipeline. These need stencil states
+  and a depth-only pipeline added to `luma-render` (task 12b).
 - **Flat shadows:** a pre-pass renders the actor into a 512x512 texture
   (own depth buffer) before the main pass; the floor quad samples it with a
-  projective matrix.
+  projective matrix (task 12c).
 - **Picking** needs the skinned triangles on the CPU: same buffers, kept.
 
 ### 12.5 `luma-adventure`
@@ -1370,15 +1552,15 @@ read first.
 | 5 | **`.3ds` geometry and `.geometry`.** The chunk walker of 3.2 into planes, blocks, generics, waypoint points, cameras, lights; the node patterns; scene keys of 3.1 in `luma_formats::scene`. `docs/formats/geometry.md`. **Done** (`luma_3d::three_ds`, `node_patterns`, `scene_geometry`). | `3DLoader3DS.cpp`, `3DS_chunks.h`, `AdSceneGeometry.cpp` (`LoadFile`), `AdGeomExt*.cpp`, `AdWaypointGroup3D.cpp`, `3DMesh.cpp`, `3DLight.cpp` | M | 1 |
 | 6 | **`.act3d` and `.anim`.** Parser to a typed definition, TEMPLATE, defaults, `ANIMATION`/`EVENT`, obsolete keys. `docs/formats/actor3d.md`. **Done** (`luma_3d::actor3d`). | `AdActor3DX.cpp` (`LoadBuffer`, `ParseEffect`, `MergeAnimations2`), `XModel.cpp` (`ParseAnim`, `ParseEvent`), `AdActor3D.cpp` (`IsActorX`) | S | |
 | 7 | **Camera and the 2D/3D mapping.** View and projection of 4.1 for a scene (`Camera`, viewport, scroll, layer size, `SCROLL_3D_COMPATIBILITY`, `FOV_OVERRIDE`, clip planes), `convert_2d_to_3d` (exact and tolerant), `convert_3d_to_2d`, the object's 2D position. **Done** (`luma_3d::camera`; the object's 2D position is `Projection::project` of its origin, to be called by task 14). | `BRenderD3D.cpp` (`SetProjection`, `GetProjectionParams`), `AdSceneGeometry.cpp` (`Convert*`, `StoreDrawingParams`), `AdObject3D.cpp`, `AdGame.cpp` (`GetLayerSize`), `AdScene.cpp` (`ScrollTo`) | M | 1, 5 |
-| 8 | **Geometry queries and the 3D path finder.** `DirectPathExists`, `GetBlockIntersection`, Dijkstra with the alternate-target rerun. Decide per quirk (9.2, 9.3) whether to reproduce. Already done with task 5: `GetHeightAt` (`SceneGeometry::height_at`), `DropWaypoints`, node enabling, the triangle tests of 9.2 (`math::intersect_triangle`, `pick_get_intersect`). | `AdSceneGeometry.cpp`, `3DUtils.cpp` (`IntersectTriangle`, `PickGetIntersect`), `AdPath3D.cpp`, `AdPathPoint3D.cpp` | M | 5 |
-| 9 | **Skeleton animation and skinning.** Frame hierarchy and matrices, channels, active animations, blending slots, events, transition-time table, looping and finish rules, CPU skinning, bounding box, ray/triangle picking of a posed model, bone matrices and positions. | `XFrameNode.cpp`, `XModel.cpp`, `XAnimationChannel.cpp`, `XActiveAnimation.cpp`, `XAnimation.cpp` (`Update`), `XAnimationSet.cpp`, `XMesh.cpp` (`Update`, `PickPoly`) | L | 3 |
+| 8 | **Geometry queries and the 3D path finder.** `DirectPathExists`, `GetBlockIntersection`, Dijkstra with the alternate-target rerun, the waypoint groups, the light toggles, the path an actor consumes. Every quirk of 9.2 and 9.3 is reproduced. **Done** (`luma_3d::path3d`, `SceneGeometry::direct_path_exists`, `block_intersection`, `set_light_enabled`, `set_light_color`). | `AdSceneGeometry.cpp`, `3DUtils.cpp` (`IntersectTriangle`, `PickGetIntersect`), `AdPath3D.cpp`, `AdPathPoint3D.cpp` | M | 5 |
+| 9 | **Skeleton animation and skinning.** Frame hierarchy and matrices, channels, active animations, blending slots, events, transition-time table, looping and finish rules, CPU skinning, bounding box, ray/triangle picking of a posed model, bone matrices and positions. **Done** (`luma_3d::animation`, section 7); the 2D bone positions need the camera of task 14, the welded adjacency goes to task 12b. | `XFrameNode.cpp`, `XModel.cpp`, `XAnimationChannel.cpp`, `XActiveAnimation.cpp`, `XAnimation.cpp` (`Update`), `XAnimationSet.cpp`, `XMesh.cpp` (`Update`, `PickPoly`) | L | 3 |
 
 ### Phase B: drawing
 
 | # | Task | WME files | Size | After |
 |---|------|-----------|------|-------|
-| 10 | **`luma-render` extension.** Depth/stencil attachment, `DrawList` custom items with the segment splitting of 12.3, tests that a custom pass sees the right depth and viewport. | `BRenderD3D.cpp` (`Fill`, `Setup2D`/`Setup3D`) | M | |
-| 11 | **Mesh pass.** Pipelines, dynamic skinned buffers, materials and textures with mipmaps and the colour key, lights (selection, model of 3.4), ambient, fog, alpha test and blend mode, culling option; the geometry debug overlay (`Scene.ShowGeometry`) as the validation tool for task 7. | `BRenderD3D.cpp` (`Setup3D`), `XMesh.cpp` (`Render`), `3DMaterial.cpp`, `3DLight.cpp`, `AdSceneGeometry.cpp` (`Render`, `EnableLights`, `CreateLights`) | L | 7, 9, 10 |
+| 10 | **`luma-render` extension.** Depth/stencil buffer cleared once per frame, quads without depth, `MeshDraw` items of the `DrawList` drawn in order in the same pass, mesh upload and per-frame vertex update, tests of the depth test among meshes and of the viewport. **Done** (12.3, [rendering.md](rendering.md#3d-pass)). | `BRenderD3D.cpp` (`Fill`, `Setup2D`/`Setup3D`) | M | |
+| 11 | **Mesh pass.** Pipelines, dynamic skinned buffers, materials and textures with mipmaps and the colour key, lights (model of 3.4), ambient, fog, alpha test and blend mode, culling option. **Done** in `luma-render` (shader `mesh.wgsl`); the light *selection* per object (`EnableLights`) and the geometry debug overlay (`Scene.ShowGeometry`, the validation tool for task 7) move to task 13, which has the scene. | `BRenderD3D.cpp` (`Setup3D`), `XMesh.cpp` (`Render`), `3DMaterial.cpp`, `3DLight.cpp`, `AdSceneGeometry.cpp` (`Render`, `EnableLights`, `CreateLights`) | L | 7, 9, 10 |
 | 12a | **Simple shadows.** | `3DShadowGen.cpp` (`RenderSimple`) | S | 11 |
 | 12b | **Stencil shadows.** CPU shadow volumes, stencil passes, receiver depth prepass, attachments, `SHADOW_MODEL`. | `3DShadowVolume.cpp`, `AdActor3DX.cpp` (`DisplayShadowVolume`), `AdSceneGeometry.cpp` (`RenderShadowGeometry`), `XMesh.cpp` (`UpdateShadowVol`), `AdScene.cpp` (`TraverseNodes`) | M | 11, 9 |
 | 12c | **Flat shadows.** Light-view pre-pass to texture, projective floor quad. | `3DShadowGen.cpp` (`Render`, `SetAdjustedProjectionMatrix`, `SetTextureMatrixStage0Stage1`) | M | 11 |
@@ -1450,9 +1632,9 @@ models are not part of it.
    nudge): an approximation by a planar projection of the vertices onto
    `y = actor.y` is much simpler (no pre-pass) and probably close; is the
    difference acceptable?
-8. **Path-finder time budget.** 15 ms per frame in the original; Luma can
-   run it to completion at once. Behaviour differs only in timing when
-   several actors path-find in one frame.
+8. **Path-finder time budget.** Closed: the original's 15 ms budget is
+   dead code (9.3), the request always runs to completion in one game
+   loop, and `PathFinder::run` does the same.
 9. **Resolution mismatch.** The camera is defined against the runtime
    resolution and the main layer (4.1). A game running at another resolution
    than its scenes were laid out for would shift; check the sample scenes
