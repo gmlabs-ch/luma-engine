@@ -954,6 +954,8 @@ impl Actor {
             scale: self.scale(scene),
             tint: self.tint(scene),
             stick: None,
+            before: Vec::new(),
+            after: Vec::new(),
         })
     }
 

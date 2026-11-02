@@ -13,6 +13,7 @@ use luma_formats::{Rgb, Sprite};
 use luma_render::{DrawList, Quad, Rect};
 use luma_script::NativeId;
 
+use crate::objects::Kind;
 use crate::scene_view::{AnimState, DrawItem, EntityRef, SpriteBank, key};
 use crate::world::World;
 
@@ -67,6 +68,8 @@ pub(crate) enum HitBank {
     Scene,
     Actor(NativeId),
     Ui,
+    /// The bank of the game's own entities and attachments.
+    Game,
 }
 
 /// Where an object can be hit, as the engine registers it while drawing
@@ -388,10 +391,9 @@ impl World {
             return;
         };
         let camera = self.camera();
-        let free_actors = self.free_actors();
+        let free_objects = self.free_objects();
         let positions: Vec<crate::scene_view::FreeObject> =
-            free_actors.iter().map(|(_, o)| *o).collect();
-        let active_actors: Vec<NativeId> = free_actors.iter().map(|(id, _)| *id).collect();
+            free_objects.iter().map(|(_, o)| *o).collect();
         for item in view.draw_order(&positions, |i| self.free_entity_stick(i)) {
             let layer = &view.scene.layers[item.layer()];
             let (ox, oy) = camera.layer_offset(&view.scene, layer);
@@ -410,11 +412,56 @@ impl World {
                     }
                 }
                 DrawItem::Other { index, .. } => {
-                    if let Some(id) = active_actors.get(index) {
-                        self.actor_hits(*id, layer_offset, hits);
+                    let Some((id, _)) = free_objects.get(index) else {
+                        continue;
+                    };
+                    match self.objects.get(*id).map(|n| n.kind.clone()) {
+                        Some(Kind::Actor) => self.actor_hits(*id, layer_offset, hits),
+                        Some(Kind::Entity(r)) => self.entity_hits(*id, r, layer_offset, hits),
+                        _ => {}
                     }
                 }
             }
+        }
+    }
+
+    /// The hit areas of an object's attachments, registered as the
+    /// object itself (`m_RegisterAlias`), around its position with its
+    /// scale.
+    fn attachment_hits(
+        &self,
+        owner: NativeId,
+        x: i32,
+        y: i32,
+        scale: f32,
+        layer_offset: (i32, i32),
+        hits: &mut Vec<HitArea>,
+    ) {
+        let Some(state) = self.object_state(owner) else {
+            return;
+        };
+        for attachment in &state.attachments {
+            let Some(Kind::Entity(r)) = self.objects.get(attachment.id).map(|n| &n.kind) else {
+                continue;
+            };
+            let view = &self.game_view;
+            let Some(entity) = view.entity(*r).filter(|e| e.active) else {
+                continue;
+            };
+            let Some(loaded) = view.shown_sprite(*r).and_then(|p| view.sprite(&p)) else {
+                continue;
+            };
+            World::sprite_hits(
+                owner,
+                HitBank::Game,
+                &loaded.sprite,
+                view.frame_of(*r),
+                x + (entity.x as f32 * scale / 100.0) as i32,
+                y + (entity.y as f32 * scale / 100.0) as i32,
+                scale,
+                layer_offset,
+                hits,
+            );
         }
     }
 
@@ -492,7 +539,16 @@ impl World {
         layer_offset: (i32, i32),
         hits: &mut Vec<HitArea>,
     ) {
-        let Some(view) = &self.scene else { return };
+        // A game-level entity lives in the game's view and is scaled by
+        // the scene it is shown in.
+        let (view, bank) = match r {
+            EntityRef::Game(_) => (&self.game_view, HitBank::Game),
+            _ => match &self.scene {
+                Some(view) => (view, HitBank::Scene),
+                None => return,
+            },
+        };
+        let levels = self.scene.as_ref().map_or(&view.scene, |v| &v.scene);
         let Some(entity) = view.entity(r) else { return };
         if !entity.active || !entity.interactive {
             return;
@@ -500,6 +556,8 @@ impl World {
         if entity.ignore_items && self.selected_item.is_some() {
             return;
         }
+        let scale = levels.entity_scale(entity);
+        self.attachment_hits(id, entity.x, entity.y, scale, layer_offset, hits);
         // The region's points are scene coordinates, registered with the
         // offset of the layer the entity is drawn in (`CAdEntity::Display`
         // hands `Game->m_OffsetX/Y` to the active rectangle), so a scene
@@ -520,12 +578,12 @@ impl World {
         };
         World::sprite_hits(
             id,
-            HitBank::Scene,
+            bank,
             &loaded.sprite,
             view.frame_of(r),
             entity.x,
             entity.y,
-            view.scene.entity_scale(entity),
+            scale,
             layer_offset,
             hits,
         );
@@ -537,6 +595,14 @@ impl World {
         if !actor.def.interactive || (actor.def.ignore_items && self.selected_item.is_some()) {
             return;
         }
+        self.attachment_hits(
+            id,
+            actor.x,
+            actor.y,
+            actor.scale(&view.scene),
+            layer_offset,
+            hits,
+        );
         let Some(path) = actor.current_sprite() else {
             return;
         };
@@ -605,6 +671,11 @@ impl World {
                                 .actor_and_vfs(*actor)
                                 .and_then(|(vfs, a)| a.bank.mask(vfs, image, *color_key).cloned()),
                             HitBank::Ui => self.ui.bank.mask(&self.vfs, image, *color_key).cloned(),
+                            HitBank::Game => self
+                                .game_view
+                                .bank
+                                .mask(&self.vfs, image, *color_key)
+                                .cloned(),
                         };
                         let Some(mask) = mask else { continue };
                         let (sw, sh) =
@@ -662,6 +733,11 @@ impl World {
                             .actor_and_vfs(*actor)
                             .and_then(|(vfs, a)| a.bank.mask(vfs, image, *color_key).cloned()),
                         HitBank::Ui => self.ui.bank.mask(&self.vfs, image, *color_key).cloned(),
+                        HitBank::Game => self
+                            .game_view
+                            .bank
+                            .mask(&self.vfs, image, *color_key)
+                            .cloned(),
                     };
                     let Some(mask) = mask else { continue };
                     let (sx, sy, sw, sh) =

@@ -35,6 +35,8 @@ A saved game holds:
   remembered of the persistent scenes (see
   [game-loop.md](game-loop.md#scene-state-between-visits));
 - the view: scroll offset, target, auto-scroll settings;
+- the game's own entities and the attachments (`Game.CreateEntity`,
+  `Game.LoadEntity`, `AddAttachment`) with their sprites' state;
 - the actors with their position, direction, state, path, animation and
   sentence;
 - the inventory: the items as the scripts modified them, those taken,

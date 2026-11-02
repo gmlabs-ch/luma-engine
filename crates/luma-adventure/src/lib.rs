@@ -70,14 +70,14 @@ pub use fader::{Fader, SCENE_FADE_MS};
 pub use input::{Cursors, Keyboard, Mouse};
 pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;
-pub use objects::{Kind, Native, ObjectState, Objects};
+pub use objects::{Attachment, Kind, Native, ObjectState, Objects};
 pub use path::Floor;
 pub use responses::{Response, ResponseKind, Responses};
 pub use save::{SAVE_EXTENSION, SaveHeader, read_save_header};
 pub use scene_state::{NodeState, SceneState, state_key};
 pub use scene_view::{
-    AnimState, Camera, DrawItem, Drawable, EntityRef, EntityTalk, LoadedSprite, Mask, SceneView,
-    SpriteBank, draw_object, frame_height, place,
+    AnimState, AttachedDraws, Camera, DrawItem, Drawable, EntityRef, EntityTalk, FreeObject,
+    LoadedSprite, Mask, SceneView, SpriteBank, draw_object, frame_height, place,
 };
 pub use settings::{GameSettings, SETTINGS_FILE};
 pub use sound::{MUSIC_CHANNELS, MusicChannel, ObjectSfx, ObjectSound, Sounds};

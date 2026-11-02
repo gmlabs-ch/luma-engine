@@ -264,17 +264,17 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdGame.cpp
 - Hierarchy and Luma: CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `responses.rs`, `inventory.rs`)
-- Count: 56 done, 9 todo, 0 no-op
+- Count: 58 done, 7 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `ChangeScene` | method | **done** | Changes scene at the start of the next frame (scene file, fade-in flag). |
 | `LoadActor` | method | **done** | Loads a 2D actor from an `.actor` file and returns it. |
 | `LoadActor3D` | method | **todo** | Loads a 3D actor (`.actor3d`, X model). 3D is not implemented. |
-| `LoadEntity` | method | **todo** | Loads an entity from an `.entity` file at runtime. Stubbed. |
+| `LoadEntity` | method | **done** | Loads an entity from an `.entity` file as an entity of the game, kept across scene changes (`TEMPLATE` is not followed). |
 | `UnloadObject`, `UnloadActor`, `UnloadEntity`, `DeleteEntity` | method | **done** | Unloads an actor or entity loaded at runtime. |
 | `UnloadActor3D` | method | **todo** | Unloads a 3D actor. 3D is not implemented. |
-| `CreateEntity` | method | **todo** | Creates an empty entity at runtime. Stubbed. |
+| `CreateEntity` | method | **done** | Creates an empty entity of the game, kept across scene changes. |
 | `CreateItem` | method | **done** | Creates an inventory item at runtime. |
 | `DeleteItem` | method | **done** | Deletes an inventory item. |
 | `QueryItem` | method | **done** | Returns an item by name or index. |
@@ -435,7 +435,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdObject.cpp
 - Hierarchy and Luma: CBObject → CAdObject → CAdTalkHolder / CAdObject3D; Luma: entities, actors (`entity_call`, `actor_call`)
-- Count: 34 done, 7 todo, 0 no-op
+- Count: 38 done, 3 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -450,9 +450,9 @@ How the list was made. For every class with a script interface, the names tested
 | `TakeItem`, `DropItem`, `GetItem`, `HasItem` | method | **done** | Inventory handling (shared inventory in Luma). |
 | `CreateParticleEmitter` | method | **todo** | Creates a particle emitter attached to the object. Particles are not implemented. |
 | `DeleteParticleEmitter` | method | **todo** | Deletes the object's emitter. |
-| `AddAttachment` | method | **todo** | Attaches a sprite or 3D model to the object (file, bone/offset, ...). Stubbed. |
-| `RemoveAttachment` | method | **todo** | Removes an attachment. |
-| `GetAttachment` | method | **todo** | Returns an attachment by index or name. Luma returns null. |
+| `AddAttachment` | method | **done** | Attaches an entity file to the object (file, pre-display flag, offset), drawn before or after it, scaled and tinted with it, hit as it. |
+| `RemoveAttachment` | method | **done** | Removes an attachment, by object or by name. |
+| `GetAttachment` | method | **done** | Returns an attachment by index (those drawn before first) or by name. |
 | `Type` | get | **done** | Class name of the object. |
 | `Active` | get/set | **done** | Whether the object is shown and active. |
 | `IgnoreItems` | get/set | **done** | Whether a selected item may be used on the object. |
@@ -460,7 +460,7 @@ How the list was made. For every class with a script interface, the names tested
 | `SubtitlesWidth`, `SubtitlesPosRelative`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosXCenter` | get/set | **done** | Placement of the object's subtitles. |
 | `NumItems` | get | **done** | Number of items in the object's inventory. |
 | `ParticleEmitter` | get | **todo** | The object's particle emitter. Luma reads null. |
-| `NumAttachments` | get | **todo** | Number of attachments. Luma reads 0. |
+| `NumAttachments` | get | **done** | Number of attachments. |
 
 ### CAdTalkHolder (base of actors, entities, items)
 
@@ -1032,14 +1032,14 @@ How the list was made. For every class with a script interface, the names tested
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 55 | 17 | 0 | 72 |
 | CBGame | 90 | 58 | 17 | 165 |
-| CAdGame | 56 | 9 | 0 | 65 |
+| CAdGame | 58 | 7 | 0 | 65 |
 | Window hook defined in CAdGame | 0 | 1 | 0 | 1 |
 | CAdScene | 52 | 29 | 2 | 83 |
 | CAdLayer | 18 | 0 | 0 | 18 |
 | CBRegion | 11 | 0 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
 | CAdWaypointGroup | 3 | 0 | 0 | 3 |
-| CAdObject | 34 | 7 | 0 | 41 |
+| CAdObject | 38 | 3 | 0 | 41 |
 | CAdTalkHolder | 7 | 0 | 0 | 7 |
 | CAdActor | 23 | 0 | 0 | 23 |
 | CAdEntity | 14 | 6 | 0 | 20 |
@@ -1070,9 +1070,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **598** | **529** | **29** | **1156** |
+| **All** | **604** | **523** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 583 done, 520 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 589 done, 514 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1106,7 +1106,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 |-------|-----:|----------------|
 | Game services | 46 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
 | Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
-| Object model (2D) | 8 | Game-level entities (`Game.CreateEntity`, `Game.LoadEntity`), attachments, per-object inventories. Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene content created at run time, `StickToRegion`. |
+| Object model (2D) | 2 | Per-object inventories (`Game.InventoryObject`). Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items, region points, waypoint groups, entity regions, scene and game content created at run time, `StickToRegion`, attachments. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Sprites and frames | 48 | Frame and sub-frame objects (`GetFrame`, `AddFrame`, `Delay`, `MoveX`, hotspots...), runtime-built sprites, frame events. Reads on the sprite format already exist in `luma-formats`. |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
@@ -1116,7 +1116,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **529** | |
+| **All** | **523** | |
 
 ## Members in Luma that WME 1.x does not define
 

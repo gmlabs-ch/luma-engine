@@ -387,6 +387,33 @@ changes, so a saved game brings the created content back (see
 created entities by name like the file's, and ignores them when the
 scene reloads without them.
 
+## Entities of the game, and attachments
+
+`Game.CreateEntity(name)` and `Game.LoadEntity(file)` make entities that
+belong to the game rather than to a scene (the original engine's
+`CAdGame::m_Objects`), as `Game.LoadActor` does for actors: they are
+drawn among the scene's free objects, scaled and tinted by the scene
+they are shown in, updated every frame, and they stay when the scene
+changes, reset like the game's actors (their sentence and `PlayAnim`
+end, their scripts' waits are cut). `Game.UnloadObject` removes one.
+Luma keeps them in a view of their own (`World::game_view`), named by
+`EntityRef::Game`, with their sprites.
+
+`AddAttachment(file, preDisplay, x, y)` on an actor or an entity loads an
+entity file as an attachment of the object (`CAdObject::m_AttachmentsPre`,
+`m_AttachmentsPost`): an entity of the game, drawn right before
+(`preDisplay`, the default) or right after the object's own sprite, at
+the object's position plus `(x, y)` scaled by the object's scale, with
+the object's scale and tint, and registered for the mouse as the object
+itself (`m_RegisterAlias`). It animates on its own and is a script
+object (`GetAttachment(index)`, those drawn before first, or
+`GetAttachment(name)`; `NumAttachments`), so a script may change its
+sprite or play an animation on it. `RemoveAttachment(object)` or
+`RemoveAttachment(name)` removes it; the attachments of an object go
+with the object, so a scene entity's are removed when the scene
+changes while a game entity's or an actor's stay. The file's `TEMPLATE`
+is not followed. An attachment's own attachments are not drawn.
+
 `StickToRegion(region)` on an actor or a free entity (the region of the
 main layer by object or by name, `null` to unstick) draws the object
 in that region's slot of the drawing order whatever its position, until

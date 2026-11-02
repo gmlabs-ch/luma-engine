@@ -63,8 +63,6 @@ const GAME_STUBS: &[&str] = &[
     "ShowStatusLine",
     "HideStatusLine",
     "LoadInventoryBox",
-    "LoadEntity",
-    "CreateEntity",
     "Reset",
     "AccOutputText",
     "DumpTextureStats",
@@ -77,8 +75,6 @@ const OBJECT_STUBS: &[&str] = &[
     "PlayAnimAsync",
     "CreateParticleEmitter",
     "DeleteParticleEmitter",
-    "AddAttachment",
-    "RemoveAttachment",
 ];
 
 impl World {
@@ -177,7 +173,7 @@ impl World {
         if let Some(ret) = self.holder_call(id, name, args, &mut ctx) {
             return Some(ret);
         }
-        if let Some(ret) = self.object_call(id, name, args) {
+        if let Some(ret) = self.object_call(id, name, args, ctx.engine) {
             return Some(ret);
         }
         match kind {
@@ -521,6 +517,19 @@ impl World {
             "LoadActor" => {
                 let path = arg(0).get_string(self);
                 Return::value(native_or_null(self.load_actor(ctx.engine, &path, false)))
+            }
+            "LoadEntity" => {
+                let path = arg(0).get_string(self);
+                Return::value(native_or_null(self.load_game_entity(ctx.engine, &path)))
+            }
+            "CreateEntity" => {
+                let entity_name = match arg(0) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                Return::value(Value::Native(
+                    self.create_game_entity(ctx.engine, entity_name.as_deref()),
+                ))
             }
             "UnloadObject" | "UnloadActor" | "UnloadEntity" | "DeleteEntity" => {
                 if let Some(id) = arg(0).as_native() {
@@ -1035,15 +1044,19 @@ impl World {
     /// The height of an entity's current frame (`CAdObject::GetHeight`):
     /// the largest hotspot `y` of its sub-frames, scaled with the entity.
     pub(crate) fn entity_height(&self, r: EntityRef) -> i32 {
-        let Some(view) = self.scene() else { return 0 };
+        let Some(view) = self.view_of(r) else {
+            return 0;
+        };
         let Some(entity) = view.entity(r) else {
             return 0;
         };
         let Some(loaded) = entity.sprite.as_deref().and_then(|p| view.sprite(p)) else {
             return 0;
         };
+        // A game-level entity is scaled by the scene it is shown in.
+        let levels = self.scene().map_or(&view.scene, |v| &v.scene);
         let zoom = if entity.scalable {
-            view.scene.zoom_at(entity.x, entity.y)
+            levels.zoom_at(entity.x, entity.y)
         } else {
             100.0
         };
@@ -1182,7 +1195,7 @@ impl World {
             "X" => Value::Int(e.x),
             "Y" => Value::Int(e.y),
             "Height" => Value::Int(self.entity_height(r)),
-            "Ready" => Value::Bool(!self.scene().is_some_and(|v| v.is_talking(r))),
+            "Ready" => Value::Bool(!self.view_of(r).is_some_and(|v| v.is_talking(r))),
             "Registrable" | "Interactive" => Value::Bool(e.interactive),
             "Zoomable" | "Scalable" => Value::Bool(e.scalable),
             "Rotatable" => Value::Bool(e.rotatable),
@@ -1209,7 +1222,6 @@ impl World {
                 Value::Bool(self.subtitle_mods_of(r).is_none_or(|m| m.x_center))
             }
             "NumItems" => Value::Int(self.inventory.taken.len() as i32),
-            "NumAttachments" => Value::Int(0),
             "ParticleEmitter" => Value::Null,
             "Item" => e.item.clone().map_or(Value::Null, Value::from),
             "Subtype" => Value::from(match e.kind {
@@ -1234,7 +1246,7 @@ impl World {
         let caption = self.expand(&text);
         let is_null = value.is_null();
         if name.starts_with("Subtitles") {
-            let Some(view) = self.scene_mut() else {
+            let Some(view) = self.view_of_mut(r) else {
                 return false;
             };
             let mods = view.subtitles.entry(r).or_default();
@@ -1304,9 +1316,9 @@ impl World {
                 };
                 let ok = match (&path, r) {
                     (Some(path), EntityRef::Ui(_)) => self.ui.bank.add_sprite(&self.vfs, path),
-                    (Some(path), _) => match self.scene.as_mut() {
-                        Some(view) => view.add_sprite(&self.vfs, path),
-                        None => true,
+                    (Some(path), r) => match self.view_and_vfs(r) {
+                        (vfs, Some(view)) => view.add_sprite(vfs, path),
+                        (_, None) => true,
                     },
                     (None, _) => true,
                 };
@@ -1332,9 +1344,9 @@ impl World {
             }
             "PlayAnim" | "PlayAnimAsync" => {
                 let path = arg(0).get_string(self);
-                let ok = match (r, self.scene.as_mut()) {
-                    (EntityRef::Ui(_), _) | (_, None) => false,
-                    (r, Some(view)) => view.play_anim(&self.vfs, r, &path),
+                let ok = match (r, self.view_and_vfs(r)) {
+                    (EntityRef::Ui(_), _) | (_, (_, None)) => false,
+                    (r, (vfs, Some(view))) => view.play_anim(vfs, r, &path),
                 };
                 if !ok {
                     let who = self.describe(id);
@@ -1358,7 +1370,13 @@ impl World {
             "AddTalkSprite" | "SetTalkSprite" | "RemoveTalkSprite" => {
                 let path = arg(0).get_string(self);
                 let special = arg(1).get_bool(self);
-                let ok = match (r, self.scene.as_mut()) {
+                let vfs = &self.vfs;
+                let view = match r {
+                    EntityRef::Game(_) => Some(&mut self.game_view),
+                    EntityRef::Ui(_) => None,
+                    _ => self.scene.as_mut(),
+                };
+                let ok = match (r, view) {
                     (EntityRef::Ui(_), _) => {
                         // A container's entity does not talk; its sets are
                         // kept all the same.
@@ -1385,8 +1403,8 @@ impl World {
                     }
                     (_, None) => false,
                     (r, Some(view)) => match name {
-                        "AddTalkSprite" => view.add_talk_sprite(&self.vfs, r, &path, special),
-                        "SetTalkSprite" => view.set_talk_sprite(&self.vfs, r, &path, special),
+                        "AddTalkSprite" => view.add_talk_sprite(vfs, r, &path, special),
+                        "SetTalkSprite" => view.set_talk_sprite(vfs, r, &path, special),
                         _ => {
                             view.remove_talk_sprite(r, &path, special);
                             true
@@ -1414,7 +1432,6 @@ impl World {
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
                 return Some(self.inventory_call(name, args));
             }
-            "GetAttachment" => Return::null(),
             "CreateRegion" => Return::value(native_or_null(self.create_entity_region(id))),
             "DeleteRegion" => Return::value(self.delete_entity_region(id)),
             _ if OBJECT_STUBS.contains(&name) => {
@@ -1471,7 +1488,7 @@ impl World {
                 self.ui_entities.get(*i).and_then(|e| e.anim.as_ref()),
             ),
             Kind::Entity(r) => {
-                let view = self.scene()?;
+                let view = self.view_of(*r)?;
                 (path.clone(), view.sprite(&path), view.anim(*r))
             }
             Kind::Actor => {
@@ -1506,7 +1523,7 @@ impl World {
                 }
                 Some(anim)
             }
-            Kind::Entity(r) => self.scene_mut()?.anim_mut(r),
+            Kind::Entity(r) => self.view_of_mut(r)?.anim_mut(r),
             Kind::Actor => Some(self.actor_mut(owner)?.anim(&path)),
             Kind::Item => {
                 let item = self.item_mut(owner)?;
@@ -1635,7 +1652,7 @@ impl World {
                 match kind {
                     // An entity's `Reset` ends a `PlayAnim` too.
                     Kind::Entity(r) if !matches!(r, EntityRef::Ui(_)) => {
-                        if let Some(view) = self.scene_mut() {
+                        if let Some(view) = self.view_of_mut(r) {
                             view.reset_anim(r);
                         }
                     }
@@ -1705,7 +1722,7 @@ fn math_call(name: &str, args: &[Value]) -> Option<Value> {
 impl World {
     /// The subtitle placement scripts set on a scene entity.
     fn subtitle_mods_of(&self, r: EntityRef) -> Option<&crate::talk::SubtitleMods> {
-        self.scene().and_then(|v| v.subtitles.get(&r))
+        self.view_of(r).and_then(|v| v.subtitles.get(&r))
     }
 
     /// Restarts the animation of an entity's sprite (`SetSprite`, `Reset`).
@@ -1717,7 +1734,7 @@ impl World {
                 }
             }
             r => {
-                if let Some(view) = self.scene_mut() {
+                if let Some(view) = self.view_of_mut(r) {
                     view.reset_anim(r);
                 }
             }

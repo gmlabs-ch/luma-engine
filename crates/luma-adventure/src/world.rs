@@ -48,6 +48,10 @@ pub struct World {
     pub(crate) scene_viewport: Option<(i32, i32, i32, i32)>,
     pub(crate) scene_id: NativeId,
     pub(crate) scene: Option<SceneView>,
+    /// The game's own entities (`Game.CreateEntity`, `Game.LoadEntity`,
+    /// attachments), which survive scene changes, with their sprites and
+    /// states; named by `EntityRef::Game`.
+    pub(crate) game_view: SceneView,
     pub(crate) prev_scene_name: String,
     pub(crate) prev_scene_filename: String,
     pub(crate) scheduled_scene: Option<(String, bool)>,
@@ -155,6 +159,7 @@ impl World {
             scene_viewport,
             scene_id,
             scene: None,
+            game_view: SceneView::game_level(),
             prev_scene_name: String::new(),
             prev_scene_filename: String::new(),
             scheduled_scene: None,
@@ -571,8 +576,14 @@ impl World {
                 self.remove_free_entity(engine, id, index);
                 return true;
             }
+            Some(Kind::Entity(crate::scene_view::EntityRef::Game(index))) => {
+                let index = *index;
+                self.remove_game_entity(engine, id, index);
+                return true;
+            }
             _ => return false,
         }
+        self.remove_attachments_of(engine, id);
         for script in engine.scripts_of(id) {
             engine.finish(script, true);
         }
@@ -691,13 +702,59 @@ impl World {
         self.collect_sentences();
     }
 
-    /// One frame of the scene's entities: animations and sentences.
+    /// One frame of the scene's entities and of the game's: animations
+    /// and sentences.
     pub fn update_scene(&mut self) {
         let timer = self.timer;
         let random = self.next_random();
         if let Some(view) = self.scene.as_mut() {
             view.advance_with(timer, random);
         }
+        let random = self.next_random();
+        self.game_view.advance_with(timer, random);
+    }
+
+    /// The view an entity lives in: the scene's for its nodes and free
+    /// entities, the game's for the game-level ones; none for a
+    /// container's entity.
+    pub(crate) fn view_of(&self, r: crate::scene_view::EntityRef) -> Option<&SceneView> {
+        match r {
+            crate::scene_view::EntityRef::Game(_) => Some(&self.game_view),
+            crate::scene_view::EntityRef::Ui(_) => None,
+            _ => self.scene.as_ref(),
+        }
+    }
+
+    /// See [`World::view_of`].
+    pub(crate) fn view_of_mut(
+        &mut self,
+        r: crate::scene_view::EntityRef,
+    ) -> Option<&mut SceneView> {
+        match r {
+            crate::scene_view::EntityRef::Game(_) => Some(&mut self.game_view),
+            crate::scene_view::EntityRef::Ui(_) => None,
+            _ => self.scene.as_mut(),
+        }
+    }
+
+    /// The view an entity lives in, mutable, with the game's files, for
+    /// loading sprites into it.
+    pub(crate) fn view_and_vfs(
+        &mut self,
+        r: crate::scene_view::EntityRef,
+    ) -> (&Vfs, Option<&mut SceneView>) {
+        let view = match r {
+            crate::scene_view::EntityRef::Game(_) => Some(&mut self.game_view),
+            crate::scene_view::EntityRef::Ui(_) => None,
+            _ => self.scene.as_mut(),
+        };
+        (&self.vfs, view)
+    }
+
+    /// The game's own entities (`Game.CreateEntity`, `Game.LoadEntity`,
+    /// attachments) with their states.
+    pub fn game_view(&self) -> &SceneView {
+        &self.game_view
     }
 
     /// Raises the queued events on their objects.
@@ -750,7 +807,7 @@ impl World {
                 Some((actor.x, actor.y - height / 2))
             }
             Kind::Entity(r) => {
-                let e = self.scene()?.entity(*r)?;
+                let e = self.entity_def(*r)?;
                 Some((e.x, e.y - self.entity_height(*r) / 2))
             }
             Kind::Region { layer, index } => {
@@ -768,21 +825,71 @@ impl World {
         let Some(view) = &self.scene else {
             return Vec::new();
         };
-        self.actors
-            .iter()
-            .filter_map(|(id, a)| {
-                let mut drawable = a.drawable(&view.scene)?;
-                drawable.stick = self.stick_region_of(*id);
-                Some(drawable)
+        self.free_objects()
+            .into_iter()
+            .map(|(id, object)| {
+                let mut drawable = match self.objects.get(id).map(|n| &n.kind) {
+                    Some(Kind::Actor) => {
+                        let actor = self.actor(id).expect("a free actor");
+                        let (scale, tint) = (actor.scale(&view.scene), actor.tint(&view.scene));
+                        let mut d = actor.drawable(&view.scene).unwrap_or(Drawable {
+                            x: actor.x,
+                            y: actor.y,
+                            sprite: None,
+                            bank: &actor.bank,
+                            frame: 0,
+                            scale,
+                            tint,
+                            stick: None,
+                            before: Vec::new(),
+                            after: Vec::new(),
+                        });
+                        let around = self.attachment_draws(id, actor.x, actor.y, scale, tint);
+                        d.before = around.before;
+                        d.after = around.after;
+                        d
+                    }
+                    Some(Kind::Entity(r)) => {
+                        // A game-level entity is scaled and tinted by the
+                        // scene it is shown in.
+                        let entity = self.game_view.entity(*r).expect("a game entity");
+                        let (scale, tint) = (
+                            view.scene.entity_scale(entity),
+                            view.scene.entity_tint(entity),
+                        );
+                        let sprite = self
+                            .game_view
+                            .shown_sprite(*r)
+                            .and_then(|p| self.game_view.sprite(&p));
+                        let around = self.attachment_draws(id, entity.x, entity.y, scale, tint);
+                        Drawable {
+                            x: entity.x,
+                            y: entity.y,
+                            sprite,
+                            bank: &self.game_view.bank,
+                            frame: self.game_view.frame_of(*r),
+                            scale,
+                            tint,
+                            stick: None,
+                            before: around.before,
+                            after: around.after,
+                        }
+                    }
+                    _ => unreachable!("free objects are actors and game entities"),
+                };
+                drawable.stick = object.stick;
+                drawable
             })
             .collect()
     }
 
-    /// The active actors as free objects of the scene's drawing order,
-    /// the game's then the scene's: their handles, where they stand and
-    /// the region they stick to.
-    pub(crate) fn free_actors(&self) -> Vec<(NativeId, crate::scene_view::FreeObject)> {
-        self.actors
+    /// The free objects of the game drawn among the scene's: the active
+    /// actors (the game's then the scene's) and the game's active
+    /// entities that are not attachments, with their handles, where they
+    /// stand and the region they stick to.
+    pub(crate) fn free_objects(&self) -> Vec<(NativeId, crate::scene_view::FreeObject)> {
+        let mut objects: Vec<(NativeId, crate::scene_view::FreeObject)> = self
+            .actors
             .iter()
             .filter(|(_, a)| a.def.active)
             .map(|(id, a)| {
@@ -795,7 +902,67 @@ impl World {
                     },
                 )
             })
-            .collect()
+            .collect();
+        for r in self.game_view.entity_refs() {
+            let Some(entity) = self.game_view.entity(r) else {
+                continue;
+            };
+            let Some(id) = self.node_id(r) else { continue };
+            if !entity.active
+                || entity.kind != luma_formats::EntityKind::Normal
+                || self
+                    .object_state(id)
+                    .is_some_and(|s| s.attached_to.is_some())
+            {
+                continue;
+            }
+            objects.push((
+                id,
+                crate::scene_view::FreeObject {
+                    x: entity.x,
+                    y: entity.y,
+                    stick: self.stick_region_of(id),
+                },
+            ));
+        }
+        objects
+    }
+
+    /// The attachments of the scene's own entities, drawn around them.
+    pub(crate) fn scene_attachments(
+        &self,
+    ) -> std::collections::HashMap<crate::scene_view::EntityRef, crate::scene_view::AttachedDraws<'_>>
+    {
+        let mut attached = std::collections::HashMap::new();
+        let Some(view) = &self.scene else {
+            return attached;
+        };
+        for (id, native) in self.objects.iter() {
+            if native.state.attachments.is_empty() {
+                continue;
+            }
+            let Kind::Entity(
+                r @ (crate::scene_view::EntityRef::Node { .. }
+                | crate::scene_view::EntityRef::Free(_)),
+            ) = native.kind
+            else {
+                continue;
+            };
+            let Some(entity) = view.entity(r) else {
+                continue;
+            };
+            attached.insert(
+                r,
+                self.attachment_draws(
+                    id,
+                    entity.x,
+                    entity.y,
+                    view.scene.entity_scale(entity),
+                    view.scene.entity_tint(entity),
+                ),
+            );
+        }
+        attached
     }
 
     /// The region a free entity of the scene sticks to.
@@ -806,13 +973,14 @@ impl World {
 
     /// The order the scene's objects are drawn in this frame (see
     /// [`SceneView::draw_order`]): the `Other` items are the active
-    /// actors, in the order of [`World::actor_ids`].
+    /// actors, in the order of [`World::actor_ids`], then the game's
+    /// entities.
     pub fn draw_order(&self) -> Vec<crate::scene_view::DrawItem> {
         let Some(view) = &self.scene else {
             return Vec::new();
         };
         let positions: Vec<crate::scene_view::FreeObject> =
-            self.free_actors().into_iter().map(|(_, o)| o).collect();
+            self.free_objects().into_iter().map(|(_, o)| o).collect();
         view.draw_order(&positions, |i| self.free_entity_stick(i))
     }
 
@@ -833,9 +1001,13 @@ impl World {
             return;
         }
         if let Some(view) = &self.scene {
-            view.draw_with(list, camera, &self.drawables(), |i| {
-                self.free_entity_stick(i)
-            });
+            view.draw_with(
+                list,
+                camera,
+                &self.drawables(),
+                &self.scene_attachments(),
+                |i| self.free_entity_stick(i),
+            );
         }
         self.draw_windows(list, true, white);
         self.draw_inventory(list, white);
@@ -860,6 +1032,7 @@ impl World {
         if let Some(view) = self.scene.as_mut() {
             view.upload(&self.vfs, renderer);
         }
+        self.game_view.upload(&self.vfs, renderer);
         for (_, actor) in &mut self.actors {
             actor.bank.upload(&self.vfs, renderer);
         }
@@ -892,10 +1065,14 @@ impl World {
             .objects
             .iter()
             .filter(|(id, n)| {
-                // The windows' container entities live outside the scene.
+                // The windows' container entities and the game's own live
+                // outside the scene.
                 let scene_entity = matches!(
                     n.kind,
-                    Kind::Entity(r) if !matches!(r, crate::scene_view::EntityRef::Ui(_))
+                    Kind::Entity(
+                        crate::scene_view::EntityRef::Node { .. }
+                            | crate::scene_view::EntityRef::Free(_)
+                    )
                 );
                 scene_entity
                     || matches!(
@@ -927,16 +1104,28 @@ impl World {
         {
             self.main_object = None;
         }
-        // The game's actors are reset before the new scene loads.
+        // The game's actors and entities are reset before the new scene
+        // loads (`CAdGame::ChangeScene`).
         for (id, actor) in &mut self.actors {
             actor.reset();
             engine.reset_object(*id);
+        }
+        for r in self.game_view.entity_refs() {
+            self.game_view.reset_anim(r);
+            self.game_view.stop_talk(r);
+            if let Some(id) = self.node_id(r) {
+                engine.reset_object(id);
+            }
         }
         self.pending_events.clear();
         for id in gone.iter().copied().chain([self.scene_id]) {
             for script in engine.scripts_of(id) {
                 engine.finish(script, true);
             }
+        }
+        // The attachments of the scene's objects go with them.
+        for id in gone.clone() {
+            self.remove_attachments_of(engine, id);
         }
         for id in gone {
             self.objects.remove(id);
@@ -1138,10 +1327,7 @@ impl World {
     pub fn font_of(&self, id: NativeId) -> Option<String> {
         let own = match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).and_then(|a| a.def.font.clone()),
-            Some(Kind::Entity(r)) => self
-                .scene()
-                .and_then(|v| v.entity(*r))
-                .and_then(|e| e.font.clone()),
+            Some(Kind::Entity(r)) => self.entity_def(*r).and_then(|e| e.font.clone()),
             _ => None,
         };
         own.filter(|f| self.fonts.get(f).is_some())
@@ -1167,7 +1353,7 @@ impl World {
                 }
             }
             Some(Kind::Entity(r)) => {
-                if let Some(entity) = self.scene_mut().and_then(|v| v.entity_mut(r)) {
+                if let Some(entity) = self.entity_def_mut(r) {
                     entity.font = value;
                 }
             }
@@ -1181,7 +1367,7 @@ impl World {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).map(|a| a.subtitles).unwrap_or_default(),
             Some(Kind::Entity(r)) => self
-                .scene()
+                .view_of(*r)
                 .and_then(|v| v.subtitles.get(r).copied())
                 .unwrap_or_default(),
             _ => SubtitleMods::default(),
@@ -1197,7 +1383,7 @@ impl World {
                 }
             }
             Some(Kind::Entity(r)) => {
-                if let Some(view) = self.scene_mut() {
+                if let Some(view) = self.view_of_mut(r) {
                     view.subtitles.insert(r, mods);
                 }
             }
@@ -1267,10 +1453,7 @@ impl World {
         let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
         let (mut x, mut y) = match &kind {
             Kind::Actor => self.actor(id).map_or((0, 0), |a| (a.x, a.y)),
-            Kind::Entity(r) => self
-                .scene()
-                .and_then(|v| v.entity(*r))
-                .map_or((0, 0), |e| (e.x, e.y)),
+            Kind::Entity(r) => self.entity_def(*r).map_or((0, 0), |e| (e.x, e.y)),
             _ => (0, 0),
         };
         // A scene-independent object is placed on the screen already.
@@ -1334,8 +1517,7 @@ impl World {
             }
             Kind::Entity(r) => {
                 let sprites: Vec<String> = self
-                    .scene()
-                    .and_then(|v| v.entity(r))
+                    .entity_def(r)
                     .map(|e| {
                         e.talk_sprites
                             .iter()
@@ -1344,11 +1526,17 @@ impl World {
                             .collect()
                     })
                     .unwrap_or_default();
-                if let Some(view) = self.scene.as_mut() {
+                let vfs = &self.vfs;
+                let view = match r {
+                    crate::scene_view::EntityRef::Game(_) => Some(&mut self.game_view),
+                    crate::scene_view::EntityRef::Ui(_) => None,
+                    _ => self.scene.as_mut(),
+                };
+                if let Some(view) = view {
                     for sprite in sprites {
-                        view.add_sprite(&self.vfs, &sprite);
+                        view.add_sprite(vfs, &sprite);
                     }
-                    let forced = forced.filter(|path| view.add_sprite(&self.vfs, path));
+                    let forced = forced.filter(|path| view.add_sprite(vfs, path));
                     view.talk(r, sentence, forced);
                 }
             }
@@ -1374,10 +1562,17 @@ impl World {
             Some(Kind::Actor) => self
                 .actor_and_vfs(id)
                 .is_some_and(|(vfs, actor)| actor.bank.add_sprite(vfs, &path)),
-            Some(Kind::Entity(_)) => self
-                .scene
-                .as_mut()
-                .is_some_and(|view| view.add_sprite(&self.vfs, &path)),
+            Some(Kind::Entity(r)) => {
+                let vfs = &self.vfs;
+                match r {
+                    crate::scene_view::EntityRef::Game(_) => self.game_view.add_sprite(vfs, &path),
+                    crate::scene_view::EntityRef::Ui(_) => false,
+                    _ => self
+                        .scene
+                        .as_mut()
+                        .is_some_and(|view| view.add_sprite(vfs, &path)),
+                }
+            }
             _ => false,
         };
         if !loaded {
@@ -1394,7 +1589,7 @@ impl World {
     pub fn stop_talk(&mut self, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| n.kind.clone()) {
             Some(Kind::Actor) => self.actor_mut(id).is_some_and(|a| a.stop_talk()),
-            Some(Kind::Entity(r)) => self.scene_mut().is_some_and(|v| v.stop_talk(r)),
+            Some(Kind::Entity(r)) => self.view_of_mut(r).is_some_and(|v| v.stop_talk(r)),
             _ => false,
         }
     }
@@ -1403,7 +1598,7 @@ impl World {
     pub fn is_talking(&self, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).is_some_and(|a| a.is_talking()),
-            Some(Kind::Entity(r)) => self.scene().is_some_and(|v| v.is_talking(*r)),
+            Some(Kind::Entity(r)) => self.view_of(*r).is_some_and(|v| v.is_talking(*r)),
             _ => false,
         }
     }
@@ -1422,6 +1617,7 @@ impl World {
         if let Some(view) = self.scene.as_mut() {
             view.skip_sentences(timer);
         }
+        self.game_view.skip_sentences(timer);
         self.stop_speech();
     }
 
@@ -1453,7 +1649,8 @@ impl World {
                 }
             }
         }
-        if let Some(view) = &self.scene {
+        let views = self.scene.iter().chain([&self.game_view]);
+        for view in views {
             for (_, sentence) in view.sentences() {
                 if let Some(draw) = SentenceDraw::of(sentence, ox, oy, sw) {
                     draws.push(draw);
@@ -1493,7 +1690,7 @@ impl World {
     pub(crate) fn entity_def(&self, r: crate::scene_view::EntityRef) -> Option<&Entity> {
         match r {
             crate::scene_view::EntityRef::Ui(i) => self.ui_entities.get(i).map(|e| &e.def),
-            r => self.scene().and_then(|v| v.entity(r)),
+            r => self.view_of(r).and_then(|v| v.entity(r)),
         }
     }
 
@@ -1504,7 +1701,7 @@ impl World {
     ) -> Option<&mut Entity> {
         match r {
             crate::scene_view::EntityRef::Ui(i) => self.ui_entities.get_mut(i).map(|e| &mut e.def),
-            r => self.scene_mut().and_then(|v| v.entity_mut(r)),
+            r => self.view_of_mut(r).and_then(|v| v.entity_mut(r)),
         }
     }
 
@@ -1699,7 +1896,7 @@ impl Host for World {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).is_none_or(|a| a.ready),
             Some(Kind::Entity(r)) => self
-                .scene()
+                .view_of(*r)
                 .is_none_or(|v| !v.is_talking(*r) && !v.is_playing_anim(*r)),
             Some(Kind::Scene) => self.is_scrolled(),
             Some(Kind::Fader) => self.fader.ready,

@@ -156,6 +156,7 @@ world_state! {
     scene_id: NativeId,
     fader_id: NativeId,
     scene: Option<SceneView>,
+    game_view: SceneView,
     prev_scene_name: String,
     prev_scene_filename: String,
     scheduled_scene: Option<(String, bool)>,
@@ -618,6 +619,7 @@ impl World {
         if let Some(view) = self.scene.as_mut() {
             view.reload_sprites(&self.vfs);
         }
+        self.game_view.reload_sprites(&self.vfs);
         for (_, actor) in &mut self.actors {
             actor.reload_sprites(&self.vfs);
         }
@@ -689,7 +691,7 @@ impl World {
             cursors.extend(actor.def.cursor.clone());
             fonts.extend(actor.sentence.as_ref().and_then(|s| s.font.clone()));
         }
-        if let Some(view) = &self.scene {
+        for view in self.scene.iter().chain([&self.game_view]) {
             for r in view.entity_refs() {
                 if let Some(e) = view.entity(r) {
                     fonts.extend(e.font.clone());

@@ -6,7 +6,7 @@
 //! Wintermute Engine 1.x (MIT License, Copyright (c) 2003-2013 Jan
 //! Nedoma); see `NOTICE`.
 
-use luma_script::{NativeId, Return, Value};
+use luma_script::{Engine, NativeId, Return, Value};
 
 use crate::objects::{Kind, ObjectState};
 use crate::world::World;
@@ -182,6 +182,14 @@ impl World {
             "Movable" => Value::Bool(state.movable),
             "SceneIndependent" => Value::Bool(state.scene_independent),
             "NonIntMouseEvents" => Value::Bool(state.non_int_mouse_events),
+            "NumAttachments"
+                if matches!(
+                    self.objects.get(id).map(|n| &n.kind),
+                    Some(Kind::Actor | Kind::Entity(_))
+                ) =>
+            {
+                Value::Int(state.attachments.len() as i32)
+            }
             _ => return None,
         })
     }
@@ -202,12 +210,15 @@ impl World {
     }
 
     /// The methods every object has: its cursor and its captions
-    /// (`CBObject::ScCallMethod`).
+    /// (`CBObject::ScCallMethod`), and those of every adventure object
+    /// (`CAdObject`): the forced talk animation, the region it sticks
+    /// to, its attachments.
     pub(crate) fn object_call(
         &mut self,
         id: NativeId,
         name: &str,
         args: &[Value],
+        engine: &mut Engine,
     ) -> Option<Return> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         Some(match name {
@@ -239,6 +250,31 @@ impl World {
                 ) =>
             {
                 Return::value(self.stick_to_region(id, &arg(0)))
+            }
+            "AddAttachment" | "RemoveAttachment" | "GetAttachment"
+                if matches!(
+                    self.objects.get(id).map(|n| &n.kind),
+                    Some(Kind::Actor | Kind::Entity(_))
+                ) =>
+            {
+                match name {
+                    "AddAttachment" => {
+                        let path = arg(0).get_string(self);
+                        let pre = match arg(1) {
+                            Value::Null => true,
+                            v => v.get_bool(self),
+                        };
+                        let (x, y) = (arg(2).get_int(self), arg(3).get_int(self));
+                        Return::value(self.add_attachment(engine, id, &path, pre, x, y))
+                    }
+                    "RemoveAttachment" => {
+                        Return::value(self.remove_attachment(engine, id, &arg(0)))
+                    }
+                    _ => Return::value(
+                        self.attachment(id, &arg(0))
+                            .map_or(Value::Null, Value::Native),
+                    ),
+                }
             }
             "ForceTalkAnim" => {
                 // The sprite plays as the first stance of the next sentence

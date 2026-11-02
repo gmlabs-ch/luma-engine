@@ -95,6 +95,21 @@ pub struct ObjectState {
     /// The region of the main layer a free object draws in
     /// (`StickToRegion`), by handle; `None` draws it by its position.
     pub stick_region: Option<NativeId>,
+    /// The entities attached to the object (`AddAttachment`), drawn
+    /// around it and hit as it, in order.
+    pub attachments: Vec<Attachment>,
+    /// The object this one is an attachment of.
+    pub attached_to: Option<NativeId>,
+}
+
+/// An entity attached to an object (`CAdObject::m_AttachmentsPre`,
+/// `m_AttachmentsPost`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Attachment {
+    /// The attached entity, a game-level entity.
+    pub id: NativeId,
+    /// Whether it is drawn before the object (`preDisplay`) or after.
+    pub pre: bool,
 }
 
 impl Default for ObjectState {
@@ -107,6 +122,8 @@ impl Default for ObjectState {
             forced_talk_anim: None,
             forced_talk_used: false,
             stick_region: None,
+            attachments: Vec::new(),
+            attached_to: None,
         }
     }
 }

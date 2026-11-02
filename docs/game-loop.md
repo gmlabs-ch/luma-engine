@@ -21,7 +21,9 @@ in this order (`Runtime::tick`):
    when asked;
 3. speech sounds that ended end their sentences; the fader advances;
 4. the scripts run (`Engine::tick`);
-5. the scene's entities animate and talk; the actors walk, turn, talk;
+5. the scene's entities and the game's own (see
+   [formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments))
+   animate and talk; the actors walk, turn, talk;
 6. the view scrolls towards the main object; the objects' sounds follow
    them;
 7. the object under the mouse is found and becomes the **active

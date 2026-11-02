@@ -3692,3 +3692,291 @@ fn scripts_create_edit_and_delete_scene_content() {
     assert!(actor_at < lamp_at, "still stuck to the floor");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn game_entities_outlive_scenes_and_attachments_follow_their_owner() {
+    use luma_adventure::{DrawItem, EntityRef};
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    let scene = runtime.world.scene_id();
+    let name = |runtime: &Runtime, id| runtime.world.get_property(id, "Name");
+
+    // An entity of the game is drawn among the scene's free objects and
+    // stays when the scene changes.
+    let hud = call_native(&mut runtime, game, "CreateEntity", &[Value::from("hud")])
+        .as_native()
+        .expect("a game entity");
+    assert_eq!(
+        runtime.world.get_property(hud, "Type"),
+        Some(Value::from("entity"))
+    );
+    assert_eq!(name(&runtime, hud), Some(Value::from("hud")));
+    runtime.world.set_property(hud, "X", &Value::Int(2));
+    runtime.world.set_property(hud, "Y", &Value::Int(2));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            hud,
+            "SetSprite",
+            &[Value::from("art\\green.png")]
+        ),
+        Value::Bool(true)
+    );
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(3, 3);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(hud));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            game,
+            "LoadEntity",
+            &[Value::from("missing.entity")]
+        ),
+        Value::Null
+    );
+    let loaded = call_native(
+        &mut runtime,
+        game,
+        "LoadEntity",
+        &[Value::from("verb.entity")],
+    )
+    .as_native()
+    .expect("a loaded game entity");
+    assert_eq!(name(&runtime, loaded), Some(Value::from("pick")));
+    assert_eq!(
+        runtime.world.get_property(scene, "NumFreeNodes"),
+        Some(Value::Int(1)),
+        "not the scene's"
+    );
+    runtime.change_scene("scenes\\hall.scene").unwrap();
+    runtime.tick(16);
+    assert_eq!(name(&runtime, hud), Some(Value::from("hud")));
+    assert_eq!(name(&runtime, loaded), Some(Value::from("pick")));
+    assert_eq!(
+        runtime.world.get_property(scene, "NumFreeNodes"),
+        Some(Value::Int(0))
+    );
+
+    // Attachments are entities drawn around their owner, scaled with it,
+    // and hit as it; GetAttachment counts the ones drawn before first.
+    let actor = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\bob.actor", false)
+        .unwrap();
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "AddAttachment",
+            &[
+                Value::from("missing.entity"),
+                Value::Bool(true),
+                Value::Int(0),
+                Value::Int(0)
+            ]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "AddAttachment",
+            &[
+                Value::from("verb.entity"),
+                Value::Bool(false),
+                Value::Int(4),
+                Value::Int(0)
+            ]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "AddAttachment",
+            &[
+                Value::from("verb.entity"),
+                Value::Bool(true),
+                Value::Int(0),
+                Value::Int(-10)
+            ]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        runtime.world.get_property(actor, "NumAttachments"),
+        Some(Value::Int(2))
+    );
+    let pre = call_native(&mut runtime, actor, "GetAttachment", &[Value::Int(0)])
+        .as_native()
+        .expect("the attachment drawn before");
+    let post = call_native(&mut runtime, actor, "GetAttachment", &[Value::Int(1)])
+        .as_native()
+        .expect("the attachment drawn after");
+    assert_ne!(pre, post);
+    assert_eq!(runtime.world.get_property(pre, "Y"), Some(Value::Int(-10)));
+    assert_eq!(runtime.world.get_property(post, "X"), Some(Value::Int(4)));
+    assert_eq!(
+        call_native(&mut runtime, actor, "GetAttachment", &[Value::from("PICK")]),
+        Value::Native(post)
+    );
+    assert_eq!(
+        call_native(&mut runtime, actor, "GetAttachment", &[Value::Int(5)]),
+        Value::Null
+    );
+    runtime.tick(16);
+    let others = runtime
+        .world
+        .draw_order()
+        .into_iter()
+        .filter(|i| matches!(i, DrawItem::Other { .. }))
+        .count();
+    assert_eq!(
+        others, 3,
+        "the actor, the two game entities; attachments are not free objects"
+    );
+    let drawables = runtime.world.drawables();
+    let bob = drawables
+        .iter()
+        .find(|d| d.x == 10 && d.y == 24)
+        .expect("the actor's drawable");
+    assert_eq!(bob.before.len(), 1);
+    assert_eq!(bob.after.len(), 1);
+    assert_eq!((bob.before[0].x, bob.before[0].y), (10, 14));
+    assert_eq!((bob.after[0].x, bob.after[0].y), (14, 24));
+    runtime.mouse_move(11, 15);
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.active_object(),
+        Some(actor),
+        "an attachment is hit as its owner"
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "RemoveAttachment",
+            &[Value::from("nothing")]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "RemoveAttachment",
+            &[Value::Native(pre)]
+        ),
+        Value::Bool(true)
+    );
+    assert!(!runtime.world.objects().contains(pre));
+    assert_eq!(
+        runtime.world.get_property(actor, "NumAttachments"),
+        Some(Value::Int(1))
+    );
+    assert_eq!(
+        name(&runtime, post),
+        Some(Value::from("pick")),
+        "the other is renumbered, still good"
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "RemoveAttachment",
+            &[Value::from("pick")]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        runtime.world.get_property(actor, "NumAttachments"),
+        Some(Value::Int(0))
+    );
+
+    // An attachment of a scene entity goes with the scene; one of a game
+    // entity stays, and both live in a saved game.
+    let door = runtime
+        .world
+        .node_id(EntityRef::Node { layer: 0, index: 0 })
+        .unwrap();
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            door,
+            "AddAttachment",
+            &[
+                Value::from("verb.entity"),
+                Value::Bool(true),
+                Value::Int(0),
+                Value::Int(0)
+            ]
+        ),
+        Value::Bool(true)
+    );
+    let door_hat = call_native(&mut runtime, door, "GetAttachment", &[Value::Int(0)])
+        .as_native()
+        .unwrap();
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            hud,
+            "AddAttachment",
+            &[
+                Value::from("verb.entity"),
+                Value::Bool(false),
+                Value::Int(1),
+                Value::Int(1)
+            ]
+        ),
+        Value::Bool(true)
+    );
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    assert!(
+        !runtime.world.objects().contains(door_hat),
+        "gone with the scene"
+    );
+    assert_eq!(
+        runtime.world.get_property(hud, "NumAttachments"),
+        Some(Value::Int(1))
+    );
+    runtime.save_game(14, "hud", false).unwrap();
+    let mut saved = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    saved.start();
+    saved.tick(16);
+    saved.load_game(14).unwrap();
+    saved.tick(16);
+    assert_eq!(name(&saved, hud), Some(Value::from("hud")));
+    assert_eq!(
+        saved.world.get_property(hud, "NumAttachments"),
+        Some(Value::Int(1))
+    );
+    assert!(
+        saved.world.game_view().sprite("art\\green.png").is_some(),
+        "loaded again"
+    );
+    let drawables = saved.world.drawables();
+    let hud_draw = drawables
+        .iter()
+        .find(|d| d.x == 2 && d.y == 2)
+        .expect("the hud");
+    assert_eq!(hud_draw.after.len(), 1);
+
+    // Game.UnloadObject removes a game entity with its attachments.
+    call_native(&mut runtime, game, "UnloadObject", &[Value::Native(hud)]);
+    assert!(!runtime.world.objects().contains(hud));
+    assert_eq!(name(&runtime, loaded), Some(Value::from("pick")));
+    assert_eq!(runtime.world.game_view().entity_refs().len(), 1);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

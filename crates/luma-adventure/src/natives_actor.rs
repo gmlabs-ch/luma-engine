@@ -12,12 +12,7 @@ use crate::objects::Kind;
 use crate::world::World;
 
 /// Methods of later milestones that actors accept and log once.
-const ACTOR_STUBS: &[&str] = &[
-    "CreateParticleEmitter",
-    "DeleteParticleEmitter",
-    "AddAttachment",
-    "RemoveAttachment",
-];
+const ACTOR_STUBS: &[&str] = &["CreateParticleEmitter", "DeleteParticleEmitter"];
 
 fn color_int(c: luma_formats::Rgba) -> i32 {
     rgba(
@@ -81,7 +76,6 @@ impl World {
             "SubtitlesPosRelative" => Value::Bool(actor.subtitles.relative),
             "SubtitlesPosXCenter" => Value::Bool(actor.subtitles.x_center),
             "NumItems" => Value::Int(self.inventory.taken.len() as i32),
-            "NumAttachments" => Value::Int(0),
             "ParticleEmitter" | "Item" => Value::Null,
             _ => return None,
         })
@@ -336,7 +330,6 @@ impl World {
             "TakeItem" | "DropItem" | "GetItem" | "HasItem" => {
                 return Some(self.inventory_call(name, args));
             }
-            "GetAttachment" => Return::null(),
             _ if ACTOR_STUBS.contains(&name) => {
                 self.stub(&format!("Actor.{name}"));
                 Return::null()

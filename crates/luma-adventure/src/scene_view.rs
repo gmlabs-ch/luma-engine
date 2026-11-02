@@ -100,6 +100,10 @@ pub enum EntityRef {
     /// An entity shown by a window's entity container, by index in the
     /// world's list; it lives outside the scene.
     Ui(usize),
+    /// An entity of the game rather than of a scene (`Game.CreateEntity`,
+    /// `Game.LoadEntity`, an attachment), by index in the game's own
+    /// view; it survives scene changes.
+    Game(usize),
 }
 
 /// The animation state of a sprite shown by an object, advanced like the
@@ -406,6 +410,20 @@ pub struct Drawable<'a> {
     /// The region node of the main layer the object is drawn in whatever
     /// its position (`StickToRegion`), as `(layer, node)`.
     pub stick: Option<(usize, usize)>,
+    /// The attachments drawn before the object (`AddAttachment` with
+    /// `preDisplay`), placed and scaled with it already.
+    pub before: Vec<Drawable<'a>>,
+    /// The attachments drawn after the object.
+    pub after: Vec<Drawable<'a>>,
+}
+
+/// The attachments of a scene entity, drawn around it.
+#[derive(Default)]
+pub struct AttachedDraws<'a> {
+    /// Drawn before the entity.
+    pub before: Vec<Drawable<'a>>,
+    /// Drawn after it.
+    pub after: Vec<Drawable<'a>>,
 }
 
 /// An entity saying a sentence.
@@ -477,6 +495,9 @@ pub struct SceneView {
     playing: HashMap<EntityRef, String>,
     /// The subtitle placement of entities scripts changed it on.
     pub subtitles: HashMap<EntityRef, SubtitleMods>,
+    /// Whether this view holds the game's own entities rather than a
+    /// scene: its free entities are then `EntityRef::Game`, not `Free`.
+    pub(crate) game_level: bool,
 }
 
 impl SceneView {
@@ -498,6 +519,7 @@ impl SceneView {
             talks: HashMap::new(),
             playing: HashMap::new(),
             subtitles: HashMap::new(),
+            game_level: false,
         };
         let paths: Vec<String> = view
             .scene
@@ -509,6 +531,41 @@ impl SceneView {
             view.bank.add_sprite(vfs, &sprite_path);
         }
         Ok(view)
+    }
+
+    /// The view holding the game's own entities (`Game.CreateEntity`,
+    /// `Game.LoadEntity`, attachments): an empty scene whose free
+    /// entities are the game's, named by `EntityRef::Game`, with their
+    /// sprites and states, kept across scene changes.
+    pub fn game_level() -> SceneView {
+        SceneView {
+            scene: Scene::default(),
+            path: String::new(),
+            bank: SpriteBank::new(),
+            anims: HashMap::new(),
+            talks: HashMap::new(),
+            playing: HashMap::new(),
+            subtitles: HashMap::new(),
+            game_level: true,
+        }
+    }
+
+    /// The reference naming free entity `index` of this view.
+    pub fn free_ref(&self, index: usize) -> EntityRef {
+        if self.game_level {
+            EntityRef::Game(index)
+        } else {
+            EntityRef::Free(index)
+        }
+    }
+
+    /// The index in `free_entities` a reference names in this view.
+    fn free_index(&self, r: EntityRef) -> Option<usize> {
+        match r {
+            EntityRef::Free(i) if !self.game_level => Some(i),
+            EntityRef::Game(i) if self.game_level => Some(i),
+            _ => None,
+        }
     }
 
     /// Loads a sprite definition if it is not loaded yet, for an entity
@@ -608,7 +665,7 @@ impl SceneView {
                 }
             }
         }
-        refs.extend((0..self.scene.free_entities.len()).map(EntityRef::Free));
+        refs.extend((0..self.scene.free_entities.len()).map(|i| self.free_ref(i)));
         refs
     }
 
@@ -624,7 +681,9 @@ impl SceneView {
                 SceneNode::Entity(e) => Some(e),
                 SceneNode::Region(_) => None,
             },
-            EntityRef::Free(i) => self.scene.free_entities.get(i),
+            EntityRef::Free(_) | EntityRef::Game(_) => {
+                self.scene.free_entities.get(self.free_index(r)?)
+            }
             EntityRef::Ui(_) => None,
         }
     }
@@ -638,7 +697,10 @@ impl SceneView {
                     SceneNode::Region(_) => None,
                 }
             }
-            EntityRef::Free(i) => self.scene.free_entities.get_mut(i),
+            EntityRef::Free(_) | EntityRef::Game(_) => {
+                let i = self.free_index(r)?;
+                self.scene.free_entities.get_mut(i)
+            }
             EntityRef::Ui(_) => None,
         }
     }
@@ -994,7 +1056,7 @@ impl SceneView {
     /// Fills a draw list with the scene as seen by `camera`, showing the
     /// frames the animations are at (see [`SceneView::advance`]).
     pub fn draw<'a>(&'a self, list: &mut DrawList<'a>, camera: &Camera) {
-        self.draw_with(list, camera, &[], |_| None);
+        self.draw_with(list, camera, &[], &HashMap::new(), |_| None);
     }
 
     /// The order the scene's objects are drawn in (`CAdScene::
@@ -1091,6 +1153,7 @@ impl SceneView {
         list: &mut DrawList<'a>,
         camera: &Camera,
         others: &[Drawable<'a>],
+        attached: &HashMap<EntityRef, AttachedDraws<'a>>,
         free_stick: impl Fn(usize) -> Option<(usize, usize)>,
     ) {
         let scene = &self.scene;
@@ -1102,6 +1165,17 @@ impl SceneView {
                 stick: d.stick,
             })
             .collect();
+        // An entity's attachments are drawn around it (`CAdEntity::Display`).
+        let draw_entity = |list: &mut DrawList<'a>, r: EntityRef, d: &Drawable<'a>| {
+            let around = attached.get(&r);
+            for a in around.iter().flat_map(|a| &a.before) {
+                draw_object(list, a);
+            }
+            draw_object(list, d);
+            for a in around.iter().flat_map(|a| &a.after) {
+                draw_object(list, a);
+            }
+        };
         let mut current_layer = usize::MAX;
         for item in self.draw_order(&positions, free_stick) {
             let layer = item.layer();
@@ -1112,19 +1186,21 @@ impl SceneView {
             }
             match item {
                 DrawItem::Node { layer, index } => {
+                    let r = EntityRef::Node { layer, index };
                     if let Some(SceneNode::Entity(entity)) = self.node(layer, index) {
-                        if let Some(d) = self.drawable(EntityRef::Node { layer, index }, entity) {
-                            draw_object(list, &d);
+                        if let Some(d) = self.drawable(r, entity) {
+                            draw_entity(list, r, &d);
                         }
                     }
                 }
                 DrawItem::Free { index, .. } => {
+                    let r = EntityRef::Free(index);
                     if let Some(d) = scene
                         .free_entities
                         .get(index)
-                        .and_then(|e| self.drawable(EntityRef::Free(index), e))
+                        .and_then(|e| self.drawable(r, e))
                     {
-                        draw_object(list, &d);
+                        draw_entity(list, r, &d);
                     }
                 }
                 DrawItem::Other { index, .. } => {
@@ -1154,6 +1230,8 @@ impl SceneView {
             scale: self.scene.entity_scale(entity),
             tint: self.scene.entity_tint(entity),
             stick: None,
+            before: Vec::new(),
+            after: Vec::new(),
         })
     }
 }
@@ -1185,19 +1263,24 @@ pub fn regions_at(scene: &Scene, x: i32, y: i32) -> Vec<(usize, usize)> {
         .collect()
 }
 
-/// Draws an object's current frame.
+/// Draws an object's current frame, between the attachments drawn
+/// before and after it.
 pub fn draw_object<'a>(list: &mut DrawList<'a>, d: &Drawable<'a>) {
-    let Some(loaded) = d.sprite else { return };
-    if loaded.sprite.frames.is_empty() {
-        return;
+    for a in &d.before {
+        draw_object(list, a);
     }
-    let frame = d.frame.min(loaded.sprite.frames.len() - 1);
-    for sub in &loaded.sprite.frames[frame].subframes {
-        let Some(image) = &sub.image else { continue };
-        let Some(texture) = d.bank.texture(image, sub.color_key) else {
-            continue;
-        };
-        list.push(place(sub, texture, d.x, d.y, d.scale / 100.0, d.tint));
+    if let Some(loaded) = d.sprite.filter(|l| !l.sprite.frames.is_empty()) {
+        let frame = d.frame.min(loaded.sprite.frames.len() - 1);
+        for sub in &loaded.sprite.frames[frame].subframes {
+            let Some(image) = &sub.image else { continue };
+            let Some(texture) = d.bank.texture(image, sub.color_key) else {
+                continue;
+            };
+            list.push(place(sub, texture, d.x, d.y, d.scale / 100.0, d.tint));
+        }
+    }
+    for a in &d.after {
+        draw_object(list, a);
     }
 }
 
