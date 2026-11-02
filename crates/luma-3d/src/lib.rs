@@ -49,7 +49,10 @@ pub mod three_ds;
 pub mod xfile;
 
 pub use actor3d::{Actor3dDef, AnimationDef, ShadowType};
-pub use animation::{ActiveAnimation, AnimatedModel, BoundingBox, SkinnedMesh};
+pub use animation::{
+    ActiveAnimation, ActiveAnimationState, AnimatedModel, AnimationState, BoundingBox,
+    ChannelState, SkinnedMesh,
+};
 pub use camera::{CameraSettings, Projection, Ray, ViewSetup, Viewport};
 pub use math::{Mat4, Plane, Quat, Vec3};
 pub use model::{Animation, AnimationSet, Bone, Frame, Material, Mesh, Model, Transform};

@@ -829,6 +829,20 @@ the first key, and a zero gap met after a positive one resets the minimum
   ray is in model space, the caller inverts the world matrix, task 16).
   A new `AnimatedModel` is posed at rest once, so these are valid before
   the first update.
+- **Saving** (`CXModel::Persist`, `CXAnimationChannel::Persist`,
+  `CXActiveAnimation::Persist`): `AnimatedModel::state` gives an
+  `AnimationState` (the timer, per channel the two active animations
+  **by set name** with start time, looping, finished, last local time
+  and current frame, the transition in progress, the two default times
+  and the pair table) and `AnimatedModel::restore` puts it back on a
+  model loaded again from its files, then poses it with an update of 0
+  ms, which fires no event. An active animation whose set the reloaded
+  model lacks is dropped (the original keeps a pointer into its own
+  list, which the reload keeps valid); a transition left without an
+  incoming animation ends. The update in which a non-looping animation
+  finishes still shows its last pose while the channel is already
+  stopped, so a state taken then restores to the pose of the next
+  update.
 
 ## 8. Actor logic
 

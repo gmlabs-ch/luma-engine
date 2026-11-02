@@ -348,6 +348,59 @@ struct TransitionTime {
     time: u32,
 }
 
+/// An active animation as a saved game keeps it: the set by name, so
+/// that the state survives a reload of the model (`CXActiveAnimation::
+/// Persist` stores the set by pointer into the model's own list).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveAnimationState {
+    /// The animation set's name.
+    pub set: String,
+    /// The timer value the animation started at.
+    pub start_time: u32,
+    /// Whether it wraps at its end.
+    pub looping: bool,
+    /// Whether a non-looping animation has reached its end.
+    pub finished: bool,
+    /// The local time of the last update.
+    pub last_local_time: u32,
+    /// The frame index of the last update, -1 before the first.
+    pub current_frame: i32,
+}
+
+/// A channel as a saved game keeps it (`CXAnimationChannel::Persist`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ChannelState {
+    /// The current animation and, while transitioning, the incoming one.
+    pub anims: [Option<ActiveAnimationState>; 2],
+    /// Whether the channel blends the two.
+    pub transitioning: bool,
+    /// When the transition started, on the timer.
+    pub transition_start: u32,
+    /// How long it lasts.
+    pub transition_time: u32,
+    /// How long the last pose is held when the animation finishes.
+    pub stop_transition_time: u32,
+}
+
+/// The animation state of a model, as a saved game keeps it: the timer,
+/// the channels, the default transition times and the pair table
+/// (`CXModel::Persist` and the actor's `Persist` together). Taken with
+/// [`AnimatedModel::state`] and put back on a freshly loaded model with
+/// [`AnimatedModel::restore`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AnimationState {
+    /// The timer the deltas added up to.
+    pub timer: u32,
+    /// One entry per channel, 0 to 9.
+    pub channels: Vec<ChannelState>,
+    /// The default transition time, milliseconds.
+    pub default_transition_ms: u32,
+    /// The default stop transition time, milliseconds.
+    pub default_stop_transition_ms: u32,
+    /// The pair table: from, to, milliseconds.
+    pub transition_times: Vec<(String, String, u32)>,
+}
+
 /// A model with its animation state: the channels, the posed frames and
 /// the skinned meshes (`CXModel` at run time).
 #[derive(Debug, Clone, PartialEq)]
@@ -632,6 +685,98 @@ impl AnimatedModel {
         }
         self.model.animation_sets.remove(index);
         true
+    }
+
+    /// The animation state for a saved game: the timer, every channel's
+    /// active animations by set name, the transition in progress and the
+    /// transition times. See [`AnimationState`].
+    pub fn state(&self) -> AnimationState {
+        let name_of = |anim: &ActiveAnimation| ActiveAnimationState {
+            set: self
+                .model
+                .animation_sets
+                .get(anim.set)
+                .map(|set| set.name.clone())
+                .unwrap_or_default(),
+            start_time: anim.start_time,
+            looping: anim.looping,
+            finished: anim.finished,
+            last_local_time: anim.last_local_time,
+            current_frame: anim.current_frame,
+        };
+        AnimationState {
+            timer: self.timer,
+            channels: self
+                .channels
+                .iter()
+                .map(|channel| ChannelState {
+                    anims: [
+                        channel.anims[0].as_ref().map(name_of),
+                        channel.anims[1].as_ref().map(name_of),
+                    ],
+                    transitioning: channel.transitioning,
+                    transition_start: channel.transition_start,
+                    transition_time: channel.transition_time,
+                    stop_transition_time: channel.stop_transition_time,
+                })
+                .collect(),
+            default_transition_ms: self.default_transition_ms,
+            default_stop_transition_ms: self.default_stop_transition_ms,
+            transition_times: self
+                .transition_times
+                .iter()
+                .map(|t| (t.from.clone(), t.to.clone(), t.time))
+                .collect(),
+        }
+    }
+
+    /// Puts a saved animation state back on a model loaded again from
+    /// its files: an active animation whose set the model no longer has
+    /// is dropped (the original keeps a dangling pointer there), a
+    /// transition left without an incoming animation ends, and the model
+    /// is posed again at the saved timer, without firing events.
+    pub fn restore(&mut self, state: &AnimationState) {
+        self.timer = state.timer;
+        self.default_transition_ms = state.default_transition_ms;
+        self.default_stop_transition_ms = state.default_stop_transition_ms;
+        self.transition_times = state
+            .transition_times
+            .iter()
+            .map(|(from, to, time)| TransitionTime {
+                from: from.clone(),
+                to: to.clone(),
+                time: *time,
+            })
+            .collect();
+        let sets = &self.model.animation_sets;
+        let revive = |saved: &Option<ActiveAnimationState>| -> Option<ActiveAnimation> {
+            let saved = saved.as_ref()?;
+            let set = sets
+                .iter()
+                .position(|set| set.name.eq_ignore_ascii_case(&saved.set))?;
+            Some(ActiveAnimation {
+                set,
+                start_time: saved.start_time,
+                looping: saved.looping,
+                finished: saved.finished,
+                last_local_time: saved.last_local_time,
+                current_frame: saved.current_frame,
+            })
+        };
+        for (index, channel) in self.channels.iter_mut().enumerate() {
+            let Some(saved) = state.channels.get(index) else {
+                *channel = Channel::default();
+                continue;
+            };
+            channel.anims = [revive(&saved.anims[0]), revive(&saved.anims[1])];
+            channel.transitioning = saved.transitioning && channel.anims[1].is_some();
+            channel.transition_start = saved.transition_start;
+            channel.transition_time = saved.transition_time;
+            channel.stop_transition_time = saved.stop_transition_time;
+        }
+        // Pose at the saved timer: with no time elapsed the local times
+        // and frame indices are what they were, so nothing fires.
+        self.update(0);
     }
 
     /// Advances the timer by `delta_ms` and updates the model
@@ -988,6 +1133,56 @@ AnimationSet raise_tip {
             rig.model().meshes[1].bones[2].frame.is_none(),
             "Ghost dangles"
         );
+    }
+
+    #[test]
+    fn the_state_restores_on_a_fresh_model_without_firing_events() {
+        let mut rig = new_rig();
+        rig.set_default_transition_ms(50);
+        rig.set_transition_time("lift", "sink", Some(120));
+        assert!(rig.play(0, "lift", true));
+        rig.update(300);
+        // A transition into `sink` on channel 0 (its 120 ms elapse in the
+        // long update, so `sink` has just started), `tilt` finished and
+        // stopped on channel 1.
+        assert!(rig.play(0, "sink", true));
+        rig.update(40);
+        assert!(rig.play_with(1, "tilt", 0, 0, true));
+        rig.update(2000);
+        let state = rig.state();
+        assert_eq!(state.timer, 2340);
+        assert_eq!(state.channels.len(), NUM_CHANNELS);
+        assert_eq!(state.channels[0].anims[0].as_ref().unwrap().set, "sink");
+        assert!(state.channels[0].anims[1].is_none(), "the transition ended");
+        assert!(state.channels[1].anims[0].is_none(), "tilt finished");
+        assert_eq!(
+            state.transition_times,
+            vec![("lift".into(), "sink".into(), 120)]
+        );
+
+        // The update where `tilt` finished still showed its last pose;
+        // the next one shows the channels as saved.
+        rig.update(0);
+        let mut back = new_rig();
+        back.restore(&state);
+        assert_eq!(back.timer(), rig.timer());
+        assert_eq!(back.current_animation(0), rig.current_animation(0));
+        assert_eq!(back.is_playing(0, None), rig.is_playing(0, None));
+        assert_eq!(back.is_playing(1, None), rig.is_playing(1, None));
+        assert_eq!(back.transition_time("lift", "sink"), 120);
+        assert_eq!(back.default_transition_ms(), 50);
+        assert_eq!(quad_of(&back), quad_of(&rig), "the same pose");
+        // The two go on in step, events included.
+        assert_eq!(back.update(100), rig.update(100));
+        assert_eq!(quad_of(&back), quad_of(&rig));
+
+        // A set the model lost is dropped from its channel.
+        let mut saved = rig.state();
+        saved.channels[0].anims[0].as_mut().unwrap().set = "gone".into();
+        let mut other = new_rig();
+        other.restore(&saved);
+        assert!(!other.is_playing(0, None));
+        assert_eq!(other.state().channels[0].anims[0], None);
     }
 
     #[test]
