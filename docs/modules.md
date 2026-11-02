@@ -20,6 +20,7 @@ core crates under short names and the modules behind Cargo features:
 | `luma::video` | `luma-video`: Ogg Theora videos | yes |
 | `luma::adventure` | `luma-adventure`: the point-and-click adventure game as Wintermute runs it | feature `adventure`, on by default |
 | `luma::lumen` | `luma-lumen`: the Lumen scenario format for games made for Luma (parser, checker, text runner; see [lumen.md](lumen.md)) | feature `lumen`, off by default |
+| `luma::three_d` | `luma-3d`: 3D characters on painted backgrounds, as Wintermute's 3D actors (the `.3ds` scene geometry, the camera that maps scene pixels to the 3D world, the Direct3D maths conventions; see [3d-actors.md](3d-actors.md)). The feature is `3d`; the module path needs a name that can start an identifier. | feature `3d`, off by default |
 
 Two more features configure the core rather than add a module:
 `audio-device` plays the sounds on the default output device (without
