@@ -77,10 +77,12 @@ fn triangles(mesh: &(Vec<MeshVertex>, Vec<u32>)) -> Vec<[f32; 3]> {
 }
 
 /// A volume covering the left half of the screen between depths `near`
-/// and `far`: a front face at `near` and a back face at `far`.
-fn left_half_volume(near: f32, far: f32) -> ShadowVolumeDraw {
-    let mut vertices = triangles(&rect(-1.0, 0.0, -1.0, 1.0, near, true));
-    vertices.extend(triangles(&rect(-1.0, 0.0, -1.0, 1.0, far, false)));
+/// and `far`: a front face at `near` and a back face at `far`, wound
+/// outward (clockwise toward the camera), or inward when `inward`, as
+/// the original's volumes are.
+fn left_half_volume(near: f32, far: f32, inward: bool) -> ShadowVolumeDraw {
+    let mut vertices = triangles(&rect(-1.0, 0.0, -1.0, 1.0, near, !inward));
+    vertices.extend(triangles(&rect(-1.0, 0.0, -1.0, 1.0, far, inward)));
     ShadowVolumeDraw {
         vertices,
         world: IDENTITY,
@@ -120,7 +122,7 @@ fn a_volume_darkens_the_receiver_inside_it_and_the_fill_clears_the_stencil() {
         view_projection: IDENTITY,
         cull_backfaces: true,
     });
-    list.push_shadow_volume(left_half_volume(0.2, 0.8));
+    list.push_shadow_volume(left_half_volume(0.2, 0.8, false));
     list.push_stencil_fill(StencilFill { color: HALF_BLACK });
     // A second fill right after finds the stencil cleared: no double
     // darkening.
@@ -134,11 +136,43 @@ fn a_volume_darkens_the_receiver_inside_it_and_the_fill_clears_the_stencil() {
     );
     close(image.pixel(6, 4).unwrap(), GREY, "lit right");
 
+    // Two volumes, or one wound inward (the far side counts up and fails,
+    // the near side counts down and wraps to 255): still one shadow.
+    for volumes in [
+        vec![
+            left_half_volume(0.2, 0.8, false),
+            left_half_volume(0.3, 0.9, false),
+        ],
+        vec![left_half_volume(0.2, 0.8, true)],
+    ] {
+        let mut list = DrawList::new(8.0, 8.0);
+        list.fill(white, Rect::new(0.0, 0.0, 8.0, 8.0), GREY);
+        list.push_depth_only(DepthOnlyDraw {
+            mesh: receiver,
+            world: IDENTITY,
+            view_projection: IDENTITY,
+            cull_backfaces: true,
+        });
+        let count = volumes.len();
+        for volume in volumes {
+            list.push_shadow_volume(volume);
+        }
+        list.push_stencil_fill(StencilFill { color: HALF_BLACK });
+        renderer.render(target.target(), GREY, &list).unwrap();
+        let image = target.read(renderer.gpu()).unwrap();
+        close(
+            image.pixel(1, 4).unwrap(),
+            rgba(100, 100, 100, 255),
+            &format!("{count} volume(s)"),
+        );
+        close(image.pixel(6, 4).unwrap(), GREY, "lit right");
+    }
+
     // Without a receiver nothing is behind the volume: both faces pass
     // the depth test, the count returns to zero, nothing darkens.
     let mut list = DrawList::new(8.0, 8.0);
     list.fill(white, Rect::new(0.0, 0.0, 8.0, 8.0), GREY);
-    list.push_shadow_volume(left_half_volume(0.2, 0.8));
+    list.push_shadow_volume(left_half_volume(0.2, 0.8, false));
     list.push_stencil_fill(StencilFill { color: HALF_BLACK });
     renderer.render(target.target(), GREY, &list).unwrap();
     let image = target.read(renderer.gpu()).unwrap();
@@ -269,7 +303,7 @@ fn the_items_keep_their_place_among_the_quads() {
         view_projection: IDENTITY,
         cull_backfaces: true,
     });
-    list.push_shadow_volume(left_half_volume(0.2, 0.8));
+    list.push_shadow_volume(left_half_volume(0.2, 0.8, false));
     list.push_stencil_fill(StencilFill { color: HALF_BLACK });
     list.fill(white, Rect::new(0.0, 0.0, 8.0, 4.0), rgba(0, 255, 0, 255));
     renderer.render(target.target(), GREY, &list).unwrap();

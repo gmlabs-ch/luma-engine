@@ -249,14 +249,18 @@ stencil and fills where the count says.
   triangles in model space (`Vec<[f32; 3]>`, built by the caller every
   frame), a world and a view-projection matrix. Drawn twice with the
   depth test `<=` against the depth buffer as it is and no depth or
-  colour writes: once culling the counter-clockwise faces (the faces
-  turned toward the camera remain) with stencil `IncrementClamp` on
-  depth pass, once culling the clockwise ones with `DecrementClamp`.
-  A pixel of a surface already in the depth buffer and inside the
-  volume ends with a count of one or more (its front face passes, its
-  back face fails); a pixel with nothing behind it, or outside the
-  volume, ends at zero. The vertices of a frame's volumes are
-  concatenated into one dynamic vertex buffer.
+  colour writes: once culling the counter-clockwise faces with stencil
+  `IncrementWrap` on depth pass, once culling the clockwise ones with
+  `DecrementWrap` (`D3DSTENCILOP_INCR` and `DECR` wrap too). The quads
+  `C3DShadowVolume::AddMesh` builds face **inward**, so the side of the
+  volume away from the camera counts up and the near side counts down:
+  a pixel of a surface already in the depth buffer and inside the
+  volume ends at 255 (the far side fails the depth test, the near side
+  passes and wraps), a pixel with nothing inside the volume at zero
+  (both pass), and the fill's `1 <= stencil` accepts the first. A
+  volume wound the other way counts 1 and 0 instead; the test is the
+  same. The vertices of a frame's volumes are concatenated into one
+  dynamic vertex buffer.
 - **`DepthOnlyDraw`** (`CAdSceneGeometry::RenderShadowGeometry`): an
   uploaded mesh written to the depth buffer only (colour writes off,
   depth writes on, test `<=`), its counter-clockwise faces culled when

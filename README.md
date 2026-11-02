@@ -56,7 +56,7 @@ Luma Engine reads the same game data with a new engine built for today:
 | `luma-3d` | 3D characters on painted backgrounds: `.3ds` scene geometry, the camera mapping, `.x` models with their skin and animations, the Direct3D maths conventions | `luma-formats`, `flate2`, `serde` with the `serde` feature |
 | `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen`, `luma-3d` and `luma-adventure/3d` with `3d` |
 | `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script`, `luma-compiler`, `luma` (feature `lumen`) |
-| `luma-player` | The desktop player | `luma` (features `adventure`, `audio-device`) |
+| `luma-player` | The desktop player | `luma` (features `adventure`, `audio-device`, `3d`) |
 
 The first six are the run-time core and `luma-compiler` a build tool (games
 ship compiled scripts, so `luma` does not re-export it); `luma-adventure`,

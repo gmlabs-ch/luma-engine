@@ -1098,10 +1098,14 @@ impl Renderer {
             pass_op,
         };
         let (face, cull, depth_compare, depth_write, color_writes, blend, entry) = match kind {
-            // The faces toward the camera are the clockwise ones
-            // (`D3DCULL_CCW` keeps them): count up on depth pass.
+            // The clockwise faces (`D3DCULL_CCW` keeps them) count up on
+            // depth pass, the others count down, both wrapping
+            // (`D3DSTENCILOP_INCR`/`DECR` wrap): the quads of
+            // `C3DShadowVolume` face inward, so the far side counts up
+            // and the near side down, and a pixel of a surface inside
+            // the volume ends at 255, which `1 <= stencil` accepts.
             SimpleKind::VolumeIncrement => (
-                count(wgpu::StencilOperation::IncrementClamp),
+                count(wgpu::StencilOperation::IncrementWrap),
                 Some(wgpu::Face::Back),
                 wgpu::CompareFunction::LessEqual,
                 false,
@@ -1110,7 +1114,7 @@ impl Renderer {
                 "vs_main",
             ),
             SimpleKind::VolumeDecrement => (
-                count(wgpu::StencilOperation::DecrementClamp),
+                count(wgpu::StencilOperation::DecrementWrap),
                 Some(wgpu::Face::Front),
                 wgpu::CompareFunction::LessEqual,
                 false,

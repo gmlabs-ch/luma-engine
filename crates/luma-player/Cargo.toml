@@ -10,7 +10,7 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
-luma = { workspace = true, features = ["adventure", "audio-device"] }
+luma = { workspace = true, features = ["adventure", "audio-device", "3d"] }
 
 [lints]
 workspace = true

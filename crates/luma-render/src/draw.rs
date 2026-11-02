@@ -282,11 +282,13 @@ impl<'a> MeshDraw<'a> {
 /// A shadow volume (`C3DShadowVolume`): triangles, in model space, that
 /// are counted into the stencil buffer and never coloured. Drawn twice
 /// with the depth test against what is in the depth buffer and no
-/// depth writes: the faces turned toward the camera (clockwise)
-/// increment the stencil where they pass the depth test, the others
-/// decrement it (`RenderToStencilBuffer`, both on depth pass). A pixel
-/// of a surface inside the volume ends with a count above zero; a
-/// [`StencilFill`] then darkens it.
+/// depth writes: the clockwise faces increment the stencil where they
+/// pass the depth test, the counter-clockwise ones decrement it, both
+/// wrapping (`RenderToStencilBuffer`, both on depth pass). Whichever way
+/// the faces are wound, a pixel of a surface inside the volume ends
+/// with a count other than zero (1, or 255 after a wrap) and a pixel
+/// with nothing inside it with zero; a [`StencilFill`] then darkens the
+/// first kind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShadowVolumeDraw {
     /// The triangles, three vertices each, in model space.
