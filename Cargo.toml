@@ -16,6 +16,7 @@ publish = false
 luma-archive = { path = "crates/luma-archive" }
 luma-formats = { path = "crates/luma-formats" }
 luma-script = { path = "crates/luma-script" }
+luma-compiler = { path = "crates/luma-compiler" }
 luma-render = { path = "crates/luma-render" }
 luma-audio = { path = "crates/luma-audio" }
 luma-video = { path = "crates/luma-video" }

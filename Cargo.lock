@@ -1025,6 +1025,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "luma-compiler"
+version = "0.0.1"
+dependencies = [
+ "luma-script",
+]
+
+[[package]]
 name = "luma-formats"
 version = "0.0.1"
 dependencies = [
