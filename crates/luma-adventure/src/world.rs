@@ -1245,10 +1245,15 @@ impl World {
             fixed_pos: !mods.relative,
             sound,
         };
+        let forced = self.forced_talk_sprite(id);
         match kind {
             Kind::Actor => {
+                let forced = forced.filter(|path| {
+                    self.actor_and_vfs(id)
+                        .is_some_and(|(vfs, actor)| actor.bank.add_sprite(vfs, path))
+                });
                 if let Some(actor) = self.actor_mut(id) {
-                    actor.talk(sentence);
+                    actor.talk(sentence, forced);
                 }
             }
             Kind::Entity(r) => {
@@ -1267,12 +1272,46 @@ impl World {
                     for sprite in sprites {
                         view.add_sprite(&self.vfs, &sprite);
                     }
-                    view.talk(r, sentence);
+                    let forced = forced.filter(|path| view.add_sprite(&self.vfs, path));
+                    view.talk(r, sentence, forced);
                 }
             }
             _ => {}
         }
         true
+    }
+
+    /// The sprite `ForceTalkAnim` named for the sentence starting on an
+    /// object (`CAdTalkHolder::GetTalkStance`): the name is used once; a
+    /// used one is forgotten when the next sentence starts
+    /// (`CAdObject::Talk`). A file that does not load is logged and
+    /// dropped.
+    fn forced_talk_sprite(&mut self, id: NativeId) -> Option<String> {
+        let state = self.object_state_mut(id)?;
+        if state.forced_talk_used {
+            state.forced_talk_anim = None;
+            state.forced_talk_used = false;
+        }
+        let path = state.forced_talk_anim.clone()?;
+        state.forced_talk_used = true;
+        let loaded = match self.objects.get(id).map(|n| n.kind.clone()) {
+            Some(Kind::Actor) => self
+                .actor_and_vfs(id)
+                .is_some_and(|(vfs, actor)| actor.bank.add_sprite(vfs, &path)),
+            Some(Kind::Entity(_)) => self
+                .scene
+                .as_mut()
+                .is_some_and(|view| view.add_sprite(&self.vfs, &path)),
+            _ => false,
+        };
+        if !loaded {
+            let who = self.describe(id);
+            self.log(format!(
+                "CAdTalkHolder::GetTalkStance: error loading talk sprite (object:\"{who}\" sprite:\"{path}\")"
+            ));
+            return None;
+        }
+        Some(path)
     }
 
     /// Ends an object's sentence (`StopTalk`); whether one was playing.
@@ -1424,21 +1463,31 @@ impl World {
         self.node_id(crate::scene_view::EntityRef::Free(free))
     }
 
-    /// The sprite object of an entity, created on first request.
+    /// The file of the sprite an object's sprite object stands for
+    /// (`CAdTalkHolder::m_Sprite`): an entity's sprite, the sprite
+    /// `SetSprite` gave an actor, an item's image.
+    pub(crate) fn own_sprite_path(&self, owner: NativeId) -> Option<String> {
+        match &self.objects.get(owner)?.kind {
+            Kind::Entity(r) => self.entity_def(*r)?.sprite.clone(),
+            Kind::Actor => self.actor(owner)?.sprite_override().map(str::to_string),
+            Kind::Item => self.item(owner)?.def.sprite.clone(),
+            _ => None,
+        }
+    }
+
+    /// The sprite object of an entity, an actor or an item, created on
+    /// first request.
     pub(crate) fn sprite_object(&mut self, owner: NativeId) -> Option<NativeId> {
-        let Kind::Entity(r) = self.objects.get(owner)?.kind else {
-            return None;
-        };
-        self.scene.as_ref()?.entity(r)?.sprite.as_ref()?;
+        self.own_sprite_path(owner)?;
         if let Some(id) = self.objects.find(|k| *k == Kind::Sprite(owner)) {
             return Some(id);
         }
         Some(self.objects.insert(Kind::Sprite(owner)))
     }
 
-    /// The sprite object of an entity (`GetSpriteObject`), created on
-    /// first request; `None` when the handle is not an entity with a
-    /// sprite.
+    /// The sprite object of an entity, an actor or an item
+    /// (`GetSpriteObject`), created on first request; `None` when the
+    /// object has no sprite of its own.
     pub fn sprite_object_id(&mut self, owner: NativeId) -> Option<NativeId> {
         self.sprite_object(owner)
     }

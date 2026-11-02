@@ -112,6 +112,9 @@ pub struct Actor {
     pub subtitles: SubtitleMods,
     /// Whether the sentence is shown this frame.
     pub show_sentence: bool,
+    /// The sprite `ForceTalkAnim` asked for the current sentence, played
+    /// as its first stance.
+    pub forced_talk: Option<String>,
     anims: HashMap<String, AnimState>,
     /// The sprite set by `SetSprite`, shown instead of `STAND`.
     sprite_override: Option<String>,
@@ -201,6 +204,7 @@ impl Actor {
             sentence: None,
             subtitles: SubtitleMods::default(),
             show_sentence: false,
+            forced_talk: None,
             anims: HashMap::new(),
             sprite_override: None,
             anim_sprite: None,
@@ -236,6 +240,7 @@ impl Actor {
             &self.anim_sprite2,
             &self.temp_sprite2,
             &self.current_sprite,
+            &self.forced_talk,
         ]
         .into_iter()
         .flatten()
@@ -294,6 +299,11 @@ impl Actor {
                 true
             }
         }
+    }
+
+    /// The animation state of a sprite path, if it was shown.
+    pub fn anim_state(&self, path: &str) -> Option<&AnimState> {
+        self.anims.get(&key(path))
     }
 
     /// The animation state of a sprite path, created at its first frame.
@@ -461,9 +471,11 @@ impl Actor {
     }
 
     /// Starts saying a sentence (`CAdObject::Talk`), already placed by
-    /// the world.
-    pub fn talk(&mut self, sentence: Sentence) {
+    /// the world; `forced` is the sprite `ForceTalkAnim` named, already
+    /// loaded, played as the first stance.
+    pub fn talk(&mut self, sentence: Sentence, forced: Option<String>) {
         self.sentence = Some(sentence);
+        self.forced_talk = forced;
         self.temp_sprite2 = None;
         self.state = ActorState::Talking;
         self.ready = false;
@@ -554,8 +566,13 @@ impl Actor {
                 self.state = self.next_state;
                 self.next_state = ActorState::Ready;
             } else {
+                // The forced sprite is the first stance (`GetTalkStance`);
+                // the sentence's stance list still advances.
                 let stance = self.sentence.as_mut().and_then(|s| s.next_stance());
-                self.temp_sprite2 = self.talk_stance(stance.as_deref(), random);
+                self.temp_sprite2 = self
+                    .forced_talk
+                    .take()
+                    .or_else(|| self.talk_stance(stance.as_deref(), random));
                 if let Some(path) = self.temp_sprite2.clone() {
                     self.anim(&path).reset();
                     self.current_sprite = Some(path);

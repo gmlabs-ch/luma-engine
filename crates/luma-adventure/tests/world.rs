@@ -2870,3 +2870,274 @@ fn objects_have_their_own_cursor_caption_slots_and_flags() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn talk_sprite_sets_forced_talk_anims_and_sprite_objects() {
+    use luma_adventure::EntityRef;
+    use luma_formats::font::TextAlign;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let prop_ref = EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    let shown = |runtime: &Runtime| runtime.world.scene().unwrap().shown_sprite(prop_ref);
+    let talk_sprites = |runtime: &Runtime| {
+        let e = runtime.world.scene().unwrap().entity(prop_ref).unwrap();
+        (e.talk_sprites.clone(), e.talk_special_sprites.clone())
+    };
+
+    // AddTalkSprite: a file that does not load fails; the others join the
+    // generic or the special set and the next sentence plays them.
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "AddTalkSprite",
+            &[Value::from("missing.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "AddTalkSprite",
+            &[Value::from("art\\walk.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "AddTalkSprite",
+            &[Value::from("art\\stand.sprite"), Value::Bool(true)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        talk_sprites(&runtime),
+        (
+            vec!["art\\walk.sprite".to_string()],
+            vec!["art\\stand.sprite".to_string()]
+        )
+    );
+    assert!(
+        runtime
+            .world
+            .talk(prop, "Hi", None, 500, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\walk.sprite"));
+    assert!(runtime.world.talk(
+        prop,
+        "Hi",
+        None,
+        500,
+        Some("stand".into()),
+        TextAlign::Center
+    ));
+    runtime.tick(16);
+    assert_eq!(
+        shown(&runtime).as_deref(),
+        Some("art\\stand.sprite"),
+        "a special stance by name"
+    );
+
+    // SetTalkSprite replaces a set, and what the entity is playing from it.
+    assert!(
+        runtime
+            .world
+            .talk(prop, "Hi", None, 500, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\walk.sprite"));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "SetTalkSprite",
+            &[Value::from("art\\prop.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        talk_sprites(&runtime).0,
+        vec!["art\\prop.sprite".to_string()]
+    );
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\prop.sprite"));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "RemoveTalkSprite",
+            &[Value::from("ART\\PROP.SPRITE"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    assert!(talk_sprites(&runtime).0.is_empty());
+    runtime.world.stop_talk(prop);
+
+    // ForceTalkAnim: the next sentence starts with that sprite, then the
+    // sets are used again; the sentence after is back to normal.
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "AddTalkSprite",
+            &[Value::from("art\\walk.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "ForceTalkAnim",
+            &[Value::from("art\\stand.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    assert!(
+        runtime
+            .world
+            .talk(prop, "Forced", None, 500, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\stand.sprite"));
+    assert!(
+        runtime
+            .world
+            .talk(prop, "Normal", None, 500, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\walk.sprite"));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "ForceTalkAnim",
+            &[Value::from("missing.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    assert!(
+        runtime
+            .world
+            .talk(prop, "Dropped", None, 500, None, TextAlign::Center)
+    );
+    let log = runtime.tick(16);
+    assert!(
+        log.iter().any(|l| l.contains("error loading talk sprite")),
+        "{log:?}"
+    );
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\walk.sprite"));
+
+    // An actor's sprite object stands for the sprite `SetSprite` gave it;
+    // an item's for its image; both animate.
+    let actor = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\bob.actor", false)
+        .unwrap();
+    assert_eq!(
+        call_native(&mut runtime, actor, "GetSpriteObject", &[]),
+        Value::Null
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "SetSprite",
+            &[Value::from("art\\prop.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    let sprite = call_native(&mut runtime, actor, "GetSpriteObject", &[])
+        .as_native()
+        .expect("the actor's sprite object");
+    assert_eq!(
+        runtime.world.get_property(sprite, "Filename"),
+        Some(Value::from("art\\prop.sprite"))
+    );
+    assert_eq!(
+        runtime.world.get_property(sprite, "NumFrames"),
+        Some(Value::Int(2))
+    );
+    assert_eq!(
+        runtime.world.get_property(sprite, "Owner"),
+        Some(Value::Native(actor))
+    );
+    for _ in 0..20 {
+        runtime.tick(16);
+    }
+    assert_eq!(
+        runtime.world.get_property(sprite, "CurrentFrame"),
+        Some(Value::Int(1))
+    );
+    assert_eq!(
+        runtime.world.get_property(sprite, "Finished"),
+        Some(Value::Bool(true))
+    );
+    let key = runtime.world.item_by_name("key").unwrap();
+    let image = call_native(&mut runtime, key, "GetSpriteObject", &[])
+        .as_native()
+        .expect("the item's sprite object");
+    assert_eq!(
+        runtime.world.get_property(image, "Filename"),
+        Some(Value::from("art\\green.png"))
+    );
+    assert_eq!(
+        runtime.world.get_property(image, "NumFrames"),
+        Some(Value::Int(1))
+    );
+    // ForceTalkAnim on an actor plays the file as the first stance too.
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "ForceTalkAnim",
+            &[Value::from("art\\walk.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    assert!(
+        runtime
+            .world
+            .talk(actor, "Hey", None, 500, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    assert_eq!(
+        runtime.world.actor(actor).unwrap().current_sprite(),
+        Some("art\\walk.sprite")
+    );
+    // Actors keep their talk sets in the file: the method only loads.
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "AddTalkSprite",
+            &[Value::from("missing.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            actor,
+            "AddTalkSprite",
+            &[Value::from("art\\stand.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}

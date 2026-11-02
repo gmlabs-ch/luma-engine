@@ -161,6 +161,15 @@ ends. The text is expanded through the string table.
   sprite, or no name, picks a random `TALK` sprite (a `TALK_SPECIAL`
   sprite only by name). Actors use the sprite of their direction. When
   the sprite finishes before the sentence, the next stance starts.
+  `ForceTalkAnim(file)` names a sprite file played as the first stance
+  of the next sentence only (the stance list still advances under it);
+  a file that does not load is logged and the sets are used. An entity's
+  sets change at run time with `AddTalkSprite(file, special)`,
+  `RemoveTalkSprite(file, special)` and `SetTalkSprite(file, special)`,
+  which replaces the set with one sprite (an entity playing a sprite it
+  replaced plays the new one at once). On actors these three methods
+  load the file and nothing else: in Wintermute 1.x an actor's talk
+  sets (`CAdActor::m_TalkSprites`) hide the list the methods edit.
 - **Skipping.** A left click (or right, or both, per `TALK_SKIP_BUTTON`)
   while the game is not interactive ends every sentence older than 300
   milliseconds.

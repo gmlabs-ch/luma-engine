@@ -401,6 +401,9 @@ pub struct EntityTalk {
     pub sprite: Option<String>,
     /// Whether the sentence is shown this frame.
     pub show: bool,
+    /// The sprite `ForceTalkAnim` asked for, played as the first stance
+    /// in place of the talk sprites.
+    pub forced: Option<String>,
 }
 
 /// One object in the drawing order of a scene.
@@ -510,6 +513,7 @@ impl SceneView {
             .collect();
         for (r, talk) in &self.talks {
             paths.extend(talk.sprite.clone());
+            paths.extend(talk.forced.clone());
             if let Some(e) = self.entity(*r) {
                 paths.extend(e.talk_sprites.iter().cloned());
                 paths.extend(e.talk_special_sprites.iter().cloned());
@@ -685,8 +689,10 @@ impl SceneView {
     /// Starts a sentence on an entity (`CAdObject::Talk`): talking is the
     /// entity's state now, so a sprite `PlayAnim` was showing is dropped
     /// (`CAdEntity::Update` frees it once the entity is ready again) and
-    /// the entity is ready as soon as the sentence ends.
-    pub fn talk(&mut self, r: EntityRef, sentence: Sentence) {
+    /// the entity is ready as soon as the sentence ends. `forced` is the
+    /// sprite `ForceTalkAnim` named, already loaded, played as the first
+    /// stance.
+    pub fn talk(&mut self, r: EntityRef, sentence: Sentence, forced: Option<String>) {
         self.playing.remove(&r);
         self.talks.insert(
             r,
@@ -694,8 +700,77 @@ impl SceneView {
                 sentence,
                 sprite: None,
                 show: false,
+                forced,
             },
         );
+    }
+
+    /// Adds a talk sprite to an entity (`AddTalkSprite`): to the special
+    /// set with `special`, else to the generic one. `false` when the
+    /// file does not load.
+    pub fn add_talk_sprite(&mut self, vfs: &Vfs, r: EntityRef, path: &str, special: bool) -> bool {
+        if self.entity(r).is_none() || !self.bank.add_sprite(vfs, path) {
+            return false;
+        }
+        if let Some(entity) = self.entity_mut(r) {
+            if special {
+                entity.talk_special_sprites.push(path.to_string());
+            } else {
+                entity.talk_sprites.push(path.to_string());
+            }
+        }
+        true
+    }
+
+    /// Removes a talk sprite from an entity (`RemoveTalkSprite`), by file
+    /// name; an entity playing it goes back to its own sprite until the
+    /// next stance.
+    pub fn remove_talk_sprite(&mut self, r: EntityRef, path: &str, special: bool) {
+        let Some(entity) = self.entity_mut(r) else {
+            return;
+        };
+        let list = if special {
+            &mut entity.talk_special_sprites
+        } else {
+            &mut entity.talk_sprites
+        };
+        if let Some(i) = list.iter().position(|p| key(p) == key(path)) {
+            list.remove(i);
+        }
+        if let Some(talk) = self.talks.get_mut(&r) {
+            if talk.sprite.as_deref().is_some_and(|p| key(p) == key(path)) {
+                talk.sprite = None;
+            }
+        }
+    }
+
+    /// Replaces an entity's talk sprites of a set with one
+    /// (`SetTalkSprite`); an entity playing one of the old ones plays the
+    /// new one at once. `false` when the file does not load.
+    pub fn set_talk_sprite(&mut self, vfs: &Vfs, r: EntityRef, path: &str, special: bool) -> bool {
+        if self.entity(r).is_none() || !self.bank.add_sprite(vfs, path) {
+            return false;
+        }
+        let current = self.talks.get(&r).and_then(|t| t.sprite.clone());
+        let Some(entity) = self.entity_mut(r) else {
+            return false;
+        };
+        let list = if special {
+            &mut entity.talk_special_sprites
+        } else {
+            &mut entity.talk_sprites
+        };
+        let playing_old =
+            current.is_some_and(|current| list.iter().any(|p| key(p) == key(&current)));
+        list.clear();
+        list.push(path.to_string());
+        if playing_old {
+            if let Some(talk) = self.talks.get_mut(&r) {
+                talk.sprite = Some(path.to_string());
+            }
+            self.anims.insert(r, AnimState::new(path));
+        }
+        true
     }
 
     /// Ends an entity's sentence (`StopTalk`); whether one was playing.
@@ -771,11 +846,13 @@ impl SceneView {
                 continue;
             }
             if sprite_done {
-                let stance = self
-                    .talks
-                    .get_mut(&r)
-                    .and_then(|t| t.sentence.next_stance());
-                let sprite = self.talk_stance(r, stance.as_deref(), random);
+                // The forced sprite is the first stance (`GetTalkStance`);
+                // the sentence's stance list still advances.
+                let (stance, forced) = match self.talks.get_mut(&r) {
+                    Some(t) => (t.sentence.next_stance(), t.forced.take()),
+                    None => (None, None),
+                };
+                let sprite = forced.or_else(|| self.talk_stance(r, stance.as_deref(), random));
                 if let Some(talk) = self.talks.get_mut(&r) {
                     talk.sprite = sprite.clone();
                     talk.show = true;

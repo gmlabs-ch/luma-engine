@@ -435,7 +435,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdObject.cpp
 - Hierarchy and Luma: CBObject → CAdObject → CAdTalkHolder / CAdObject3D; Luma: entities, actors (`entity_call`, `actor_call`)
-- Count: 32 done, 9 todo, 0 no-op
+- Count: 33 done, 8 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -443,7 +443,7 @@ How the list was made. For every class with a script interface, the names tested
 | `Reset` | method | **done** | Returns to the idle state; stops talking and animations. |
 | `IsTalking` | method | **done** | True while a sentence plays. |
 | `StopTalk`, `StopTalking` | method | **done** | Cuts the current sentence. |
-| `ForceTalkAnim` | method | **todo** | Forces a named talk animation for the next sentence. Stubbed. |
+| `ForceTalkAnim` | method | **done** | Plays a sprite file as the first stance of the next sentence. |
 | `Talk`, `TalkAsync` | method | **done** | Says a sentence (text, sound, duration, stances, align). |
 | `StickToRegion` | method | **todo** | Constrains a free object to move only inside a region. Stubbed. |
 | `SetFont`, `GetFont` | method | **done** | Sets / reads the font used for the object's speech. |
@@ -466,16 +466,16 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdTalkHolder.cpp
 - Hierarchy and Luma: CAdObject → CAdTalkHolder; Luma: entities, actors, items
-- Count: 3 done, 4 todo, 0 no-op
+- Count: 7 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `SetSprite` | method | **done** | Sets the object's default sprite. |
 | `GetSprite` | method | **done** | File of the current default sprite. |
-| `GetSpriteObject` | method | **todo** | The default sprite as a script object. Done for entities, stubbed for actors and items. |
-| `AddTalkSprite` | method | **todo** | Adds a sprite to the talk animation set (file, "ex" flag). Stubbed. |
-| `RemoveTalkSprite` | method | **todo** | Removes a talk sprite. Stubbed. |
-| `SetTalkSprite` | method | **todo** | Replaces the talk sprite set with one sprite. Stubbed. |
+| `GetSpriteObject` | method | **done** | The default sprite as a script object: an entity's sprite, the sprite `SetSprite` gave an actor, an item's image. |
+| `AddTalkSprite` | method | **done** | Adds a sprite to the talk animation set (file, "ex" flag). On actors and items the file is loaded and nothing else, as in WME (an actor's own sprite sets hide the list; items do not talk). |
+| `RemoveTalkSprite` | method | **done** | Removes a talk sprite (entities). |
+| `SetTalkSprite` | method | **done** | Replaces the talk sprite set with one sprite (entities). |
 | `Type` | get | **done** | Class name of the object. |
 
 ### CAdActor (2D walking character)
@@ -1039,8 +1039,8 @@ How the list was made. For every class with a script interface, the names tested
 | CBRegion | 7 | 4 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
 | CAdWaypointGroup | 0 | 3 | 0 | 3 |
-| CAdObject | 32 | 9 | 0 | 41 |
-| CAdTalkHolder | 3 | 4 | 0 | 7 |
+| CAdObject | 33 | 8 | 0 | 41 |
+| CAdTalkHolder | 7 | 0 | 0 | 7 |
 | CAdActor | 23 | 0 | 0 | 23 |
 | CAdEntity | 11 | 9 | 0 | 20 |
 | CAdItem | 23 | 3 | 0 | 26 |
@@ -1070,9 +1070,9 @@ How the list was made. For every class with a script interface, the names tested
 | CAdActor3DX | 0 | 67 | 0 | 67 |
 | CAdAttach3DX | 0 | 7 | 0 | 7 |
 | Events raised on objects | 15 | 9 | 0 | 24 |
-| **All** | **571** | **556** | **29** | **1156** |
+| **All** | **576** | **551** | **29** | **1156** |
 
-Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 556 done, 547 todo, 29 no-op, 1132 in all.
+Of the total, 24 are events (15 done, 9 todo) and the rest are methods, properties, functions, constructors and global variables: 561 done, 542 todo, 29 no-op, 1132 in all.
 
 ## WME classes Luma lacks entirely
 
@@ -1107,7 +1107,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 |-------|-----:|----------------|
 | Game services | 46 | Persistent private settings (`RegRead*`/`RegWrite*`), screenshots and thumbnails, loading/saving screens and icons, `Reset`, `LockMouseRect`, `OpenDocument`, `GetFileChecksum`, real values for the volume, sound, FPS and encoding properties, `StartupScene`, the game-level halves of runtime object creation. Mostly small and independent. |
 | Script library | 103 | `String`, `Array`, `Date`, `File`, `MemBuffer` and `Directory` objects, `new Object` with scripts, `new Actor` and `new Entity`, and the HSL colour helpers. Needed by scripts that parse text, keep arrays, read dates or write settings files; the `File` object needs a policy for where a script may read and write. |
-| Object model (2D) | 35 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), `StickToRegion`, `ForceTalkAnim`, talk sprite sets, attachments, per-object inventories, `GetSpriteObject` on actors and items. Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`. |
+| Object model (2D) | 30 | Runtime creation and editing (`CreateEntity`, `LoadEntity`, `AddLayer`, `AddRegion`, region points, waypoint groups, entity `Region`), `StickToRegion`, attachments, per-object inventories. Done: per-object cursors, `SetCaption`, `Movable`, `SceneIndependent`, `NonIntMouseEvents`, `ForceTalkAnim`, talk sprite sets, `GetSpriteObject` on actors and items. |
 | Rendering features | 15 | Rotation (`Rotate`, `RelativeRotate`, `ROTATABLE` entities), per-axis scale (`ScaleX`, `ScaleY`), blend modes, scene-only fades. Needs renderer work first (see `docs/rendering.md`). |
 | Sprites and frames | 48 | Frame and sub-frame objects (`GetFrame`, `AddFrame`, `Delay`, `MoveX`, hotspots...), runtime-built sprites, frame events. Reads on the sprite format already exist in `luma-formats`. |
 | Windows and controls | 10 | State-image objects (`Get...ImageObject`), `CreateEntityContainer`, settable `Exclusive`, `Freezable`. |
@@ -1117,7 +1117,7 @@ Counts are the todo members (no-op excluded). Groups are ordered by what a game 
 | Accessibility | 12 | `AccTTS*`, `AccKeyboard*`, `AccOutputText`, `AccCaption`. On macOS this would sit on the system speech synthesizer. |
 | Particles | 83 | The `CPartEmitter` class and the object methods that create emitters (`CreateParticleEmitter`, `DeleteParticleEmitter`, `ParticleEmitter`). |
 | 3D | 189 | `CAdActor3D`, `CAdActor3DX`, `CAdAttach3DX`, `CAdObject3D`, the scene's geometry, lights, fog, cameras, shadows, effects and textures on 3D models. A separate module in the sense of `docs/modules.md`: renderer, loaders (X files, MS3D/3DS), animation, lighting and shadows, all missing. |
-| **All** | **556** | |
+| **All** | **551** | |
 
 ## Members in Luma that WME 1.x does not define
 

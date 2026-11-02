@@ -229,6 +229,19 @@ impl World {
                 Return::null()
             }
             "Caption" => Return::value(self.caption_of(id, arg(0).get_int(self))),
+            "ForceTalkAnim" => {
+                // The sprite plays as the first stance of the next sentence
+                // (`CAdObject::ScCallMethod`).
+                let path = arg(0).get_string(self);
+                match self.object_state_mut(id) {
+                    Some(state) => {
+                        state.forced_talk_anim = Some(path);
+                        state.forced_talk_used = false;
+                        Return::value(true)
+                    }
+                    None => Return::value(false),
+                }
+            }
             _ => return None,
         })
     }

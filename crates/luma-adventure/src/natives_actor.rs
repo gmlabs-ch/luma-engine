@@ -13,10 +13,6 @@ use crate::world::World;
 
 /// Methods of later milestones that actors accept and log once.
 const ACTOR_STUBS: &[&str] = &[
-    "ForceTalkAnim",
-    "AddTalkSprite",
-    "RemoveTalkSprite",
-    "SetTalkSprite",
     "StickToRegion",
     "CreateParticleEmitter",
     "DeleteParticleEmitter",
@@ -273,8 +269,22 @@ impl World {
                     .map_or(Value::Null, Value::from),
             ),
             "GetSpriteObject" => {
-                self.stub("Actor.GetSpriteObject");
-                Return::null()
+                Return::value(self.sprite_object(id).map_or(Value::Null, Value::Native))
+            }
+            "AddTalkSprite" | "SetTalkSprite" | "RemoveTalkSprite" => {
+                // In Wintermute 1.x an actor's talk sprites are sprite sets
+                // of its own (`CAdActor::m_TalkSprites`), which hide the
+                // list these methods edit (`CAdTalkHolder::m_TalkSprites`),
+                // so the call loads the file and changes nothing else.
+                let path = arg(0).get_string(self);
+                let ok = name == "RemoveTalkSprite"
+                    || self
+                        .actor_and_vfs(id)
+                        .is_some_and(|(vfs, actor)| actor.bank.add_sprite(vfs, &path));
+                if !ok {
+                    self.log(format!("{name} method failed for file '{path}'"));
+                }
+                Return::value(ok)
             }
             "MergeAnims" => {
                 let path = arg(0).get_string(self);

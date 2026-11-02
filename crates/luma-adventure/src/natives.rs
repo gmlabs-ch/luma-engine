@@ -16,7 +16,7 @@ use luma_formats::scene::Direction;
 use luma_script::{Context, Effect, NativeId, Return, State, Value, rgba};
 
 use crate::objects::Kind;
-use crate::scene_view::{EntityRef, frame_height};
+use crate::scene_view::{AnimState, EntityRef, LoadedSprite, frame_height, key};
 use crate::talk::TalkSkipButton;
 use crate::video::VideoPlayback;
 use crate::world::World;
@@ -74,15 +74,11 @@ const GAME_STUBS: &[&str] = &[
 const OBJECT_STUBS: &[&str] = &[
     "PlayAnim",
     "PlayAnimAsync",
-    "ForceTalkAnim",
     "StickToRegion",
     "CreateParticleEmitter",
     "DeleteParticleEmitter",
     "AddAttachment",
     "RemoveAttachment",
-    "AddTalkSprite",
-    "RemoveTalkSprite",
-    "SetTalkSprite",
     "CreateRegion",
     "DeleteRegion",
 ];
@@ -1279,6 +1275,49 @@ impl World {
             "Talk" | "TalkAsync" => self.talk_call(id, name == "Talk", args),
             "StopTalk" | "StopTalking" => Return::value(self.stop_talk(id)),
             "IsTalking" => Return::value(self.is_talking(id)),
+            "AddTalkSprite" | "SetTalkSprite" | "RemoveTalkSprite" => {
+                let path = arg(0).get_string(self);
+                let special = arg(1).get_bool(self);
+                let ok = match (r, self.scene.as_mut()) {
+                    (EntityRef::Ui(_), _) => {
+                        // A container's entity does not talk; its sets are
+                        // kept all the same.
+                        let ok =
+                            name == "RemoveTalkSprite" || self.ui.bank.add_sprite(&self.vfs, &path);
+                        if ok {
+                            if let Some(e) = self.entity_def_mut(r) {
+                                let list = if special {
+                                    &mut e.talk_special_sprites
+                                } else {
+                                    &mut e.talk_sprites
+                                };
+                                match name {
+                                    "AddTalkSprite" => list.push(path.clone()),
+                                    "SetTalkSprite" => {
+                                        list.clear();
+                                        list.push(path.clone());
+                                    }
+                                    _ => list.retain(|p| key(p) != key(&path)),
+                                }
+                            }
+                        }
+                        ok
+                    }
+                    (_, None) => false,
+                    (r, Some(view)) => match name {
+                        "AddTalkSprite" => view.add_talk_sprite(&self.vfs, r, &path, special),
+                        "SetTalkSprite" => view.set_talk_sprite(&self.vfs, r, &path, special),
+                        _ => {
+                            view.remove_talk_sprite(r, &path, special);
+                            true
+                        }
+                    },
+                };
+                if !ok {
+                    self.log(format!("{name} method failed for file '{path}'"));
+                }
+                Return::value(ok)
+            }
             "SetFont" => {
                 let path = match arg(0) {
                     Value::Null => None,
@@ -1438,18 +1477,77 @@ impl World {
     // Sprites
     // ----------------------------------------------------------------
 
+    /// The sprite an object's sprite object stands for, with its
+    /// animation: an entity's in the scene (or the window bank for a
+    /// container's), an actor's in its own bank, an item's in the UI
+    /// bank.
+    fn sprite_parts(
+        &self,
+        owner: NativeId,
+    ) -> Option<(String, Option<&LoadedSprite>, Option<&AnimState>)> {
+        let path = self.own_sprite_path(owner)?;
+        Some(match &self.native(owner)?.kind {
+            Kind::Entity(EntityRef::Ui(i)) => (
+                path.clone(),
+                self.ui.bank.sprite(&path),
+                self.ui_entities.get(*i).and_then(|e| e.anim.as_ref()),
+            ),
+            Kind::Entity(r) => {
+                let view = self.scene()?;
+                (path.clone(), view.sprite(&path), view.anim(*r))
+            }
+            Kind::Actor => {
+                let actor = self.actor(owner)?;
+                (
+                    path.clone(),
+                    actor.bank.sprite(&path),
+                    actor.anim_state(&path),
+                )
+            }
+            Kind::Item => {
+                let item = self.item(owner)?;
+                (
+                    path.clone(),
+                    self.ui.bank.sprite(&path),
+                    item.anim.as_ref().filter(|a| a.sprite == key(&path)),
+                )
+            }
+            _ => return None,
+        })
+    }
+
+    /// The animation state behind an object's sprite object, mutable.
+    fn sprite_anim_mut(&mut self, owner: NativeId) -> Option<&mut AnimState> {
+        let path = self.own_sprite_path(owner)?;
+        match self.native(owner)?.kind.clone() {
+            Kind::Entity(EntityRef::Ui(i)) => {
+                let entity = self.ui_entities.get_mut(i)?;
+                let anim = entity.anim.get_or_insert_with(|| AnimState::new(&path));
+                if anim.sprite != key(&path) {
+                    *anim = AnimState::new(&path);
+                }
+                Some(anim)
+            }
+            Kind::Entity(r) => self.scene_mut()?.anim_mut(r),
+            Kind::Actor => Some(self.actor_mut(owner)?.anim(&path)),
+            Kind::Item => {
+                let item = self.item_mut(owner)?;
+                let anim = item.anim.get_or_insert_with(|| AnimState::new(&path));
+                if anim.sprite != key(&path) {
+                    *anim = AnimState::new(&path);
+                }
+                Some(anim)
+            }
+            _ => None,
+        }
+    }
+
     fn sprite_get(&self, owner: NativeId, name: &str) -> Option<Value> {
-        let Kind::Entity(r) = self.native(owner)?.kind else {
-            return None;
-        };
-        let view = self.scene()?;
-        let entity = view.entity(r)?;
-        let loaded = entity.sprite.as_deref().and_then(|p| view.sprite(p));
+        let (path, loaded, anim) = self.sprite_parts(owner)?;
         let frames = loaded.map_or(0, |l| l.sprite.frames.len());
-        let anim = view.anim(r);
         Some(match name {
             "Type" => Value::from("sprite"),
-            "Filename" => entity.sprite.clone().map_or(Value::Null, Value::from),
+            "Filename" => Value::from(path),
             "NumFrames" => Value::Int(frames as i32),
             "CurrentFrame" => Value::Int(if frames == 0 {
                 -1
@@ -1469,11 +1567,8 @@ impl World {
     }
 
     fn sprite_set(&mut self, owner: NativeId, name: &str, value: &Value) -> bool {
-        let Some(Kind::Entity(r)) = self.native(owner).map(|n| n.kind.clone()) else {
-            return false;
-        };
         let (int, flag) = (value.get_int(self), value.get_bool(self));
-        let Some(anim) = self.scene_mut().and_then(|v| v.anim_mut(r)) else {
+        let Some(anim) = self.sprite_anim_mut(owner) else {
             return false;
         };
         match name {
@@ -1556,19 +1651,27 @@ impl World {
     }
 
     fn sprite_call(&mut self, owner: NativeId, name: &str) -> Option<Return> {
-        let Some(Kind::Entity(r)) = self.native(owner).map(|n| n.kind.clone()) else {
-            return None;
-        };
+        let kind = self.native(owner)?.kind.clone();
         Some(match name {
             "Reset" => {
-                if let Some(view) = self.scene_mut() {
-                    view.reset_anim(r);
+                match kind {
+                    // An entity's `Reset` ends a `PlayAnim` too.
+                    Kind::Entity(r) if !matches!(r, EntityRef::Ui(_)) => {
+                        if let Some(view) = self.scene_mut() {
+                            view.reset_anim(r);
+                        }
+                    }
+                    _ => {
+                        if let Some(anim) = self.sprite_anim_mut(owner) {
+                            anim.reset();
+                        }
+                    }
                 }
                 Return::null()
             }
             "Pause" | "Play" => {
                 let paused = name == "Pause";
-                if let Some(anim) = self.scene_mut().and_then(|v| v.anim_mut(r)) {
+                if let Some(anim) = self.sprite_anim_mut(owner) {
                     anim.paused = paused;
                 }
                 Return::null()
