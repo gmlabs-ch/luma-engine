@@ -649,12 +649,23 @@ impl World {
             self.log(format!("'WINDOW' keyword expected in '{path}'"));
             return None;
         };
-        let mut def = WindowDef::default();
-        def.apply(root);
-        if let Some(template) = def.template.clone() {
-            let mut base = self.read_window_def(&template, depth + 1)?;
-            base.apply(root);
-            def = base;
+        // The controls' own templates (`TEMPLATE` in a `BUTTON`, `STATIC`
+        // or `EDIT` block) are read from the game where they stand.
+        let mut missing = Vec::new();
+        let mut def = match WindowDef::template_of(root) {
+            Some(template) => self.read_window_def(&template, depth + 1)?,
+            None => WindowDef::default(),
+        };
+        let vfs = &self.vfs;
+        def.apply_with(root, &mut |file| match vfs.read(file) {
+            Ok(bytes) => Some(bytes),
+            Err(err) => {
+                missing.push(format!("Error opening template file '{file}': {err}"));
+                None
+            }
+        });
+        for line in missing {
+            self.log(line);
         }
         Some(def)
     }

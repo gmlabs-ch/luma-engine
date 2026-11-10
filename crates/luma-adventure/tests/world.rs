@@ -5897,3 +5897,55 @@ fn loading_screens_and_the_loading_icon() {
         Some((0, 0))
     );
 }
+
+#[test]
+fn button_templates_are_read_from_the_game() {
+    let dir = game();
+    std::fs::write(
+        dir.join("t.window"),
+        b"WINDOW { NAME=\"tw\" WIDTH=20 HEIGHT=16
+  BUTTON { TEMPLATE=\"t.button\" NAME=\"yes\" WIDTH=7 }
+  BUTTON { TEMPLATE=\"gone.button\" NAME=\"lost\" }
+}",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("t.button"),
+        b"BUTTON { BACK=\"t.tiled\" FONT=\"fonts\\test.font\" WIDTH=30 HEIGHT=9 NAME=\"tpl\" }",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("t.tiled"),
+        b"TILED_IMAGE { IMAGE=\"art\\red.png\" UP_LEFT { 0,0,2,2 } }",
+    )
+    .unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.world.take_log();
+    let win = runtime
+        .world
+        .load_window(&mut runtime.engine, "t.window")
+        .expect("the window loads");
+    let yes = runtime.world.widget(win, "yes").expect("own name wins");
+    let c = runtime.world.control(yes).unwrap();
+    assert_eq!(c.width, 7);
+    assert_eq!(c.height, 9);
+    assert_eq!(c.font.as_deref(), Some("fonts\\test.font"));
+    assert!(c.back.is_some());
+    let lost = runtime.world.widget(win, "lost").unwrap();
+    assert!(runtime.world.control(lost).unwrap().font.is_none());
+    let log = runtime.world.take_log();
+    assert_eq!(
+        log.iter()
+            .filter(|l| l.contains("Error opening template file 'gone.button'"))
+            .count(),
+        1,
+        "{log:?}"
+    );
+    assert!(
+        !log.iter().any(|l| l.contains("template file 't.button'")),
+        "{log:?}"
+    );
+}

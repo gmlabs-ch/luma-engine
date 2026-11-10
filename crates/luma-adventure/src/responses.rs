@@ -93,7 +93,9 @@ impl World {
                 return false;
             }
         };
-        let mut def = match ResponseBoxDef::parse(&bytes) {
+        let vfs = &self.vfs;
+        let parsed = ResponseBoxDef::parse_with(&bytes, &mut |file| vfs.read(file).ok());
+        let mut def = match parsed {
             Ok(def) => def,
             Err(err) => {
                 self.log(format!("Error parsing response box '{path}': {err}"));

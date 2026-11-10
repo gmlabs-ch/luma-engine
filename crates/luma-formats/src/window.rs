@@ -14,6 +14,14 @@ use crate::image::{Rgb, Rgba};
 use crate::scene::Property;
 use crate::sprite::Rect;
 
+/// How many `TEMPLATE` files a control may chain.
+const TEMPLATE_DEPTH: u32 = 8;
+
+/// How many `TEMPLATE` files a control may read in all: a file may name
+/// several templates, each naming several, and a game file must not be
+/// able to make the engine read without end.
+const TEMPLATE_LOADS: u32 = 32;
+
 /// Vertical placement of a text in its box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -420,14 +428,56 @@ impl ButtonDef {
     }
 
     /// Reads the keys of a `BUTTON` block, overriding what is there.
+    /// A `TEMPLATE` is only recorded; see [`ButtonDef::apply_with`].
     pub fn apply(&mut self, node: &Node) {
+        self.apply_with(node, &mut |_| None, 0);
+    }
+
+    /// Reads the keys of a `BUTTON` block in order, overriding what is
+    /// there. A `TEMPLATE` names a file of the same kind that `load`
+    /// reads: its keys are applied where the `TEMPLATE` key stands, as
+    /// the original engine loads the file in place, so the keys after it
+    /// override the template and the keys before it are overridden.
+    /// `depth` is the length of the template chain so far.
+    pub fn apply_with(
+        &mut self,
+        node: &Node,
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+        depth: u32,
+    ) {
+        let mut left = TEMPLATE_LOADS;
+        self.apply_counted(node, load, depth, &mut left);
+    }
+
+    /// `apply_with`, with the template files the control may still read.
+    fn apply_counted(
+        &mut self,
+        node: &Node,
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+        depth: u32,
+        left: &mut u32,
+    ) {
         for child in node.nodes() {
             let key = child.key.to_ascii_uppercase();
             if self.base.apply_key(&key, child) {
                 continue;
             }
             match key.as_str() {
-                "TEMPLATE" => self.template = path(child),
+                "TEMPLATE" => {
+                    let file = path(child);
+                    if let Some(file) = file
+                        .as_deref()
+                        .filter(|_| depth < TEMPLATE_DEPTH && *left > 0)
+                    {
+                        *left -= 1;
+                        if let Some(doc) = load(file).and_then(|b| Document::parse(&b).ok()) {
+                            if let Some(root) = doc.get("BUTTON") {
+                                self.apply_counted(root, load, depth + 1, left);
+                            }
+                        }
+                    }
+                    self.template = file;
+                }
                 "BACK_HOVER" => self.back_hover = path(child),
                 "BACK_PRESS" => self.back_press = path(child),
                 "BACK_DISABLE" => self.back_disable = path(child),
@@ -505,14 +555,56 @@ impl StaticDef {
     }
 
     /// Reads the keys of a `STATIC` block, overriding what is there.
+    /// A `TEMPLATE` is only recorded; see [`StaticDef::apply_with`].
     pub fn apply(&mut self, node: &Node) {
+        self.apply_with(node, &mut |_| None, 0);
+    }
+
+    /// Reads the keys of a `STATIC` block in order, overriding what is
+    /// there. A `TEMPLATE` names a file of the same kind that `load`
+    /// reads: its keys are applied where the `TEMPLATE` key stands, as
+    /// the original engine loads the file in place, so the keys after it
+    /// override the template and the keys before it are overridden.
+    /// `depth` is the length of the template chain so far.
+    pub fn apply_with(
+        &mut self,
+        node: &Node,
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+        depth: u32,
+    ) {
+        let mut left = TEMPLATE_LOADS;
+        self.apply_counted(node, load, depth, &mut left);
+    }
+
+    /// `apply_with`, with the template files the control may still read.
+    fn apply_counted(
+        &mut self,
+        node: &Node,
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+        depth: u32,
+        left: &mut u32,
+    ) {
         for child in node.nodes() {
             let key = child.key.to_ascii_uppercase();
             if self.base.apply_key(&key, child) {
                 continue;
             }
             match key.as_str() {
-                "TEMPLATE" => self.template = path(child),
+                "TEMPLATE" => {
+                    let file = path(child);
+                    if let Some(file) = file
+                        .as_deref()
+                        .filter(|_| depth < TEMPLATE_DEPTH && *left > 0)
+                    {
+                        *left -= 1;
+                        if let Some(doc) = load(file).and_then(|b| Document::parse(&b).ok()) {
+                            if let Some(root) = doc.get("STATIC") {
+                                self.apply_counted(root, load, depth + 1, left);
+                            }
+                        }
+                    }
+                    self.template = file;
+                }
                 "TEXT" => self.text = control_text(&text(child)),
                 "TEXT_ALIGN" => self.text_align = text_align(&text(child), TextAlign::Center),
                 "VERTICAL_ALIGN" => self.vertical_align = VerticalAlign::from_name(&text(child)),
@@ -569,14 +661,56 @@ impl EditDef {
     }
 
     /// Reads the keys of an `EDIT` block, overriding what is there.
+    /// A `TEMPLATE` is only recorded; see [`EditDef::apply_with`].
     pub fn apply(&mut self, node: &Node) {
+        self.apply_with(node, &mut |_| None, 0);
+    }
+
+    /// Reads the keys of an `EDIT` block in order, overriding what is
+    /// there. A `TEMPLATE` names a file of the same kind that `load`
+    /// reads: its keys are applied where the `TEMPLATE` key stands, as
+    /// the original engine loads the file in place, so the keys after it
+    /// override the template and the keys before it are overridden.
+    /// `depth` is the length of the template chain so far.
+    pub fn apply_with(
+        &mut self,
+        node: &Node,
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+        depth: u32,
+    ) {
+        let mut left = TEMPLATE_LOADS;
+        self.apply_counted(node, load, depth, &mut left);
+    }
+
+    /// `apply_with`, with the template files the control may still read.
+    fn apply_counted(
+        &mut self,
+        node: &Node,
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+        depth: u32,
+        left: &mut u32,
+    ) {
         for child in node.nodes() {
             let key = child.key.to_ascii_uppercase();
             if self.base.apply_key(&key, child) {
                 continue;
             }
             match key.as_str() {
-                "TEMPLATE" => self.template = path(child),
+                "TEMPLATE" => {
+                    let file = path(child);
+                    if let Some(file) = file
+                        .as_deref()
+                        .filter(|_| depth < TEMPLATE_DEPTH && *left > 0)
+                    {
+                        *left -= 1;
+                        if let Some(doc) = load(file).and_then(|b| Document::parse(&b).ok()) {
+                            if let Some(root) = doc.get("EDIT") {
+                                self.apply_counted(root, load, depth + 1, left);
+                            }
+                        }
+                    }
+                    self.template = file;
+                }
                 "TEXT" => self.text = control_text(&text(child)),
                 "FONT_SELECTED" => self.font_selected = path(child),
                 "MAX_LENGTH" => self.max_length = child.as_int().unwrap_or(-1) as i32,
@@ -675,8 +809,29 @@ impl ResponseBoxDef {
         Ok(def)
     }
 
+    /// Parses a `.def` file as [`ResponseBoxDef::parse`] does, reading the
+    /// `TEMPLATE` files of its window's controls with `load`.
+    pub fn parse_with(
+        bytes: &[u8],
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+    ) -> Result<ResponseBoxDef> {
+        let doc = Document::parse(bytes)?;
+        let root = doc.get("RESPONSE_BOX").ok_or_else(|| Error::Invalid {
+            reason: "'RESPONSE_BOX' keyword expected".into(),
+        })?;
+        let mut def = ResponseBoxDef::default();
+        def.apply_with(root, load);
+        Ok(def)
+    }
+
     /// Reads the keys of a `RESPONSE_BOX` block, overriding what is there.
     pub fn apply(&mut self, node: &Node) {
+        self.apply_with(node, &mut |_| None);
+    }
+
+    /// Reads the keys of the block, overriding what is there; `load`
+    /// reads the `TEMPLATE` files of the window's controls.
+    pub fn apply_with(&mut self, node: &Node, load: &mut dyn FnMut(&str) -> Option<Vec<u8>>) {
         for child in node.nodes() {
             match child.key.to_ascii_uppercase().as_str() {
                 "TEMPLATE" => self.template = path(child),
@@ -691,7 +846,7 @@ impl ResponseBoxDef {
                 "SPACING" => self.spacing = child.as_int().unwrap_or(0) as i32,
                 "WINDOW" => {
                     let mut window = WindowDef::default();
-                    window.apply(child);
+                    window.apply_with(child, load);
                     self.window = Some(window);
                 }
                 "CURSOR" => self.cursor = path(child),
@@ -807,9 +962,27 @@ impl WindowDef {
         Ok(window)
     }
 
+    /// The `TEMPLATE` file a `WINDOW` block names, if any.
+    pub fn template_of(node: &Node) -> Option<String> {
+        node.nodes()
+            .iter()
+            .find(|child| child.key.eq_ignore_ascii_case("TEMPLATE"))
+            .and_then(path)
+    }
+
     /// Reads the keys of a `WINDOW` block, overriding what is there;
-    /// the controls are appended.
+    /// the controls are appended. The controls' `TEMPLATE` files are
+    /// only recorded; see [`WindowDef::apply_with`].
     pub fn apply(&mut self, node: &Node) {
+        self.apply_with(node, &mut |_| None);
+    }
+
+    /// Reads the keys of a `WINDOW` block, overriding what is there; the
+    /// controls are appended, and the `TEMPLATE` files of the buttons,
+    /// statics and editors (of nested windows too) are read with `load`
+    /// and applied in place. The window's own `TEMPLATE` is only
+    /// recorded: the caller loads it first.
+    pub fn apply_with(&mut self, node: &Node, load: &mut dyn FnMut(&str) -> Option<Vec<u8>>) {
         let mut fade_rgb: Option<Rgb> = None;
         let mut fade_alpha: i32 = 255;
         let mut alpha_rgb: Option<Rgb> = None;
@@ -839,22 +1012,22 @@ impl WindowDef {
                 "ALPHA" => alpha = child.as_int().unwrap_or(255) as i32,
                 "BUTTON" => {
                     let mut def = ButtonDef::default();
-                    def.apply(child);
+                    def.apply_with(child, load, 0);
                     self.widgets.push(WidgetDef::Button(Box::new(def)));
                 }
                 "STATIC" => {
                     let mut def = StaticDef::default();
-                    def.apply(child);
+                    def.apply_with(child, load, 0);
                     self.widgets.push(WidgetDef::Static(def));
                 }
                 "EDIT" => {
                     let mut def = EditDef::default();
-                    def.apply(child);
+                    def.apply_with(child, load, 0);
                     self.widgets.push(WidgetDef::Edit(def));
                 }
                 "WINDOW" => {
                     let mut def = WindowDef::default();
-                    def.apply(child);
+                    def.apply_with(child, load);
                     self.widgets.push(WidgetDef::Window(Box::new(def)));
                 }
                 "ENTITY_CONTAINER" => {
@@ -953,9 +1126,30 @@ impl InventoryBoxDef {
         Ok(def)
     }
 
+    /// Parses a `.def` file as [`InventoryBoxDef::parse`] does, reading the
+    /// `TEMPLATE` files of its window's controls with `load`.
+    pub fn parse_with(
+        bytes: &[u8],
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+    ) -> Result<InventoryBoxDef> {
+        let doc = Document::parse(bytes)?;
+        let root = doc.get("INVENTORY_BOX").ok_or_else(|| Error::Invalid {
+            reason: "'INVENTORY_BOX' keyword expected".into(),
+        })?;
+        let mut def = InventoryBoxDef::default();
+        def.apply_with(root, load);
+        Ok(def)
+    }
+
     /// Reads the keys of an `INVENTORY_BOX` block, overriding what is
     /// there.
     pub fn apply(&mut self, node: &Node) {
+        self.apply_with(node, &mut |_| None);
+    }
+
+    /// Reads the keys of the block, overriding what is there; `load`
+    /// reads the `TEMPLATE` files of the window's controls.
+    pub fn apply_with(&mut self, node: &Node, load: &mut dyn FnMut(&str) -> Option<Vec<u8>>) {
         for child in node.nodes() {
             match child.key.to_ascii_uppercase().as_str() {
                 "TEMPLATE" => self.template = path(child),
@@ -963,7 +1157,7 @@ impl InventoryBoxDef {
                 "CAPTION" => self.caption = text(child),
                 "WINDOW" => {
                     let mut window = WindowDef::default();
-                    window.apply(child);
+                    window.apply_with(child, load);
                     self.window = Some(window);
                 }
                 "AREA" => {
@@ -1373,5 +1567,214 @@ ITEM { NAME = "key" SPRITE = "items\key.sprite" CURSOR_COMBINED = FALSE AMOUNT =
         assert_eq!(VerticalAlign::from_code(2), VerticalAlign::Bottom);
         assert_eq!(VerticalAlign::Bottom.code(), 2);
         assert_eq!(control_text("a|b"), "a\nb");
+    }
+
+    /// A loader serving `files` by name.
+    fn files<'a>(files: &'a [(&'a str, &'a str)]) -> impl FnMut(&str) -> Option<Vec<u8>> + 'a {
+        move |name| {
+            files
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, body)| body.as_bytes().to_vec())
+        }
+    }
+
+    fn window_with(src: &str, mut load: impl FnMut(&str) -> Option<Vec<u8>>) -> WindowDef {
+        let doc = Document::parse(src.as_bytes()).unwrap();
+        let mut window = WindowDef::default();
+        window.apply_with(doc.get("WINDOW").unwrap(), &mut load);
+        window
+    }
+
+    fn first_button(window: &WindowDef) -> &ButtonDef {
+        match &window.widgets[0] {
+            WidgetDef::Button(b) => b,
+            other => panic!("button expected, got {other:?}"),
+        }
+    }
+
+    const TPL_BUTTON: &str =
+        r#"BUTTON { BACK="b.image" FONT="f.font" WIDTH=30 HEIGHT=30 NAME="tpl" }"#;
+
+    #[test]
+    fn a_button_template_is_loaded_in_place() {
+        let window = window_with(
+            r#"WINDOW { BUTTON { TEMPLATE="t.button" NAME="yes" TEXT="Yes" WIDTH=70 } }"#,
+            files(&[("t.button", TPL_BUTTON)]),
+        );
+        let b = first_button(&window);
+        assert_eq!(b.base.back.as_deref(), Some("b.image"));
+        assert_eq!(b.base.font.as_deref(), Some("f.font"));
+        assert_eq!(b.base.height, 30);
+        assert_eq!(b.base.name, "yes");
+        assert_eq!(b.text, "Yes");
+        assert_eq!(b.base.width, 70);
+        assert_eq!(b.template.as_deref(), Some("t.button"));
+    }
+
+    #[test]
+    fn a_key_before_the_template_is_overridden_by_it() {
+        let window = window_with(
+            r#"WINDOW { BUTTON { NAME="mine" WIDTH=70 HEIGHT=5 TEMPLATE="t.button" } }"#,
+            files(&[("t.button", TPL_BUTTON)]),
+        );
+        let b = first_button(&window);
+        assert_eq!(b.base.name, "tpl");
+        assert_eq!(b.base.width, 30);
+        assert_eq!(b.base.height, 30);
+    }
+
+    #[test]
+    fn templates_chain() {
+        let window = window_with(
+            r#"WINDOW { BUTTON { TEMPLATE="a.button" } }"#,
+            files(&[
+                ("a.button", r#"BUTTON { TEMPLATE="b.button" HEIGHT=12 }"#),
+                (
+                    "b.button",
+                    r#"BUTTON { FONT="deep.font" HEIGHT=99 WIDTH=8 }"#,
+                ),
+            ]),
+        );
+        let b = first_button(&window);
+        assert_eq!(b.base.font.as_deref(), Some("deep.font"));
+        assert_eq!(b.base.width, 8);
+        assert_eq!(b.base.height, 12);
+    }
+
+    #[test]
+    fn a_template_naming_itself_stops_at_the_depth_cap() {
+        let mut loads = 0;
+        let src = r#"BUTTON { TEMPLATE="self.button" FONT="f.font" }"#;
+        let window = window_with(r#"WINDOW { BUTTON { TEMPLATE="self.button" } }"#, |name| {
+            loads += 1;
+            (name == "self.button").then(|| src.as_bytes().to_vec())
+        });
+        assert_eq!(loads, TEMPLATE_DEPTH as usize);
+        let b = first_button(&window);
+        assert_eq!(b.base.font.as_deref(), Some("f.font"));
+        assert_eq!(b.template.as_deref(), Some("self.button"));
+    }
+
+    #[test]
+    fn many_template_lines_stop_at_the_load_budget() {
+        let mut loads = 0;
+        let src = format!(
+            "BUTTON {{ {} FONT=\"f.font\" }}",
+            "TEMPLATE=\"self.button\" ".repeat(50)
+        );
+        let window = window_with(r#"WINDOW { BUTTON { TEMPLATE="self.button" } }"#, |name| {
+            loads += 1;
+            (name == "self.button").then(|| src.as_bytes().to_vec())
+        });
+        assert!(loads <= TEMPLATE_LOADS as usize, "{loads} loads");
+        assert!(loads > 0);
+        let b = first_button(&window);
+        assert_eq!(b.base.font.as_deref(), Some("f.font"));
+        assert_eq!(b.template.as_deref(), Some("self.button"));
+    }
+
+    #[test]
+    fn a_missing_template_keeps_the_own_keys() {
+        let window = window_with(
+            r#"WINDOW { BUTTON { TEMPLATE="gone.button" NAME="yes" WIDTH=70 } }"#,
+            |_| None,
+        );
+        let b = first_button(&window);
+        assert_eq!(b.base.name, "yes");
+        assert_eq!(b.base.width, 70);
+        assert_eq!(b.template.as_deref(), Some("gone.button"));
+    }
+
+    #[test]
+    fn a_template_of_the_wrong_kind_is_ignored() {
+        let window = window_with(
+            r#"WINDOW { BUTTON { TEMPLATE="t.static" NAME="yes" } }"#,
+            files(&[("t.static", r#"STATIC { FONT="f.font" WIDTH=30 }"#)]),
+        );
+        let b = first_button(&window);
+        assert_eq!(b.base.name, "yes");
+        assert!(b.base.font.is_none());
+        assert_eq!(b.base.width, 0);
+    }
+
+    #[test]
+    fn an_unparsable_template_is_ignored() {
+        let window = window_with(
+            r#"WINDOW { BUTTON { TEMPLATE="t.button" NAME="yes" } }"#,
+            files(&[("t.button", "BUTTON {")]),
+        );
+        assert_eq!(first_button(&window).base.name, "yes");
+    }
+
+    #[test]
+    fn static_and_edit_templates_are_loaded_too() {
+        let window = window_with(
+            r#"WINDOW {
+  STATIC { TEMPLATE="t.static" TEXT="own" }
+  EDIT { TEMPLATE="t.edit" NAME="e" }
+}"#,
+            files(&[
+                (
+                    "t.static",
+                    r#"STATIC { FONT="s.font" HEIGHT=11 TEXT="tpl" }"#,
+                ),
+                (
+                    "t.edit",
+                    r#"EDIT { FONT="e.font" HEIGHT=22 NAME="tpl" MAX_LENGTH=9 }"#,
+                ),
+            ]),
+        );
+        let WidgetDef::Static(s) = &window.widgets[0] else {
+            panic!("static expected");
+        };
+        assert_eq!(s.base.font.as_deref(), Some("s.font"));
+        assert_eq!(s.base.height, 11);
+        assert_eq!(s.text, "own");
+        assert_eq!(s.template.as_deref(), Some("t.static"));
+        let WidgetDef::Edit(e) = &window.widgets[1] else {
+            panic!("edit expected");
+        };
+        assert_eq!(e.base.font.as_deref(), Some("e.font"));
+        assert_eq!(e.base.height, 22);
+        assert_eq!(e.max_length, 9);
+        assert_eq!(e.base.name, "e");
+        assert_eq!(e.template.as_deref(), Some("t.edit"));
+    }
+
+    #[test]
+    fn a_button_in_a_nested_window_gets_its_template() {
+        let window = window_with(
+            r#"WINDOW { WINDOW { NAME="inner" BUTTON { TEMPLATE="t.button" NAME="n" } } }"#,
+            files(&[("t.button", TPL_BUTTON)]),
+        );
+        let WidgetDef::Window(inner) = &window.widgets[0] else {
+            panic!("window expected");
+        };
+        let b = first_button(inner);
+        assert_eq!(b.base.back.as_deref(), Some("b.image"));
+        assert_eq!(b.base.name, "n");
+    }
+
+    #[test]
+    fn plain_apply_records_the_template_without_loading_it() {
+        let window =
+            WindowDef::parse(br#"WINDOW { BUTTON { TEMPLATE="t.button" NAME="yes" } }"#).unwrap();
+        let b = first_button(&window);
+        assert_eq!(b.template.as_deref(), Some("t.button"));
+        assert_eq!(b.base.name, "yes");
+        assert!(b.base.font.is_none());
+        assert_eq!(b.base.height, 0);
+    }
+
+    #[test]
+    fn the_window_template_is_read_from_its_node() {
+        let doc = Document::parse(br#"WINDOW { NAME="w" TEMPLATE="t.window" }"#).unwrap();
+        assert_eq!(
+            WindowDef::template_of(doc.get("WINDOW").unwrap()).as_deref(),
+            Some("t.window")
+        );
+        let doc = Document::parse(br#"WINDOW { NAME="w" }"#).unwrap();
+        assert_eq!(WindowDef::template_of(doc.get("WINDOW").unwrap()), None);
     }
 }
