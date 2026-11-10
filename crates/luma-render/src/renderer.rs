@@ -197,6 +197,25 @@ pub struct Renderer {
     simple_uniform_stride: u64,
     /// The vertices of the frame's shadow volumes, concatenated.
     volume_vertices: RefCell<wgpu::Buffer>,
+
+    blit_shader: wgpu::ShaderModule,
+    blit_pipeline_layout: wgpu::PipelineLayout,
+    /// The pipeline that scales a native frame onto a target, per
+    /// target format.
+    blit_pipelines: RefCell<HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>>,
+    /// The frame at the list's own resolution, when a letterboxed list
+    /// is scaled onto its target.
+    native: RefCell<Option<NativeFrame>>,
+}
+
+/// The texture a letterboxed frame is drawn into before it is scaled.
+#[derive(Debug)]
+struct NativeFrame {
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+    view: wgpu::TextureView,
+    group: wgpu::BindGroup,
 }
 
 impl Renderer {
@@ -297,6 +316,15 @@ impl Renderer {
                 bind_group_layouts: &[Some(&simple_uniform_layout)],
                 immediate_size: 0,
             });
+        let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("blit shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
+        });
+        let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("blit pipeline layout"),
+            bind_group_layouts: &[Some(&texture_layout)],
+            immediate_size: 0,
+        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("bilinear clamp"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -393,6 +421,10 @@ impl Renderer {
             simple_uniforms: RefCell::new(simple_uniforms),
             simple_uniform_stride,
             volume_vertices: RefCell::new(volume_vertices),
+            blit_shader,
+            blit_pipeline_layout,
+            blit_pipelines: RefCell::new(HashMap::new()),
+            native: RefCell::new(None),
         }
     }
 
@@ -504,12 +536,176 @@ impl Renderer {
     /// Renders a draw list into a target, clearing it first (colour,
     /// depth and stencil), and submits the work. The GPU runs it
     /// asynchronously; see [`Gpu::wait`].
+    ///
+    /// A letterboxed list whose size is not the target's is drawn at its
+    /// own size first, as the game was made to be seen, and that frame is
+    /// then scaled onto the target with its pixels kept sharp.
     pub fn render(&self, target: Target<'_>, clear: Rgba, list: &DrawList<'_>) -> Result<()> {
         if target.width == 0 || target.height == 0 {
             return Err(Error::Render {
                 reason: "empty target".into(),
             });
         }
+        if list.letterbox && list.width.is_finite() && list.height.is_finite() {
+            let width = list.width.round().clamp(1.0, 8192.0) as u32;
+            let height = list.height.round().clamp(1.0, 8192.0) as u32;
+            if (width, height) != (target.width, target.height) {
+                return self.render_scaled(target, clear, list, width, height);
+            }
+        }
+        self.render_direct(target, clear, list)
+    }
+
+    /// Draws the list into a texture of its own size, then that texture
+    /// into the letterbox rectangle of the target.
+    fn render_scaled(
+        &self,
+        target: Target<'_>,
+        clear: Rgba,
+        list: &DrawList<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<()> {
+        self.ensure_native(width, height, target.format);
+        self.ensure_blit_pipeline(target.format);
+        let native = self.native.borrow();
+        let native = native.as_ref().expect("native frame created above");
+        self.render_direct(
+            Target {
+                view: &native.view,
+                format: target.format,
+                width,
+                height,
+            },
+            clear,
+            list,
+        )?;
+        let (x, y, w, h) = letterbox(width as f32, height as f32, target.width, target.height);
+        let pipelines = self.blit_pipelines.borrow();
+        let mut encoder = self
+            .gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("luma frame scale"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scale"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target.view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: f64::from(clear.r) / 255.0,
+                            g: f64::from(clear.g) / 255.0,
+                            b: f64::from(clear.b) / 255.0,
+                            a: f64::from(clear.a) / 255.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            if w >= 1.0 && h >= 1.0 {
+                pass.set_viewport(x, y, w, h, 0.0, 1.0);
+                pass.set_pipeline(&pipelines[&target.format]);
+                pass.set_bind_group(0, &native.group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+        }
+        self.gpu.queue.submit([encoder.finish()]);
+        Ok(())
+    }
+
+    fn ensure_native(&self, width: u32, height: u32, format: wgpu::TextureFormat) {
+        let mut native = self.native.borrow_mut();
+        if native
+            .as_ref()
+            .is_some_and(|n| (n.width, n.height, n.format) == (width, height, format))
+        {
+            return;
+        }
+        let texture = self.gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("native frame"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let group = self
+            .gpu
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("native frame"),
+                layout: &self.texture_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            });
+        *native = Some(NativeFrame {
+            width,
+            height,
+            format,
+            view,
+            group,
+        });
+    }
+
+    fn ensure_blit_pipeline(&self, format: wgpu::TextureFormat) {
+        if self.blit_pipelines.borrow().contains_key(&format) {
+            return;
+        }
+        let pipeline = self
+            .gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("scale"),
+                layout: Some(&self.blit_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &self.blit_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.blit_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+        self.blit_pipelines.borrow_mut().insert(format, pipeline);
+    }
+
+    fn render_direct(&self, target: Target<'_>, clear: Rgba, list: &DrawList<'_>) -> Result<()> {
         let vertices = build_vertices(list);
         let quad_count = list.quads().len();
         self.ensure_capacity(quad_count);

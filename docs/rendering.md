@@ -63,8 +63,19 @@ The draw list has a logical size, usually the game's resolution
 corner and `(width, height)` to the bottom-right one, so sprite positions
 from the scene files are used as they are. The projection covers the
 whole target, or, with `letterbox`, the largest centred rectangle of the
-same aspect ratio; the GPU does the scaling, so HiDPI windows get a sharp
-bilinear upscale for free.
+same aspect ratio.
+
+A letterboxed list whose size is not the target's is drawn in two steps:
+the frame is rendered into a texture of the list's own size, as the game
+was made to be seen (the original engine drew at the game's resolution
+and let the display stretch it), then that texture is scaled onto the
+letterbox rectangle (`blit.wgsl`). The scaling keeps the game's pixels
+sharp: each output pixel takes one source pixel, and only the output
+pixels that straddle two source pixels blend them. At a whole multiple
+of the resolution this is exact nearest-neighbour scaling; at any other
+scale the pixels stay crisp without the uneven rows of plain nearest
+sampling. Scaled sprites, text and 3D actors are therefore smoothed at
+the game's resolution, as in the original, not at the window's.
 
 Scrolling is the draw list's `offset`, added to the position of every
 quad pushed after it (a layer scrolled by `s` pixels uses an offset of
@@ -113,7 +124,10 @@ gamma space, as it did in Direct3D 8 and SDL, so translucent sprites look
 the way the game's artists saw them. Tint and alpha are a per-vertex
 colour multiplied with the texel.
 
-Sampling is bilinear with clamping. A quad drawn at its texture's size at
+Sampling is bilinear with clamping, and textures are not premultiplied:
+the transparent pixels of a colour-keyed image carry the colour of their
+opaque neighbours (see [sprite.md](formats/sprite.md#images)), so that a
+scaled sprite's edge fades out instead of showing the key. A quad drawn at its texture's size at
 an integer position samples texel centres and is pixel-exact; a scaled
 quad is smoothed like the original engine's stretched sprites. The engine
 keeps images whole and uses the sub-frame `RECT` as the source

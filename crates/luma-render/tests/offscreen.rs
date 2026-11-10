@@ -164,6 +164,117 @@ fn applies_source_rect_tint_flip_and_offset() {
     close(out.pixel(18, 20).unwrap(), BLACK, "below the quad");
 }
 
+/// A 4x2 logical list of eight distinct opaque colours, letterboxed.
+fn palette_list(renderer: &Renderer) -> (DrawList<'_>, Vec<Rgba>) {
+    let colors: Vec<Rgba> = (0..8u8)
+        .map(|i| rgba(30 * i + 10, 255 - 30 * i, i * 31 + 7, 255))
+        .collect();
+    let mut list = DrawList::new(4.0, 2.0);
+    list.letterbox = true;
+    for (i, color) in colors.iter().enumerate() {
+        let (x, y) = ((i % 4) as f32, (i / 4) as f32);
+        list.fill(renderer.white(), Rect::new(x, y, 1.0, 1.0), *color);
+    }
+    (list, colors)
+}
+
+#[test]
+fn letterboxed_whole_multiples_scale_without_blending() {
+    let Some(renderer) = renderer() else { return };
+    let gpu = renderer.gpu();
+    let (list, colors) = palette_list(&renderer);
+    let clear = rgba(9, 9, 9, 255);
+
+    // 4x: every output pixel is exactly its source pixel, also next to the
+    // boundary between two colours.
+    let target = Offscreen::new(gpu, 16, 8);
+    renderer.render(target.target(), clear, &list).unwrap();
+    let out = target.read(gpu).unwrap();
+    for y in 0..8u32 {
+        for x in 0..16u32 {
+            let expected = colors[((y / 4) * 4 + x / 4) as usize];
+            assert_eq!(out.pixel(x, y).unwrap(), expected, "pixel {x},{y}");
+        }
+    }
+
+    // In a 16x16 target the picture sits in rows 4..12 between two bars.
+    let target = Offscreen::new(gpu, 16, 16);
+    renderer.render(target.target(), clear, &list).unwrap();
+    let out = target.read(gpu).unwrap();
+    for y in 0..16u32 {
+        for x in 0..16u32 {
+            let expected = if (4..12).contains(&y) {
+                colors[(((y - 4) / 4) * 4 + x / 4) as usize]
+            } else {
+                clear
+            };
+            assert_eq!(out.pixel(x, y).unwrap(), expected, "pixel {x},{y}");
+        }
+    }
+}
+
+#[test]
+fn letterboxed_fractional_scale_keeps_the_pixel_centres() {
+    let Some(renderer) = renderer() else { return };
+    let gpu = renderer.gpu();
+    let (list, colors) = palette_list(&renderer);
+    // 4x2 into 10x5: a scale of 2.5, source pixel i covers 2.5i..2.5(i+1).
+    let target = Offscreen::new(gpu, 10, 5);
+    renderer
+        .render(target.target(), rgba(9, 9, 9, 255), &list)
+        .unwrap();
+    let out = target.read(gpu).unwrap();
+    // Output pixels whose centres lie well inside a source pixel.
+    for (x, sx) in [(1u32, 0usize), (3, 1), (6, 2), (8, 3)] {
+        for (y, sy) in [(1u32, 0usize), (3, 1)] {
+            assert_eq!(
+                out.pixel(x, y).unwrap(),
+                colors[sy * 4 + sx],
+                "pixel {x},{y}"
+            );
+        }
+    }
+}
+
+#[test]
+fn letterboxed_scaled_half_transparent_texture_survives_a_target_change() {
+    let Some(renderer) = renderer() else { return };
+    let gpu = renderer.gpu();
+    let image = Image {
+        width: 2,
+        height: 2,
+        pixels: vec![
+            201, 3, 77, 128, 5, 250, 91, 128, 13, 99, 240, 128, 255, 1, 1, 128,
+        ],
+        has_alpha_channel: true,
+    };
+    let texture = renderer.texture("half", &image);
+    let mut list = DrawList::new(8.0, 8.0);
+    list.letterbox = true;
+    list.sprite(
+        &texture,
+        Rect::new(1.0, 1.0, 6.0, 6.0),
+        None,
+        Rgba::OPAQUE_WHITE,
+    );
+    // Two different target sizes in a row: the internal texture is made
+    // again for the second.
+    for (w, h) in [(24, 16), (40, 40)] {
+        let target = Offscreen::new(gpu, w, h);
+        renderer.render(target.target(), BLACK, &list).unwrap();
+        let out = target.read(gpu).unwrap();
+        assert_eq!((out.width, out.height), (w, h));
+        // The corner of the picture is outside the sprite: still black.
+        let left = (w - w.min(h)) / 2;
+        close(out.pixel(left, 0).unwrap(), BLACK, "outside the sprite");
+        let centre = out.pixel(w / 2, h / 2).unwrap();
+        assert!(
+            centre.r > 0 || centre.g > 0 || centre.b > 0,
+            "the sprite is drawn: {centre:?}"
+        );
+    }
+}
+
 #[test]
 fn letterboxes_a_logical_size_into_the_target() {
     let Some(renderer) = renderer() else { return };
