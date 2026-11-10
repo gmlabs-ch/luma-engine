@@ -134,9 +134,12 @@ filtering when scaled.
 
 ## Notes for implementers
 
-- Keep the colour key's RGB in transparent pixels or clear it consistently;
-  with premultiplied alpha and bilinear filtering, clearing it avoids
-  magenta fringes.
+- Do not keep the colour key's RGB in transparent pixels: bilinear
+  filtering blends a sprite's edge with its transparent neighbours, and
+  the key shows as a magenta fringe around every scaled sprite and glyph.
+  Luma replaces the colour of each keyed pixel with the average of the
+  opaque pixels around it (black when it has none) at decoding time;
+  alpha stays 0, so hit testing and blending are unchanged.
 - Image paths use `\` and are case-insensitive; resolve them through the
   virtual file system, loose files first.
 - A missing image is not fatal for the engine: it substitutes

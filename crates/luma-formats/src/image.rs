@@ -214,6 +214,7 @@ pub fn decode(bytes: &[u8], color_key: Rgb) -> Result<Image> {
                 p[3] = 0;
             }
         }
+        clear_keyed_color(&mut rgba, width as usize, height as usize);
         rgba
     };
     Ok(Image {
@@ -222,6 +223,39 @@ pub fn decode(bytes: &[u8], color_key: Rgb) -> Result<Image> {
         pixels,
         has_alpha_channel: keep_alpha,
     })
+}
+
+/// Replaces the colour of the transparent pixels of a colour-keyed image:
+/// the average of the opaque pixels around each one, or black when it has
+/// none. Bilinear filtering blends a sprite's edge with its transparent
+/// neighbours, so the key (magenta, usually) would show as a fringe
+/// around every scaled sprite; with the neighbours' colour the edge only
+/// fades out.
+fn clear_keyed_color(rgba: &mut [u8], width: usize, height: usize) {
+    let source = rgba.to_vec();
+    for y in 0..height {
+        for x in 0..width {
+            let at = (y * width + x) * 4;
+            if source[at + 3] != 0 {
+                continue;
+            }
+            let (mut sum, mut count) = ([0u32; 3], 0u32);
+            for ny in y.saturating_sub(1)..(y + 2).min(height) {
+                for nx in x.saturating_sub(1)..(x + 2).min(width) {
+                    let n = (ny * width + nx) * 4;
+                    if source[n + 3] != 0 {
+                        for c in 0..3 {
+                            sum[c] += u32::from(source[n + c]);
+                        }
+                        count += 1;
+                    }
+                }
+            }
+            for c in 0..3 {
+                rgba[at + c] = sum[c].checked_div(count).unwrap_or(0) as u8;
+            }
+        }
+    }
 }
 
 /// Whether the decoder would keep the alpha channel of an image with this
@@ -272,7 +306,19 @@ mod tests {
         let img = decode(&png_rgb(), DEFAULT_COLOR_KEY).unwrap();
         assert_eq!((img.width, img.height), (2, 2));
         assert!(!img.has_alpha_channel);
-        assert_eq!(img.pixel(0, 0).unwrap().a, 0, "magenta is transparent");
+        // The transparent pixel takes the average colour of its opaque
+        // neighbours instead of the key: (10+166+0)/3, (20+202+0)/3,
+        // (30+240+0)/3.
+        assert_eq!(
+            img.pixel(0, 0),
+            Some(Rgba {
+                r: 58,
+                g: 74,
+                b: 90,
+                a: 0
+            }),
+            "magenta is transparent and gone"
+        );
         assert_eq!(
             img.pixel(1, 0),
             Some(Rgba {
@@ -300,6 +346,48 @@ mod tests {
             "magenta stays with a custom key"
         );
         assert_eq!(custom.pixel(0, 1).unwrap().a, 0);
+    }
+
+    #[test]
+    fn keyed_pixels_without_opaque_neighbours_turn_black() {
+        let img = ImageBuffer::from_fn(2, 2, |_, _| IRgb([255u8, 0, 255]));
+        let mut out = Cursor::new(Vec::new());
+        img.write_to(&mut out, ImageFormat::Png).unwrap();
+        let img = decode(&out.into_inner(), DEFAULT_COLOR_KEY).unwrap();
+        for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            assert_eq!(
+                img.pixel(x, y),
+                Some(Rgba {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: 0
+                }),
+                "pixel {x},{y}"
+            );
+        }
+    }
+
+    #[test]
+    fn keyed_clearing_leaves_opaque_pixels_and_rgba_images_alone() {
+        let img = decode(&png_rgb(), DEFAULT_COLOR_KEY).unwrap();
+        let rgb = |r, g, b| Rgba { r, g, b, a: 255 };
+        assert_eq!(img.pixel(1, 0), Some(rgb(10, 20, 30)));
+        assert_eq!(img.pixel(0, 1), Some(rgb(166, 202, 240)));
+        assert_eq!(img.pixel(1, 1), Some(rgb(0, 0, 0)));
+
+        // A real alpha channel keeps every colour, the key included.
+        let img = decode(&png_rgba(), DEFAULT_COLOR_KEY).unwrap();
+        assert_eq!(img.pixel(0, 0), Some(rgb(255, 0, 255)));
+        assert_eq!(
+            img.pixel(1, 0),
+            Some(Rgba {
+                r: 10,
+                g: 20,
+                b: 30,
+                a: 77
+            })
+        );
     }
 
     #[test]
