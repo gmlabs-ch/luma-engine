@@ -7,8 +7,10 @@ Lite's `BGame`, `AdGame`, `BRenderer`, `BKeyboardState`, `BFader`,
 
 ## A frame
 
-`luma-player <game>` opens a window at the game's resolution (letterboxed
-when the window has another shape), loads `default.game`, attaches the
+`luma-player <game>` opens a window at a whole multiple of the game's
+resolution (the largest that keeps the window at most 1280 points wide,
+or `--scale <n>`; the frame is letterboxed when the window has another
+shape, see [rendering.md](rendering.md#coordinates)), loads `default.game`, attaches the
 game's scripts and schedules its `STARTUP_SCENE`. Every frame then runs,
 in this order (`Runtime::tick`):
 
@@ -42,6 +44,16 @@ in this order (`Runtime::tick`):
    window is checked; the cursor is chosen and animates;
 9. the events raised during the frame reach their scripts (they run
    next frame).
+
+The mouse reaches the runtime between frames (`mouse_move`,
+`mouse_left_down`, `mouse_left_up`). A button needs one frame that sees
+it held and a later one that sees it released, as in the original
+engine, but a click can be shorter than a frame (a tap on a trackpad, a
+slow frame). So a press that follows a move finds the object under the
+mouse again before it is dispatched, and a release that arrives before
+any frame saw the press waits for the end of the next frame: the
+`LeftRelease` event is raised then, and the button fires on the frame
+after. This is Luma's own; the original engine lost such clicks.
 
 The frame is then drawn: the scene with the actors (each object's
 particles right after it; a 3D actor takes its place in the order at

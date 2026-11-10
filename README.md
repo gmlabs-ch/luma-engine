@@ -175,6 +175,10 @@ luma-player path/to/game --headless --scene scenes/room/room.scene --say "Hello"
 # The same without sound (the sounds still run on the game clock)
 luma-player path/to/game --headless --mute
 
+# Play in a window three times the game's resolution (by default the
+# largest whole multiple that keeps the window at most 1280 points wide)
+luma-player path/to/game --scale 3
+
 # Open the game's main menu with Escape and render it, or right-click an
 # object and click the verb menu that opens
 luma-player path/to/game --headless --key 27 --screenshot menu.png

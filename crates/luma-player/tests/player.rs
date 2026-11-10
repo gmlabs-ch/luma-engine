@@ -37,6 +37,9 @@ fn usage_errors() {
     let out = player(&["game", "--headless", "--wheel", "sideways"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--wheel expects"));
+    let out = player(&["game", "--scale", "0"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--scale expects"));
     let out = player(&["/nonexistent", "--scene", "x", "--screenshot", "x.png"]);
     assert_eq!(out.status.code(), Some(1));
 }

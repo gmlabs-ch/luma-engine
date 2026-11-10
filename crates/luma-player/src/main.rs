@@ -44,6 +44,8 @@ OPTIONS:
     --say <text>          In headless mode, make the main actor say a sentence once the scene is up
     --font <file>         With --say, the font the actor talks with
     --mute                Play no sound (the sounds still run, silently, on the game clock)
+    --scale <n>           Open the window at n times the game's resolution (by default the
+                          largest whole number that keeps it within 1280 points wide)
     --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
                           node, e.g. --click Door or --click Freezer:LookAt
     --click-at <x>,<y>    In headless mode, move the mouse there and click
@@ -139,6 +141,8 @@ struct Options {
     say: Option<String>,
     font: Option<String>,
     mute: bool,
+    /// Window size as a multiple of the game's resolution (`--scale`).
+    scale: Option<u32>,
     steps: Vec<Step>,
     hover_at: Option<(i32, i32)>,
     after: u64,
@@ -163,6 +167,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut say = None;
     let mut font = None;
     let mut mute = false;
+    let mut scale = None;
     let mut steps = Vec::new();
     let mut hover_at = None;
     let mut after = 3;
@@ -209,6 +214,17 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--say" => say = Some(value(&mut i)?.clone()),
             "--font" => font = Some(value(&mut i)?.clone()),
             "--mute" => mute = true,
+            "--scale" => {
+                let v = value(&mut i)?;
+                scale = Some(
+                    v.parse::<u32>()
+                        .ok()
+                        .filter(|n| (1..=16).contains(n))
+                        .ok_or_else(|| {
+                            format!("--scale expects a number from 1 to 16, got `{v}`")
+                        })?,
+                );
+            }
             "--click-at" => {
                 let v = value(&mut i)?;
                 let (x, y) = v
@@ -335,6 +351,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         say,
         font,
         mute,
+        scale,
         steps,
         hover_at,
         after,
@@ -989,6 +1006,12 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         .and_then(|v| v.parse().ok());
     let mut runtime = runtime;
     runtime.world.set_windowed(true);
+    // Games of the time are 320 to 1024 pixels wide: open the window at a
+    // whole multiple of that, so that a small game is not a stamp on a
+    // modern screen. The frame is letterboxed into whatever the window is.
+    let scale = options
+        .scale
+        .unwrap_or_else(|| (1280 / settings.width.max(1)).max(1));
     let player = GamePlayer {
         runtime,
         frame_limit,
@@ -999,8 +1022,8 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
     luma::render::window::run(
         WindowConfig {
             title: if caption.is_empty() { name } else { caption },
-            width: settings.width,
-            height: settings.height,
+            width: settings.width.saturating_mul(scale).clamp(1, 16384),
+            height: settings.height.saturating_mul(scale).clamp(1, 16384),
             cursor_visible: false,
             ..WindowConfig::default()
         },
