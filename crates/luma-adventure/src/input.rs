@@ -543,8 +543,9 @@ impl World {
         self.scene_hits(&mut hits);
         self.ui_hits_in_game(&mut hits);
         self.inventory_hits(&mut hits);
-        self.ui_hits_normal(&mut hits);
+        // In drawing order: the response box is under the normal windows.
         self.responses_hits(&mut hits);
+        self.ui_hits_normal(&mut hits);
         self.hits = hits;
     }
 

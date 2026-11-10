@@ -1751,8 +1751,11 @@ impl World {
         }
         self.draw_windows(list, true, white);
         self.draw_inventory(list, white);
-        self.draw_windows(list, false, white);
+        // The response box comes before the normal windows
+        // (`CAdGame::DisplayContent`): a menu opened during a dialogue
+        // covers the responses.
         self.draw_responses(list, white);
+        self.draw_windows(list, false, white);
         if let Some(white) = white {
             self.draw_access_hint(list, white);
         }

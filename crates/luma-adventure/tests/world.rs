@@ -3686,6 +3686,52 @@ fn runtime_with_window_shown() -> (Runtime, std::path::PathBuf, (i32, i32)) {
 }
 
 #[test]
+fn a_window_shown_during_a_dialogue_takes_the_clicks_over_the_responses() {
+    let (mut runtime, dir, (x, y)) = runtime_with_window_shown();
+    let game = runtime.world.game_id();
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "dialogue.script")
+    );
+    runtime.tick(16);
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "dlg", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "num"), Value::Int(2));
+    let responses = runtime.world.responses_window().unwrap();
+    assert!(runtime.world.control(responses).unwrap().visible);
+    let rows: Vec<_> = runtime
+        .world
+        .widgets_of(responses)
+        .into_iter()
+        .filter(|w| runtime.world.control(*w).unwrap().name == "response")
+        .collect();
+    // A response row lies under the window's OK button.
+    let under = rows.iter().any(|r| {
+        let c = runtime.world.control(*r).unwrap();
+        (c.x..c.x + c.width).contains(&x) && (c.y..c.y + c.height).contains(&y)
+    });
+    assert!(under, "a response row overlaps the OK button");
+    // The window is drawn over the rows, so it takes the click.
+    click_at(&mut runtime, x, y, Click::Slow);
+    assert_eq!(result(&runtime, "okPressed"), Value::Bool(true));
+    assert_eq!(result(&runtime, "chosen"), Value::Null);
+    assert!(runtime.world.control(responses).unwrap().visible);
+    // Hidden, the window lets the row take the click again.
+    let win = runtime.world.window_ids()[0];
+    runtime
+        .world
+        .set_property(win, "Visible", &Value::Bool(false));
+    runtime.tick(16);
+    click_at(&mut runtime, x, y, Click::Slow);
+    assert_ne!(result(&runtime, "chosen"), Value::Null);
+    assert!(!runtime.world.control(responses).unwrap().visible);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn a_click_shorter_than_a_frame_presses_a_window_button() {
     for click in [Click::HoveredFast, Click::BlindFast] {
         let (mut runtime, dir, (x, y)) = runtime_with_window_shown();

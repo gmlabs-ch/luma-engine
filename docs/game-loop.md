@@ -61,7 +61,10 @@ its projected position, where its shadow, its model and its attachments
 are pushed as 3D items of the draw list, and the scene's shadow
 receivers are written to the depth buffer before the main layer's
 nodes, see [3d-actors.md](3d-actors.md) section 10), the windows marked
-`IN_GAME`, the other windows, the sentences, the cursor, the fader's
+`IN_GAME`, the inventory box, the response box while a dialogue waits
+for a choice, the other windows (so a menu opened during a dialogue
+covers the responses, and takes the clicks over them; `CAdGame::
+DisplayContent`), the sentences, the cursor, the fader's
 colour over everything, the loading icon (see
 [saving.md](saving.md#loading-and-saving-screens-loading-icon)), and
 last the messages of `Game.Msg`: short
