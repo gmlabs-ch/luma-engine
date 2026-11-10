@@ -3053,6 +3053,24 @@ pub struct Runtime {
     pub engine: Engine,
     /// The game world, the engine's host.
     pub world: World,
+    /// What the mouse did since the last frame.
+    input: FrameInput,
+}
+
+/// What the mouse did since the last frame. The windows' buttons work
+/// frame by frame, as in the original engine (`CUIButton::Display`): one
+/// frame sees the button held, a later one sees it released and fires.
+/// A click can be shorter than a frame (a tap on a trackpad, a slow
+/// frame), so the runtime keeps what a frame has not seen yet.
+#[derive(Debug, Default)]
+struct FrameInput {
+    /// The mouse moved: the active object is the one of the last frame.
+    moved: bool,
+    /// The left button went down and no frame has seen it held.
+    left_pressed: bool,
+    /// The left button went up meanwhile: the release waits for the end
+    /// of the next frame.
+    left_release_due: bool,
 }
 
 impl Runtime {
@@ -3069,7 +3087,11 @@ impl Runtime {
         engine.set_global("Game", Value::Native(world.game_id));
         engine.set_global("Math", Value::Native(world.math_id));
         engine.set_global("Directory", Value::Native(world.directory_id));
-        Ok(Runtime { engine, world })
+        Ok(Runtime {
+            engine,
+            world,
+            input: FrameInput::default(),
+        })
     }
 
     /// Attaches the game's scripts (`SCRIPT=` in `default.game`); they
@@ -3159,6 +3181,7 @@ impl Runtime {
             // A video takes the frame: no scripts, no scene, no windows
             // (`CAdGame::DisplayContent`).
             self.world.update_video(&mut self.engine);
+            self.settle_input();
             return self.world.take_log();
         }
         self.world.update_speech();
@@ -3183,7 +3206,19 @@ impl Runtime {
         self.world.update_cursor();
         self.world.update_item_cursor(&self.engine);
         self.world.apply_pending_events(&mut self.engine);
+        self.settle_input();
         self.world.take_log()
+    }
+
+    /// Ends the frame's input: the frame saw the mouse where it is and
+    /// the button as it was held, so a release that waited for it goes
+    /// through now and the next frame fires the button.
+    fn settle_input(&mut self) {
+        self.input.moved = false;
+        self.input.left_pressed = false;
+        if std::mem::take(&mut self.input.left_release_due) {
+            self.release_left();
+        }
     }
 
     /// Fills a draw list with the frame as it is now; `white` is the
@@ -3200,6 +3235,7 @@ impl Runtime {
     /// Moves the mouse to a point in game pixels.
     pub fn mouse_move(&mut self, x: i32, y: i32) {
         self.world.set_mouse(x, y);
+        self.input.moved = true;
     }
 
     /// Whether the mouse is over the scene (`PointInViewport`).
@@ -3252,6 +3288,10 @@ impl Runtime {
     /// follows another within 400 ms and 4 pixels. While the game is not
     /// interactive, the click only skips the sentences.
     pub fn mouse_left_down(&mut self) {
+        if std::mem::take(&mut self.input.left_release_due) {
+            // A second press before the frame: the first click ends.
+            self.release_left();
+        }
         let double = self.note_click(false);
         self.world.mouse.left_down = true;
         if self.world.is_video_playing() {
@@ -3270,6 +3310,13 @@ impl Runtime {
             self.world.click_while_busy(false);
             return;
         }
+        if std::mem::take(&mut self.input.moved) {
+            // The mouse moved since the last frame: the click goes to
+            // what is under it now, not to what was under it then.
+            self.world.collect_hits();
+            self.world.update_active_object();
+        }
+        self.input.left_pressed = true;
         self.world.ui_mouse_down();
         if double {
             self.mouse_event("LeftDoubleClick", true);
@@ -3278,8 +3325,19 @@ impl Runtime {
         }
     }
 
-    /// The left button goes up (`LeftRelease`).
+    /// The left button goes up (`LeftRelease`). When no frame has seen
+    /// the button held yet, the release waits for the end of the next
+    /// frame, so that a click shorter than a frame still presses the
+    /// button under it.
     pub fn mouse_left_up(&mut self) {
+        if self.input.left_pressed {
+            self.input.left_release_due = true;
+            return;
+        }
+        self.release_left();
+    }
+
+    fn release_left(&mut self) {
         self.world.mouse.left_down = false;
         self.world.ui_mouse_up();
         self.mouse_event("LeftRelease", true);

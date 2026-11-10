@@ -3627,6 +3627,155 @@ fn dialogue_responses_wait_for_a_pick_and_remember_once_choices() {
     assert_eq!(result(&runtime, "num"), Value::Int(2));
 }
 
+/// How a click reaches the runtime: a frame can see the press, or not.
+#[derive(Clone, Copy)]
+enum Click {
+    /// Move, tick, then press and release with no tick between.
+    HoveredFast,
+    /// Move, press and release with no tick at all (stale hover).
+    BlindFast,
+    /// Move, tick, press, tick, release.
+    Slow,
+}
+
+fn click_at(runtime: &mut Runtime, x: i32, y: i32, click: Click) {
+    runtime.mouse_move(x, y);
+    match click {
+        Click::HoveredFast => {
+            runtime.tick(16);
+            runtime.mouse_left_down();
+            runtime.mouse_left_up();
+        }
+        Click::BlindFast => {
+            runtime.mouse_left_down();
+            runtime.mouse_left_up();
+        }
+        Click::Slow => {
+            runtime.tick(16);
+            runtime.mouse_left_down();
+            runtime.tick(16);
+            runtime.mouse_left_up();
+        }
+    }
+    for _ in 0..3 {
+        runtime.tick(16);
+    }
+}
+
+/// A runtime whose test window is shown, with the centre of its OK button.
+fn runtime_with_window_shown() -> (Runtime, std::path::PathBuf, (i32, i32)) {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    let win = runtime.world.window_ids()[0];
+    runtime
+        .world
+        .set_property(win, "Visible", &Value::Bool(true));
+    runtime.tick(16);
+    let ok = runtime.world.widget(win, "OK").unwrap();
+    let c = runtime.world.control(ok).unwrap();
+    let at = (c.x + 2, c.y + c.height / 2);
+    (runtime, dir, at)
+}
+
+#[test]
+fn a_click_shorter_than_a_frame_presses_a_window_button() {
+    for click in [Click::HoveredFast, Click::BlindFast] {
+        let (mut runtime, dir, (x, y)) = runtime_with_window_shown();
+        let win = runtime.world.window_ids()[0];
+        let ok = runtime.world.widget(win, "OK").unwrap();
+        click_at(&mut runtime, x, y, click);
+        assert_eq!(result(&runtime, "okPressed"), Value::Bool(true));
+        assert!(!runtime.world.control(ok).unwrap().button().unwrap().press);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[test]
+fn a_slow_click_fires_a_window_button_once() {
+    let (mut runtime, dir, (x, y)) = runtime_with_window_shown();
+    runtime.mouse_move(x, y);
+    runtime.tick(16);
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "okPressed"), Value::Bool(true));
+    // Clear the mark: nothing may fire the button again.
+    let mut r = runtime.engine.global("result").unwrap().clone();
+    assert!(r.set_property("okPressed", Value::Bool(false), &mut runtime.world));
+    runtime.engine.set_global("result", r);
+    for _ in 0..4 {
+        runtime.tick(16);
+    }
+    assert_eq!(result(&runtime, "okPressed"), Value::Bool(false));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn two_fast_clicks_before_a_tick_do_not_panic() {
+    let (mut runtime, dir, (x, y)) = runtime_with_window_shown();
+    runtime.mouse_move(x, y);
+    for _ in 0..2 {
+        runtime.mouse_left_down();
+        runtime.mouse_left_up();
+    }
+    // A release with nothing pressed is harmless too.
+    runtime.mouse_left_up();
+    for _ in 0..4 {
+        runtime.tick(16);
+    }
+    assert_eq!(result(&runtime, "okPressed"), Value::Bool(true));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_response_row_clicked_within_a_frame_is_chosen() {
+    for click in [Click::HoveredFast, Click::BlindFast, Click::Slow] {
+        let dir = game();
+        let vfs = Vfs::open_game(&dir).unwrap();
+        let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+        runtime.start();
+        runtime.tick(16);
+        let game = runtime.world.game_id();
+        runtime
+            .world
+            .set_property(game, "Interactive", &Value::Bool(true));
+        assert!(
+            runtime
+                .world
+                .attach(&mut runtime.engine, game, "dialogue.script")
+        );
+        runtime.tick(16);
+        runtime
+            .engine
+            .apply_event(&mut runtime.world, game, "dlg", false);
+        runtime.tick(16);
+        let window = runtime.world.responses_window().unwrap();
+        let buttons: Vec<_> = runtime
+            .world
+            .widgets_of(window)
+            .into_iter()
+            .filter(|w| runtime.world.control(*w).unwrap().name == "response")
+            .collect();
+        assert_eq!(buttons.len(), 2);
+        let second = runtime.world.control(buttons[1]).unwrap();
+        let (x, y) = (second.x + 2, second.y + second.height / 2);
+        click_at(&mut runtime, x, y, click);
+        assert_eq!(result(&runtime, "chosen"), Value::Int(2));
+        assert!(!runtime.world.control(window).unwrap().visible);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
 #[test]
 fn a_played_animation_survives_a_saved_game() {
     use luma_adventure::EntityRef;
