@@ -241,6 +241,8 @@ pub struct World {
     pub(crate) save_dir_checked: bool,
     /// The accessibility switches and state (`CBAccessMgr`).
     pub(crate) access: Accessibility,
+    /// Where the editors copy to and paste from.
+    pub(crate) clipboard: Box<dyn crate::input::Clipboard>,
 }
 
 impl World {
@@ -371,6 +373,7 @@ impl World {
             personal_save: personal_savegames,
             save_dir_checked: false,
             access: Accessibility::new(),
+            clipboard: Box::new(crate::input::MemoryClipboard::default()),
         };
         // The settings' table first, then the game file's on top, as the
         // original engine loads them.
@@ -2849,6 +2852,7 @@ impl Natives for World {
             Some(Kind::Frame { .. }) => "[frame]".to_string(),
             Some(Kind::SubFrame { .. }) => "[subframe]".to_string(),
             Some(Kind::Object) => "[object]".to_string(),
+            Some(Kind::Keyboard) => "[keyboard state]".to_string(),
             Some(Kind::Emitter(_)) => "[particle emitter]".to_string(),
             Some(_) => "[native object]".to_string(),
             None => "[invalid object]".to_string(),
@@ -3365,6 +3369,7 @@ impl Runtime {
             // A second press before the frame: the first click ends.
             self.release_left();
         }
+        self.world.key_held(crate::input::VK_LBUTTON);
         let double = self.note_click(false);
         self.world.mouse.left_down = true;
         if self.world.is_video_playing() {
@@ -3403,6 +3408,7 @@ impl Runtime {
     /// frame, so that a click shorter than a frame still presses the
     /// button under it.
     pub fn mouse_left_up(&mut self) {
+        self.world.key_up(crate::input::VK_LBUTTON);
         if self.input.left_pressed {
             self.input.left_release_due = true;
             return;
@@ -3423,6 +3429,7 @@ impl Runtime {
     /// interactive, a click only skips the sentences and a double click
     /// does nothing.
     pub fn mouse_right_down(&mut self) {
+        self.world.key_held(crate::input::VK_RBUTTON);
         let double = self.note_click(true);
         if self.world.is_video_playing() {
             if matches!(
@@ -3448,6 +3455,7 @@ impl Runtime {
 
     /// The right button goes up (`RightRelease`).
     pub fn mouse_right_up(&mut self) {
+        self.world.key_up(crate::input::VK_RBUTTON);
         self.mouse_event("RightRelease", true);
     }
 
@@ -3455,6 +3463,7 @@ impl Runtime {
     /// OnMouseMiddleDown`): to the game, else to the active object;
     /// nothing while a video plays or the game is not interactive.
     pub fn mouse_middle_down(&mut self) {
+        self.world.key_held(crate::input::VK_MBUTTON);
         if self.world.is_video_playing() || !self.world.interactive {
             return;
         }
@@ -3463,6 +3472,7 @@ impl Runtime {
 
     /// The middle button goes up (`MiddleRelease`).
     pub fn mouse_middle_up(&mut self) {
+        self.world.key_up(crate::input::VK_MBUTTON);
         if self.world.is_video_playing() {
             return;
         }
@@ -3510,10 +3520,15 @@ impl Runtime {
         true
     }
 
-    /// A key goes down (`CBGame::HandleKeypress`): the keyboard state is
-    /// updated; the focused window takes the key first (`Tab`, its
-    /// editor), else its `Keypress` handler when it has one, else the
-    /// game's.
+    /// A key goes down, as Windows delivers it to the original engine:
+    /// the key itself (`WM_KEYDOWN`, [`Runtime::key_message`]) and then
+    /// the character it types (`WM_CHAR`, [`Runtime::key_char`]). `code`
+    /// is the Windows virtual key code; `text` is the character the key
+    /// types with the modifiers held, if any. Without one, the keys
+    /// that always send a character still do (Backspace, Tab, Enter,
+    /// Escape, the space bar, Ctrl with a letter: see
+    /// [`crate::input::translated_char`]). A front-end calls this again
+    /// for every repeat of a held key.
     pub fn key_down(
         &mut self,
         code: i32,
@@ -3522,19 +3537,74 @@ impl Runtime {
         alt: bool,
         control: bool,
     ) {
-        self.world.key_down(code, text, shift, alt, control);
+        self.world.key_held(code);
+        self.key_message(code, shift, alt, control);
+        let translated = crate::input::translated_char(code, alt, control);
+        let ch = if control && !alt {
+            // Ctrl turns a letter into its control character and keeps
+            // the other keys from typing.
+            translated
+        } else {
+            translated.or(text.filter(|c| !c.is_control()))
+        };
+        if let Some(ch) = ch {
+            self.key_char(ch, shift, alt, control);
+        }
+    }
+
+    /// The key message alone (`WM_KEYDOWN`, `CBGame::HandleKeypress`
+    /// with `Printable` false): the key is not marked as held and no
+    /// character follows.
+    pub fn key_message(&mut self, code: i32, shift: bool, alt: bool, control: bool) {
+        self.handle_keypress(false, code, None, shift, alt, control);
+    }
+
+    /// A character is typed (`WM_CHAR`, `CBGame::HandleKeypress` with
+    /// `Printable` true): it reaches the focused window's editor and
+    /// becomes the keyboard state, but raises no `Keypress`. Nothing
+    /// while a video plays.
+    pub fn key_char(&mut self, ch: char, shift: bool, alt: bool, control: bool) {
+        if self.world.is_video_playing() {
+            return;
+        }
+        let code = crate::input::char_code(ch);
+        self.handle_keypress(true, code, Some(ch), shift, alt, control);
+    }
+
+    /// `CBGame::HandleKeypress`: Escape stops a video and a video
+    /// swallows every other key; then the accessibility keys; then the
+    /// keyboard state is recorded and the focused window takes the
+    /// message (`Tab`, its editor). A key the window leaves raises
+    /// `Keypress` on the window when its scripts handle it, else on the
+    /// game; a character raises nothing.
+    fn handle_keypress(
+        &mut self,
+        printable: bool,
+        code: i32,
+        text: Option<char>,
+        shift: bool,
+        alt: bool,
+        control: bool,
+    ) {
         if self.world.is_video_playing() {
             if code == 27 {
                 self.world.stop_video(&mut self.engine);
             }
             return;
         }
-        if self.world.access_key(&mut self.engine, code) {
+        // The modifiers stand for the system's own key state, which the
+        // original reads wherever it needs it.
+        self.world.keyboard.shift = shift;
+        self.world.keyboard.alt = alt;
+        self.world.keyboard.control = control;
+        if self.world.access_key(&mut self.engine, printable, code) {
             return;
         }
+        self.world
+            .read_key(printable, code, text, shift, alt, control);
         let game = self.world.game_id;
         if let Some(window) = self.world.focused_window() {
-            if self.world.window_key(window, code, text) {
+            if self.world.window_key(window, printable, code, text) || printable {
                 return;
             }
             if self.engine.can_handle_event(window, "Keypress") {
@@ -3542,6 +3612,8 @@ impl Runtime {
                     .apply_event(&mut self.world, window, "Keypress", false);
                 return;
             }
+        } else if printable {
+            return;
         }
         self.engine
             .apply_event(&mut self.world, game, "Keypress", false);

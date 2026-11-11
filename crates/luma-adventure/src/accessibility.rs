@@ -483,18 +483,19 @@ impl World {
     // Keyboard play
     // ----------------------------------------------------------------
 
-    /// A key going down, before anything else sees it
+    /// A keyboard message, before anything else sees it
     /// (`CBGame::HandleAccessKey`): Ctrl+Tab picks the next clickable
-    /// object, Ctrl+Shift+Tab the previous one, Ctrl+Space pauses and
-    /// resumes the game. Returns whether the key was taken.
-    pub(crate) fn access_key(&mut self, engine: &mut Engine, code: i32) -> bool {
+    /// object, Ctrl+Shift+Tab the previous one; the space character
+    /// typed with Ctrl held (`printable`) pauses and resumes the game.
+    /// Returns whether the message was taken.
+    pub(crate) fn access_key(&mut self, engine: &mut Engine, printable: bool, code: i32) -> bool {
         let control = self.keyboard.control || self.keyboard.is_key_down(VK_CONTROL);
         if self.access.keyboard_enabled && code == VK_TAB && control {
             let forward = !self.keyboard.shift;
             self.access.active = self.next_access_object(self.access.active, forward);
             return true;
         }
-        if self.access.keyboard_pause && code == VK_SPACE && control {
+        if printable && self.access.keyboard_pause && code == VK_SPACE && control {
             if self.access.paused {
                 self.access_unpause(engine);
             } else {

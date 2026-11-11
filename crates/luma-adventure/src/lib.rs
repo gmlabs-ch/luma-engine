@@ -103,7 +103,7 @@ pub use actor3d::{
 };
 pub use error::{Error, Result};
 pub use fader::{Fader, SCENE_FADE_MS};
-pub use input::{Cursors, Keyboard, Mouse};
+pub use input::{Clipboard, Cursors, Keyboard, MemoryClipboard, Mouse};
 pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;
 pub use objects::{Attachment, CursorSlot, Kind, Native, ObjectInventory, ObjectState, Objects};

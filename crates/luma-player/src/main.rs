@@ -4,6 +4,8 @@
 //! keyboard; shows one scene without scripts (`--scene`); or runs the
 //! scripts without a window (`--headless`).
 
+mod keys;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
@@ -57,13 +59,20 @@ OPTIONS:
                           centred on the mouse is then clicked with --click-at at the same point)
     --wheel <up|down>     In headless mode, turn the mouse wheel a notch (MouseWheelUp or
                           MouseWheelDown on the focused window, else on the game)
-    --key <code>          In headless mode, press a key (a Windows virtual key code, e.g. 27 for
-                          Escape)
+    --key [ctrl+][shift+][alt+]<code>
+                          In headless mode, press a key (a Windows virtual key code, e.g. 27 for
+                          Escape, 46 for Delete, ctrl+86 to paste), then the character the key
+                          types on a US keyboard, if any
+    --repeat-key <code>:<n>
+                          In headless mode, hold a key until it has repeated n times, as a held
+                          key does: n+1 presses, then one release
     --hold-key <code>[:<frames>]
                           In headless mode, hold a key down for that many frames (--after by
                           default), for scripts that poll Keyboard.IsKeyDown
     --type <text>         In headless mode, type the text, a key per character (into the
-                          focused editor)
+                          focused editor): each key as a US keyboard has it, then its
+                          character; a character the layout lacks (an accented letter) comes
+                          without a key
     --drag <x>,<y>:<x>,<y>
                           In headless mode, press the left button at the first point, move to
                           the second over --after frames and release there (a puzzle piece)
@@ -85,7 +94,7 @@ OPTIONS:
     --help                Show this message
 
 --click, --click-at, --click-on, --right-click-at, --drag, --wheel, --key, --hold-key,
---type and --wait are steps: they run in the order given, --after frames apart, starting one
+--repeat-key, --type and --wait are steps: they run in the order given, --after frames apart, starting one
 frame after the scene is up, once its scripts have placed the actor, as
 for a player who acts when the scene shows.
 
@@ -114,8 +123,15 @@ enum Step {
     /// Click a scene node where it is at that moment.
     ClickOn(String),
     RightClickAt(i32, i32),
-    /// Press and release a key.
-    Key(i32),
+    /// Press and release a key, with modifiers held.
+    Key {
+        code: i32,
+        shift: bool,
+        alt: bool,
+        control: bool,
+    },
+    /// Press a key, let it repeat that many times, release it.
+    RepeatKey(i32, u32),
     /// Turn the wheel a notch: `1` up, `-1` down.
     Wheel(i32),
     /// Hold a key down for that many frames (`--after` when `None`).
@@ -278,10 +294,41 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--key" => {
                 let v = value(&mut i)?;
-                let code = v
-                    .parse()
-                    .map_err(|_| format!("--key expects a key code, got `{v}`"))?;
-                steps.push(Step::Key(code));
+                let (mut shift, mut alt, mut control) = (false, false, false);
+                let mut parts: Vec<&str> = v.split('+').collect();
+                let code = parts
+                    .pop()
+                    .and_then(|code| code.trim().parse().ok())
+                    .ok_or_else(|| format!("--key expects a key code, got `{v}`"))?;
+                for modifier in parts {
+                    match modifier.trim().to_ascii_lowercase().as_str() {
+                        "shift" => shift = true,
+                        "alt" => alt = true,
+                        "ctrl" | "control" => control = true,
+                        _ => {
+                            return Err(format!(
+                                "--key expects [ctrl+][shift+][alt+]<code>, got `{v}`"
+                            ));
+                        }
+                    }
+                }
+                steps.push(Step::Key {
+                    code,
+                    shift,
+                    alt,
+                    control,
+                });
+            }
+            "--repeat-key" => {
+                let v = value(&mut i)?;
+                let (code, count) = v
+                    .split_once(':')
+                    .and_then(|(code, count)| {
+                        Some((code.trim().parse().ok()?, count.trim().parse::<u32>().ok()?))
+                    })
+                    .filter(|(_, count)| *count <= 10_000)
+                    .ok_or_else(|| format!("--repeat-key expects <code>:<n>, got `{v}`"))?;
+                steps.push(Step::RepeatKey(code, count));
             }
             "--wheel" => {
                 let v = value(&mut i)?;
@@ -533,9 +580,24 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                         }
                         continue;
                     }
-                    Step::Key(code) => {
+                    Step::Key {
+                        code,
+                        shift,
+                        alt,
+                        control,
+                    } => {
                         println!("[{tick}] key {code} pressed");
-                        runtime.key_down(*code, None, false, false, false);
+                        let text = luma::adventure::input::char_for_key(*code, *shift);
+                        runtime.key_down(*code, text, *shift, *alt, *control);
+                        runtime.key_up(*code);
+                        continue;
+                    }
+                    Step::RepeatKey(code, count) => {
+                        println!("[{tick}] key {code} held, repeated {count} time(s)");
+                        let text = luma::adventure::input::char_for_key(*code, false);
+                        for _ in 0..=*count {
+                            runtime.key_down(*code, text, false, false, false);
+                        }
                         runtime.key_up(*code);
                         continue;
                     }
@@ -601,9 +663,15 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                     Step::Type(text) => {
                         println!("[{tick}] typing {text:?}");
                         for ch in text.chars() {
-                            let code = i32::from(ch.to_ascii_uppercase() as u8);
-                            runtime.key_down(code, Some(ch), false, false, false);
-                            runtime.key_up(code);
+                            match luma::adventure::input::key_for_char(ch) {
+                                Some((code, shift)) => {
+                                    runtime.key_down(code, Some(ch), shift, false, false);
+                                    runtime.key_up(code);
+                                }
+                                // No key of the layout types it: the
+                                // character alone, as a composed one.
+                                None => runtime.key_char(ch, false, false, false),
+                            }
                         }
                         continue;
                     }
@@ -1060,61 +1128,6 @@ impl GamePlayer {
             ((y - f64::from(vy)) * h / f64::from(vh)).floor() as i32,
         )
     }
-
-    /// The Windows virtual key code of a key, as scripts compare
-    /// `Keyboard.KeyCode` (the engine's codes on its home platform):
-    /// letters as upper-case ASCII, digits and punctuation as themselves,
-    /// named keys by their `VK_` value.
-    fn key_code(key: &Key) -> Option<i32> {
-        Some(match key {
-            Key::Character(text) => {
-                let c = text.chars().next()?;
-                if c.is_ascii_alphabetic() {
-                    i32::from(c.to_ascii_uppercase() as u8)
-                } else if c.is_ascii() {
-                    i32::from(c as u8)
-                } else {
-                    return None;
-                }
-            }
-            Key::Named(named) => match named {
-                NamedKey::Backspace => 8,
-                NamedKey::Tab => 9,
-                NamedKey::Enter => 13,
-                NamedKey::Shift => 16,
-                NamedKey::Control => 17,
-                NamedKey::Alt => 18,
-                NamedKey::Pause => 19,
-                NamedKey::CapsLock => 20,
-                NamedKey::Escape => 27,
-                NamedKey::Space => 32,
-                NamedKey::PageUp => 33,
-                NamedKey::PageDown => 34,
-                NamedKey::End => 35,
-                NamedKey::Home => 36,
-                NamedKey::ArrowLeft => 37,
-                NamedKey::ArrowUp => 38,
-                NamedKey::ArrowRight => 39,
-                NamedKey::ArrowDown => 40,
-                NamedKey::Insert => 45,
-                NamedKey::Delete => 46,
-                NamedKey::F1 => 112,
-                NamedKey::F2 => 113,
-                NamedKey::F3 => 114,
-                NamedKey::F4 => 115,
-                NamedKey::F5 => 116,
-                NamedKey::F6 => 117,
-                NamedKey::F7 => 118,
-                NamedKey::F8 => 119,
-                NamedKey::F9 => 120,
-                NamedKey::F10 => 121,
-                NamedKey::F11 => 122,
-                NamedKey::F12 => 123,
-                _ => return None,
-            },
-            _ => return None,
-        })
-    }
 }
 
 impl App for GamePlayer {
@@ -1152,32 +1165,50 @@ impl App for GamePlayer {
                 event:
                     KeyEvent {
                         logical_key,
+                        physical_key,
+                        location,
                         state,
                         text,
-                        repeat,
                         ..
                     },
                 ..
             } => {
-                let Some(code) = GamePlayer::key_code(logical_key) else {
-                    return Flow::Continue;
-                };
-                match state {
-                    ElementState::Pressed if !repeat => {
-                        let printable = text
-                            .as_ref()
-                            .and_then(|t| t.chars().next())
-                            .filter(|c| !c.is_control());
-                        self.runtime.key_down(
-                            code,
-                            printable,
-                            self.modifiers.shift_key(),
-                            self.modifiers.alt_key(),
-                            self.modifiers.control_key(),
-                        );
+                // A held key repeats: the game gets the key and its
+                // character again each time, as Windows sends them.
+                let code = keys::virtual_key(logical_key, *physical_key);
+                let sided = code.and_then(|code| keys::sided_key(code, *location));
+                if *state == ElementState::Released {
+                    for code in code.into_iter().chain(sided) {
+                        self.runtime.key_up(code);
                     }
-                    ElementState::Released => self.runtime.key_up(code),
-                    _ => {}
+                    return Flow::Continue;
+                }
+                let shift = self.modifiers.shift_key();
+                let alt = self.modifiers.alt_key();
+                // The Command key of a Mac stands for Control, so that
+                // Cmd+C, Cmd+X, Cmd+V and Cmd+A edit as Ctrl does.
+                let control = self.modifiers.control_key()
+                    || (cfg!(target_os = "macos") && self.modifiers.super_key());
+                // The key is held whether or not the game is told.
+                for code in code.into_iter().chain(sided) {
+                    self.runtime.world.key_held(code);
+                }
+                // On a Mac, Option types the third character of a key.
+                if !keys::reaches_game(code, alt, control, cfg!(target_os = "macos")) {
+                    return Flow::Continue;
+                }
+                let mut chars = text
+                    .iter()
+                    .flat_map(|t| t.chars())
+                    .filter(|c| !c.is_control());
+                if let Some(code) = code {
+                    self.runtime
+                        .key_down(code, chars.next(), shift, alt, control);
+                }
+                // A key without a code, or a second character (a dead
+                // key that did not combine): the characters alone.
+                for ch in chars {
+                    self.runtime.key_char(ch, shift, alt, control);
                 }
             }
             _ => {}

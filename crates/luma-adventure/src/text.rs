@@ -107,6 +107,18 @@ fn text_to_ansi(text: &str) -> Vec<u8> {
         .collect()
 }
 
+/// The Windows-1252 byte of a character, `None` when the code page
+/// lacks it.
+pub(crate) fn ansi_byte(c: char) -> Option<u8> {
+    match u32::from(c) {
+        code @ (0..=0x7F | 0xA0..=0xFF) => Some(code as u8),
+        _ => WINDOWS_1252
+            .iter()
+            .position(|&w| w == c && w != '\u{fffd}')
+            .map(|at| 0x80 + at as u8),
+    }
+}
+
 impl Font {
     /// Loads a `.font` file and what it needs (the tile image, the
     /// TrueType file).

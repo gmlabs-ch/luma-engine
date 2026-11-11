@@ -186,6 +186,10 @@ luma-player path/to/game --scale 3
 luma-player path/to/game --headless --key 27 --screenshot menu.png
 luma-player path/to/game --headless --scene scenes/room/room.scene --right-click-at 300,240 --click-at 300,240
 
+# Type into the focused editor, punctuation and accents included, hold a
+# key until it has repeated five times, paste with Ctrl+V
+luma-player path/to/game --headless --type "Zoé, 3.5%" --repeat-key 8:5 --key ctrl+86
+
 # Hold the right arrow down for a scene driven by Keyboard.IsKeyDown, or
 # turn the mouse wheel (MouseWheelUp / MouseWheelDown on the focused window, else the game)
 luma-player path/to/game --headless --scene scenes/minigame/minigame.scene --hold-key 39 --ticks 300 --entities

@@ -153,8 +153,10 @@ text; `HeightToFit` only its height.
 An editor can take the focus (`Tab` moves it between the focusable
 controls of a window) and reads the keys: printable characters are
 inserted at the caret, `Backspace`, `Delete`, the arrows, `Home` and
-`End` edit and move. `Escape`, `Tab` and `Return` are left to the
-window. With right-to-left text (`Game.TextRTL`) the text sits against
+`End` edit and move, Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V select all,
+copy, cut and paste (see
+[game-loop.md](../game-loop.md#the-editors-keys)). `Escape`, `Tab` and
+`Return` are left to the window. With right-to-left text (`Game.TextRTL`) the text sits against
 the right edge, `Backspace` deletes the character after the caret and
 `Delete` the one before, `Home` and `End` swap, and a typed character
 leaves the caret before it, as the original engine's editor does.
@@ -215,9 +217,9 @@ object over its rectangle unless `PIXEL_PERFECT`. A click on a button
 holds it pressed while the mouse stays on it; releasing it there raises
 `Press` on the button, then the event named after the button on its
 parent when `PARENT_NOTIFY` is on; an editor with `PARENT_NOTIFY` raises
-the event named after it on its parent at each key that edits its text
-(a character, Backspace, Delete), as `CUIEdit::InsertChars` and
-`DeleteChars` do, which is how a save window enables its OK button once
+the event named after it on its parent for each deletion and each
+insertion (a character, Backspace, Delete; twice for a character typed
+over a selection), as `CUIEdit::InsertChars` and `DeleteChars` do, which is how a save window enables its OK button once
 a name is typed. A `MENU` window registers a button
 named `close` under the whole screen (and under the window) whose press
 closes the window.

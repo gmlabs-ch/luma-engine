@@ -736,11 +736,11 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `IsKeyDown` | method | **done** | True while a key (character or code) is held. |
+| `IsKeyDown` | method | **done** | True while a key (character or code) or a mouse button (1, 2, 4) is held. |
 | `Type` | get | **done** | `keyboard`. |
-| `Key` | get | **done** | Last key as text. |
-| `Printable` | get | **done** | Whether the last key produced a character. |
-| `KeyCode` | get | **done** | Last key's code. |
+| `Key` | get | **done** | The character of the last keyboard message, empty for a key that types none. |
+| `Printable` | get | **done** | Whether the last keyboard message was a character. |
+| `KeyCode` | get | **done** | The last message's code: the character's when the key typed one, else the virtual key code (see `docs/game-loop.md`). |
 | `IsShift`, `IsAlt`, `IsControl` | get | **done** | Modifier state. |
 
 ## 8. Script library objects

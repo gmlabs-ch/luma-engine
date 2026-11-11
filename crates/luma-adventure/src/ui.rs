@@ -2336,11 +2336,20 @@ impl World {
     // The keyboard
     // ----------------------------------------------------------------
 
-    /// A key reaches the focused window (`CUIWindow::HandleKeypress`):
-    /// `Tab` moves the focus, else the focused control takes it. `true`
-    /// when handled.
-    pub(crate) fn window_key(&mut self, window: NativeId, code: i32, text: Option<char>) -> bool {
-        if code == VK_TAB {
+    /// A keyboard message reaches the focused window
+    /// (`CUIWindow::HandleKeypress`): the `Tab` key moves the focus,
+    /// anything else goes to the focused control. `printable` tells a
+    /// character typed (`code` its code, `text` the character) from a
+    /// key going down (`code` its virtual key code). `true` when
+    /// handled.
+    pub(crate) fn window_key(
+        &mut self,
+        window: NativeId,
+        printable: bool,
+        code: i32,
+        text: Option<char>,
+    ) -> bool {
+        if !printable && code == VK_TAB {
             let forward = !self.keyboard.shift;
             return self.move_focus(window, forward);
         }
@@ -2352,41 +2361,79 @@ impl World {
             return false;
         };
         match self.control(focused).map(|c| &c.kind) {
-            Some(ControlKind::Window(_)) => self.window_key(focused, code, text),
-            Some(ControlKind::Edit(_)) => self.edit_key(focused, code, text),
+            Some(ControlKind::Window(_)) => self.window_key(focused, printable, code, text),
+            Some(ControlKind::Edit(_)) => self.edit_message(focused, printable, code, text),
             _ => false,
         }
     }
 
-    /// A key in a text editor (`CUIEdit::HandleKeypress`); an edit of
-    /// the text raises an event named after the editor on its parent
-    /// when `PARENT_NOTIFY` is on, as `InsertChars` and `DeleteChars`
-    /// do. With right-to-left text (`Game.TextRTL`) `Backspace` takes
-    /// the character after the caret and `Delete` the one before, `Home`
-    /// and `End` swap, and a typed character leaves the caret before it.
+    /// A key press in a text editor, as the two messages Windows sends
+    /// for it: the key going down with its virtual key code, then the
+    /// character it types (`text`, or the one Backspace, the space bar
+    /// and Ctrl with a letter always send). `true` when either was
+    /// handled. See [`World::edit_message`].
     pub fn edit_key(&mut self, id: NativeId, code: i32, text: Option<char>) -> bool {
-        let (shift, control_down, rtl) =
-            (self.keyboard.shift, self.keyboard.control, self.text_rtl);
-        let mut typed: Option<char> = None;
-        let Some(control) = self.control_mut(id) else {
+        let (alt, control) = (self.keyboard.alt, self.keyboard.control);
+        let down = self.edit_message(id, false, code, None);
+        let translated = crate::input::translated_char(code, alt, control);
+        let ch = if control && !alt {
+            translated
+        } else {
+            translated.or(text.filter(|c| !c.is_control()))
+        };
+        let typed =
+            ch.is_some_and(|ch| self.edit_message(id, true, crate::input::char_code(ch), Some(ch)));
+        down || typed
+    }
+
+    /// A keyboard message in a text editor (`CUIEdit::HandleKeypress`).
+    ///
+    /// A key going down (`printable` false) moves the caret (the arrows,
+    /// `Home`, `End`, with Shift to extend the selection) or deletes
+    /// (`Delete`); any other key is left to the caller. A character
+    /// (`printable` true) is typed over the selection, `Backspace`
+    /// (character 8) deletes, and with Ctrl held and Alt up the control
+    /// characters of C, X, V and A copy, cut, paste and select all.
+    /// Escape, Tab, Enter and a line feed are never taken.
+    ///
+    /// Every deletion and every insertion raises an event named after
+    /// the editor on its parent when `PARENT_NOTIFY` is on, as
+    /// `DeleteChars` and `InsertChars` do: typing over a selection
+    /// raises it twice. With right-to-left text (`Game.TextRTL`)
+    /// `Backspace` takes the character after the caret and `Delete` the
+    /// one before, `Home` and `End` swap, and a typed character leaves
+    /// the caret before it.
+    pub fn edit_message(
+        &mut self,
+        id: NativeId,
+        printable: bool,
+        code: i32,
+        text: Option<char>,
+    ) -> bool {
+        if matches!(code, 0x0A | VK_ESCAPE | VK_TAB | VK_RETURN) {
+            return false;
+        }
+        let (shift, control_down, alt, rtl) = (
+            self.keyboard.shift,
+            self.keyboard.control,
+            self.keyboard.alt,
+            self.text_rtl,
+        );
+        let Some(control) = self.control(id) else {
             return false;
         };
         let (parent, parent_notify, name) =
             (control.parent, control.parent_notify, control.name.clone());
-        let len = control.text.len();
-        let held = control.text.clone();
-        let Some(e) = control.edit_mut() else {
+        let mut new_text = control.text.clone();
+        let Some(e) = control.edit() else {
             return false;
         };
+        let max_length = e.max_length;
         // A script may have put the caret anywhere (`SelStart`,
         // `SelEnd`): keep it inside the text and between two characters.
-        e.sel_start = char_floor(&held, e.sel_start.min(len));
-        e.sel_end = char_floor(&held, e.sel_end.min(len));
-        let (mut start, mut end) = (e.sel_start, e.sel_end);
-        let max_length = e.max_length;
-        let mut handled = true;
-        let mut edited = false;
-        let mut new_text = control.text.clone();
+        let len = new_text.len();
+        let mut start = char_floor(&new_text, e.sel_start.min(len));
+        let mut end = char_floor(&new_text, e.sel_end.min(len));
         let prev_boundary = |s: &str, i: usize| {
             let mut i = i.saturating_sub(1);
             while i > 0 && !s.is_char_boundary(i) {
@@ -2401,10 +2448,68 @@ impl World {
             }
             i
         };
-        match code {
-            VK_ESCAPE | VK_TAB | VK_RETURN => return false,
-            VK_BACK => {
-                edited = true;
+        // How many characters still fit (`MAX_LENGTH`).
+        let room = |s: &str| {
+            if max_length < 0 {
+                usize::MAX
+            } else {
+                (max_length as usize).saturating_sub(s.chars().count())
+            }
+        };
+        // Calls of `DeleteChars` and `InsertChars`: each notifies the
+        // parent.
+        let mut edits = 0;
+        let mut typed: Option<char> = None;
+        if printable {
+            let mut handled = false;
+            if control_down && !alt {
+                match code {
+                    // Ctrl+C, Ctrl+X
+                    3 | 24 => {
+                        let (a, b) = (start.min(end), start.max(end));
+                        handled = self.clipboard.set_text(&new_text[a..b]);
+                        if code == 24 {
+                            new_text.replace_range(a..b, "");
+                            edits += 1;
+                            start = a;
+                            end = a;
+                            handled = true;
+                        }
+                    }
+                    // Ctrl+V
+                    22 => {
+                        if let Some(pasted) = self.clipboard.get_text() {
+                            if start != end {
+                                let (a, b) = (start.min(end), start.max(end));
+                                new_text.replace_range(a..b, "");
+                                edits += 1;
+                                end = a;
+                            }
+                            let fits = room(&new_text);
+                            let pasted: String = pasted
+                                .chars()
+                                .filter(|c| !c.is_control())
+                                .take(fits)
+                                .collect();
+                            new_text.insert_str(end, &pasted);
+                            edits += 1;
+                            if !rtl {
+                                end += pasted.len();
+                            }
+                            start = end;
+                            handled = true;
+                        }
+                    }
+                    // Ctrl+A
+                    1 => {
+                        start = 0;
+                        end = new_text.len();
+                        handled = true;
+                    }
+                    _ => {}
+                }
+            }
+            if !handled && code == VK_BACK {
                 if start == end && rtl {
                     // The character after the caret goes, and the caret
                     // steps back.
@@ -2421,62 +2526,17 @@ impl World {
                     start = a;
                 }
                 end = start;
-            }
-            VK_DELETE => {
-                edited = true;
-                if start == end && rtl {
-                    // The character before the caret goes.
-                    let from = prev_boundary(&new_text, start);
-                    new_text.replace_range(from..start, "");
-                    start = from;
-                } else if start == end {
-                    let to = next_boundary(&new_text, start);
-                    new_text.replace_range(start..to, "");
-                } else {
-                    let (a, b) = (start.min(end), start.max(end));
-                    new_text.replace_range(a..b, "");
-                    start = a;
-                }
-                end = start;
-            }
-            VK_LEFT | VK_UP => {
-                end = prev_boundary(&new_text, end);
-                if !shift {
-                    start = end;
-                }
-            }
-            VK_RIGHT | VK_DOWN => {
-                end = next_boundary(&new_text, end);
-                if !shift {
-                    start = end;
-                }
-            }
-            VK_HOME => {
-                end = if rtl { new_text.len() } else { 0 };
-                if !shift {
-                    start = end;
-                }
-            }
-            VK_END => {
-                end = if rtl { 0 } else { new_text.len() };
-                if !shift {
-                    start = end;
-                }
-            }
-            _ if control_down && code == i32::from(b'A') => {
-                start = 0;
-                end = new_text.len();
-            }
-            _ => match text.filter(|c| !c.is_control()) {
-                Some(ch) => {
-                    edited = true;
+                edits += 1;
+            } else if !handled {
+                // A control character that is no command is swallowed.
+                if let Some(ch) = text.filter(|c| !c.is_control()) {
                     if start != end {
                         let (a, b) = (start.min(end), start.max(end));
                         new_text.replace_range(a..b, "");
+                        edits += 1;
                         end = a;
                     }
-                    let fits = max_length < 0 || new_text.chars().count() < max_length as usize;
-                    if fits {
+                    if room(&new_text) > 0 {
                         new_text.insert(end, ch);
                         // Right-to-left keeps the caret before the new
                         // character: the text is typed backwards in
@@ -2485,20 +2545,70 @@ impl World {
                             end += ch.len_utf8();
                         }
                     }
+                    edits += 1;
                     start = end;
                     typed = Some(ch);
                 }
-                None => handled = false,
-            },
+            }
+        } else {
+            match code {
+                VK_LEFT | VK_UP => {
+                    end = prev_boundary(&new_text, end);
+                    if !shift {
+                        start = end;
+                    }
+                }
+                VK_RIGHT | VK_DOWN => {
+                    end = next_boundary(&new_text, end);
+                    if !shift {
+                        start = end;
+                    }
+                }
+                VK_HOME => {
+                    end = if rtl { new_text.len() } else { 0 };
+                    if !shift {
+                        start = end;
+                    }
+                }
+                VK_END => {
+                    end = if rtl { 0 } else { new_text.len() };
+                    if !shift {
+                        start = end;
+                    }
+                }
+                VK_DELETE => {
+                    if start == end && rtl {
+                        // The character before the caret goes.
+                        let from = prev_boundary(&new_text, start);
+                        new_text.replace_range(from..start, "");
+                        start = from;
+                    } else if start == end {
+                        let to = next_boundary(&new_text, start);
+                        new_text.replace_range(start..to, "");
+                    } else {
+                        let (a, b) = (start.min(end), start.max(end));
+                        new_text.replace_range(a..b, "");
+                        start = a;
+                    }
+                    end = start;
+                    edits += 1;
+                }
+                // Keys the editor has no use for are not eaten.
+                _ => return false,
+            }
         }
-        control.text = new_text;
-        if let Some(e) = control.edit_mut() {
-            e.sel_start = start;
-            e.sel_end = end;
+        if let Some(control) = self.control_mut(id) {
+            control.text = new_text;
+            if let Some(e) = control.edit_mut() {
+                e.sel_start = start;
+                e.sel_end = end;
+            }
         }
-        if edited && parent_notify {
+        if parent_notify {
             if let Some(parent) = parent {
-                self.queue_event(parent, name);
+                for _ in 0..edits {
+                    self.queue_event(parent, name.clone());
+                }
             }
         }
         // The key typed is read out (`CUIEdit::HandleKeypress`).
@@ -2506,7 +2616,7 @@ impl World {
             let spoken = self.game_text(&ch.to_string());
             self.access_speak(&spoken, crate::accessibility::SpeechKind::Keypress);
         }
-        handled
+        true
     }
 
     // ----------------------------------------------------------------

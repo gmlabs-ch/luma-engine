@@ -238,25 +238,135 @@ the mouse, with the animation it plays there.
 
 ## Keyboard
 
-A key going down updates `Game.Keyboard`, is offered to the
-[accessibility](#accessibility) shortcuts (Ctrl+Tab, Ctrl+Space, when
-their switches are on), then goes to the **focused window** when there
-is one: `Tab` moves its focus between its focusable controls, an editor
-with the focus edits its text (mirrored for right-to-left text, see
-[formats/window.md](formats/window.md#edit)); a key the window did not
-use raises
-`Keypress` on the window when its scripts handle that event, else on
-the game. Without a focused window, `Keypress` goes to the game.
+A key press reaches the game as **two messages**, as Windows delivers
+it to the original engine (`CBPlatform::WindowProc`, `CBGame::
+HandleKeypress`):
+
+1. the **key** going down (`WM_KEYDOWN`), named by its Windows virtual
+   key code: letters as upper-case ASCII (`A` is 65), digits as
+   themselves, the other keys by their `VK_` value (`VK_ESCAPE` 27,
+   `VK_RETURN` 13, `VK_SPACE` 32, arrows 37 to 40, `VK_DELETE` 46,
+   `VK_F1` 112, the period key 190...), as the games' `keys.inc` define
+   them. A key code says which key, never what it types: the period key
+   is 190, not the 46 of its character, which is `VK_DELETE`;
+2. the **character** the key types, if any (`WM_CHAR`): `a` or `A`,
+   `.`, `é`. Backspace, Tab, Enter and Escape send the control
+   characters 8, 9, 13 and 27, Ctrl with a letter the control character
+   of that letter (Ctrl+C is 3, Ctrl+V 22), Ctrl+Enter 10, Ctrl+Backspace
+   127; Ctrl+Tab sends none.
+
+Each message, in this order (`Runtime::key_down` sends both,
+`Runtime::key_message` and `Runtime::key_char` one):
+
+- while a video plays, Escape stops it and nothing else happens;
+- the [accessibility](#accessibility) shortcuts take it when their
+  switches are on (Ctrl+Tab on the key, Ctrl+Space on the character);
+- it becomes the state of `Game.Keyboard` (`CBKeyboardState::ReadKey`);
+- the **focused window** gets it when there is one: the `Tab` key moves
+  its focus between its focusable controls, an editor with the focus
+  edits its text (see below);
+- a **key** the window did not use raises `Keypress` on the window when
+  its scripts handle that event, else on the game; without a focused
+  window, on the game. A **character** never raises `Keypress`.
+
+A held key repeats: the front-end sends the key and its character again
+for each repeat, so `Keypress` is raised again and an editor keeps
+deleting or typing, as on Windows.
 
 | Property | Value |
 |----------|-------|
-| `KeyCode` | The key's code: letters as upper-case ASCII, digits and punctuation as themselves, named keys by their Windows virtual key code (`VK_ESCAPE` 27, `VK_RETURN` 13, `VK_SPACE` 32, arrows 37 to 40, `VK_F1` 112...), as the games' `keys.inc` define them. |
-| `Key` | The character typed when the key is printable, else empty. |
-| `Printable` | Whether the key produced a character. |
-| `IsShift`, `IsAlt`, `IsControl` | The modifiers held. |
+| `KeyCode` | The code of the last message: a key's virtual key code, or a character's code (its Windows-1252 byte: `a` is 97, `é` 233; the Unicode code point for a character the code page lacks). |
+| `Key` | The character of the last message when it was a character, else empty. |
+| `Printable` | Whether the last message was a character. |
+| `IsShift`, `IsAlt`, `IsControl` | The modifiers held at the last message. |
+
+A `Keypress` handler runs with the next frame's scripts, after both
+messages, so it sees the **character** of a key that types one and the
+**key code** of a key that does not: `KeyCode` is 112 for F1 and 27 for
+Escape (whose character is 27 too), but 97 for the A key, with `Key`
+`"a"` and `Printable` true. This is the original's behaviour, read from
+its sources (the handler is a script thread started at the next frame,
+the character message is handled before that frame): a script that
+compares `KeyCode` with a letter's virtual key code never matches, and
+a character whose code is a key's (`p` is 112, `VK_F1`; `.` is 46,
+`VK_DELETE`; `$` is 36, `VK_HOME`) is taken for that key by a script
+that does not test `Printable`.
 
 `Keyboard.IsKeyDown(code)` says whether a key is held; a string gives
-its first character, in either case.
+its first character, in either case. It also answers for the mouse
+buttons (1 left, 2 right, 4 middle: `VK_LBUTTON`, `VK_RBUTTON`,
+`VK_MBUTTON`) and for the left and right Shift, Control and Alt (160 to
+165), as the system call the original asks does. Luma answers from the
+keys and buttons its front-end reported. `ToString(Game.Keyboard)` is
+`[keyboard state]`.
+
+### The editor's keys
+
+An editor with the focus (`CUIEdit::HandleKeypress`) takes:
+
+- the **keys** Left and Up, Right and Down (the caret moves a
+  character), Home and End, each extending the selection while Shift is
+  held, and Delete; any other key is left to `Keypress`;
+- the **characters**: Backspace (8) deletes, a printable character is
+  typed over the selection, and with Ctrl held and Alt up, the control
+  characters of A (select all), C (copy the selection), X (cut it) and
+  V (paste over the selection, up to `MAX_LENGTH`). Escape, Tab and
+  Enter are never taken, as key or as character.
+
+So Backspace both raises `Keypress` (its key) and deletes (its
+character), while Delete and the arrows are eaten by the editor.
+
+Every deletion and every insertion raises the editor's event on its
+parent when `PARENT_NOTIFY` is on: typing over a selection raises it
+twice (`DeleteChars`, then `InsertChars`), and Backspace at the start of
+the text still raises it once.
+
+Copy and paste go through a clipboard the front-end provides
+(`World::set_clipboard`; `luma-adventure` has no platform code).
+Without one the game keeps a clipboard of its own, so that what one
+editor copies another pastes.
+
+Luma differs from the original on purpose in three places, all defects
+of the original that no game could rely on:
+
+- typing or pasting over a selection made from left to right inserts
+  where the selection was; the original inserts further right, after as
+  many characters as the selection had;
+- a control character that is no command (Ctrl+B, Ctrl+Backspace) or
+  that comes with a pasted text (a line break) is dropped; the original
+  inserts it in the text;
+- Ctrl+C when the clipboard cannot be written types nothing; the
+  original inserts the control character.
+
+Mirrored keys for right-to-left text are described in
+[formats/window.md](formats/window.md#edit).
+
+### In `luma-player`
+
+The window's key events are translated in `crates/luma-player/src/
+keys.rs`: letters by the character they type (so a French keyboard's A
+is `A`), the other keys by their place on a US keyboard (the key right
+of M is 188 whatever it types), the numeric keypad by its own codes
+with Num Lock on (`VK_NUMPAD0` 96 to `VK_DIVIDE` 111) and as the arrows
+it stands for with Num Lock off; F13 to F24, Print Screen, Num Lock,
+Scroll Lock and the menu key have their codes. A character of any
+alphabet is delivered, with or without a key code. This table is
+inferred from the public list of virtual key codes: the original gets
+them from Windows.
+
+With Alt held and Control up, only F10 reaches the game, as on Windows,
+where the other keys are system keys the engine leaves to the system
+(AltGr, which Windows reports as Control and Alt, types). On macOS the
+rule is lifted, since Option is the key that types the third character
+of a key (`@`, `#`, `{` on many layouts), and Command stands for
+Control, so that Cmd+C, Cmd+X, Cmd+V and Cmd+A edit.
+
+The headless player presses keys with `--key [ctrl+][shift+][alt+]
+<code>` (the key, then the character it types on a US keyboard),
+`--repeat-key <code>:<n>` (a held key repeating n times), `--hold-key`
+(held without repeating, for `IsKeyDown`) and `--type <text>` (each
+character's key, then the character; a character no US key types comes
+alone).
 
 ## Fades
 
