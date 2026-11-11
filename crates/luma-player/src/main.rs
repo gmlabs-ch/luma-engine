@@ -1308,6 +1308,26 @@ impl GamePlayer {
     }
 }
 
+impl Drop for GamePlayer {
+    /// The game ends: the four volumes go to the settings file for the
+    /// next run (`CBSoundMgr::~CBSoundMgr`), and the window's position
+    /// too (`CBPlatform::MessageLoop` on exit), unless the game ran
+    /// full screen.
+    fn drop(&mut self) {
+        if let (true, Some((x, y))) = (self.windowed, self.window_position) {
+            let world = &mut self.runtime.world;
+            world.write_engine_setting("Video", "WindowPosX", &x.to_string());
+            world.write_engine_setting("Video", "WindowPosY", &y.to_string());
+        }
+        if self.started {
+            self.runtime.world.save_volume_settings();
+        }
+        for line in self.runtime.world.take_log() {
+            eprintln!("{line}");
+        }
+    }
+}
+
 impl App for GamePlayer {
     fn init(&mut self, renderer: &Renderer) -> luma::render::Result<()> {
         eprintln!("adapter: {}", renderer.gpu().describe());
@@ -1514,19 +1534,6 @@ impl App for GamePlayer {
             // window keeps showing the last one presented.
             _ if self.runtime.world.suspended_rendering() => Flow::Skip,
             _ => Flow::Continue,
-        }
-    }
-}
-
-impl Drop for GamePlayer {
-    /// The window's position is remembered for the next run
-    /// (`CBPlatform::MessageLoop` on exit), unless the game ran full
-    /// screen.
-    fn drop(&mut self) {
-        if let (true, Some((x, y))) = (self.windowed, self.window_position) {
-            let world = &mut self.runtime.world;
-            world.write_engine_setting("Video", "WindowPosX", &x.to_string());
-            world.write_engine_setting("Video", "WindowPosY", &y.to_string());
         }
     }
 }

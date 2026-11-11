@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 14;
+pub const VERSION: u32 = 15;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -69,7 +69,10 @@ pub struct SoundState {
     pub filename: String,
     /// Its position in milliseconds.
     pub position_ms: u64,
-    /// Whether it was playing (or held by a frozen game).
+    /// Whether it was playing, or held by a frozen game. The original
+    /// engine records a held sound as not playing and without its
+    /// position (`CBSoundBuffer::IsPlaying`), so that it starts over at
+    /// the unfreeze after a load; Luma keeps where it was.
     pub playing: bool,
     /// Whether a script paused it.
     pub paused: bool,
@@ -79,8 +82,8 @@ pub struct SoundState {
     pub loop_start_ms: u64,
     /// Its own volume in percent.
     pub private_volume: i32,
-    /// The event raised on the owner when it ends.
-    pub event: Option<String>,
+    /// Where every later play of it starts (`CBSound::m_SoundPosition`).
+    pub start_ms: u64,
 }
 
 /// An object's sound state as saved.
@@ -94,6 +97,8 @@ pub struct ObjectSoundState {
     pub volume: i32,
     /// The object's sound effect.
     pub effect: Option<SfxEffect>,
+    /// The event raised on the object when its sound is not playing.
+    pub event: Option<String>,
 }
 
 /// Everything the world plays, as saved.
@@ -508,15 +513,15 @@ impl World {
     /// Everything the world plays, as a saved game keeps it.
     pub(crate) fn sounds_state(&self) -> SoundsState {
         let audio = &self.sounds.audio;
-        let state = |id: SoundId, filename: &str, event: Option<String>| SoundState {
+        let state = |id: SoundId, filename: &str| SoundState {
             filename: filename.to_string(),
             position_ms: audio.position_ms(id),
-            playing: audio.is_playing(id),
-            paused: audio.is_paused(id) && !audio.is_freeze_paused(id),
+            playing: audio.is_playing(id) || audio.is_freeze_paused(id),
+            paused: audio.is_paused(id),
             looping: audio.is_looping(id),
             loop_start_ms: audio.loop_start_ms(id),
             private_volume: audio.private_volume(id),
-            event,
+            start_ms: audio.start_ms(id),
         };
         let mut objects: Vec<(NativeId, ObjectSoundState)> = self
             .sounds
@@ -526,13 +531,11 @@ impl World {
                 (
                     *owner,
                     ObjectSoundState {
-                        sound: sfx
-                            .sound
-                            .as_ref()
-                            .map(|s| state(s.id, &s.filename, s.event.clone())),
+                        sound: sfx.sound.as_ref().map(|s| state(s.id, &s.filename)),
                         start_ms: sfx.start_ms,
                         volume: sfx.volume,
                         effect: sfx.effect,
+                        event: sfx.event.clone(),
                     },
                 )
             })
@@ -542,7 +545,7 @@ impl World {
             .sounds
             .music
             .iter()
-            .map(|channel| channel.as_ref().map(|m| state(m.id, &m.filename, None)))
+            .map(|channel| channel.as_ref().map(|m| state(m.id, &m.filename)))
             .collect();
         let music_frozen = self
             .sounds
@@ -564,7 +567,8 @@ impl World {
     fn restore_sound(&mut self, saved: &SoundState, kind: SoundType) -> Option<SoundId> {
         let (clip, _) = self.load_clip(&saved.filename)?;
         let audio = &mut self.sounds.audio;
-        let id = audio.add(clip, kind, saved.private_volume);
+        // Objects' sounds and music are the ones the engine streams.
+        let id = audio.add_streamed(clip, kind, saved.private_volume);
         if saved.loop_start_ms != 0 {
             audio.set_loop_start_ms(id, saved.loop_start_ms);
         }
@@ -575,6 +579,7 @@ impl World {
                 audio.pause(id);
             }
         }
+        audio.set_start_ms(id, saved.start_ms);
         Some(id)
     }
 
@@ -595,7 +600,6 @@ impl World {
                     .map(|id| ObjectSound {
                         id,
                         filename: s.filename,
-                        event: s.event,
                     })
             });
             if let Some(id) = sound.as_ref().map(|s| s.id) {
@@ -610,6 +614,7 @@ impl World {
                     start_ms: saved.start_ms,
                     volume: saved.volume,
                     effect: saved.effect,
+                    event: saved.event,
                 },
             );
         }

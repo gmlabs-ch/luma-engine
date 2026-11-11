@@ -1404,7 +1404,7 @@ ITEM { NAME=\"gem\" CAPTION=\"Gem\" IMAGE=\"art\\red.png\" }"
     pkg.add_file("game.script", game_script());
     pkg.add_file("win.script", window_script());
     pkg.add_file("intro.ogv", luma_video::synthetic_clip(32, 32, 10, 10));
-    pkg.add_file("intro.sub", b"{2}{5}Hello|intro\n{7}{0}Bye".to_vec());
+    pkg.add_file("intro.sub", b"{2}{5}Hello|intro\r\n{7}{0}/GREET/x".to_vec());
     pkg.add_file(
         "items.items",
         b"ITEM { NAME=\"key\" CAPTION=\"/GREET/x\" IMAGE=\"art\\green.png\" SPRITE_HOVER=\"art\\red.png\" CURSOR=\"art\\red.png\" CURSOR_HOVER=\"art\\green.png\" PROPERTY { NAME=\"weight\" VALUE=\"3\" } }
@@ -6307,5 +6307,499 @@ fn the_active_cursor_is_shown_over_usable_objects_only() {
     runtime.tick(16);
     assert_eq!(runtime.world.active_object(), Some(own));
     assert_eq!(runtime.world.cursors().shown(), Some("art\\red.png"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The objects' sound methods as Wintermute 1.x has them
+/// (`CBObject::ScCallMethod`, `PlaySFX`, `StopSFX`, `CBSound`).
+#[test]
+fn object_sounds_follow_the_original_rules() {
+    use luma_adventure::Sounds;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let hum = runtime.world.find_node("hum").unwrap();
+    let lamp = runtime.world.find_node("lamp").unwrap();
+    let beep = Value::from("audio\\beep.wav");
+    let yes = Value::Bool(true);
+    let no = Value::Bool(false);
+
+    // `StopSound` deletes the sound: nothing is left to play again.
+    assert_eq!(
+        call_native(&mut runtime, lamp, "PlaySound", std::slice::from_ref(&beep)),
+        yes
+    );
+    assert_eq!(call_native(&mut runtime, lamp, "StopSound", &[]), yes);
+    assert!(runtime.world.sfx_of(lamp).is_none());
+    assert_eq!(call_native(&mut runtime, lamp, "PlaySound", &[]), no);
+    assert_eq!(call_native(&mut runtime, lamp, "StopSound", &[]), no);
+    // A sound entity keeps its sound loaded.
+    assert_eq!(call_native(&mut runtime, hum, "PlaySound", &[]), yes);
+    assert_eq!(call_native(&mut runtime, hum, "StopSound", &[]), yes);
+    assert!(runtime.world.sfx_of(hum).is_some());
+
+    // A position set while the sound is not playing is where it starts,
+    // this time and the next ones.
+    assert_eq!(
+        call_native(&mut runtime, hum, "SetSoundPosition", &[Value::Int(100)]),
+        yes
+    );
+    for _ in 0..2 {
+        assert_eq!(call_native(&mut runtime, hum, "PlaySound", &[]), yes);
+        runtime.tick(16);
+        let at = call_native(&mut runtime, hum, "GetSoundPosition", &[]);
+        let Value::Int(at) = at else { panic!("{at:?}") };
+        assert!((105..=130).contains(&at), "{at}");
+        // Played again while playing, it starts over.
+        assert_eq!(call_native(&mut runtime, hum, "PlaySound", &[]), yes);
+        runtime.tick(16);
+        let again = call_native(&mut runtime, hum, "GetSoundPosition", &[]);
+        let Value::Int(again) = again else {
+            panic!("{again:?}")
+        };
+        assert!((105..=130).contains(&again), "{again}");
+        assert_eq!(call_native(&mut runtime, hum, "StopSound", &[]), yes);
+        runtime.tick(16);
+    }
+
+    // `ResumeSound` only resumes a sound `PauseSound` paused; a pause
+    // on a stopped sound makes the resume start it.
+    assert_eq!(call_native(&mut runtime, hum, "ResumeSound", &[]), no);
+    assert_eq!(call_native(&mut runtime, hum, "PauseSound", &[]), yes);
+    assert_eq!(call_native(&mut runtime, hum, "IsSoundPlaying", &[]), no);
+    assert_eq!(call_native(&mut runtime, hum, "ResumeSound", &[]), yes);
+    runtime.tick(16);
+    assert_eq!(call_native(&mut runtime, hum, "IsSoundPlaying", &[]), yes);
+
+    // Every object of the engine has the sound methods: the scene, an
+    // item, a `new Object`.
+    let scene = runtime.world.scene_id();
+    let key = runtime.world.item_by_name("key").unwrap();
+    for id in [scene, key] {
+        assert_eq!(
+            call_native(&mut runtime, id, "IsSoundPlaying", &[]),
+            no,
+            "{id:?}"
+        );
+        assert_eq!(
+            call_native(&mut runtime, id, "PlaySound", std::slice::from_ref(&beep)),
+            yes,
+            "{id:?}"
+        );
+        runtime.tick(16);
+        assert_eq!(
+            call_native(&mut runtime, id, "IsSoundPlaying", &[]),
+            yes,
+            "{id:?}"
+        );
+        assert_eq!(
+            call_native(&mut runtime, id, "GetSoundVolume", &[]),
+            Value::Int(100)
+        );
+        assert_eq!(call_native(&mut runtime, id, "StopSound", &[]), yes);
+    }
+
+    // An object's sound follows it across the screen with the
+    // original's pan law; `SoundPanning = false` centres it.
+    runtime
+        .world
+        .set_property(lamp, "Active", &Value::Bool(true));
+    runtime.world.set_property(lamp, "X", &Value::Int(30));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            lamp,
+            "PlaySound",
+            &[beep.clone(), yes.clone()]
+        ),
+        yes
+    );
+    runtime.tick(16);
+    let width = runtime.world.settings().width as i32;
+    let (scroll, _) = runtime.world.offset();
+    let want = Sounds::pos_to_pan(30 - scroll, width);
+    assert_ne!(want, 0);
+    let sound = runtime.world.sfx_of(lamp).unwrap().id;
+    assert_eq!(runtime.world.audio().pan(sound), want);
+    runtime
+        .world
+        .set_property(lamp, "SoundPanning", &Value::Bool(false));
+    assert_eq!(runtime.world.audio().pan(sound), 0);
+    runtime.tick(16);
+    assert_eq!(runtime.world.audio().pan(sound), 0);
+    // The game's own sound is not panned, however the scene scrolls.
+    assert_ne!(scroll, 0);
+    let game = runtime.world.game_id();
+    assert_eq!(
+        call_native(&mut runtime, game, "PlaySound", std::slice::from_ref(&beep)),
+        yes
+    );
+    runtime.tick(16);
+    let sound = runtime.world.sfx_of(game).unwrap().id;
+    assert_eq!(runtime.world.audio().pan(sound), 0);
+    // Absurd positions do not overflow: the pan is out of range and the
+    // sound keeps the one it had.
+    runtime
+        .world
+        .set_property(lamp, "SoundPanning", &Value::Bool(true));
+    runtime.tick(16);
+    let lamp_sound = runtime.world.sfx_of(lamp).unwrap().id;
+    assert_eq!(runtime.world.audio().pan(lamp_sound), want);
+    for x in [i32::MIN, i32::MAX] {
+        runtime.world.set_property(lamp, "X", &Value::Int(x));
+        runtime.tick(16);
+        assert_eq!(runtime.world.audio().pan(lamp_sound), want);
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// What a frozen game does to sounds: a held sound is not playing
+/// (`CBSoundBuffer::IsPlaying` of Wintermute 1.x) but has not ended, so
+/// no sound event fires and a sentence keeps its speech, which goes on
+/// at the unfreeze; the music crossfade waits.
+#[test]
+fn a_frozen_game_holds_sounds_without_ending_them() {
+    use luma_formats::font::TextAlign;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let lamp = runtime.world.find_node("lamp").unwrap();
+    runtime
+        .world
+        .set_property(lamp, "Active", &Value::Bool(true));
+    runtime.world.set_property(lamp, "X", &Value::Int(4));
+    let beep = Value::from("audio\\beep.wav");
+    let yes = Value::Bool(true);
+    let no = Value::Bool(false);
+    assert!(runtime.world.sounds_mut().add_speech_dir("voices"));
+
+    // A sentence with a speech sound lasts as long as the sound,
+    // whatever duration was given (100 ms here, the sound 250 ms).
+    assert!(
+        runtime
+            .world
+            .talk(lamp, "/GREET/x", None, 100, None, TextAlign::Center)
+    );
+    for _ in 0..10 {
+        runtime.tick(16);
+    }
+    assert_eq!(
+        call_native(&mut runtime, lamp, "IsTalking", &[]),
+        yes,
+        "160 ms"
+    );
+    // The speech is panned with the object that says it.
+    let speech = runtime.world.speech_sound_of(lamp).unwrap();
+    let width = runtime.world.settings().width as i32;
+    let (scroll, _) = runtime.world.offset();
+    let want = luma_adventure::Sounds::pos_to_pan(4 - scroll, width);
+    assert_ne!(want, 0);
+    assert_eq!(runtime.world.audio().pan(speech), want);
+    runtime
+        .world
+        .set_property(lamp, "SoundPanning", &Value::Bool(false));
+    assert_eq!(runtime.world.audio().pan(speech), 0);
+    for _ in 0..8 {
+        runtime.tick(16);
+    }
+    assert_eq!(
+        call_native(&mut runtime, lamp, "IsTalking", &[]),
+        no,
+        "288 ms"
+    );
+
+    // A freeze holds the speech and the sentence with it.
+    assert!(
+        runtime
+            .world
+            .talk(lamp, "/GREET/x", None, 0, None, TextAlign::Center)
+    );
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(call_native(&mut runtime, lamp, "IsTalking", &[]), yes);
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            lamp,
+            "PlaySoundEvent",
+            &[beep.clone(), Value::from("BeepDone")]
+        ),
+        yes
+    );
+    runtime.tick(16);
+    assert_eq!(call_native(&mut runtime, lamp, "IsSoundPlaying", &[]), yes);
+    assert!(runtime.world.sounds().objects[&lamp].event.is_some());
+    runtime.world.freeze(&mut runtime.engine, true);
+    // Longer than the speech (250 ms) and the beep (300 ms) last.
+    for _ in 0..30 {
+        runtime.tick(16);
+    }
+    assert_eq!(call_native(&mut runtime, lamp, "IsTalking", &[]), yes);
+    let speech = runtime.world.speech_sound_of(lamp).unwrap();
+    assert!(runtime.world.audio().is_freeze_paused(speech));
+    // The object's sound is held: not playing for a script, but not
+    // ended, so its event waits.
+    assert_eq!(call_native(&mut runtime, lamp, "IsSoundPlaying", &[]), no);
+    let sound = runtime.world.sfx_of(lamp).unwrap().id;
+    assert!(runtime.world.audio().is_freeze_paused(sound));
+    assert!(runtime.world.sounds().objects[&lamp].event.is_some());
+    // `ResumeSound` does not resume what the freeze holds.
+    assert_eq!(call_native(&mut runtime, lamp, "ResumeSound", &[]), no);
+    runtime.world.unfreeze(&mut runtime.engine);
+    runtime.tick(16);
+    assert_eq!(call_native(&mut runtime, lamp, "IsSoundPlaying", &[]), yes);
+    assert_eq!(call_native(&mut runtime, lamp, "IsTalking", &[]), yes);
+    // Both go on to their end: the sentence ends and the event fires.
+    for _ in 0..25 {
+        runtime.tick(16);
+    }
+    assert_eq!(call_native(&mut runtime, lamp, "IsTalking", &[]), no);
+    assert_eq!(call_native(&mut runtime, lamp, "IsSoundPlaying", &[]), no);
+    assert!(runtime.world.sounds().objects[&lamp].event.is_none());
+    // A sound stopped while held stays stopped at the unfreeze.
+    assert_eq!(
+        call_native(&mut runtime, lamp, "PlaySound", std::slice::from_ref(&beep)),
+        yes
+    );
+    runtime.tick(16);
+    runtime.world.freeze(&mut runtime.engine, true);
+    let hum = runtime.world.find_node("hum").unwrap();
+    assert_eq!(call_native(&mut runtime, hum, "PlaySound", &[]), yes);
+    runtime.world.unfreeze(&mut runtime.engine);
+    runtime.world.freeze(&mut runtime.engine, true);
+    assert_eq!(call_native(&mut runtime, hum, "StopSound", &[]), yes);
+    runtime.world.unfreeze(&mut runtime.engine);
+    runtime.tick(16);
+    assert_eq!(call_native(&mut runtime, hum, "IsSoundPlaying", &[]), no);
+
+    // The crossfade makes no progress while the game is frozen.
+    assert!(runtime.world.play_music(0, "audio\\beep.wav", true, 0, 100));
+    assert!(runtime.world.play_music(1, "audio\\beep.wav", true, 0, 100));
+    assert!(runtime.world.music_crossfade(0, 1, 1000, true));
+    for _ in 0..4 {
+        runtime.tick(16);
+    }
+    let fading = runtime.world.music_volume(0);
+    assert!(fading < 100 && fading > 80, "{fading}");
+    assert_eq!(runtime.world.music_volume(1), 99 - fading);
+    runtime.world.freeze(&mut runtime.engine, false);
+    for _ in 0..10 {
+        runtime.tick(16);
+    }
+    assert_eq!(runtime.world.music_volume(0), fading);
+    assert!(runtime.world.is_crossfading());
+    runtime.world.unfreeze(&mut runtime.engine);
+    runtime.tick(16);
+    assert!(runtime.world.music_volume(0) < fading);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The four volumes are the player's settings: written when the game
+/// ends and read back when it starts (`CBSoundMgr::~CBSoundMgr`,
+/// `Initialize`), with the original's keys and units.
+#[test]
+fn volumes_are_kept_between_runs() {
+    use luma_audio::SoundType;
+    let dir = game();
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let audio = runtime.world.audio();
+    assert_eq!(audio.volume(SoundType::Sfx), 100);
+    assert_eq!(audio.master_volume(), 100);
+    let game_id = runtime.world.game_id();
+    for (name, percent) in [
+        ("SetGlobalSFXVolume", 30),
+        ("SetGlobalSpeechVolume", 55),
+        ("SetGlobalMusicVolume", 0),
+        ("SetGlobalMasterVolume", 80),
+    ] {
+        // Out of range first: clamped, not wrapped.
+        call_native(&mut runtime, game_id, name, &[Value::Int(150)]);
+        let getter = name.replacen("Set", "Get", 1);
+        assert_eq!(
+            call_native(&mut runtime, game_id, &getter, &[]),
+            Value::Int(100),
+            "{name}"
+        );
+        call_native(&mut runtime, game_id, name, &[Value::Int(percent)]);
+    }
+    assert!(runtime.world.write_setting("Lang", "fr"));
+    assert!(runtime.world.save_volume_settings());
+    let path = runtime.world.settings_ini_path();
+    let text = std::fs::read_to_string(&path).unwrap();
+    for line in [
+        "[Audio]",
+        "SFXVolume=60",
+        "SpeechVolume=110",
+        "MusicVolume=0",
+        // 655 x 80 in both halves of the wave volume, as a signed number.
+        "MasterVolume=-860828496",
+        "Lang=fr",
+    ] {
+        assert!(text.lines().any(|l| l == line), "{line} in {text}");
+    }
+    drop(runtime);
+    // The next run starts with them.
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    runtime.start();
+    let audio = runtime.world.audio();
+    assert_eq!(audio.volume(SoundType::Sfx), 30);
+    assert_eq!(audio.volume(SoundType::Speech), 55);
+    assert_eq!(audio.volume(SoundType::Music), 0);
+    assert_eq!(audio.master_volume(), 80);
+    // A key that is absent or not a number keeps the default.
+    std::fs::write(
+        &path,
+        "[Audio]\nSFXVolume=abc\nMusicVolume=150 \nSpeechVolume=900\n",
+    )
+    .unwrap();
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    runtime.start();
+    let audio = runtime.world.audio();
+    assert_eq!(audio.volume(SoundType::Sfx), 100);
+    assert_eq!(audio.volume(SoundType::Speech), 100, "clamped");
+    assert_eq!(audio.volume(SoundType::Music), 75);
+    assert_eq!(audio.master_volume(), 100);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `SOUND_VOLUME` in an actor file is the volume of the actor's sounds
+/// (`CAdActor::LoadBuffer`, `m_SFXVolume`).
+#[test]
+fn an_actor_file_sets_the_volume_of_its_sounds() {
+    let dir = game();
+    std::fs::create_dir_all(dir.join("actors")).unwrap();
+    std::fs::write(
+        dir.join("actors").join("quiet.actor"),
+        b"ACTOR { NAME=\"quiet\" SOUND_VOLUME=40 }",
+    )
+    .unwrap();
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let quiet = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\quiet.actor", false)
+        .expect("the actor");
+    assert_eq!(
+        call_native(&mut runtime, quiet, "GetSoundVolume", &[]),
+        Value::Int(40)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            quiet,
+            "PlaySound",
+            &[Value::from("audio\\beep.wav")]
+        ),
+        Value::Bool(true)
+    );
+    let sound = runtime.world.sfx_of(quiet).unwrap().id;
+    assert_eq!(runtime.world.audio().private_volume(sound), 40);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// An entity's video as `CVidTheoraPlayer` plays it: its own subtitles
+/// (loaded only while `VideoSubtitles` is on, through the string
+/// table), the zoom fixed when it starts, an alpha image without colour
+/// key.
+#[test]
+fn an_entity_video_has_subtitles_and_a_fixed_zoom() {
+    let dir = game();
+    // A 24-bit image, all in the colour key: no alpha channel.
+    let magenta = Image {
+        width: 32,
+        height: 32,
+        pixels: [255u8, 0, 255, 255].repeat(32 * 32),
+        has_alpha_channel: false,
+    };
+    std::fs::write(dir.join("mask.bmp"), magenta.to_bmp().unwrap()).unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    let prop_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "VideoSubtitles", &Value::Bool(false));
+    // Subtitles are loaded when the video opens, and only while
+    // `VideoSubtitles` is on.
+    assert!(
+        runtime
+            .world
+            .play_entity_theora(prop, "intro.ogv", false, None, 0)
+    );
+    assert!(
+        runtime
+            .world
+            .entity_video(prop)
+            .unwrap()
+            .subtitler
+            .is_none()
+    );
+    runtime
+        .world
+        .set_property(game, "VideoSubtitles", &Value::Bool(true));
+    for _ in 0..25 {
+        runtime.tick(16);
+    }
+    assert_eq!(runtime.world.entity_video_subtitle(prop), None);
+    assert!(runtime.world.stop_entity_video(prop));
+
+    runtime
+        .world
+        .set_property(prop, "Scale", &Value::Float(50.0));
+    assert!(
+        runtime
+            .world
+            .play_entity_theora(prop, "intro.ogv", true, Some("mask.bmp"), 0)
+    );
+    let video = runtime.world.entity_video(prop).unwrap();
+    assert_eq!(video.zoom, 50.0);
+    assert_eq!(video.subtitler.as_ref().unwrap().subtitles.len(), 2);
+    // The mask has no alpha channel: the frames stay opaque, its colour
+    // key is not a transparency.
+    let frame = video.frame.as_ref().unwrap();
+    assert!(frame.rgba.chunks_exact(4).all(|p| p[3] == 255));
+    // A scale changed during the video does not rescale it.
+    runtime
+        .world
+        .set_property(prop, "Scale", &Value::Float(80.0));
+    for _ in 0..20 {
+        runtime.tick(16);
+    }
+    let video = runtime.world.entity_video(prop).unwrap();
+    assert_eq!(video.zoom, 50.0);
+    assert_eq!(video.frame_index(), Some(3), "320 ms at 10 fps");
+    assert_eq!(
+        runtime.world.entity_video_subtitle(prop),
+        Some("Hello\nintro")
+    );
+    for _ in 0..30 {
+        runtime.tick(16);
+    }
+    // The second subtitle went through the string table.
+    assert_eq!(runtime.world.entity_video_subtitle(prop), Some("Hello"));
+    // With `VideoSubtitles` off nothing is shown.
+    runtime
+        .world
+        .set_property(game, "VideoSubtitles", &Value::Bool(false));
+    assert_eq!(runtime.world.entity_video_subtitle(prop), None);
     std::fs::remove_dir_all(&dir).unwrap();
 }

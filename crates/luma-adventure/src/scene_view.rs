@@ -566,6 +566,9 @@ pub struct VideoOverlay<'a> {
     pub texture: &'a Texture,
     /// Scale in percent.
     pub zoom: f32,
+    /// Where the picture is from the entity's position: its place in
+    /// the video's coded frame, zoomed.
+    pub offset: (f32, f32),
     /// Tint and opacity.
     pub tint: Rgba,
 }
@@ -1111,6 +1114,20 @@ impl SceneView {
         self.talks.values_mut().map(|t| &mut t.sentence)
     }
 
+    /// The speech sound of the sentence an entity is saying.
+    pub(crate) fn speech_sound(&self, r: EntityRef) -> Option<luma_audio::SoundId> {
+        self.talks.get(&r)?.sentence.sound
+    }
+
+    /// The entities saying a sentence with a speech sound.
+    pub(crate) fn speaking_entities(&self) -> Vec<EntityRef> {
+        self.talks
+            .iter()
+            .filter(|(_, t)| t.sentence.sound.is_some())
+            .map(|(r, _)| *r)
+            .collect()
+    }
+
     /// Ends every sentence older than 300 ms (`FinishSentences`).
     pub fn skip_sentences(&mut self, timer: u64) {
         for talk in self.talks.values_mut() {
@@ -1431,8 +1448,8 @@ impl SceneView {
                 list.push(Quad {
                     texture: video.texture,
                     dst: Rect::new(
-                        entity.x as f32,
-                        entity.y as f32,
+                        entity.x as f32 + video.offset.0,
+                        entity.y as f32 + video.offset.1,
                         (video.texture.width as f32 * zoom).trunc(),
                         (video.texture.height as f32 * zoom).trunc(),
                     ),

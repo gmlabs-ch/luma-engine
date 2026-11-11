@@ -76,8 +76,12 @@ A saved game holds:
 - the windows and their controls, the focused window, what the mouse
   captured, whether the game is frozen and by how many windows;
 - the sounds: each object's sound and the music channels, by file,
-  position, looping, volume and whether they play or are paused; the
-  crossfade in progress; the speech directories;
+  position, looping, volume, start position and whether they play or
+  are paused, with each object's pending sound event; a sound held by a
+  frozen game is saved as playing, with its position (the original
+  engine saves it as stopped and it starts over after the load; see
+  [audio.md](audio.md)); the crossfade in progress; the speech
+  directories;
 - the game's fader and the scene's, the cursors chosen, the mouse and
   the keyboard state;
 - the game's own settings a script may change: name, caption,
@@ -291,6 +295,10 @@ KeyboardEnabled=1
 The `AccCaption` scripts set on objects is saved with the game, like
 the original's `m_AccessCaption`; the switches are not.
 
+The same file keeps the four sound volumes between runs, in an `[Audio]`
+section the engine itself reads when the game starts and writes when it
+ends (see [audio.md](audio.md#volumes)).
+
 ## File format
 
 The format is Luma's own: the original engine's `.dsv` files serialize
@@ -300,7 +308,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `13` today |
+| 4 | layout version, little-endian; `15` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -330,7 +338,9 @@ scene's 3D side and the game's shadow settings (the lists are empty and
 the side absent in a 2D game). Version 14, after 13, added the 3D
 actors' attachments, material overrides and bone emitters, and the
 shadow image and light position every object keeps (`SetShadowImage`,
-`SetLightPosition`).
+`SetLightPosition`). Version 15, after 14, added the start position a
+sound keeps for its later plays and moved the sound event from the
+sound to its object.
 
 ## Checking a game
 
