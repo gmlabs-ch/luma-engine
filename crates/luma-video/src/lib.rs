@@ -111,7 +111,8 @@ impl VideoInfo {
         if self.fps_den == 0 {
             return 0;
         }
-        ms * u64::from(self.fps_num) / (1000 * u64::from(self.fps_den))
+        let frame = u128::from(ms) * u128::from(self.fps_num) / (1000 * u128::from(self.fps_den));
+        u64::try_from(frame).unwrap_or(u64::MAX)
     }
 }
 
@@ -822,6 +823,8 @@ mod tests {
         let info = VideoInfo::from_ident(&film, false);
         assert_eq!(info.frame_time_ms(115), 3837);
         assert_eq!(info.frame_time_ms(u64::MAX), u64::MAX);
+        assert_eq!(info.frame_at_ms(3837), 114);
+        assert_eq!(info.frame_at_ms(u64::MAX), 552_849_472_738_548_000);
         // A frame is shown at the start of its interval; before
         // bitstream 3.2.1, the original's decoder gives its end.
         assert_eq!(info.shown_at_ms(115), 3837);

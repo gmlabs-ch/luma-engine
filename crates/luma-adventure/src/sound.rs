@@ -555,8 +555,9 @@ impl World {
                 .map(|e| e.x),
             _ => None,
         }?;
+        // Scripts set both: no overflow on absurd values.
         Some(Sounds::pos_to_pan(
-            x - self.offset_x,
+            x.saturating_sub(self.offset_x),
             self.settings.width as i32,
         ))
     }

@@ -1054,13 +1054,23 @@ impl Voice {
     /// the loop start to the end for a streamed sound
     /// (`LoadSegment`); the whole sound otherwise (a DirectSound buffer
     /// played with `DSBPLAY_LOOPING`). A loop start past the end is the
-    /// start.
+    /// start. An empty sound does not loop, and the loop always spans at
+    /// least one frame: the mixer would otherwise never leave it.
     fn loop_region(&self) -> Option<kira::sound::Region> {
-        if !self.looping {
+        let frames = self.clip.frames() as u64;
+        if !self.looping || frames == 0 {
             return None;
         }
-        let start = if self.streamed && self.loop_start_ms < self.clip.duration_ms() {
-            self.loop_start_ms
+        let start = if self.streamed {
+            // The frame the loop start falls on, rounded up so that it
+            // is never before the frame the mixer rounds to.
+            let frame = (u128::from(self.loop_start_ms) * u128::from(self.clip.sample_rate()))
+                .div_ceil(1000);
+            if frame < u128::from(frames) {
+                self.loop_start_ms
+            } else {
+                0
+            }
         } else {
             0
         };
@@ -1341,6 +1351,18 @@ mod tests {
         assert!(!is_streamed(&short, true), "under 3 s / 16");
         assert!(is_streamed(&Clip::silence(1000, 187), true));
         assert!(!is_streamed(&Clip::silence(1000, 186), true));
+        // A loop start on the last frame or after it, and an empty
+        // sound, give no loop the mixer could not leave.
+        let mut audio = Audio::null();
+        let slow = audio.add_streamed(Arc::new(Clip::silence(1, 3000)), SoundType::Sfx, 100);
+        assert!(audio.is_streamed(slow));
+        assert!(audio.set_loop_start_ms(slow, 2999));
+        assert!(audio.play(slow, true));
+        let empty = audio.add_streamed(Arc::new(Clip::silence(1000, 0)), SoundType::Sfx, 100);
+        assert!(audio.play(empty, true));
+        audio.tick(50);
+        assert!(audio.voices[&slow].loop_region().is_some());
+        assert!(audio.voices[&empty].loop_region().is_none());
         let big = Clip::silence(1000, 400).with_file_size(1024 * 1024 + 1);
         assert!(is_streamed(&big, false));
         assert!(!is_streamed(
