@@ -519,31 +519,31 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdLayer::CAdLayer` | unreviewed |  |
-| `CAdLayer::~CAdLayer` | unreviewed |  |
-| `CAdLayer::LoadFile` | unreviewed |  |
-| `CAdLayer::LoadBuffer` | unreviewed |  |
-| `CAdLayer::LoadBuffer LAYER` | unreviewed |  |
-| `CAdLayer::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdLayer::LoadBuffer NAME` | unreviewed |  |
-| `CAdLayer::LoadBuffer WIDTH` | unreviewed |  |
-| `CAdLayer::LoadBuffer HEIGHT` | unreviewed |  |
-| `CAdLayer::LoadBuffer MAIN` | unreviewed |  |
-| `CAdLayer::LoadBuffer ENTITY` | unreviewed |  |
-| `CAdLayer::LoadBuffer REGION` | unreviewed |  |
-| `CAdLayer::LoadBuffer ACTIVE` | unreviewed |  |
-| `CAdLayer::LoadBuffer EDITOR_SELECTED` | unreviewed |  |
-| `CAdLayer::LoadBuffer SCRIPT` | unreviewed |  |
-| `CAdLayer::LoadBuffer CAPTION` | unreviewed |  |
-| `CAdLayer::LoadBuffer PROPERTY` | unreviewed |  |
-| `CAdLayer::LoadBuffer CLOSE_UP` | unreviewed |  |
-| `CAdLayer::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdLayer::ScCallMethod` | unreviewed |  |
-| `CAdLayer::ScGetProperty` | unreviewed |  |
-| `CAdLayer::ScSetProperty` | unreviewed |  |
-| `CAdLayer::ScToString` | unreviewed |  |
-| `CAdLayer::SaveAsText` | unreviewed |  |
-| `CAdLayer::Persist` | unreviewed |  |
+| `CAdLayer::CAdLayer` | done | `luma-formats/src/scene.rs` `Layer::default`: not main, size 0, active, not close-up. |
+| `CAdLayer::~CAdLayer` | replaced | Rust ownership; `scene_edit.rs` `delete_layer` drops the nodes and their natives. |
+| `CAdLayer::LoadFile` | todo | Loads a layer from its own file (root `LAYER`); only reached through the `TEMPLATE` key, which Luma does not follow. |
+| `CAdLayer::LoadBuffer` | partial | `Layer::from_node`. Unknown keys are ignored (original: `Syntax error in LAYER definition`, the scene's parsing stops); a region or entity that fails to load stops the parsing of the layer's remaining keys in the original. |
+| `CAdLayer::LoadBuffer LAYER` | done | Root block of a layer file; inside a scene the block is read directly. |
+| `CAdLayer::LoadBuffer TEMPLATE` | partial | Parsed into `Layer::template`, never followed. Original: loads that layer file at this point, the following keys override and its nodes come first. |
+| `CAdLayer::LoadBuffer NAME` | done | `Layer::name`, `Scene.GetLayer(name)`. |
+| `CAdLayer::LoadBuffer WIDTH` | done | `Layer::width`: parallax and, for the main layer, the scene's size. |
+| `CAdLayer::LoadBuffer HEIGHT` | done | `Layer::height`. |
+| `CAdLayer::LoadBuffer MAIN` | done | `Layer::main`; the last main layer is the scene's. |
+| `CAdLayer::LoadBuffer ENTITY` | done | `Entity::from_node(.., scalable=false)`: a layer's entity is not scalable unless it says so. |
+| `CAdLayer::LoadBuffer REGION` | done | `Region::from_node(.., scene=true)`. |
+| `CAdLayer::LoadBuffer ACTIVE` | done | `Layer::active`: an inactive layer is not drawn (its entities are still updated: see `CAdScene::TraverseNodes`). |
+| `CAdLayer::LoadBuffer EDITOR_SELECTED` | n/a | SceneEdit selection state, no runtime reader. |
+| `CAdLayer::LoadBuffer SCRIPT` | done | `Layer::scripts`, attached by `World::load_scene` after the scene's. |
+| `CAdLayer::LoadBuffer CAPTION` | done | `Layer::caption`, expanded through the string table at load, read by `Caption`. |
+| `CAdLayer::LoadBuffer PROPERTY` | partial | Parsed into `Layer::properties`, never registered as script properties of the layer. |
+| `CAdLayer::LoadBuffer CLOSE_UP` | partial | Parsed, readable and writable (`CloseUp`), used by the keyboard cycle (`accessibility.rs`); the full-screen shield that makes everything under a close-up layer unclickable is missing (see `CAdScene::TraverseNodes`). |
+| `CAdLayer::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
+| `CAdLayer::ScCallMethod` | partial | `natives.rs` `layer_call`: `GetNode`, `AddRegion`, `AddEntity`, `InsertRegion`, `InsertEntity`, `DeleteNode` agree on indexes, names and return values. Difference: an entity made by `AddEntity`/`InsertEntity` is not scalable in Luma (`scene_edit.rs` `add_entity_node`); in the original only entities read from a `LAYER` block get `Scalable=false`, a script-made one keeps the default true. |
+| `CAdLayer::ScGetProperty` | done | `natives.rs` `layer_get`: `Type`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active`, plus `Name` and `Caption`. |
+| `CAdLayer::ScSetProperty` | partial | `layer_set`. Missing: `Width`/`Height` below 0 are stored as given (original: 0); `Active=false` on the main layer is accepted (original: refused with `Warning: cannot deactivate scene's main layer`). |
+| `CAdLayer::ScToString` | partial | `world.rs` `to_string` answers `[<layer name>]`; the original always `[layer]`. |
+| `CAdLayer::SaveAsText` | n/a | Only reachable from the editor tools. |
+| `CAdLayer::Persist` | replaced | serde: the layer is part of the `Scene` saved with the `SceneView`. |
 
 ## `wme_ad/AdNodeState.cpp`
 
@@ -619,15 +619,15 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdPath::CAdPath` | unreviewed |  |
-| `CAdPath::~CAdPath` | unreviewed |  |
-| `CAdPath::Reset` | unreviewed |  |
-| `CAdPath::GetFirst` | unreviewed |  |
-| `CAdPath::GetNext` | unreviewed |  |
-| `CAdPath::GetCurrent` | unreviewed |  |
-| `CAdPath::AddPoint` | unreviewed |  |
-| `CAdPath::SetReady` | unreviewed |  |
-| `CAdPath::Persist` | unreviewed |  |
+| `CAdPath::CAdPath` | replaced | `luma-adventure/src/actor.rs` `Actor::path` (a `Vec<Point>`), `path_index`, `path_ready`. |
+| `CAdPath::~CAdPath` | replaced | Rust ownership. |
+| `CAdPath::Reset` | done | `actor.rs` `go_to`: `path.clear()`, index 0, not ready. |
+| `CAdPath::GetFirst` | done | `Actor::follow_path` starts at index 0. |
+| `CAdPath::GetNext` | done | `path_index += 1` in `follow_path` and at the end of a segment. |
+| `CAdPath::GetCurrent` | done | `path.get(path_index)`. |
+| `CAdPath::AddPoint` | done | The vector returned by `Floor::find_path`. |
+| `CAdPath::SetReady` | done | `Actor::path_ready`, set when the path is found. |
+| `CAdPath::Persist` | replaced | serde derive on `Actor`. |
 
 ## `wme_ad/AdPath3D.cpp`
 
@@ -648,10 +648,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdPathPoint::CAdPathPoint` | unreviewed |  |
-| `CAdPathPoint::CAdPathPoint #2` | unreviewed |  |
-| `CAdPathPoint::~CAdPathPoint` | unreviewed |  |
-| `CAdPathPoint::Persist` | unreviewed |  |
+| `CAdPathPoint::CAdPathPoint` | replaced | The parallel vectors `vertices`, `distance`, `origin`, `marked` of `path.rs` `Floor::find_path`. |
+| `CAdPathPoint::CAdPathPoint #2` | replaced | As above: start at distance 0, the others at `i32::MAX`. |
+| `CAdPathPoint::~CAdPathPoint` | replaced | Rust ownership. |
+| `CAdPathPoint::Persist` | replaced | Not needed: a path is found within one call, nothing is in progress when the game is saved. |
 
 ## `wme_ad/AdPathPoint3D.cpp`
 
@@ -666,33 +666,33 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdRegion::CAdRegion` | unreviewed |  |
-| `CAdRegion::~CAdRegion` | unreviewed |  |
-| `CAdRegion::LoadFile` | unreviewed |  |
-| `CAdRegion::LoadBuffer` | unreviewed |  |
-| `CAdRegion::LoadBuffer REGION` | unreviewed |  |
-| `CAdRegion::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdRegion::LoadBuffer NAME` | unreviewed |  |
-| `CAdRegion::LoadBuffer ACTIVE` | unreviewed |  |
-| `CAdRegion::LoadBuffer ZOOM` | unreviewed |  |
-| `CAdRegion::LoadBuffer SCALE` | unreviewed |  |
-| `CAdRegion::LoadBuffer BLOCKED` | unreviewed |  |
-| `CAdRegion::LoadBuffer DECORATION` | unreviewed |  |
-| `CAdRegion::LoadBuffer POINT` | unreviewed |  |
-| `CAdRegion::LoadBuffer ALPHA_COLOR` | unreviewed |  |
-| `CAdRegion::LoadBuffer ALPHA` | unreviewed |  |
-| `CAdRegion::LoadBuffer EDITOR_SELECTED_POINT` | unreviewed |  |
-| `CAdRegion::LoadBuffer EDITOR_SELECTED` | unreviewed |  |
-| `CAdRegion::LoadBuffer SCRIPT` | unreviewed |  |
-| `CAdRegion::LoadBuffer CAPTION` | unreviewed |  |
-| `CAdRegion::LoadBuffer PROPERTY` | unreviewed |  |
-| `CAdRegion::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdRegion::ScCallMethod` | unreviewed |  |
-| `CAdRegion::ScGetProperty` | unreviewed |  |
-| `CAdRegion::ScSetProperty` | unreviewed |  |
-| `CAdRegion::ScToString` | unreviewed |  |
-| `CAdRegion::SaveAsText` | unreviewed |  |
-| `CAdRegion::Persist` | unreviewed |  |
+| `CAdRegion::CAdRegion` | done | `Region::default`: active, not blocked, not decoration, no scale, opaque white. |
+| `CAdRegion::~CAdRegion` | replaced | Rust ownership. |
+| `CAdRegion::LoadFile` | todo | Loads a region from its own file (root `REGION`); only reached through the `TEMPLATE` key, which Luma does not follow. |
+| `CAdRegion::LoadBuffer` | partial | `Region::from_node(.., scene=true)`. Unknown keys are ignored (original: syntax error). The bounding rectangle (`CreateRegion`) is computed on demand by `Region::bounds`. |
+| `CAdRegion::LoadBuffer REGION` | done | Root block of a region file; inside a layer the block is read directly. |
+| `CAdRegion::LoadBuffer TEMPLATE` | partial | Parsed into `Region::template`, never followed. Original: loads that region file at this point (its points replace those read so far), the following keys override. |
+| `CAdRegion::LoadBuffer NAME` | done | `Region::name`. |
+| `CAdRegion::LoadBuffer ACTIVE` | done | `Region::active`. |
+| `CAdRegion::LoadBuffer ZOOM` | done | Same as `SCALE`. |
+| `CAdRegion::LoadBuffer SCALE` | done | `Region::zoom`, an integer; 0 means the scale levels. |
+| `CAdRegion::LoadBuffer BLOCKED` | done | `Region::blocked`. |
+| `CAdRegion::LoadBuffer DECORATION` | done | `Region::decoration`. |
+| `CAdRegion::LoadBuffer POINT` | done | `Region::points`. |
+| `CAdRegion::LoadBuffer ALPHA_COLOR` | done | With `ALPHA`, `Region::tint`; 255 for what is not given. |
+| `CAdRegion::LoadBuffer ALPHA` | done | See `ALPHA_COLOR`. |
+| `CAdRegion::LoadBuffer EDITOR_SELECTED_POINT` | n/a | SceneEdit selection state, no runtime reader. |
+| `CAdRegion::LoadBuffer EDITOR_SELECTED` | n/a | SceneEdit selection state, no runtime reader. |
+| `CAdRegion::LoadBuffer SCRIPT` | done | `Region::scripts`, attached by `World::load_scene`. |
+| `CAdRegion::LoadBuffer CAPTION` | done | `Region::caption`, expanded at load. |
+| `CAdRegion::LoadBuffer PROPERTY` | partial | Parsed into `Region::properties`, never registered as script properties of the region (`region.<name>` reads null). |
+| `CAdRegion::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
+| `CAdRegion::ScCallMethod` | done | Passes everything to `CBRegion` (`natives_region.rs` `region_call`). |
+| `CAdRegion::ScGetProperty` | done | `natives_region.rs` `region_get`: `Type` (`ad region`), `Name`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`. (The inherited `X`/`Y` answer the bounds' corner in Luma: a `BRegion`/`BObject` matter.) |
+| `CAdRegion::ScSetProperty` | done | `region_set`: `Name`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`. |
+| `CAdRegion::ScToString` | partial | `world.rs` `to_string` answers `[<region name>]`; the original always `[ad region]`. |
+| `CAdRegion::SaveAsText` | n/a | Only reachable from the editor tools. |
+| `CAdRegion::Persist` | replaced | serde: the region is part of the `Scene` saved with the `SceneView`. |
 
 ## `wme_ad/AdResponse.cpp`
 
@@ -755,33 +755,33 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdRotLevel::CAdRotLevel` | unreviewed |  |
-| `CAdRotLevel::~CAdRotLevel` | unreviewed |  |
-| `CAdRotLevel::LoadFile` | unreviewed |  |
-| `CAdRotLevel::LoadBuffer` | unreviewed |  |
-| `CAdRotLevel::LoadBuffer ROTATION_LEVEL` | unreviewed |  |
-| `CAdRotLevel::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdRotLevel::LoadBuffer X` | unreviewed |  |
-| `CAdRotLevel::LoadBuffer ROTATION` | unreviewed |  |
-| `CAdRotLevel::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdRotLevel::SaveAsText` | unreviewed |  |
-| `CAdRotLevel::Persist` | unreviewed |  |
+| `CAdRotLevel::CAdRotLevel` | done | `RotationLevel::from_node`: `X` 0 and rotation 0 by default. |
+| `CAdRotLevel::~CAdRotLevel` | replaced | Rust ownership. |
+| `CAdRotLevel::LoadFile` | todo | Loads a level from its own file (root `ROTATION_LEVEL`); only reached through the `TEMPLATE` key. |
+| `CAdRotLevel::LoadBuffer` | partial | `luma-formats/src/scene.rs` `RotationLevel::from_node`; unknown keys are ignored (original: syntax error). |
+| `CAdRotLevel::LoadBuffer ROTATION_LEVEL` | done | Root block of a level file; inside a scene the block is read directly. |
+| `CAdRotLevel::LoadBuffer TEMPLATE` | todo | Not read at all. Original: loads the level from that file. |
+| `CAdRotLevel::LoadBuffer X` | done | `RotationLevel::x`. |
+| `CAdRotLevel::LoadBuffer ROTATION` | done | `RotationLevel::rotation`, an integer of degrees. |
+| `CAdRotLevel::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
+| `CAdRotLevel::SaveAsText` | n/a | Only reachable from the editor tools. |
+| `CAdRotLevel::Persist` | replaced | serde: part of the `Scene`. |
 
 ## `wme_ad/AdScaleLevel.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdScaleLevel::CAdScaleLevel` | unreviewed |  |
-| `CAdScaleLevel::~CAdScaleLevel` | unreviewed |  |
-| `CAdScaleLevel::LoadFile` | unreviewed |  |
-| `CAdScaleLevel::LoadBuffer` | unreviewed |  |
-| `CAdScaleLevel::LoadBuffer SCALE_LEVEL` | unreviewed |  |
-| `CAdScaleLevel::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdScaleLevel::LoadBuffer Y` | unreviewed |  |
-| `CAdScaleLevel::LoadBuffer SCALE` | unreviewed |  |
-| `CAdScaleLevel::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdScaleLevel::SaveAsText` | unreviewed |  |
-| `CAdScaleLevel::Persist` | unreviewed |  |
+| `CAdScaleLevel::CAdScaleLevel` | done | `ScaleLevel::from_node`: `Y` 0 and scale 100 by default. |
+| `CAdScaleLevel::~CAdScaleLevel` | replaced | Rust ownership. |
+| `CAdScaleLevel::LoadFile` | todo | Loads a level from its own file (root `SCALE_LEVEL`); only reached through the `TEMPLATE` key. |
+| `CAdScaleLevel::LoadBuffer` | partial | `luma-formats/src/scene.rs` `ScaleLevel::from_node`; unknown keys are ignored (original: syntax error). |
+| `CAdScaleLevel::LoadBuffer SCALE_LEVEL` | done | Root block of a level file; inside a scene the block is read directly. |
+| `CAdScaleLevel::LoadBuffer TEMPLATE` | todo | Not read at all. Original: loads the level from that file. |
+| `CAdScaleLevel::LoadBuffer Y` | done | `ScaleLevel::y`. |
+| `CAdScaleLevel::LoadBuffer SCALE` | done | `ScaleLevel::scale`, an integer of percent. |
+| `CAdScaleLevel::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
+| `CAdScaleLevel::SaveAsText` | n/a | Only reachable from the editor tools. |
+| `CAdScaleLevel::Persist` | replaced | serde: part of the `Scene`. |
 
 ## `wme_ad/AdScene.cpp`
 
@@ -866,7 +866,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdScene::ScCallMethod` | partial | `natives.rs` `scene_call`, `scene3d.rs` `scene3d_call`. Differences: `GetNode` does not look among the waypoint groups (third lookup of `GetNodeByName`); `GetFreeNode` only sees free entities, not the actors loaded with `Scene.LoadActor`/`LoadActor3D` (they are in `m_Objects`); `IsPointInViewport` excludes the right and bottom edges (original `<=`); `SetActiveCamera` returns null (original: true/false); `GetLightColor`/`GetLightPosition` without geometry return null (original 0); `UnloadObject` also removes an object that is not the scene's (original: only from the scene's list, else nothing); `SkipTo`/`ScrollTo` with an object: see `ScrollToObject`; fade colours are clamped (original: truncated to a byte). Present and equal: `LoadActor`, `LoadActor3D`, `LoadEntity`, `CreateEntity`, `DeleteEntity`, `GetLayer`, `GetWaypointGroup`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `IsScrolling`, `FadeOut/In(Async)`, `GetFadeColor`, `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled`, `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `SetViewport`, `AddLayer`, `InsertLayer`, `DeleteLayer`, `EnableFog`, `DisableFog`. |
 | `CAdScene::ScGetProperty` | partial | `scene_get`, `scene3d_get`. Missing: `ShowGeometry` (no built-in: reads null until a script sets it); `NumFreeNodes` does not count the actors loaded into the scene. The rest agrees (`Type`, `NumLayers`, `NumWaypointGroups`, `MainLayer`, `MouseX/Y`, `AutoScroll`, `PersistentState(Sprites)`, `ScrollPixelsX/Y`, `ScrollSpeedX/Y`, `OffsetX/Y`, `GeometryFile`, `WaypointsHeight`, `Width`, `Height`, `MaxShadowType`, `AmbientLightColor`, `NumLights`). |
 | `CAdScene::ScSetProperty` | partial | `scene_set`, `scene3d_set`. `OffsetX`/`OffsetY`: the original treats the value as a point to centre on and clamps it (`max(0, v - viewport/2)`, then `min(.., scene - viewport)`); Luma stores the raw value. `ShowGeometry` has no effect (the geometry overlay is not drawn). The rest agrees. |
-| `CAdScene::ScToString` | done | `world.rs` `to_string`: `[scene object]`. |
+| `CAdScene::ScToString` | partial | `world.rs` `to_string` answers `[<scene name>]`; the original always `[scene object]`. |
 | `CAdScene::AddObject` | done | `scene_edit.rs` `add_free_entity`, `World::load_actor(.., scene_bound=true)`. |
 | `CAdScene::RemoveObject` | done | `scene_edit.rs` `remove_free_entity`, `World::unload_object`. |
 | `CAdScene::SaveAsText` | n/a | Only reachable from the editor tools: no caller in the engine and no script method. |
@@ -881,8 +881,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdScene::PFPointsAdd` | replaced | Local vectors in `Floor::find_path`. |
 | `CAdScene::GetViewportOffset` | done | `World::viewport`: the scene's own viewport, else the game's, else (0,0). |
 | `CAdScene::GetViewportSize` | done | `World::viewport`: same order, the screen by default. |
-| `CAdScene::GetOffsetLeft` | done | `offset_x - viewport().0`, as in `scene_get` `MouseX` and `Camera::layer_offset`. |
-| `CAdScene::GetOffsetTop` | done | As `GetOffsetLeft`. |
+| `CAdScene::GetOffsetLeft` | partial | No function of its own: `offset_x - viewport().0` is written out where needed (`scene_get` `MouseX`, `Camera::layer_offset`), but the sentence placement (`World::talk`, `SentenceDraw::of`) uses the bare `offset_x`: see `CAdSentence::Display`. |
+| `CAdScene::GetOffsetTop` | partial | As `GetOffsetLeft`. |
 | `CAdScene::PointInViewport` | partial | `Runtime::mouse_in_viewport` and `Scene.IsPointInViewport`: Luma excludes `x == left+width` and `y == top+height`, the original includes them. |
 | `CAdScene::SetOffset` | done | No caller in the engine; `World::offset_x/offset_y` are plain fields. |
 | `CAdScene::GetNodeByName` | partial | `World::find_node`: layer nodes, then free entities. The waypoint groups, looked up last by the original, are not searched. |
@@ -947,11 +947,11 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdSceneNode::CAdSceneNode` | unreviewed |  |
-| `CAdSceneNode::~CAdSceneNode` | unreviewed |  |
-| `CAdSceneNode::SetEntity` | unreviewed |  |
-| `CAdSceneNode::SetRegion` | unreviewed |  |
-| `CAdSceneNode::Persist` | unreviewed |  |
+| `CAdSceneNode::CAdSceneNode` | replaced | `luma-formats/src/scene.rs` enum `SceneNode` (`Entity` or `Region`); there is no empty node. |
+| `CAdSceneNode::~CAdSceneNode` | replaced | Rust ownership; `scene_edit.rs` `delete_node` removes the node's native. |
+| `CAdSceneNode::SetEntity` | done | `SceneNode::Entity`; the native is registered by `World::load_scene` or `scene_edit.rs` `add_node`. |
+| `CAdSceneNode::SetRegion` | done | `SceneNode::Region`; same registration. |
+| `CAdSceneNode::Persist` | replaced | serde: part of the `Scene`. |
 
 ## `wme_ad/AdSceneState.cpp`
 
@@ -986,46 +986,46 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdSpriteSet::CAdSpriteSet` | unreviewed |  |
-| `CAdSpriteSet::~CAdSpriteSet` | unreviewed |  |
-| `CAdSpriteSet::LoadFile` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer SPRITESET` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer NAME` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer UP_LEFT` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer DOWN_LEFT` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer LEFT` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer UP_RIGHT` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer DOWN_RIGHT` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer RIGHT` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer UP` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer DOWN` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdSpriteSet::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdSpriteSet::Persist` | unreviewed |  |
-| `CAdSpriteSet::GetSprite` | unreviewed |  |
-| `CAdSpriteSet::SaveAsText` | unreviewed |  |
-| `CAdSpriteSet::ContainsSprite` | unreviewed |  |
+| `CAdSpriteSet::CAdSpriteSet` | done | `luma-formats/src/actor.rs` `SpriteSet::default`: no sprite in any direction. |
+| `CAdSpriteSet::~CAdSpriteSet` | replaced | Rust ownership. |
+| `CAdSpriteSet::LoadFile` | partial | `SpriteSet::parse` reads a `.spriteset` file, but nothing in `luma-adventure` calls it: the original reaches it through `TEMPLATE` and through the `.talk` files (`DEFAULT_SPRITESET_FILE`, `SPRITESET_FILE`). |
+| `CAdSpriteSet::LoadBuffer` | partial | `SpriteSet::apply`. In the original a sprite that fails to load fails the whole set (`Error loading SPRITESET definition`) and with it the actor; Luma keeps the set and records the sprite as missing. Unknown keys are ignored (original: syntax error). |
+| `CAdSpriteSet::LoadBuffer SPRITESET` | done | Root block, also required inside `WALK`, `STAND`, `TALK`... (`SpriteSet::from_wrapper`). |
+| `CAdSpriteSet::LoadBuffer NAME` | done | `SpriteSet::name`, used for talk stances and animations. |
+| `CAdSpriteSet::LoadBuffer UP_LEFT` | done | `sprites[7]`. |
+| `CAdSpriteSet::LoadBuffer DOWN_LEFT` | done | `sprites[5]`. |
+| `CAdSpriteSet::LoadBuffer LEFT` | done | `sprites[6]`. |
+| `CAdSpriteSet::LoadBuffer UP_RIGHT` | done | `sprites[1]`. |
+| `CAdSpriteSet::LoadBuffer DOWN_RIGHT` | done | `sprites[3]`. |
+| `CAdSpriteSet::LoadBuffer RIGHT` | done | `sprites[2]`. |
+| `CAdSpriteSet::LoadBuffer UP` | done | `sprites[0]`. |
+| `CAdSpriteSet::LoadBuffer DOWN` | done | `sprites[4]`. |
+| `CAdSpriteSet::LoadBuffer TEMPLATE` | partial | Parsed into `SpriteSet::template`, never followed. Original: loads that `.spriteset` file into the same set at this point, the following keys override. |
+| `CAdSpriteSet::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
+| `CAdSpriteSet::Persist` | replaced | serde: the sets are part of the actor definition saved with the `Actor`. |
+| `CAdSpriteSet::GetSprite` | done | `SpriteSet::sprite`: the direction's sprite, else the nearer of the first set below and the first above, the lower on a tie. |
+| `CAdSpriteSet::SaveAsText` | n/a | Only reachable from the editor tools. |
+| `CAdSpriteSet::ContainsSprite` | done | `actor.rs` `Actor::unload_anim` compares the sprite paths of the removed sets (its only use in the original). |
 
 ## `wme_ad/AdTalkDef.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdTalkDef::CAdTalkDef` | unreviewed |  |
-| `CAdTalkDef::~CAdTalkDef` | unreviewed |  |
-| `CAdTalkDef::LoadFile` | unreviewed |  |
-| `CAdTalkDef::LoadBuffer` | unreviewed |  |
-| `CAdTalkDef::LoadBuffer TALK` | unreviewed |  |
-| `CAdTalkDef::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdTalkDef::LoadBuffer ACTION` | unreviewed |  |
-| `CAdTalkDef::LoadBuffer DEFAULT_SPRITESET_FILE` | unreviewed |  |
-| `CAdTalkDef::LoadBuffer DEFAULT_SPRITESET` | unreviewed |  |
-| `CAdTalkDef::LoadBuffer DEFAULT_SPRITE` | unreviewed |  |
-| `CAdTalkDef::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdTalkDef::Persist` | unreviewed |  |
-| `CAdTalkDef::SaveAsText` | unreviewed |  |
-| `CAdTalkDef::LoadDefaultSprite` | unreviewed |  |
-| `CAdTalkDef::GetDefaultSprite` | unreviewed |  |
+| `CAdTalkDef::CAdTalkDef` | todo | Talk definition (`.talk` file next to a speech sound): no default sprite or sprite set, no node. Luma has no talk definitions at all (see `CAdSentence::SetupTalkFile`). |
+| `CAdTalkDef::~CAdTalkDef` | todo | Frees the nodes and the default sprite or set; nothing to port until the class exists. |
+| `CAdTalkDef::LoadFile` | todo | Reads the `.talk` file; a missing file is logged `CAdTalkDef::LoadFile failed for file`, a parse error `Error parsing TALK file`. |
+| `CAdTalkDef::LoadBuffer` | todo | Parses the `TALK` block; a failing node or set fails the load (`Error loading TALK definition`); afterwards drops any inline default set, then loads `DEFAULT_SPRITE` and `DEFAULT_SPRITESET_FILE` (a failure fails the load). |
+| `CAdTalkDef::LoadBuffer TALK` | todo | Root block of a `.talk` file. |
+| `CAdTalkDef::LoadBuffer TEMPLATE` | todo | Loads another `.talk` file at this point. |
+| `CAdTalkDef::LoadBuffer ACTION` | todo | One timed node (`CAdTalkNode`), kept in file order. |
+| `CAdTalkDef::LoadBuffer DEFAULT_SPRITESET_FILE` | todo | File of the sprite set shown when no node matches the current time. |
+| `CAdTalkDef::LoadBuffer DEFAULT_SPRITESET` | todo | Inline `SPRITESET` block for the default; note that the original deletes it again at the end of `LoadBuffer`, so only `DEFAULT_SPRITESET_FILE` and `DEFAULT_SPRITE` have an effect. |
+| `CAdTalkDef::LoadBuffer DEFAULT_SPRITE` | todo | File of the sprite shown when no node matches the current time; it wins over the default set. |
+| `CAdTalkDef::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
+| `CAdTalkDef::Persist` | todo | Saves the default sprite and set with their file names and the nodes; to do with the class (a sentence in progress keeps its talk definition across a save). |
+| `CAdTalkDef::SaveAsText` | n/a | Only reachable from the editor tools. |
+| `CAdTalkDef::LoadDefaultSprite` | todo | Loads the default sprite, else the default set, on first use; a failure leaves none. |
+| `CAdTalkDef::GetDefaultSprite` | todo | The default sprite, else the default set's sprite for the direction, else none. |
 
 ## `wme_ad/AdTalkHolder.cpp`
 
@@ -1045,23 +1045,23 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdTalkNode::CAdTalkNode` | unreviewed |  |
-| `CAdTalkNode::~CAdTalkNode` | unreviewed |  |
-| `CAdTalkNode::LoadBuffer` | unreviewed |  |
-| `CAdTalkNode::LoadBuffer ACTION` | unreviewed |  |
-| `CAdTalkNode::LoadBuffer SPRITESET_FILE` | unreviewed |  |
-| `CAdTalkNode::LoadBuffer SPRITESET` | unreviewed |  |
-| `CAdTalkNode::LoadBuffer SPRITE` | unreviewed |  |
-| `CAdTalkNode::LoadBuffer START_TIME` | unreviewed |  |
-| `CAdTalkNode::LoadBuffer END_TIME` | unreviewed |  |
-| `CAdTalkNode::LoadBuffer COMMENT` | unreviewed |  |
-| `CAdTalkNode::LoadBuffer PRECACHE` | unreviewed |  |
-| `CAdTalkNode::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdTalkNode::Persist` | unreviewed |  |
-| `CAdTalkNode::SaveAsText` | unreviewed |  |
-| `CAdTalkNode::LoadSprite` | unreviewed |  |
-| `CAdTalkNode::IsInTimeInterval` | unreviewed |  |
-| `CAdTalkNode::GetSprite` | unreviewed |  |
+| `CAdTalkNode::CAdTalkNode` | todo | One timed action of a `.talk` file: no sprite, start and end 0, not play-to-end, not pre-cached. |
+| `CAdTalkNode::~CAdTalkNode` | todo | Frees the sprite or set; nothing to port until the class exists. |
+| `CAdTalkNode::LoadBuffer` | todo | Parses an `ACTION` block; `END_TIME` 0 or absent makes the node play its sprite to the end (`m_PlayToEnd`); with `PRECACHE` the sprite or set file is loaded at once (a failure fails the load), else at first use. |
+| `CAdTalkNode::LoadBuffer ACTION` | todo | Root block of a node. |
+| `CAdTalkNode::LoadBuffer SPRITESET_FILE` | todo | File of the sprite set of the node (one sprite per direction). |
+| `CAdTalkNode::LoadBuffer SPRITESET` | todo | Inline `SPRITESET` block of the node. |
+| `CAdTalkNode::LoadBuffer SPRITE` | todo | File of the node's sprite; it wins over the set. |
+| `CAdTalkNode::LoadBuffer START_TIME` | todo | Milliseconds from the start of the sentence at which the node begins. |
+| `CAdTalkNode::LoadBuffer END_TIME` | todo | Milliseconds at which it ends (inclusive); 0 means until the sprite finishes. |
+| `CAdTalkNode::LoadBuffer COMMENT` | n/a | Kept only in the editor mode. |
+| `CAdTalkNode::LoadBuffer PRECACHE` | todo | Loads the node's sprite or set when the file is read instead of at first use. |
+| `CAdTalkNode::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
+| `CAdTalkNode::Persist` | todo | Saves the times, the play-to-end flag, the sprite and set with their file names; to do with the class. |
+| `CAdTalkNode::SaveAsText` | n/a | Only reachable from the editor tools. |
+| `CAdTalkNode::LoadSprite` | todo | Loads the sprite, else the set, on first use; a failure leaves none. |
+| `CAdTalkNode::IsInTimeInterval` | todo | True from `START_TIME` to `END_TIME`; for a play-to-end node, from `START_TIME` while its sprite (or the set's sprite for the direction) is not loaded yet or not finished. |
+| `CAdTalkNode::GetSprite` | todo | The node's sprite, else its set's sprite for the direction, loading on first use. |
 
 ## `wme_ad/AdWalkplane.cpp`
 
@@ -1075,24 +1075,24 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdWaypointGroup::CAdWaypointGroup` | unreviewed |  |
-| `CAdWaypointGroup::~CAdWaypointGroup` | unreviewed |  |
-| `CAdWaypointGroup::Cleanup` | unreviewed |  |
-| `CAdWaypointGroup::LoadFile` | unreviewed |  |
-| `CAdWaypointGroup::LoadBuffer` | unreviewed |  |
-| `CAdWaypointGroup::LoadBuffer WAYPOINTS` | unreviewed |  |
-| `CAdWaypointGroup::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdWaypointGroup::LoadBuffer NAME` | unreviewed |  |
-| `CAdWaypointGroup::LoadBuffer POINT` | unreviewed |  |
-| `CAdWaypointGroup::LoadBuffer EDITOR_SELECTED_POINT` | unreviewed |  |
-| `CAdWaypointGroup::LoadBuffer EDITOR_SELECTED` | unreviewed |  |
-| `CAdWaypointGroup::LoadBuffer PROPERTY` | unreviewed |  |
-| `CAdWaypointGroup::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdWaypointGroup::SaveAsText` | unreviewed |  |
-| `CAdWaypointGroup::Persist` | unreviewed |  |
-| `CAdWaypointGroup::ScGetProperty` | unreviewed |  |
-| `CAdWaypointGroup::ScSetProperty` | unreviewed |  |
-| `CAdWaypointGroup::Mimic` | unreviewed |  |
+| `CAdWaypointGroup::CAdWaypointGroup` | done | `WaypointGroup::default`: active, no points. |
+| `CAdWaypointGroup::~CAdWaypointGroup` | replaced | Rust ownership. |
+| `CAdWaypointGroup::Cleanup` | replaced | Rust ownership; `mimic` builds a new vector. |
+| `CAdWaypointGroup::LoadFile` | todo | Loads a group from its own file (root `WAYPOINTS`); only reached through the `TEMPLATE` key, which Luma does not follow. |
+| `CAdWaypointGroup::LoadBuffer` | partial | `luma-formats/src/scene.rs` `WaypointGroup::from_node`; unknown keys are ignored (original: syntax error). |
+| `CAdWaypointGroup::LoadBuffer WAYPOINTS` | done | Root block of a waypoints file; inside a scene, entity or actor the block is read directly. |
+| `CAdWaypointGroup::LoadBuffer TEMPLATE` | partial | Parsed into `WaypointGroup::template`, never followed. Original: loads that file's points and name at this point. |
+| `CAdWaypointGroup::LoadBuffer NAME` | done | `WaypointGroup::name`. |
+| `CAdWaypointGroup::LoadBuffer POINT` | done | `WaypointGroup::points`. |
+| `CAdWaypointGroup::LoadBuffer EDITOR_SELECTED_POINT` | n/a | SceneEdit selection state, no runtime reader. |
+| `CAdWaypointGroup::LoadBuffer EDITOR_SELECTED` | n/a | SceneEdit selection state, no runtime reader. |
+| `CAdWaypointGroup::LoadBuffer PROPERTY` | partial | Parsed into `WaypointGroup::properties`, never registered as script properties of the group. |
+| `CAdWaypointGroup::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
+| `CAdWaypointGroup::SaveAsText` | n/a | Only reachable from the editor tools. |
+| `CAdWaypointGroup::Persist` | replaced | serde: part of the `Scene` (points, `active`); the mimic cache is not needed. |
+| `CAdWaypointGroup::ScGetProperty` | done | `natives_region.rs` `waypoint_group_get`: `Type` (`waypoint-group`), `Active`. |
+| `CAdWaypointGroup::ScSetProperty` | done | `waypoint_group_set`: `Active`. |
+| `CAdWaypointGroup::Mimic` | done | `luma-adventure/src/actor.rs` `mimic`: each point scaled (truncated) and moved; computed when asked instead of cached. |
 
 ## `wme_ad/AdWaypointGroup3D.cpp`
 
