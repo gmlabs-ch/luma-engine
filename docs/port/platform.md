@@ -6,480 +6,480 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBDebugger::CBDebugger` | unreviewed |  |
-| `CBDebugger::~CBDebugger` | unreviewed |  |
-| `CBDebugger::Initialize` | unreviewed |  |
-| `CBDebugger::Shutdown` | unreviewed |  |
-| `CBDebugger::IsClientValid` | unreviewed |  |
-| `CBDebugger::OnGameInit` | unreviewed |  |
-| `CBDebugger::OnGameShutdown` | unreviewed |  |
-| `CBDebugger::OnGameTick` | unreviewed |  |
-| `CBDebugger::OnLog` | unreviewed |  |
-| `CBDebugger::OnScriptInit` | unreviewed |  |
-| `CBDebugger::OnScriptEventThreadInit` | unreviewed |  |
-| `CBDebugger::OnScriptMethodThreadInit` | unreviewed |  |
-| `CBDebugger::OnScriptShutdown` | unreviewed |  |
-| `CBDebugger::OnScriptChangeLine` | unreviewed |  |
-| `CBDebugger::OnScriptChangeScope` | unreviewed |  |
-| `CBDebugger::OnScriptShutdownScope` | unreviewed |  |
-| `CBDebugger::OnVariableInit` | unreviewed |  |
-| `CBDebugger::OnVariableChangeValue` | unreviewed |  |
-| `CBDebugger::OnScriptHitBreakpoint` | unreviewed |  |
-| `CBDebugger::AttachClient` | unreviewed |  |
-| `CBDebugger::DetachClient` | unreviewed |  |
-| `CBDebugger::QueryData` | unreviewed |  |
-| `CBDebugger::GetPropInt` | unreviewed |  |
-| `CBDebugger::GetPropFloat` | unreviewed |  |
-| `CBDebugger::GetPropString` | unreviewed |  |
-| `CBDebugger::GetPropBool` | unreviewed |  |
-| `CBDebugger::SetProp` | unreviewed |  |
-| `CBDebugger::SetProp #2` | unreviewed |  |
-| `CBDebugger::SetProp #3` | unreviewed |  |
-| `CBDebugger::SetProp #4` | unreviewed |  |
-| `CBDebugger::ResolveFilename` | unreviewed |  |
-| `CBDebugger::AddBreakpoint` | unreviewed |  |
-| `CBDebugger::RemoveBreakpoint` | unreviewed |  |
-| `CBDebugger::ContinueExecution` | unreviewed |  |
+| `CBDebugger::CBDebugger` | n/a | Bridge to the external script debugger (`wme_console.dll`, a .NET console loaded only when `Debug/DebugMode` and `Debug/DebugConsole` ask for it): disabled by default, no state the game sees. |
+| `CBDebugger::~CBDebugger` | n/a | Bridge to the external script debugger (`wme_console.dll`, a .NET console loaded only when `Debug/DebugMode` and `Debug/DebugConsole` ask for it). |
+| `CBDebugger::Initialize` | n/a | Loads `wme_console.dll` and calls its `Initialize`; a Windows DLL of the WME development kit. |
+| `CBDebugger::Shutdown` | n/a | Unloads `wme_console.dll`. |
+| `CBDebugger::IsClientValid` | n/a | Debugger client list. |
+| `CBDebugger::OnGameInit` | n/a | Forwards the game's start, stop and frame to the debugger clients; does nothing when no debugger is attached. |
+| `CBDebugger::OnGameShutdown` | n/a | Forwards the game's start, stop and frame to the debugger clients; does nothing when no debugger is attached. |
+| `CBDebugger::OnGameTick` | n/a | Forwards the game's start, stop and frame to the debugger clients; does nothing when no debugger is attached. |
+| `CBDebugger::OnLog` | n/a | Copies each log line to the debugger console; the log itself is `CBGame::LOG` (Luma: `World::log`, printed by `luma-player`). |
+| `CBDebugger::OnScriptInit` | n/a | Notifies the debugger clients of a script engine event (scripts, scopes, variables, breakpoints); no effect on the game when no debugger is attached. |
+| `CBDebugger::OnScriptEventThreadInit` | n/a | Notifies the debugger clients of a script engine event (scripts, scopes, variables, breakpoints); no effect on the game when no debugger is attached. |
+| `CBDebugger::OnScriptMethodThreadInit` | n/a | Notifies the debugger clients of a script engine event (scripts, scopes, variables, breakpoints); no effect on the game when no debugger is attached. |
+| `CBDebugger::OnScriptShutdown` | n/a | Notifies the debugger clients of a script engine event (scripts, scopes, variables, breakpoints); no effect on the game when no debugger is attached. |
+| `CBDebugger::OnScriptChangeLine` | n/a | Notifies the debugger clients of a script engine event (scripts, scopes, variables, breakpoints); no effect on the game when no debugger is attached. |
+| `CBDebugger::OnScriptChangeScope` | n/a | Notifies the debugger clients of a script engine event (scripts, scopes, variables, breakpoints); no effect on the game when no debugger is attached. |
+| `CBDebugger::OnScriptShutdownScope` | n/a | Notifies the debugger clients of a script engine event (scripts, scopes, variables, breakpoints); no effect on the game when no debugger is attached. |
+| `CBDebugger::OnVariableInit` | n/a | Notifies the debugger clients of a script engine event (scripts, scopes, variables, breakpoints); no effect on the game when no debugger is attached. |
+| `CBDebugger::OnVariableChangeValue` | n/a | Notifies the debugger clients of a script engine event (scripts, scopes, variables, breakpoints); no effect on the game when no debugger is attached. |
+| `CBDebugger::OnScriptHitBreakpoint` | n/a | Notifies the debugger clients of a script engine event (scripts, scopes, variables, breakpoints); no effect on the game when no debugger is attached. |
+| `CBDebugger::AttachClient` | n/a | `IWmeDebugServer`: called by the debugger DLL only. |
+| `CBDebugger::DetachClient` | n/a | `IWmeDebugServer`: called by the debugger DLL only. |
+| `CBDebugger::QueryData` | n/a | `IWmeDebugServer`: called by the debugger DLL only. |
+| `CBDebugger::GetPropInt` | n/a | `IWmeDebugServer` stub returning a constant. |
+| `CBDebugger::GetPropFloat` | n/a | `IWmeDebugServer` stub returning a constant. |
+| `CBDebugger::GetPropString` | n/a | `IWmeDebugServer`: only answers `RegistryPath` for the debugger. |
+| `CBDebugger::GetPropBool` | n/a | `IWmeDebugServer` stub returning a constant. |
+| `CBDebugger::SetProp` | n/a | `IWmeDebugServer` stub returning false. |
+| `CBDebugger::SetProp #2` | n/a | `IWmeDebugServer` stub returning false. |
+| `CBDebugger::SetProp #3` | n/a | `IWmeDebugServer` stub returning false. |
+| `CBDebugger::SetProp #4` | n/a | `IWmeDebugServer` stub returning false. |
+| `CBDebugger::ResolveFilename` | n/a | `IWmeDebugServer`: lets the debugger find a script's source file on disk. |
+| `CBDebugger::AddBreakpoint` | n/a | `IWmeDebugServer`: the debugger sets breakpoints in the script engine; Luma's engine has no breakpoints. |
+| `CBDebugger::RemoveBreakpoint` | n/a | `IWmeDebugServer`: the debugger sets breakpoints in the script engine; Luma's engine has no breakpoints. |
+| `CBDebugger::ContinueExecution` | n/a | `IWmeDebugServer`: brings the game window back to the front after a breakpoint. |
 
 ## `wme_base/BNetworkMgr.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBNetworkMgr::CBNetworkMgr` | unreviewed |  |
-| `CBNetworkMgr::~CBNetworkMgr` | unreviewed |  |
-| `CBNetworkMgr::InitLoop` | unreviewed |  |
-| `CBNetworkMgr::InitWinSock` | unreviewed |  |
-| `CBNetworkMgr::ShutdownWinSock` | unreviewed |  |
-| `CBNetworkMgr::AddSocket` | unreviewed |  |
-| `CBNetworkMgr::OnWinsockEvent` | unreviewed |  |
-| `CBNetworkMgr::GetSocket` | unreviewed |  |
-| `CBNetworkMgr::Connect` | unreviewed |  |
-| `CBNetworkMgr::CreateServer` | unreviewed |  |
+| `CBNetworkMgr::CBNetworkMgr` | n/a | Unfinished networking: nothing in `wme_base`/`wme_ad` and no script method ever creates a socket (the only calls to `Connect`/`CreateServer` are commented-out tests in `CBPlatform::Initialize`). |
+| `CBNetworkMgr::~CBNetworkMgr` | n/a | Unfinished networking: nothing in `wme_base`/`wme_ad` and no script method ever creates a socket (the only calls to `Connect`/`CreateServer` are commented-out tests in `CBPlatform::Initialize`). |
+| `CBNetworkMgr::InitLoop` | n/a | Called every frame, but the socket list is always empty. Unfinished networking: nothing in `wme_base`/`wme_ad` and no script method ever creates a socket (the only calls to `Connect`/`CreateServer` are commented-out tests in `CBPlatform::Initialize`). |
+| `CBNetworkMgr::InitWinSock` | n/a | WinSock start-up and clean-up, reached only from `Connect`/`CreateServer`, which have no caller. |
+| `CBNetworkMgr::ShutdownWinSock` | n/a | WinSock start-up and clean-up, reached only from `Connect`/`CreateServer`, which have no caller. |
+| `CBNetworkMgr::AddSocket` | n/a | Socket list of the unfinished network manager; always empty. |
+| `CBNetworkMgr::OnWinsockEvent` | n/a | Handles the `WM_WINSOCK` window message, which is never posted since no socket is ever created. |
+| `CBNetworkMgr::GetSocket` | n/a | Socket list of the unfinished network manager; always empty. |
+| `CBNetworkMgr::Connect` | n/a | No caller in `wme_base`/`wme_ad` and no script access. |
+| `CBNetworkMgr::CreateServer` | n/a | No caller in `wme_base`/`wme_ad` and no script access. |
 
 ## `wme_base/BPlugin.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBPlugin::CBPlugin` | unreviewed |  |
-| `CBPlugin::~CBPlugin` | unreviewed |  |
-| `CBPlugin::Create` | unreviewed |  |
-| `CBPlugin::HandleExternalCall` | unreviewed |  |
+| `CBPlugin::CBPlugin` | n/a | Holds the handle and path of a Windows DLL. |
+| `CBPlugin::~CBPlugin` | n/a | Frees the DLL. |
+| `CBPlugin::Create` | n/a | Reads a DLL's exports (`GetPluginInfo`, `GetSupportedClasses`), refuses plugins built for WME older than 1.5.2 and keeps the list of script class names the plugin provides. What Luma lacks is in `HandleExternalCall`. |
+| `CBPlugin::HandleExternalCall` | todo | A script calling `new <Class>(...)` with a class name a plugin declared gets a plugin object built by that plugin. Luma has no way for a module to add a script class to the adventure game: `World::call_function` (`crates/luma-adventure/src/world.rs`) only knows its built-in classes, so games written for a plugin (`wme_*.dll`: Steam, SQLite, snow, HTTP...) lose those classes. |
 
 ## `wme_base/BPluginMgr.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBPluginMgr::CBPluginMgr` | unreviewed |  |
-| `CBPluginMgr::~CBPluginMgr` | unreviewed |  |
-| `CBPluginMgr::RegisterPlugins` | unreviewed |  |
-| `CBPluginMgr::RegisterPlugins #2` | unreviewed |  |
-| `CBPluginMgr::RegisterPlugin` | unreviewed |  |
-| `CBPluginMgr::RegisterClasses` | unreviewed |  |
-| `CBPluginMgr::HandleExternalCall` | unreviewed |  |
-| `CBPluginMgr::GetDllHandle` | unreviewed |  |
-| `CBPluginMgr::AddObject` | unreviewed |  |
-| `CBPluginMgr::RemoveObject` | unreviewed |  |
-| `CBPluginMgr::SubscribeEvent` | unreviewed |  |
-| `CBPluginMgr::UnsubscribeEvent` | unreviewed |  |
-| `CBPluginMgr::ApplyEvent` | unreviewed |  |
-| `CBPluginMgr::ValidObject` | unreviewed |  |
+| `CBPluginMgr::CBPluginMgr` | n/a | List of loaded DLLs and of their live objects. |
+| `CBPluginMgr::~CBPluginMgr` | n/a | Deletes the plugin objects, then unloads the DLLs. |
+| `CBPluginMgr::RegisterPlugins` | n/a | Scans the executable's directory, then the current directory, for `wme_*.dll`. Windows DLLs cannot be loaded; the capability they add is in `HandleExternalCall` and `ApplyEvent`. |
+| `CBPluginMgr::RegisterPlugins #2` | n/a | `_findfirst` over `wme_*.dll` in one directory. |
+| `CBPluginMgr::RegisterPlugin` | n/a | `LoadLibrary` of one DLL (skipping `wme_report.dll` and `wme_console.dll`), kept only when it exports `GetPluginInfo`, `GetSupportedClasses` and `GetClassDefinition`. |
+| `CBPluginMgr::RegisterClasses` | done | Declares each plugin class name to the script compiler as an external function (`ExtDefineFunction`): `Natives::function` in `crates/luma-compiler/src/lib.rs` adds a name to the compiler's list the same way. Running such a class is the missing part, see `HandleExternalCall`. |
+| `CBPluginMgr::HandleExternalCall` | todo | Called by `CBGame::ExternalCall` for any name the engine does not know: each plugin is tried in turn. No equivalent hook in Luma: see `CBPlugin::HandleExternalCall`. |
+| `CBPluginMgr::GetDllHandle` | n/a | Finds the DLL of a class name, to rebuild plugin objects after a load. |
+| `CBPluginMgr::AddObject` | n/a | Bookkeeping of live plugin objects; Luma's object table would hold them once plugin classes exist. |
+| `CBPluginMgr::RemoveObject` | n/a | Bookkeeping of live plugin objects; Luma's object table would hold them once plugin classes exist. |
+| `CBPluginMgr::SubscribeEvent` | todo | `IWmeGame::SubscribeEvent`: a plugin object asks to receive one of seven engine events (see `ApplyEvent`). Luma has no event subscription for modules. |
+| `CBPluginMgr::UnsubscribeEvent` | todo | Counterpart of `SubscribeEvent`. |
+| `CBPluginMgr::ApplyEvent` | todo | Sends an engine event to every subscribed plugin object: `UPDATE` (each frame the game updates), `SCENE_DRAW_BEGIN` and `SCENE_DRAW_END` (around the scene's display, with the scene), `SCENE_INIT` and `SCENE_SHUTDOWN` (scene change), `GAME_BEFORE_SAVE` and `GAME_AFTER_LOAD`. Luma raises none of these to code outside `luma-adventure`: a module cannot run per frame, draw with the scene or react to a save. |
+| `CBPluginMgr::ValidObject` | todo | Lets `CBGame::ValidObject` accept plugin objects as script values. Nothing to accept in Luma until plugin classes exist. |
 
 ## `wme_base/BRegistry.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBRegistry::CBRegistry` | unreviewed |  |
-| `CBRegistry::~CBRegistry` | unreviewed |  |
-| `CBRegistry::SetBasePath` | unreviewed |  |
-| `CBRegistry::GetBasePath` | unreviewed |  |
-| `CBRegistry::ReadString` | unreviewed |  |
-| `CBRegistry::WriteString` | unreviewed |  |
-| `CBRegistry::ReadInt` | unreviewed |  |
-| `CBRegistry::WriteInt` | unreviewed |  |
-| `CBRegistry::ReadBool` | unreviewed |  |
-| `CBRegistry::WriteBool` | unreviewed |  |
-| `CBRegistry::SetIniName` | unreviewed |  |
-| `CBRegistry::GetIniName` | unreviewed |  |
+| `CBRegistry::CBRegistry` | replaced | `Ini` and `World::settings_ini_path` (`crates/luma-adventure/src/registry.rs`): one file, `settings.ini` in the save directory, instead of `.\wme.ini` next to the game plus a registry key. |
+| `CBRegistry::~CBRegistry` | replaced | Rust ownership. |
+| `CBRegistry::SetBasePath` | replaced | The registry key of the game (`REGISTRY_PATH` in `startup.settings`, else `Software\DEAD:CODE\Wintermute\Retail`): Luma separates games by their save directory, where `settings.ini` lives. |
+| `CBRegistry::GetBasePath` | n/a | Only the debugger asks for the registry path. |
+| `CBRegistry::ReadString` | partial | `World::read_setting` / `Ini::get` (`crates/luma-adventure/src/registry.rs`) for `PrivateSettings` (`Game.RegReadString`). Missing: (1) the original looks in the game's own `wme.ini` first, then the user's registry, then the machine's: a `wme.ini` shipped with a game (preset `PrivateSettings`, `Accessibility`, `Resource` paths...) is never read by Luma; (2) of the other values the engine reads, `Resource/CustomPaths` and `Resource/PackagePaths` are not read (see `files.md`, `CBFileManager::InitPaths`), `Video/DeviceGuid`, `Audio/DeviceGuid` and the debugger's `Debug/Breakpoint<n>` have no meaning. |
+| `CBRegistry::WriteString` | replaced | `World::write_setting` (`crates/luma-adventure/src/registry.rs`) rewrites `settings.ini` at once. The original always writes to the user's registry, never to `wme.ini`, so a value present in `wme.ini` kept shadowing later writes; Luma has one store and no such shadowing. |
+| `CBRegistry::ReadInt` | partial | `Game.RegReadNumber` through `World::read_setting` (`crates/luma-adventure/src/registry.rs`; leading integer, default when absent), `System/MostRecentSaveSlot` through a file of its own (`World::most_recent_save_slot`, `save.rs`), the seven `Accessibility` switches through `Accessibility::read_settings`. Engine values Luma does not keep: `Audio/MasterVolume`, `SFXVolume`, `SpeechVolume`, `MusicVolume` (the sound manager saves the four volumes on exit and restores them at the next launch: in Luma they start from their defaults at every launch), `Video/WindowPosX`, `WindowPosY` (window position), `Video/Windowed` and `Multisample` (see `CHWManager::LoadSettings`), `Debug/*` (see `CBPlatform::Initialize`). Same `wme.ini` remark as `ReadString`. |
+| `CBRegistry::WriteInt` | replaced | `World::write_setting` (`crates/luma-adventure/src/registry.rs`) for `Game.RegWriteNumber`; `MostRecentSaveSlot` in its own file. The values Luma never writes are listed in `ReadInt`. |
+| `CBRegistry::ReadBool` | done | `parse_bool` over an `Ini` value (`crates/luma-adventure/src/accessibility.rs`, `read_settings`): the current value is the default, as `ReadInt(..., Init) != 0`; Luma also accepts `true`/`yes`. |
+| `CBRegistry::WriteBool` | replaced | No engine code writes a boolean setting in Luma (the original's writers are the settings dialog and the `LastRun` crash flag). |
+| `CBRegistry::SetIniName` | replaced | The `-project <file>` option names the ini file; Luma's file name is fixed (`settings.ini`, `SETTINGS_INI`). |
+| `CBRegistry::GetIniName` | replaced | `World::settings_ini_path`. |
 
 ## `wme_base/BSocket.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSocket::CBSocket` | unreviewed |  |
-| `CBSocket::~CBSocket` | unreviewed |  |
-| `CBSocket::Close` | unreviewed |  |
-| `CBSocket::GoAsync` | unreviewed |  |
-| `CBSocket::Connect` | unreviewed |  |
-| `CBSocket::Send` | unreviewed |  |
-| `CBSocket::OnReadEvent` | unreviewed |  |
-| `CBSocket::ProcessPendingData` | unreviewed |  |
-| `CBSocket::OnAcceptEvent` | unreviewed |  |
-| `CBSocket::OnConnectEvent` | unreviewed |  |
-| `CBSocket::Bind` | unreviewed |  |
-| `CBSocket::Listen` | unreviewed |  |
+| `CBSocket::CBSocket` | n/a | Unfinished networking: nothing in `wme_base`/`wme_ad` and no script method ever creates a socket (the only calls to `Connect`/`CreateServer` are commented-out tests in `CBPlatform::Initialize`). |
+| `CBSocket::~CBSocket` | n/a | Unfinished networking: nothing in `wme_base`/`wme_ad` and no script method ever creates a socket (the only calls to `Connect`/`CreateServer` are commented-out tests in `CBPlatform::Initialize`). |
+| `CBSocket::Close` | n/a | WinSock socket of the unfinished network manager: never created by the engine or by a script, and received data is only buffered, never handed to anything. |
+| `CBSocket::GoAsync` | n/a | WinSock socket of the unfinished network manager: never created by the engine or by a script, and received data is only buffered, never handed to anything. |
+| `CBSocket::Connect` | n/a | WinSock socket of the unfinished network manager: never created by the engine or by a script, and received data is only buffered, never handed to anything. |
+| `CBSocket::Send` | n/a | WinSock socket of the unfinished network manager: never created by the engine or by a script, and received data is only buffered, never handed to anything. |
+| `CBSocket::OnReadEvent` | n/a | WinSock socket of the unfinished network manager: never created by the engine or by a script, and received data is only buffered, never handed to anything. |
+| `CBSocket::ProcessPendingData` | n/a | WinSock socket of the unfinished network manager: never created by the engine or by a script, and received data is only buffered, never handed to anything. |
+| `CBSocket::OnAcceptEvent` | n/a | WinSock socket of the unfinished network manager: never created by the engine or by a script, and received data is only buffered, never handed to anything. |
+| `CBSocket::OnConnectEvent` | n/a | WinSock socket of the unfinished network manager: never created by the engine or by a script, and received data is only buffered, never handed to anything. |
+| `CBSocket::Bind` | n/a | WinSock socket of the unfinished network manager: never created by the engine or by a script, and received data is only buffered, never handed to anything. |
+| `CBSocket::Listen` | n/a | WinSock socket of the unfinished network manager: never created by the engine or by a script, and received data is only buffered, never handed to anything. |
 
 ## `wme_base/DlgAdvanced.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CDlgAdvanced::CDlgAdvanced` | unreviewed |  |
-| `CDlgAdvanced::~CDlgAdvanced` | unreviewed |  |
-| `CDlgAdvanced::RegisterControls` | unreviewed |  |
-| `CDlgAdvanced::OnOK` | unreviewed |  |
-| `CDlgAdvanced::OnCancel` | unreviewed |  |
+| `CDlgAdvanced::CDlgAdvanced` | n/a | The 'advanced' sub-dialog (force 16-bit textures, force texture subdivision) can never open: its button is always hidden (`CDlgPageDisplay::UpdateDevices`) and `CHWManager::LoadSettings` forces both options off. |
+| `CDlgAdvanced::~CDlgAdvanced` | n/a | Unreachable 'advanced' sub-dialog (its button is always hidden); the two Direct3D texture options it holds are forced off. |
+| `CDlgAdvanced::RegisterControls` | n/a | Unreachable 'advanced' sub-dialog (its button is always hidden); the two Direct3D texture options it holds are forced off. |
+| `CDlgAdvanced::OnOK` | n/a | Unreachable 'advanced' sub-dialog (its button is always hidden); the two Direct3D texture options it holds are forced off. |
+| `CDlgAdvanced::OnCancel` | n/a | Unreachable 'advanced' sub-dialog (its button is always hidden); the two Direct3D texture options it holds are forced off. |
 
 ## `wme_base/DlgPage.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CDlgPage::CDlgPage` | unreviewed |  |
-| `CDlgPage::~CDlgPage` | unreviewed |  |
-| `CDlgPage::IsValid` | unreviewed |  |
-| `CDlgPage::OnConfirm` | unreviewed |  |
-| `CDlgPage::DlgMsgHandler` | unreviewed |  |
-| `CDlgPage::OnInitDialog` | unreviewed |  |
+| `CDlgPage::CDlgPage` | n/a | Base class of a tab page of the Win32 settings dialog shown before the game window opens. |
+| `CDlgPage::~CDlgPage` | n/a | Win32 dialog page. |
+| `CDlgPage::IsValid` | n/a | Lets a page grey out the OK button; dialog plumbing. |
+| `CDlgPage::OnConfirm` | n/a | Hook called on OK; the pages that store a choice are reviewed in their own rows. |
+| `CDlgPage::DlgMsgHandler` | n/a | Win32 dialog message handler (themed background code commented out). |
+| `CDlgPage::OnInitDialog` | n/a | Windows XP theme texture for a tab page. |
 
 ## `wme_base/DlgPageAbout.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CDlgPageAbout::CDlgPageAbout` | unreviewed |  |
-| `CDlgPageAbout::~CDlgPageAbout` | unreviewed |  |
-| `CDlgPageAbout::GetTabName` | unreviewed |  |
-| `CDlgPageAbout::RegisterControls` | unreviewed |  |
-| `CDlgPageAbout::CursorAtLink` | unreviewed |  |
-| `CDlgPageAbout::DlgMsgHandler` | unreviewed |  |
+| `CDlgPageAbout::CDlgPageAbout` | n/a | The 'About' tab (shown when `ALLOW_ABOUT_TAB`): a logo and a link to wintermute-engine.org, no setting. |
+| `CDlgPageAbout::~CDlgPageAbout` | n/a | The 'About' tab of the settings dialog: a logo and a link to wintermute-engine.org; it holds no setting the engine reads. |
+| `CDlgPageAbout::GetTabName` | n/a | The 'About' tab of the settings dialog: a logo and a link to wintermute-engine.org; it holds no setting the engine reads. |
+| `CDlgPageAbout::RegisterControls` | n/a | The 'About' tab of the settings dialog: a logo and a link to wintermute-engine.org; it holds no setting the engine reads. |
+| `CDlgPageAbout::CursorAtLink` | n/a | The 'About' tab of the settings dialog: a logo and a link to wintermute-engine.org; it holds no setting the engine reads. |
+| `CDlgPageAbout::DlgMsgHandler` | n/a | The 'About' tab of the settings dialog: a logo and a link to wintermute-engine.org; it holds no setting the engine reads. |
 
 ## `wme_base/DlgPageAccess.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CDlgPageAccess::CDlgPageAccess` | unreviewed |  |
-| `CDlgPageAccess::~CDlgPageAccess` | unreviewed |  |
-| `CDlgPageAccess::GetTabName` | unreviewed |  |
-| `CDlgPageAccess::RegisterControls` | unreviewed |  |
-| `CDlgPageAccess::SetState` | unreviewed |  |
-| `CDlgPageAccess::OnConfirm` | unreviewed |  |
+| `CDlgPageAccess::CDlgPageAccess` | n/a | Win32 controls of the 'Accessibility' tab; what the tab stores is in `OnConfirm`. |
+| `CDlgPageAccess::~CDlgPageAccess` | n/a | Win32 dialog page. |
+| `CDlgPageAccess::GetTabName` | n/a | Tab title (`/SYSENG0030/Accessibility`). |
+| `CDlgPageAccess::RegisterControls` | n/a | Fills the seven check boxes from the game's current switches. |
+| `CDlgPageAccess::SetState` | n/a | Greys the three text-to-speech kinds unless speech is on, and 'cursor skip' unless keyboard play is on; the engine applies the same dependency at run time. |
+| `CDlgPageAccess::OnConfirm` | partial | Stores the player's seven accessibility choices (speech on, speech of sentences, of captions, of typed keys, keyboard play, cursor skip, Ctrl+Space pause), which `CHWManager::SaveSettings` writes to the `Accessibility` section. Luma reads the same keys from `[Accessibility]` of `settings.ini` (`Accessibility::read_settings`, `crates/luma-adventure/src/accessibility.rs`), but gives the player no way to set them: the file must be written by hand. |
 
 ## `wme_base/DlgPageDisplay.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CDlgPageDisplay::CDlgPageDisplay` | unreviewed |  |
-| `CDlgPageDisplay::~CDlgPageDisplay` | unreviewed |  |
-| `CDlgPageDisplay::GetTabName` | unreviewed |  |
-| `CDlgPageDisplay::RegisterControls` | unreviewed |  |
-| `CDlgPageDisplay::IsValid` | unreviewed |  |
-| `CDlgPageDisplay::UpdateDevices` | unreviewed |  |
-| `CDlgPageDisplay::UpdateSettings` | unreviewed |  |
-| `CDlgPageDisplay::UpdateState` | unreviewed |  |
-| `CDlgPageDisplay::UpdateMultisample` | unreviewed |  |
-| `CDlgPageDisplay::OnDeviceSelected` | unreviewed |  |
-| `CDlgPageDisplay::OnColorsSelected` | unreviewed |  |
-| `CDlgPageDisplay::OnFSAASelected` | unreviewed |  |
-| `CDlgPageDisplay::OnAccelerated` | unreviewed |  |
-| `CDlgPageDisplay::OnWindowed` | unreviewed |  |
-| `CDlgPageDisplay::OnTL` | unreviewed |  |
-| `CDlgPageDisplay::OnAspect` | unreviewed |  |
-| `CDlgPageDisplay::OnDesktop` | unreviewed |  |
-| `CDlgPageDisplay::OnMore` | unreviewed |  |
+| `CDlgPageDisplay::CDlgPageDisplay` | n/a | Win32 controls of the 'Display' tab; each choice is reviewed in the row of its handler. |
+| `CDlgPageDisplay::~CDlgPageDisplay` | n/a | Win32 dialog page. |
+| `CDlgPageDisplay::GetTabName` | n/a | Tab title (`/SYSENG0002/Display`). |
+| `CDlgPageDisplay::RegisterControls` | n/a | Sets up the tab: 'accelerated' box (hidden when the game requires 3D), 'windowed' box forced and hidden when `ALLOW_WINDOWED_MODE` is false, a warning text when no 3D device exists. The choices are in the `On...` rows. |
+| `CDlgPageDisplay::IsValid` | n/a | OK is greyed while no video device is selected; Luma fails with an error when wgpu finds no adapter. |
+| `CDlgPageDisplay::UpdateDevices` | n/a | Fills the Direct3D/DirectDraw device list. |
+| `CDlgPageDisplay::UpdateSettings` | n/a | Refreshes the colour depth, windowed and hardware T&L controls for the selected Direct3D device. |
+| `CDlgPageDisplay::UpdateState` | n/a | Shows or hides controls: anti-aliasing and T&L only for an accelerated device when `ALLOW_ADVANCED`, 'maintain aspect' only when a full-screen mode with the monitor's aspect exists, 'desktop resolution' only when `ALLOW_DESKTOP_RES`. |
+| `CDlgPageDisplay::UpdateMultisample` | n/a | Fills the anti-aliasing list from the Direct3D modes; the choice itself is in `OnFSAASelected`. |
+| `CDlgPageDisplay::OnDeviceSelected` | replaced | Choice of the video adapter: `Gpu::with_surface` (`luma-render`) takes the adapter wgpu proposes for the window; the player cannot pick another. |
+| `CDlgPageDisplay::OnColorsSelected` | n/a | 16 or 32 bit full-screen colour depth of a Direct3D mode; Luma always renders in 32 bits. |
+| `CDlgPageDisplay::OnFSAASelected` | todo | Anti-aliasing level (none, 2x to 16x) the player picks when the game allows advanced settings; `CBRenderD3D` creates its device with it, which smooths the edges of 3D characters. `luma-render` always renders with one sample (`sample_count: 1`) and has no setting for it. |
+| `CDlgPageDisplay::OnAccelerated` | n/a | Switch between Direct3D and the DirectDraw software renderer. |
+| `CDlgPageDisplay::OnWindowed` | todo | The player's choice between full screen (the default: `Video/Windowed` is false until chosen) and a window. Luma always opens a window (`luma-player` `play`, `set_windowed(true)`): there is no full-screen mode, `Game.WindowedMode` is always true, and `ALLOW_WINDOWED_MODE = FALSE` (full screen only) is not honoured. |
+| `CDlgPageDisplay::OnTL` | n/a | Direct3D hardware transform and lighting. |
+| `CDlgPageDisplay::OnAspect` | replaced | 'Maintain aspect ratio' picks a full-screen mode with the monitor's aspect and letterboxes the game in it. Luma always letterboxes the game's resolution into the window (`letterbox`, `luma-render`), whatever its size; there is no stretched display. |
+| `CDlgPageDisplay::OnDesktop` | replaced | 'Use desktop resolution' renders full screen at the desktop's size; Luma scales the frame to the window, which gives the same picture once a full-screen mode exists (see `OnWindowed`). |
+| `CDlgPageDisplay::OnMore` | n/a | Opens the 'advanced' sub-dialog; its button is always hidden. |
 
 ## `wme_base/DlgPageSound.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CDlgPageSound::CDlgPageSound` | unreviewed |  |
-| `CDlgPageSound::~CDlgPageSound` | unreviewed |  |
-| `CDlgPageSound::GetTabName` | unreviewed |  |
-| `CDlgPageSound::RegisterControls` | unreviewed |  |
-| `CDlgPageSound::IsValid` | unreviewed |  |
-| `CDlgPageSound::UpdateDevices` | unreviewed |  |
-| `CDlgPageSound::OnDeviceSelected` | unreviewed |  |
+| `CDlgPageSound::CDlgPageSound` | n/a | Win32 controls of the 'Sound' tab; the choice is in `OnDeviceSelected`. |
+| `CDlgPageSound::~CDlgPageSound` | n/a | Win32 dialog page. |
+| `CDlgPageSound::GetTabName` | n/a | Tab title (`/SYSENG0003/Sound`). |
+| `CDlgPageSound::RegisterControls` | n/a | Fills the device list and shows a warning when `REQUIRE_SOUND` is set and no sound card exists. |
+| `CDlgPageSound::IsValid` | n/a | OK is greyed while no audio device is selected (only possible when the game requires sound and there is none). |
+| `CDlgPageSound::UpdateDevices` | n/a | Fills the DirectSound device list. |
+| `CDlgPageSound::OnDeviceSelected` | todo | The player picks the output device, or `[no sound]` (offered unless the game sets `REQUIRE_SOUND`), kept in `Audio/DeviceGuid` and `Audio/NoSound` for the next launches. Luma plays on the system's default device; silence is only the `--mute` option of `luma-player`, given at each launch, and `REQUIRE_SOUND` is not read. |
 
 ## `wme_base/DlgSettings.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CDlgSettings::CDlgSettings` | unreviewed |  |
-| `CDlgSettings::~CDlgSettings` | unreviewed |  |
-| `CDlgSettings::RegisterControls` | unreviewed |  |
-| `CDlgSettings::AddPage` | unreviewed |  |
-| `CDlgSettings::OnOK` | unreviewed |  |
-| `CDlgSettings::OnCancel` | unreviewed |  |
-| `CDlgSettings::OnTabChanged` | unreviewed |  |
-| `CDlgSettings::SelNextPage` | unreviewed |  |
-| `CDlgSettings::SelPrevPage` | unreviewed |  |
-| `CDlgSettings::OnKeyDown` | unreviewed |  |
-| `CDlgSettings::OnEnterIdle` | unreviewed |  |
-| `CDlgSettings::CheckValidity` | unreviewed |  |
-| `CDlgSettings::OnDontShow` | unreviewed |  |
+| `CDlgSettings::CDlgSettings` | n/a | Win32 settings dialog shown before the game window opens; Luma has no settings dialog. What each tab lets the player choose is reviewed in `CDlgPageDisplay::OnWindowed`, `OnFSAASelected`, `CDlgPageSound::OnDeviceSelected` and `CDlgPageAccess::OnConfirm`. |
+| `CDlgSettings::~CDlgSettings` | n/a | Win32 dialog. |
+| `CDlgSettings::RegisterControls` | n/a | Builds the tabs: Display, Sound, Accessibility when `ALLOW_ACCESSIBILITY_TAB`, About when `ALLOW_ABOUT_TAB`; shows the engine version in debug mode. |
+| `CDlgSettings::AddPage` | n/a | Win32 tab control layout. |
+| `CDlgSettings::OnOK` | n/a | Confirms every page and closes the dialog. |
+| `CDlgSettings::OnCancel` | n/a | Closes the dialog; the game then does not start (`QueryDevices` fails). |
+| `CDlgSettings::OnTabChanged` | n/a | Tab switching in the settings dialog (mouse, Ctrl+Tab, Ctrl+PageUp/PageDown). |
+| `CDlgSettings::SelNextPage` | n/a | Tab switching in the settings dialog (mouse, Ctrl+Tab, Ctrl+PageUp/PageDown). |
+| `CDlgSettings::SelPrevPage` | n/a | Tab switching in the settings dialog (mouse, Ctrl+Tab, Ctrl+PageUp/PageDown). |
+| `CDlgSettings::OnKeyDown` | n/a | Tab switching in the settings dialog (mouse, Ctrl+Tab, Ctrl+PageUp/PageDown). |
+| `CDlgSettings::OnEnterIdle` | n/a | Greys the OK button while a page is not valid. |
+| `CDlgSettings::CheckValidity` | n/a | Greys the OK button while a page is not valid. |
+| `CDlgSettings::OnDontShow` | n/a | 'Do not show this dialog again' (`System/ShowSettings`); there is no dialog to hide. |
 
 ## `wme_base/HWDevice.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CHWDevice::CHWDevice` | unreviewed |  |
-| `CHWDevice::~CHWDevice` | unreviewed |  |
-| `CHWDevice::SetDescript` | unreviewed |  |
-| `CHWDevice::SetDriver` | unreviewed |  |
+| `CHWDevice::CHWDevice` | n/a | Description of a DirectDraw, Direct3D or DirectSound device for the settings dialog. |
+| `CHWDevice::~CHWDevice` | n/a | Device description. |
+| `CHWDevice::SetDescript` | n/a | Device name shown in the dialog and the log. |
+| `CHWDevice::SetDriver` | n/a | Driver name and version for the log. |
 
 ## `wme_base/HWDeviceAudio.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CHWDeviceAudio::CHWDeviceAudio` | unreviewed |  |
-| `CHWDeviceAudio::~CHWDeviceAudio` | unreviewed |  |
+| `CHWDeviceAudio::CHWDeviceAudio` | n/a | DirectSound device entry (`m_NoSound` marks the `[no sound]` choice, see `CDlgPageSound::OnDeviceSelected`). |
+| `CHWDeviceAudio::~CHWDeviceAudio` | n/a | Device description. |
 
 ## `wme_base/HWDeviceVideo.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CHWDeviceVideo::CHWDeviceVideo` | unreviewed |  |
-| `CHWDeviceVideo::~CHWDeviceVideo` | unreviewed |  |
+| `CHWDeviceVideo::CHWDeviceVideo` | n/a | Direct3D/DirectDraw adapter entry with its full-screen modes. |
+| `CHWDeviceVideo::~CHWDeviceVideo` | n/a | Device description. |
 
 ## `wme_base/HWManager.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CHWManager::CHWManager` | unreviewed |  |
-| `CHWManager::~CHWManager` | unreviewed |  |
-| `CHWManager::ClearDevices` | unreviewed |  |
-| `CHWManager::EnumAllDevices` | unreviewed |  |
-| `CHWManager::IsOptimalAspect` | unreviewed |  |
-| `CHWManager::IsSameAspect` | unreviewed |  |
-| `CHWManager::IsRes16to9` | unreviewed |  |
-| `CHWManager::IsRes4to3` | unreviewed |  |
-| `CHWManager::EnumDDDevices` | unreviewed |  |
-| `CHWManager::EnumD3DDevices` | unreviewed |  |
-| `CHWManager::FindStencilFormatsForDevice` | unreviewed |  |
-| `CHWManager::FindDepthStencilFormat` | unreviewed |  |
-| `CHWManager::EnumDSDevices` | unreviewed |  |
-| `CHWManager::DDEnumCallbackEx` | unreviewed |  |
-| `CHWManager::EnumModesCallback2` | unreviewed |  |
-| `CHWManager::DSEnumCallback` | unreviewed |  |
-| `CHWManager::ShowDialog` | unreviewed |  |
-| `CHWManager::SaveSettings` | unreviewed |  |
-| `CHWManager::LoadSettings` | unreviewed |  |
-| `CHWManager::QueryDevices` | unreviewed |  |
-| `CHWManager::ReportSelectedDevices` | unreviewed |  |
-| `CHWManager::AutoselectWindowedDevice` | unreviewed |  |
-| `CHWManager::EnumMonitors` | unreviewed |  |
-| `CHWManager::MonitorEnumProc` | unreviewed |  |
-| `CHWManager::GetResolution` | unreviewed |  |
+| `CHWManager::CHWManager` | n/a | State of the device selection (requested size, DirectX device, depth and stencil bits for stencil shadows); `luma-render` chooses its surface and depth formats itself. |
+| `CHWManager::~CHWManager` | n/a | Device lists. |
+| `CHWManager::ClearDevices` | n/a | Device lists. |
+| `CHWManager::EnumAllDevices` | replaced | Lists monitors and DirectX devices, then for each adapter finds the full-screen mode to use when the game's aspect differs from the monitor's ('optimal' resolution) or when the game's resolution is not offered ('backup' resolution). Luma renders the game's resolution into a window of any size through `letterbox` (`luma-render`), so no display mode is searched. |
+| `CHWManager::IsOptimalAspect` | replaced | Aspect-ratio tests used to pick a full-screen display mode; Luma never changes the display mode and letterboxes instead (`letterbox`, `luma-render`). |
+| `CHWManager::IsSameAspect` | replaced | Aspect-ratio tests used to pick a full-screen display mode; Luma never changes the display mode and letterboxes instead (`letterbox`, `luma-render`). |
+| `CHWManager::IsRes16to9` | replaced | Aspect-ratio tests used to pick a full-screen display mode; Luma never changes the display mode and letterboxes instead (`letterbox`, `luma-render`). |
+| `CHWManager::IsRes4to3` | replaced | Aspect-ratio tests used to pick a full-screen display mode; Luma never changes the display mode and letterboxes instead (`letterbox`, `luma-render`). |
+| `CHWManager::EnumDDDevices` | n/a | DirectDraw/Direct3D device, display mode and depth-stencil format enumeration; wgpu selects the adapter and formats (`Gpu::with_surface`). |
+| `CHWManager::EnumD3DDevices` | n/a | DirectDraw/Direct3D device, display mode and depth-stencil format enumeration; wgpu selects the adapter and formats (`Gpu::with_surface`). |
+| `CHWManager::FindStencilFormatsForDevice` | n/a | DirectDraw/Direct3D device, display mode and depth-stencil format enumeration; wgpu selects the adapter and formats (`Gpu::with_surface`). |
+| `CHWManager::FindDepthStencilFormat` | n/a | DirectDraw/Direct3D device, display mode and depth-stencil format enumeration; wgpu selects the adapter and formats (`Gpu::with_surface`). |
+| `CHWManager::EnumDSDevices` | n/a | DirectSound device enumeration, plus a `[no sound]` entry unless the game requires sound; the missing choice is in `CDlgPageSound::OnDeviceSelected`. |
+| `CHWManager::DDEnumCallbackEx` | n/a | DirectDraw/Direct3D device, display mode and depth-stencil format enumeration; wgpu selects the adapter and formats (`Gpu::with_surface`). |
+| `CHWManager::EnumModesCallback2` | n/a | DirectDraw/Direct3D device, display mode and depth-stencil format enumeration; wgpu selects the adapter and formats (`Gpu::with_surface`). |
+| `CHWManager::DSEnumCallback` | n/a | DirectSound enumeration callback. |
+| `CHWManager::ShowDialog` | n/a | Opens the Win32 settings dialog; the choices it carries are reviewed in the `CDlgPage...` rows. |
+| `CHWManager::SaveSettings` | partial | Writes the player's choices: `Video` (device, `16bit`, `Windowed`, `Accelerated`, `HardwareT&L`, `Multisample`, `MaintainAspect`, `DesktopRes`), `Audio` (device, `NoSound`), `System/ShowSettings` and the seven `Accessibility` switches. Luma writes none of them; only the `Accessibility` section has a reader (`Accessibility::read_settings`), fed by hand. |
+| `CHWManager::LoadSettings` | partial | Reads back the choices of `SaveSettings`. Luma reads the `Accessibility` section (`World::init_accessibility`, `crates/luma-adventure/src/accessibility.rs`, same keys and defaults). Not read: `Video/Windowed` (full screen or window, see `CDlgPageDisplay::OnWindowed`), `Video/Multisample` (forced to 0 unless `ALLOW_ADVANCED`, see `OnFSAASelected`), `Audio/NoSound` and the audio device (see `CDlgPageSound::OnDeviceSelected`). The Direct3D-only values (`16bit`, `Accelerated`, `HardwareT&L`, device ids) have no meaning. |
+| `CHWManager::QueryDevices` | partial | Start-up decision: the settings dialog is shown on the first run, after a crash (`System/LastRun` false), with `-detect`, when a saved device is gone or while `System/ShowSettings` is on; cancelling it quits. Then the full-screen resolution is chosen. Luma starts the game at once in a window, on the default devices (`luma-player` `play`). Missing for the player: every choice of the dialog (see the `CDlgPage...` rows). Different: with `ALLOW_ACCESSIBILITY_TAB` false the original turns speech, keyboard play and the pause off only when the dialog was shown; `Accessibility::read_settings` always does. |
+| `CHWManager::ReportSelectedDevices` | replaced | Log lines naming the devices used; `luma-player` prints `adapter: ...` and `game ...: audio ...` on stderr. |
+| `CHWManager::AutoselectWindowedDevice` | n/a | No caller in `wme_base`/`wme_ad`: used by the editors, which embed the engine in their own window. |
+| `CHWManager::EnumMonitors` | n/a | Win32 monitor enumeration, used to place the window on the selected adapter's monitor. |
+| `CHWManager::MonitorEnumProc` | n/a | Win32 monitor enumeration, used to place the window on the selected adapter's monitor. |
+| `CHWManager::GetResolution` | replaced | Logical (game) and real (display mode) sizes for the Direct3D renderer: `GameSettings::width`/`height` and the window's size, mapped by `letterbox` (`luma-render`) and `GamePlayer::to_game` (`luma-player`). |
 
 ## `wme_base/HWVideoMode.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CHWVideoMode::CHWVideoMode` | unreviewed |  |
-| `CHWVideoMode::~CHWVideoMode` | unreviewed |  |
+| `CHWVideoMode::CHWVideoMode` | n/a | One Direct3D/DirectDraw display mode (size, bits, multisample levels, depth format). |
+| `CHWVideoMode::~CHWVideoMode` | n/a | Display mode entry. |
 
 ## `wme_base/PlatformWin.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBPlatform::WindowProc` | unreviewed |  |
-| `CBPlatform::Initialize` | unreviewed |  |
-| `CBPlatform::MessageLoop` | unreviewed |  |
-| `CBPlatform::GetPrivateSaveDirectory` | unreviewed |  |
-| `CBPlatform::GetSafeLogFilename` | unreviewed |  |
-| `CBPlatform::HandleCrashReport` | unreviewed |  |
-| `CBPlatform::ShellExecute` | unreviewed |  |
-| `CBPlatform::CoInitialize` | unreviewed |  |
-| `CBPlatform::CoUninitialize` | unreviewed |  |
-| `CBPlatform::OutputDebugString` | unreviewed |  |
-| `CBPlatform::GetLocalTime` | unreviewed |  |
-| `CBPlatform::timeGetTime` | unreviewed |  |
-| `CBPlatform::GetCursorPos` | unreviewed |  |
-| `CBPlatform::SetCursorPos` | unreviewed |  |
-| `CBPlatform::ScreenToClient` | unreviewed |  |
-| `CBPlatform::ClientToScreen` | unreviewed |  |
-| `CBPlatform::ShowWindow` | unreviewed |  |
-| `CBPlatform::DeleteFile` | unreviewed |  |
-| `CBPlatform::GetModuleFileName` | unreviewed |  |
-| `CBPlatform::LoadLibrary` | unreviewed |  |
-| `CBPlatform::FreeLibrary` | unreviewed |  |
-| `CBPlatform::GetProcAddress` | unreviewed |  |
-| `CBPlatform::SetCapture` | unreviewed |  |
-| `CBPlatform::ReleaseCapture` | unreviewed |  |
-| `CBPlatform::SetRectEmpty` | unreviewed |  |
-| `CBPlatform::IsRectEmpty` | unreviewed |  |
-| `CBPlatform::PtInRect` | unreviewed |  |
-| `CBPlatform::SetRect` | unreviewed |  |
-| `CBPlatform::IntersectRect` | unreviewed |  |
-| `CBPlatform::SetForegroundWindow` | unreviewed |  |
-| `CBPlatform::IsWindowsVistaOrHigher` | unreviewed |  |
-| `CBPlatform::IsWindowsXPOrHigher` | unreviewed |  |
-| `CBPlatform::AddFontResource` | unreviewed |  |
-| `CBPlatform::RemoveFontResource` | unreviewed |  |
+| `CBPlatform::WindowProc` | partial | `GamePlayer::event` and `close_requested` (`crates/luma-player/src/main.rs`) over winit (`crates/luma-render/src/window.rs`). Agree: mouse buttons (left, right, middle), wheel, close asking `QuitGame` (`Runtime::window_close`), system cursor hidden over the game, double clicks (found by `Runtime::note_click`: 400 ms and 4 game pixels, where Windows uses the user's double-click settings, 500 ms by default). Missing or different: (1) `WM_ACTIVATE`, `WM_SIZE` (minimise) and the menu loop call `Game->OnActivate`, which pauses every sound and stops the frame loop until the window is active again; Luma handles no focus event: the game keeps running and sounding in the background, and when the window is hidden the frames stop but the sounds go on; (2) key translation: `key_code` gives a character key its ASCII code, so `.` arrives as 46 (`VK_DELETE`), `'` as 39 (`VK_RIGHT`), `(` as 40 (`VK_DOWN`), `%` and `&` as 37 and 38, `#` and `$` as 35 and 36 (`VK_END`, `VK_HOME`), `!` and `"` as 33 and 34 (page up and down): `World::edit_key` tests the code before the character, so typing `.` in an editor deletes a character instead of writing a dot; Windows sends `WM_KEYDOWN` with the key's own code (190 for `.`) and the character apart in `WM_CHAR`; (3) a key whose character is not ASCII (accented letters, any other alphabet) is dropped whole (`key_code` returns `None`): it cannot be typed in an editor, where `WM_CHAR` delivers it; (4) key repeat: Windows repeats `WM_KEYDOWN` and `WM_CHAR` while a key is held, Luma ignores repeats (`!repeat`), so a held Backspace or arrow acts once and `Keypress` is not repeated; (5) `key_code` knows no numeric keypad codes (`VK_NUMPAD0` to `VK_DIVIDE`, 96 to 111): a keypad key arrives with its character's code (49 for keypad 1) or as the arrow it stands for; F13 and above, Print Screen, Num Lock, Scroll Lock and the menu key have no code and are dropped; (6) with Alt held the original passes only F10 to the game (other `WM_SYSKEYDOWN` go to Windows), Luma passes every key; (7) `WM_SYSCOMMAND` blocks the screen saver and the monitor's power saving while the game runs; nothing does in Luma, so the screen may sleep during a long video; (8) to verify on the original: by message order the `WM_CHAR` of a printable key is read before the `Keypress` script runs, so a script would see `Keyboard.KeyCode` as the character's code (97 for `a`) where Luma gives the key's code (65); (9) the window keeps a fixed size (`WM_GETMINMAXINFO`), Luma's is resizable and letterboxed; `QueryCancelAutoPlay` (CD autorun) and `WM_WINSOCK` have no meaning. |
+| `CBPlatform::Initialize` | partial | `main`, `open` and `play` (`crates/luma-player/src/main.rs`) with `Runtime::with_audio`: read `startup.settings`, open the window, start sound (its failure is not fatal in either), load the game file named there. Missing: (1) `-savegame <file>` loads a saved game right after start-up (how a double click on a saved game opens it); `luma-player --load <slot>` only works with `--headless`, the windowed `play` ignores it; (2) the device and settings step (`CHWManager::QueryDevices`): no full screen, no settings dialog (`-detect`, `-settingsonly` have nothing to show); (3) the `Debug` settings: `DebugMode` (opens the log file `wme.log`, makes `Game.DebugMode` true; Luma's is always false and the log goes to stderr only), `ShowFPS`, `DisableSmartCache`, `DebugConsole`, `ScriptProfiling` are not read; (4) the window's last position (`Video/WindowPosX`, `WindowPosY`) is not restored; (5) the text `/SYSENG0027/Loading...` drawn in the window while the game file loads (Luma's window opens after the load); (6) a missing or broken `startup.settings` stops the original with a message box in the user's language; `GameSettings::load` falls back to `default.game` at 800x600 when the file is absent. Replaced: `-project <ini>` (game directory given as argument), the window title (`<caption> - Wintermute Engine`; Luma shows the caption or the name). No meaning: `-gameexplorer` (Windows Game Explorer), the DirectX check, FPU control word, `AllowDirectDraw`. |
+| `CBPlatform::MessageLoop` | partial | `Runner` in `crates/luma-render/src/window.rs` and `GamePlayer::draw` (`crates/luma-player/src/main.rs`): one game frame per redraw, no present while `Game.SuspendedRendering` (`Flow::Skip`), exit on `Game.QuitGame`, the load scheduled by `Game.LoadGame` done between frames (`World::scheduled_load`). Missing: (1) while the window is not active the original sleeps in `WaitMessage`: no frame, game time stopped (and sounds paused by `OnActivate`); Luma keeps ticking, see `WindowProc`; (2) `DisplayDebugInfo` (the frame rate shown when `Debug/ShowFPS` is set) is not drawn; (3) the window position is not saved on exit (`Video/WindowPosX`, `WindowPosY`). The structured-exception crash report (`wme_report.dll`) has no meaning. |
+| `CBPlatform::GetPrivateSaveDirectory` | replaced | `World::private_save_dir` and `data_dir` (`crates/luma-adventure/src/save.rs`): the platform's application data directory, then `Luma Engine/<game>`, instead of Windows' Saved Games folder (My Documents before Vista). |
+| `CBPlatform::GetSafeLogFilename` | n/a | Fallback path of the debug log file under `%APPDATA%\Wintermute Engine\Logs`; Luma writes no log file (see `Initialize`, `Debug/DebugMode`). |
+| `CBPlatform::HandleCrashReport` | n/a | Hands a Windows structured exception to `wme_report.dll` to build a crash report. |
+| `CBPlatform::ShellExecute` | replaced | `World::open_document` (`crates/luma-adventure/src/world.rs`) for `Game.OpenDocument`: the system's `open` command instead of `ShellExecute`. The other callers are the dialog's web links. |
+| `CBPlatform::CoInitialize` | n/a | COM initialisation for DirectX and the speech API. |
+| `CBPlatform::CoUninitialize` | n/a | COM initialisation for DirectX and the speech API. |
+| `CBPlatform::OutputDebugString` | n/a | Writes to the Windows debugger output. |
+| `CBPlatform::GetLocalTime` | n/a | Its two callers only date the debug log (the opening banner and the time in front of each `CBGame::LOG` line); Luma writes no log file. The script `Date` object reads the clock by itself (see `script.md`). |
+| `CBPlatform::timeGetTime` | replaced | `std::time::Instant` in `crates/luma-render/src/window.rs` (`Frame::dt`), summed by `Runtime::tick`. |
+| `CBPlatform::GetCursorPos` | replaced | The mouse position comes from winit's `CursorMoved` events, mapped to game pixels by `GamePlayer::to_game` (`crates/luma-player/src/main.rs`) and kept by `World::set_mouse`. |
+| `CBPlatform::SetCursorPos` | partial | The original moves the real cursor: `Game.SetMousePos`, the mouse lock rectangle (`Game.LockMouseRect`, when the cursor leaves it) and the accessibility 'cursor skip'. Luma only changes the game's own mouse point (`World::set_mouse`, `crates/luma-adventure/src/input.rs`); the system cursor is not moved (`luma-render` exposes no way to), so at the next mouse movement the game's cursor jumps back to where the real one is. |
+| `CBPlatform::ScreenToClient` | replaced | `GamePlayer::to_game` (`crates/luma-player/src/main.rs`): window position to game pixels through the letterbox. |
+| `CBPlatform::ClientToScreen` | replaced | `GamePlayer::to_game` (`crates/luma-player/src/main.rs`): window position to game pixels through the letterbox. |
+| `CBPlatform::ShowWindow` | n/a | Only used to minimise the full-screen window before `Game.OpenDocument` opens another program; Luma has no full-screen mode. |
+| `CBPlatform::DeleteFile` | replaced | `std::fs::remove_file` (for example the save directory's write test in `World::checked_save_directory`, `crates/luma-adventure/src/save.rs`). |
+| `CBPlatform::GetModuleFileName` | n/a | Path of the executable, used for the bound package (see `files.md`, `CBFileManager::RegisterPackages`), plugins and the log name. |
+| `CBPlatform::LoadLibrary` | n/a | Windows DLL loading (plugins, debugger console, external script functions). |
+| `CBPlatform::FreeLibrary` | n/a | Windows DLL loading (plugins, debugger console, external script functions). |
+| `CBPlatform::GetProcAddress` | n/a | Windows DLL loading (plugins, debugger console, external script functions). |
+| `CBPlatform::SetCapture` | replaced | Keeps mouse messages coming while a button is held outside the window; winit keeps delivering the release of a button pressed inside the window. |
+| `CBPlatform::ReleaseCapture` | replaced | Keeps mouse messages coming while a button is held outside the window; winit keeps delivering the release of a button pressed inside the window. |
+| `CBPlatform::SetRectEmpty` | replaced | Win32 rectangle helpers; Luma's rectangle types carry them (for example `Border::is_empty` and `Border::contains` in `crates/luma-adventure/src/particles.rs`, right and bottom edges excluded as `PtInRect`). |
+| `CBPlatform::IsRectEmpty` | replaced | Win32 rectangle helpers; Luma's rectangle types carry them (for example `Border::is_empty` and `Border::contains` in `crates/luma-adventure/src/particles.rs`, right and bottom edges excluded as `PtInRect`). |
+| `CBPlatform::PtInRect` | replaced | Win32 rectangle helpers; Luma's rectangle types carry them (for example `Border::is_empty` and `Border::contains` in `crates/luma-adventure/src/particles.rs`, right and bottom edges excluded as `PtInRect`). |
+| `CBPlatform::SetRect` | replaced | Win32 rectangle helpers; Luma's rectangle types carry them (for example `Border::is_empty` and `Border::contains` in `crates/luma-adventure/src/particles.rs`, right and bottom edges excluded as `PtInRect`). |
+| `CBPlatform::IntersectRect` | replaced | Win32 rectangle helpers; Luma's rectangle types carry them (for example `Border::is_empty` and `Border::contains` in `crates/luma-adventure/src/particles.rs`, right and bottom edges excluded as `PtInRect`). |
+| `CBPlatform::SetForegroundWindow` | n/a | Only the debugger calls it (`ContinueExecution`). |
+| `CBPlatform::IsWindowsVistaOrHigher` | n/a | Windows version tests (Saved Games folder, Game Explorer). |
+| `CBPlatform::IsWindowsXPOrHigher` | n/a | Windows version tests (Saved Games folder, Game Explorer). |
+| `CBPlatform::AddFontResource` | replaced | Registers a TrueType file with GDI so that `CBFontTT` can name its face; Luma loads the font file's bytes into its own font database (`crates/luma-adventure/src/font_face.rs`). |
+| `CBPlatform::RemoveFontResource` | replaced | Counterpart of `AddFontResource`; Rust ownership drops the loaded faces. |
 
 ## `wme_base/SXPluginObject.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXPluginObject::CSXPluginObject` | unreviewed |  |
-| `CSXPluginObject::~CSXPluginObject` | unreviewed |  |
-| `CSXPluginObject::Initialize` | unreviewed |  |
-| `CSXPluginObject::Construct` | unreviewed |  |
-| `CSXPluginObject::ScCallMethod` | unreviewed |  |
-| `CSXPluginObject::ScGetProperty` | unreviewed |  |
-| `CSXPluginObject::ScSetProperty` | unreviewed |  |
-| `CSXPluginObject::ScToString` | unreviewed |  |
-| `CSXPluginObject::Persist` | unreviewed |  |
-| `CSXPluginObject::ApplyEvent` | unreviewed |  |
+| `CSXPluginObject::CSXPluginObject` | todo | The script object of a plugin class: a table of eight callbacks (construct, construct empty, destruct, call method, set and get property, serialize, receive event), an id the plugin chose and the subscribed events, all cleared. No equivalent in Luma. |
+| `CSXPluginObject::~CSXPluginObject` | todo | Calls the plugin's `Destruct` with the object's id when the script object dies. |
+| `CSXPluginObject::Initialize` | n/a | Fetches the class's callback table from the DLL (`GetClassDefinition`). |
+| `CSXPluginObject::Construct` | todo | Calls the plugin's `Construct` with the owner object, the game, the calling script and its stack (the constructor's arguments); without one, the arguments are dropped. |
+| `CSXPluginObject::ScCallMethod` | todo | Offers the method to the plugin's `CallMethod` first, with the script and the stack; falls back to `CBObject`'s methods when the plugin does not handle it. |
+| `CSXPluginObject::ScGetProperty` | todo | Offers the property to the plugin's `GetProperty` first, then `CBObject`'s. |
+| `CSXPluginObject::ScSetProperty` | todo | Offers the property to the plugin's `SetProperty` first; else `Ready` sets the object's ready flag (which `WaitFor` polls), else `CBObject`'s. `docs/compatibility.md` lists `Ready` as a no-op. |
+| `CSXPluginObject::ScToString` | todo | `[plugin object]`. |
+| `CSXPluginObject::Persist` | todo | Saves the class name, the subscribed events and whatever the plugin's `Serialize` writes; on load, rebuilds the object with `ConstructEmpty` and fails the load ('Error restoring plugin class') when the class is gone. Luma's saved games have no slot for a module's state. |
+| `CSXPluginObject::ApplyEvent` | todo | Calls the plugin's `ReceiveEvent` when the object subscribed to the event; see `CBPluginMgr::ApplyEvent`. |
 
 ## `wme_base/SXTcpClient.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXTcpClient::CSXTcpClient` | unreviewed |  |
-| `CSXTcpClient::~CSXTcpClient` | unreviewed |  |
-| `CSXTcpClient::InitWinSock` | unreviewed |  |
-| `CSXTcpClient::ShutdownWinSock` | unreviewed |  |
-| `CSXTcpClient::InitSocket` | unreviewed |  |
-| `CSXTcpClient::ConnectToSocket` | unreviewed |  |
-| `CSXTcpClient::ScToString` | unreviewed |  |
-| `CSXTcpClient::ScCallMethod` | unreviewed |  |
-| `CSXTcpClient::ScGetProperty` | unreviewed |  |
-| `CSXTcpClient::ScSetProperty` | unreviewed |  |
-| `CSXTcpClient::Persist` | unreviewed |  |
-| `CSXTcpClient::ScCompare` | unreviewed |  |
+| `CSXTcpClient::CSXTcpClient` | partial | `new TcpClient(arg)` gives scripts an object (its one argument is dropped, a socket is opened and never used). Luma has no such object: the compiler knows the name (`crates/luma-compiler/src/lib.rs`) but `World::call_function` does not build it, so the script gets no object where the original returns one. |
+| `CSXTcpClient::~CSXTcpClient` | n/a | Empty. |
+| `CSXTcpClient::InitWinSock` | n/a | Opens a WinSock socket that nothing ever uses. |
+| `CSXTcpClient::ShutdownWinSock` | n/a | Opens a WinSock socket that nothing ever uses. |
+| `CSXTcpClient::InitSocket` | n/a | Opens a WinSock socket that nothing ever uses. |
+| `CSXTcpClient::ConnectToSocket` | n/a | No caller: the class's script methods are commented out in the original. |
+| `CSXTcpClient::ScToString` | todo | `[tcp-client object]`; needs the object of the constructor row. |
+| `CSXTcpClient::ScCallMethod` | todo | Every method call fails (the body is commented out); needs the object of the constructor row. |
+| `CSXTcpClient::ScGetProperty` | todo | `Type` is `tcp-client`, the rest is `CBScriptable`'s; needs the object of the constructor row. |
+| `CSXTcpClient::ScSetProperty` | todo | Every assignment fails; needs the object of the constructor row. |
+| `CSXTcpClient::Persist` | todo | Saves only the `CBScriptable` base, so the object survives a save; needs the object of the constructor row. |
+| `CSXTcpClient::ScCompare` | todo | Always 0: any two objects compare equal; needs the object of the constructor row. |
 
 ## `wme_base/ThemeLibEx.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CThemeLibEx::CThemeLibEx` | unreviewed |  |
-| `CThemeLibEx::~CThemeLibEx` | unreviewed |  |
-| `CThemeLibEx::IsAvailable` | unreviewed |  |
-| `CThemeLibEx::IsAppThemed` | unreviewed |  |
-| `CThemeLibEx::IsThemeActive` | unreviewed |  |
-| `CThemeLibEx::OpenThemeData` | unreviewed |  |
-| `CThemeLibEx::CloseThemeData` | unreviewed |  |
-| `CThemeLibEx::GetThemeBackgroundContentRect` | unreviewed |  |
-| `CThemeLibEx::DrawThemeBackground` | unreviewed |  |
-| `CThemeLibEx::DrawThemeParentBackground` | unreviewed |  |
-| `CThemeLibEx::GetThemeColor` | unreviewed |  |
-| `CThemeLibEx::EnableThemeDialogTexture` | unreviewed |  |
+| `CThemeLibEx::CThemeLibEx` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::~CThemeLibEx` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::IsAvailable` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::IsAppThemed` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::IsThemeActive` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::OpenThemeData` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::CloseThemeData` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::GetThemeBackgroundContentRect` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::DrawThemeBackground` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::DrawThemeParentBackground` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::GetThemeColor` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
+| `CThemeLibEx::EnableThemeDialogTexture` | n/a | Wrapper over `uxtheme.dll` (Windows XP visual styles) for the settings dialog's tab pages. |
 
 ## `wme_base/utils_getdxver.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBUtils::GetDXVersion` | unreviewed |  |
+| `CBUtils::GetDXVersion` | n/a | Finds the installed DirectX version for the first lines of the log. |
 
 ## `wme_base/WinButton.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CWinButton::CWinButton` | unreviewed |  |
-| `CWinButton::~CWinButton` | unreviewed |  |
-| `CWinButton::SetCheck` | unreviewed |  |
-| `CWinButton::GetCheck` | unreviewed |  |
-| `CWinButton::GetState` | unreviewed |  |
-| `CWinButton::SetState` | unreviewed |  |
-| `CWinButton::SetStyle` | unreviewed |  |
+| `CWinButton::CWinButton` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog (check boxes and buttons). |
+| `CWinButton::~CWinButton` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog. |
+| `CWinButton::SetCheck` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `Button_*` messages. |
+| `CWinButton::GetCheck` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `Button_*` messages. |
+| `CWinButton::GetState` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `Button_*` messages. |
+| `CWinButton::SetState` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `Button_*` messages. |
+| `CWinButton::SetStyle` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `Button_*` messages. |
 
 ## `wme_base/WinCombo.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CWinCombo::CWinCombo` | unreviewed |  |
-| `CWinCombo::~CWinCombo` | unreviewed |  |
-| `CWinCombo::GetCount` | unreviewed |  |
-| `CWinCombo::ResetContent` | unreviewed |  |
-| `CWinCombo::AddString` | unreviewed |  |
-| `CWinCombo::InsertString` | unreviewed |  |
-| `CWinCombo::DeleteString` | unreviewed |  |
-| `CWinCombo::SetItemData` | unreviewed |  |
-| `CWinCombo::GetItemData` | unreviewed |  |
-| `CWinCombo::FindString` | unreviewed |  |
-| `CWinCombo::FindItemData` | unreviewed |  |
-| `CWinCombo::GetCurSel` | unreviewed |  |
-| `CWinCombo::SetCurSel` | unreviewed |  |
-| `CWinCombo::ComboSendMessage` | unreviewed |  |
+| `CWinCombo::CWinCombo` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog (drop-down lists). |
+| `CWinCombo::~CWinCombo` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog. |
+| `CWinCombo::GetCount` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::ResetContent` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::AddString` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::InsertString` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::DeleteString` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::SetItemData` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::GetItemData` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::FindString` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::FindItemData` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::GetCurSel` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::SetCurSel` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
+| `CWinCombo::ComboSendMessage` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `CB_*` messages. |
 
 ## `wme_base/WinDialog.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CWinDialog::CWinDialog` | unreviewed |  |
-| `CWinDialog::~CWinDialog` | unreviewed |  |
-| `CWinDialog::Create` | unreviewed |  |
-| `CWinDialog::CreateIndirect` | unreviewed |  |
-| `CWinDialog::InternalDlgMsgHandler` | unreviewed |  |
-| `CWinDialog::InternalInitDialog` | unreviewed |  |
-| `CWinDialog::DoModal` | unreviewed |  |
-| `CWinDialog::RegisterControls` | unreviewed |  |
-| `CWinDialog::OnInitDialog` | unreviewed |  |
-| `CWinDialog::OnKeyDown` | unreviewed |  |
-| `CWinDialog::OnSysKeyDown` | unreviewed |  |
-| `CWinDialog::OnEnterIdle` | unreviewed |  |
-| `CWinDialog::OnPaint` | unreviewed |  |
-| `CWinDialog::RegisterControl` | unreviewed |  |
-| `CWinDialog::RegisterButton` | unreviewed |  |
-| `CWinDialog::RegisterStatic` | unreviewed |  |
-| `CWinDialog::RegisterCombo` | unreviewed |  |
-| `CWinDialog::RegisterEditor` | unreviewed |  |
-| `CWinDialog::RegisterTabCtrl` | unreviewed |  |
-| `CWinDialog::RegisterEvent` | unreviewed |  |
-| `CWinDialog::InvokeEvent` | unreviewed |  |
-| `CWinDialog::UnhandledEvent` | unreviewed |  |
-| `CWinDialog::DlgMsgHandler` | unreviewed |  |
-| `CWinDialog::EndDialog` | unreviewed |  |
+| `CWinDialog::CWinDialog` | n/a | Base class of the Win32 settings dialog and its pages. |
+| `CWinDialog::~CWinDialog` | n/a | Win32 dialog. |
+| `CWinDialog::Create` | n/a | Creates a Win32 dialog from a resource template (mirrored for right-to-left text) and runs its modal message loop. |
+| `CWinDialog::CreateIndirect` | n/a | Creates a Win32 dialog from a resource template (mirrored for right-to-left text) and runs its modal message loop. |
+| `CWinDialog::InternalDlgMsgHandler` | n/a | Creates a Win32 dialog from a resource template (mirrored for right-to-left text) and runs its modal message loop. |
+| `CWinDialog::InternalInitDialog` | n/a | Creates a Win32 dialog from a resource template (mirrored for right-to-left text) and runs its modal message loop. |
+| `CWinDialog::DoModal` | n/a | Creates a Win32 dialog from a resource template (mirrored for right-to-left text) and runs its modal message loop. |
+| `CWinDialog::RegisterControls` | n/a | Empty hook of the Win32 dialog base class, overridden by the settings dialog. |
+| `CWinDialog::OnInitDialog` | n/a | Empty hook of the Win32 dialog base class, overridden by the settings dialog. |
+| `CWinDialog::OnKeyDown` | n/a | Empty hook of the Win32 dialog base class, overridden by the settings dialog. |
+| `CWinDialog::OnSysKeyDown` | n/a | Empty hook of the Win32 dialog base class, overridden by the settings dialog. |
+| `CWinDialog::OnEnterIdle` | n/a | Empty hook of the Win32 dialog base class, overridden by the settings dialog. |
+| `CWinDialog::OnPaint` | n/a | Empty hook of the Win32 dialog base class, overridden by the settings dialog. |
+| `CWinDialog::RegisterControl` | n/a | Binds a wrapper object to a control of the Win32 dialog. |
+| `CWinDialog::RegisterButton` | n/a | Binds a wrapper object to a control of the Win32 dialog. |
+| `CWinDialog::RegisterStatic` | n/a | Binds a wrapper object to a control of the Win32 dialog. |
+| `CWinDialog::RegisterCombo` | n/a | Binds a wrapper object to a control of the Win32 dialog. |
+| `CWinDialog::RegisterEditor` | n/a | Binds a wrapper object to a control of the Win32 dialog. |
+| `CWinDialog::RegisterTabCtrl` | n/a | Binds a wrapper object to a control of the Win32 dialog. |
+| `CWinDialog::RegisterEvent` | n/a | Message dispatch of the Win32 dialog (control notifications to handler methods). |
+| `CWinDialog::InvokeEvent` | n/a | Message dispatch of the Win32 dialog (control notifications to handler methods). |
+| `CWinDialog::UnhandledEvent` | n/a | Message dispatch of the Win32 dialog (control notifications to handler methods). |
+| `CWinDialog::DlgMsgHandler` | n/a | Message dispatch of the Win32 dialog (control notifications to handler methods). |
+| `CWinDialog::EndDialog` | n/a | Message dispatch of the Win32 dialog (control notifications to handler methods). |
 
 ## `wme_base/WinEditor.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CWinEditor::CWinEditor` | unreviewed |  |
-| `CWinEditor::~CWinEditor` | unreviewed |  |
+| `CWinEditor::CWinEditor` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog (edit box; the dialog has none). |
+| `CWinEditor::~CWinEditor` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog. |
 
 ## `wme_base/WinStatic.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CWinStatic::CWinStatic` | unreviewed |  |
-| `CWinStatic::~CWinStatic` | unreviewed |  |
+| `CWinStatic::CWinStatic` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog (labels). |
+| `CWinStatic::~CWinStatic` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog. |
 
 ## `wme_base/WinTabCtrl.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CWinTabCtrl::CWinTabCtrl` | unreviewed |  |
-| `CWinTabCtrl::~CWinTabCtrl` | unreviewed |  |
-| `CWinTabCtrl::GetItemCount` | unreviewed |  |
-| `CWinTabCtrl::GetItem` | unreviewed |  |
-| `CWinTabCtrl::SetItemA` | unreviewed |  |
-| `CWinTabCtrl::SetItemW` | unreviewed |  |
-| `CWinTabCtrl::InsertItemA` | unreviewed |  |
-| `CWinTabCtrl::InsertItemW` | unreviewed |  |
-| `CWinTabCtrl::InsertItem` | unreviewed |  |
-| `CWinTabCtrl::InsertItem #2` | unreviewed |  |
-| `CWinTabCtrl::InsertItem #3` | unreviewed |  |
-| `CWinTabCtrl::DeleteItem` | unreviewed |  |
-| `CWinTabCtrl::DeleteAllItems` | unreviewed |  |
-| `CWinTabCtrl::GetCurSel` | unreviewed |  |
-| `CWinTabCtrl::SetCurSel` | unreviewed |  |
-| `CWinTabCtrl::AdjustRect` | unreviewed |  |
+| `CWinTabCtrl::CWinTabCtrl` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog (tab strip). |
+| `CWinTabCtrl::~CWinTabCtrl` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog. |
+| `CWinTabCtrl::GetItemCount` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::GetItem` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::SetItemA` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::SetItemW` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::InsertItemA` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::InsertItemW` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::InsertItem` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::InsertItem #2` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::InsertItem #3` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::DeleteItem` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::DeleteAllItems` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::GetCurSel` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::SetCurSel` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
+| `CWinTabCtrl::AdjustRect` | n/a | Thin wrapper over a Win32 control, used only by the settings dialog: `TCM_*` messages. |
 
 ## `wme_base/WinWindow.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CWinWindow::CWinWindow` | unreviewed |  |
-| `CWinWindow::~CWinWindow` | unreviewed |  |
-| `CWinWindow::BindWindow` | unreviewed |  |
-| `CWinWindow::RemoveBinding` | unreviewed |  |
-| `CWinWindow::SetWindowText` | unreviewed |  |
-| `CWinWindow::GetWindowText` | unreviewed |  |
-| `CWinWindow::ShowWindow` | unreviewed |  |
-| `CWinWindow::EnableWindow` | unreviewed |  |
-| `CWinWindow::SetForegroundWindow` | unreviewed |  |
-| `CWinWindow::IsWindowEnabled` | unreviewed |  |
-| `CWinWindow::SetFocus` | unreviewed |  |
-| `CWinWindow::MessageBox` | unreviewed |  |
-| `CWinWindow::DestroyWindow` | unreviewed |  |
-| `CWinWindow::SetWindowPos` | unreviewed |  |
-| `CWinWindow::GetWindowRect` | unreviewed |  |
-| `CWinWindow::GetThemeLib` | unreviewed |  |
+| `CWinWindow::CWinWindow` | n/a | Base wrapper over a Win32 window handle for the settings dialog's controls. |
+| `CWinWindow::~CWinWindow` | n/a | Win32 window wrapper. |
+| `CWinWindow::BindWindow` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::RemoveBinding` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::SetWindowText` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::GetWindowText` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::ShowWindow` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::EnableWindow` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::SetForegroundWindow` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::IsWindowEnabled` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::SetFocus` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::MessageBox` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::DestroyWindow` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::SetWindowPos` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::GetWindowRect` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
+| `CWinWindow::GetThemeLib` | n/a | Win32 window call on a control of the settings dialog; no caller outside the dialog classes. |
