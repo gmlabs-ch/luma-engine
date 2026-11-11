@@ -128,4 +128,4 @@ pub use ui::{
     WindowMode, WindowState,
 };
 pub use video::{Subtitle, Subtitler, VideoPlayback, VideoPlayer, parse_subtitles};
-pub use world::{LoadingIcon, QuickMessage, Runtime, ScreenImage, World};
+pub use world::{FIXED_SEED, LoadingIcon, QuickMessage, Runtime, ScreenImage, World};

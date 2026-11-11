@@ -734,3 +734,38 @@ fn the_engine_keeps_its_own_settings_beside_the_games() {
     assert!(text.contains("[Video]\nWindowPosX=-120\n"), "{text}");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn random_numbers_are_seeded_from_the_clock_and_can_be_fixed() {
+    use luma_script::Host;
+    let draws = |runtime: &mut Runtime| -> Vec<i32> {
+        (0..8).map(|_| runtime.world.random(0, 30000)).collect()
+    };
+    // Two games started one after the other draw different numbers, as
+    // two launches of the original do.
+    let (mut first, dir1, _, _) = start();
+    let (mut second, dir2, _, _) = start();
+    assert_ne!(draws(&mut first), draws(&mut second));
+    // Under a seed the draws are the same at every run.
+    first.world.seed_random(5);
+    second.world.seed_random(5);
+    let seeded = draws(&mut first);
+    assert_eq!(seeded, draws(&mut second));
+    first.world.seed_random(6);
+    assert_ne!(draws(&mut first), seeded);
+    first.world.seed_random(luma_adventure::FIXED_SEED);
+    second.world.seed_random(0);
+    assert_eq!(draws(&mut first), draws(&mut second), "0 is the fixed seed");
+    // As the original's `rand()` gives 15 bits, a span wider than 32768
+    // values is never covered; reversed bounds are put in order.
+    for _ in 0..2000 {
+        let value = first.world.random(1000, 2_000_000);
+        assert!((1000..=1000 + 32767).contains(&value), "{value}");
+        let value = first.world.random(6, 1);
+        assert!((1..=6).contains(&value), "{value}");
+    }
+    assert_eq!(first.world.random(7, 7), 7);
+    assert_eq!(first.world.random(i32::MIN, i32::MAX), i32::MIN);
+    std::fs::remove_dir_all(&dir1).ok();
+    std::fs::remove_dir_all(&dir2).ok();
+}

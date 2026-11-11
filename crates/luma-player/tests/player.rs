@@ -116,6 +116,9 @@ fn renders_a_screenshot() {
 #[test]
 fn headless_steps_type_into_the_focused_editor() {
     const SCRIPT: &str = r#"
+global r1 = Random(0, 30000);
+global r2 = Random(0, 30000);
+global r3 = Random(0, 30000);
 var win = Game.LoadWindow("w.window");
 win.Visible = true;
 var name = win.GetWidget("name");
@@ -188,6 +191,24 @@ Game.ChangeScene("room.scene");
         "--type", "ab", "--key", "ctrl+65", "--key", "ctrl+67", "--key", "35", "--key", "ctrl+86",
     ]);
     assert!(out.contains("text \"abab\""), "{out}");
+    // Headless runs draw the same random numbers every time, a seed
+    // gives others, and the clock others again.
+    let draws = |steps: &[&str]| -> Vec<String> {
+        let mut args = vec!["--global", "r1", "--global", "r2", "--global", "r3"];
+        args.extend_from_slice(steps);
+        run(&args)
+            .lines()
+            .filter(|l| l.starts_with("global r"))
+            .map(str::to_string)
+            .collect()
+    };
+    let default = draws(&[]);
+    assert_eq!(default.len(), 3, "{default:?}");
+    assert_eq!(default, draws(&[]));
+    let seeded = draws(&["--seed", "7"]);
+    assert_eq!(seeded, draws(&["--seed", "7"]));
+    assert_ne!(seeded, default);
+    assert_ne!(draws(&["--seed", "clock"]), default);
     let out = player(&["game", "--headless", "--key", "meta+65"]);
     assert_eq!(out.status.code(), Some(2));
     let out = player(&["game", "--headless", "--repeat-key", "65"]);

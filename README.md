@@ -149,6 +149,11 @@ The player shows one scene of a game, without running its scripts yet:
 # Play a game: its scripts pick the scenes, the mouse and the keyboard go to them
 luma-player path/to/game
 
+# Headless runs draw the same random numbers every time; pick another
+# seed, or the clock as when playing
+luma-player path/to/game --headless --seed 7
+luma-player path/to/game --headless --seed clock
+
 # Play full screen, or start from a saved game
 luma-player path/to/game --fullscreen
 luma-player path/to/game --load 3

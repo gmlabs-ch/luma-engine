@@ -180,6 +180,32 @@ with the system (`open` on macOS, `xdg-open` elsewhere, `start` on
 Windows); the original engine also minimizes a fullscreen window
 first, which Luma does not do.
 
+## Random numbers
+
+The scripts' `Random(from, to)`, the particle emitters and the pick of
+a talk animation draw from one generator (`Rng` in `luma-adventure`).
+It is **seeded from the clock** when the game is opened, as the original
+does (`srand(time(NULL))` in `CBGame::CBGame`): two launches draw
+different numbers. The generator itself is Luma's own (xorshift64*), so
+a sequence is never the original's, but its draws have the shape of the
+C library's `rand()` the original calls:
+
+- a draw is 15 bits wide (0 to 32767), so `Random(from, to)`, which is
+  `rand() % (to - from + 1) + from` (`CBUtils::RandomInt`), never
+  exceeds `from + 32767` however far `to` is; the bounds may come in
+  either order;
+- a random fraction (`CBUtils::RandomFloat`, for the particles) is one
+  of 32768 values from 0 to 1, both included.
+
+A saved game does not bring its random state back: after a load the
+draws go on from the running game's, as the original's do.
+
+For runs that must repeat, `World::seed_random(seed)` fixes the seed
+(tests, tooling). The headless player does it by default, so that two
+headless runs of the same steps give the same result; `--seed <n>` picks
+another fixed seed, `--seed clock` the clock. In a window the player
+seeds from the clock unless `--seed <n>` is given.
+
 ## The active object
 
 While drawing, the engine notes where each object that reacts to the

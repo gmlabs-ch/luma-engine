@@ -83,6 +83,23 @@ pub const QUICK_MSG_MS: u64 = 3000;
 /// How many quick messages show at once (`MAX_QUICK_MSG`).
 pub const MAX_QUICK_MSGS: usize = 5;
 
+/// A seed for runs that must draw the same random numbers every time
+/// ([`World::seed_random`]).
+pub const FIXED_SEED: u64 = 0x2545_F491_4F6C_DD1D;
+
+/// A seed from the clock (`srand(time(NULL))`), mixed so that two
+/// launches close in time draw unrelated numbers; never zero.
+fn clock_seed() -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let mut z = nanos.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    if z == 0 { FIXED_SEED } else { z }
+}
+
 /// The game as scripts see it. Implements the script engine's [`Host`].
 pub struct World {
     pub(crate) vfs: Vfs,
@@ -375,7 +392,7 @@ impl World {
             clock: 0,
             log: Vec::new(),
             stubs: HashSet::new(),
-            rng: 0x2545_F491_4F6C_DD1D,
+            rng: clock_seed(),
             scheduled_load: None,
             pending_save: None,
             personal_save: personal_savegames,
@@ -2183,10 +2200,21 @@ impl World {
 
     /// A random number, from the same generator as the scripts'.
     pub(crate) fn next_random(&mut self) -> u32 {
-        self.rng ^= self.rng >> 12;
-        self.rng ^= self.rng << 25;
-        self.rng ^= self.rng >> 27;
-        (self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as u32
+        let mut rng = crate::particles::Rng::new(self.rng);
+        let value = rng.next_u32();
+        self.rng = rng.state();
+        value
+    }
+
+    /// Seeds the random generator (`srand`), for a run that draws the
+    /// same numbers every time: the scripts' `Random`, the particles,
+    /// the talk animations picked. A new world is seeded from the
+    /// clock, as the original does when the game starts
+    /// (`srand(time(NULL))` in `CBGame::CBGame`); tests and tooling
+    /// that compare runs seed it themselves ([`FIXED_SEED`] is what the
+    /// headless player uses).
+    pub fn seed_random(&mut self, seed: u64) {
+        self.rng = crate::particles::Rng::new(seed).state();
     }
 
     /// The font an object's file gives it (`FONT`) or a script set.
@@ -3067,16 +3095,11 @@ impl Host for World {
     }
 
     fn random(&mut self, from: i32, to: i32) -> i32 {
-        // xorshift64*, seeded once: deterministic across runs.
-        self.rng ^= self.rng >> 12;
-        self.rng ^= self.rng << 25;
-        self.rng ^= self.rng >> 27;
-        let value = self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32;
-        let span = i64::from(to) - i64::from(from) + 1;
-        if span <= 0 {
-            return from;
-        }
-        (i64::from(from) + (value as i64).rem_euclid(span)) as i32
+        // `CBUtils::RandomInt`, on the world's generator.
+        let mut rng = crate::particles::Rng::new(self.rng);
+        let value = rng.int(from, to);
+        self.rng = rng.state();
+        value
     }
 
     fn call_function(&mut self, name: &str, args: &[Value], ctx: Context<'_>) -> Option<Return> {

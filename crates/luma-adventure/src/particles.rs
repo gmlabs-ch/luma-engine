@@ -23,11 +23,17 @@ use crate::scene_view::{
     AnimState, SpriteBank, Transform, drawn_subframes, key, place_transformed,
 };
 
-/// The random generator the emitters draw from: xorshift64*, the same
-/// algorithm as the world's, so that a run is deterministic under a
-/// seed.
+/// The game's random generator, for the scripts' `Random` and the
+/// particle emitters: xorshift64* under the interface of the C
+/// library's `rand()` the original uses, whose draws are 15 bits wide
+/// ([`Rng::rand`]). A run is deterministic under a seed
+/// ([`World::seed_random`](crate::World::seed_random)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rng(u64);
+
+/// The largest value of [`Rng::rand`], as `RAND_MAX` of the original's
+/// C library.
+pub const RAND_MAX: i32 = 32767;
 
 impl Rng {
     /// A generator at a state; `0` is replaced by a fixed seed, since
@@ -53,17 +59,33 @@ impl Rng {
         (self.0.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as u32
     }
 
-    /// An integer in `[from, to]`, in either order (`CBUtils::RandomInt`).
+    /// A draw as the C library's `rand()` gives it: `0..=RAND_MAX`.
+    pub fn rand(&mut self) -> i32 {
+        ((self.next_u32() >> 16) & 0x7FFF) as i32
+    }
+
+    /// An integer in `[from, to]`, in either order (`CBUtils::
+    /// RandomInt`): `rand() % (to - from + 1) + from`. As in the
+    /// original, a draw is at most `RAND_MAX`, so a span wider than
+    /// 32768 values is never covered: the result stays within `from +
+    /// 32767`. A span wider than an integer holds (undefined in the
+    /// original) gives `from`.
     pub fn int(&mut self, from: i32, to: i32) -> i32 {
         let (from, to) = if to < from { (to, from) } else { (from, to) };
-        let span = i64::from(to) - i64::from(from) + 1;
-        (i64::from(from) + i64::from(self.next_u32()) % span) as i32
+        let span = to.wrapping_sub(from).wrapping_add(1);
+        let draw = self.rand();
+        if span <= 0 {
+            return from;
+        }
+        from + draw % span
     }
 
     /// A float in `[from, to]` (`CBUtils::RandomFloat`): `from` plus a
-    /// fraction of the distance to `to`, so `to < from` works too.
+    /// fraction of the distance to `to`, so `to < from` works too. The
+    /// fraction is `rand() / RAND_MAX`: one of 32768 values, both ends
+    /// included.
     pub fn float(&mut self, from: f32, to: f32) -> f32 {
-        let unit = self.next_u32() as f32 / u32::MAX as f32;
+        let unit = self.rand() as f32 / RAND_MAX as f32;
         from + (to - from) * unit
     }
 
@@ -925,6 +947,29 @@ impl Emitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn draws_are_the_c_librarys() {
+        let mut rng = Rng::new(1);
+        let (mut low, mut high) = (i32::MAX, i32::MIN);
+        for _ in 0..20_000 {
+            let draw = rng.rand();
+            assert!((0..=RAND_MAX).contains(&draw));
+            low = low.min(draw);
+            high = high.max(draw);
+            let value = rng.int(-3, 3);
+            assert!((-3..=3).contains(&value));
+            // Wider than a draw: never beyond `from + RAND_MAX`.
+            let value = rng.int(0, 1_000_000);
+            assert!((0..=RAND_MAX).contains(&value));
+            let value = rng.float(2.0, -2.0);
+            assert!((-2.0..=2.0).contains(&value));
+        }
+        assert!(low < 100 && high > RAND_MAX - 100, "{low}..{high}");
+        assert_eq!(rng.int(5, 5), 5);
+        assert_eq!(rng.int(i32::MIN, i32::MAX), i32::MIN, "span beyond an int");
+        assert_eq!(rng.int(i32::MAX, i32::MIN), i32::MIN);
+    }
     use luma_formats::Sprite;
 
     const OWNER: NativeId = NativeId(1);

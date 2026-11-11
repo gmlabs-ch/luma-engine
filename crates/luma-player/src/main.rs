@@ -47,6 +47,10 @@ OPTIONS:
     --say <text>          In headless mode, make the main actor say a sentence once the scene is up
     --font <file>         With --say, the font the actor talks with
     --mute                Play no sound (the sounds still run, silently, on the game clock)
+    --seed <n|clock>      Seed of the random numbers (Random, particles): a number for a run
+                          that draws the same numbers every time, or `clock` for the clock,
+                          as the original engine does. By default the clock in a window, a
+                          fixed seed in headless mode, so that headless runs can be compared
     --scale <n>           Open the window at n times the game's resolution (by default the
                           largest whole number that keeps it within 1280 points wide)
     --fullscreen          Run the game full screen (the frame fills the desktop, letterboxed)
@@ -120,6 +124,15 @@ const BLACK: Rgba = Rgba {
     a: 255,
 };
 
+/// What `--seed` asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Seed {
+    /// The clock, as the original engine seeds.
+    Clock,
+    /// A number: the same draws at every run.
+    Fixed(u64),
+}
+
 /// A step of the headless run, in command-line order.
 enum Step {
     /// Raise an event on a scene node by name (`node` or `node:event`).
@@ -166,6 +179,8 @@ struct Options {
     scale: Option<u32>,
     /// `--windowed` (true) or `--fullscreen` (false).
     windowed: Option<bool>,
+    /// `--seed`: a number, or `Seed::Clock`.
+    seed: Option<Seed>,
     steps: Vec<Step>,
     hover_at: Option<(i32, i32)>,
     after: u64,
@@ -192,6 +207,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut mute = false;
     let mut scale = None;
     let mut windowed = None;
+    let mut seed = None;
     let mut steps = Vec::new();
     let mut hover_at = None;
     let mut after = 3;
@@ -238,6 +254,17 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--say" => say = Some(value(&mut i)?.clone()),
             "--font" => font = Some(value(&mut i)?.clone()),
             "--mute" => mute = true,
+            "--seed" => {
+                let v = value(&mut i)?;
+                seed =
+                    Some(if v.eq_ignore_ascii_case("clock") {
+                        Seed::Clock
+                    } else {
+                        Seed::Fixed(v.parse().map_err(|_| {
+                            format!("--seed expects a number or `clock`, got `{v}`")
+                        })?)
+                    });
+            }
             "--fullscreen" => windowed = Some(false),
             "--windowed" => windowed = Some(true),
             "--savegame" => {
@@ -416,6 +443,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         mute,
         scale,
         windowed,
+        seed,
         steps,
         hover_at,
         after,
@@ -498,6 +526,13 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         Audio::new()
     };
     let mut runtime = Runtime::with_audio(vfs, audio).map_err(|e| e.to_string())?;
+    // Headless runs are compared with one another: the same random
+    // numbers at every run unless the clock is asked for.
+    match options.seed {
+        Some(Seed::Clock) => {}
+        Some(Seed::Fixed(seed)) => runtime.world.seed_random(seed),
+        None => runtime.world.seed_random(luma::adventure::FIXED_SEED),
+    }
     let game = runtime.world.game_file();
     println!(
         "game {:?}: {} script(s), {} strings, audio {}",
@@ -1108,6 +1143,11 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         .ok()
         .and_then(|v| v.parse().ok());
     let mut runtime = runtime;
+    // The world is seeded from the clock, as the original; a number
+    // makes the run repeatable.
+    if let Some(Seed::Fixed(seed)) = options.seed {
+        runtime.world.seed_random(seed);
+    }
     // Window or full screen (`CHWManager`): what the command line asks,
     // else the choice kept in the settings (`Video/Windowed`), else a
     // window; full screen only when the game forbids the window
@@ -1576,5 +1616,11 @@ mod tests {
         let options = parse_args(&args(&["game", "--windowed", "--load", "2"])).unwrap();
         assert_eq!((options.windowed, options.load), (Some(true), Some(2)));
         assert!(parse_args(&args(&["game", "--savegame", "x.txt"])).is_err());
+        assert_eq!(options.seed, None);
+        let options = parse_args(&args(&["game", "--seed", "42"])).unwrap();
+        assert_eq!(options.seed, Some(Seed::Fixed(42)));
+        let options = parse_args(&args(&["game", "--seed", "Clock"])).unwrap();
+        assert_eq!(options.seed, Some(Seed::Clock));
+        assert!(parse_args(&args(&["game", "--seed", "dice"])).is_err());
     }
 }

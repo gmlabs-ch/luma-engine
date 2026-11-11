@@ -370,7 +370,13 @@ pub fn load_game(world: &mut World, engine: &mut Engine, slot: i32) -> Result<()
         return Err("Saved game name doesn't match current game".to_string());
     }
     let saved: Saved = postcard::from_bytes(&body).map_err(|e| e.to_string())?;
+    // The random generator is the running game's, not the saved one's:
+    // the original's `rand()` state is no part of a saved game, so
+    // loading twice does not replay the same draws. The value is still
+    // written, to keep the file's layout.
+    let rng = world.rng;
     let sounds = saved.world.apply(world);
+    world.rng = rng;
     world.after_restore(sounds);
     engine.restore(saved.engine, world)?;
     let game = world.game_id;
