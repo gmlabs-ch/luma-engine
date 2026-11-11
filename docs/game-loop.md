@@ -187,15 +187,11 @@ a talk animation draw from one generator (`Rng` in `luma-adventure`).
 It is **seeded from the clock** when the game is opened, as the original
 does (`srand(time(NULL))` in `CBGame::CBGame`): two launches draw
 different numbers. The generator itself is Luma's own (xorshift64*), so
-a sequence is never the original's, but its draws have the shape of the
-C library's `rand()` the original calls:
-
-- a draw is 15 bits wide (0 to 32767), so `Random(from, to)`, which is
-  `rand() % (to - from + 1) + from` (`CBUtils::RandomInt`), never
-  exceeds `from + 32767` however far `to` is; the bounds may come in
-  either order;
-- a random fraction (`CBUtils::RandomFloat`, for the particles) is one
-  of 32768 values from 0 to 1, both included.
+a sequence is never the original's. `Random(from, to)` covers the whole
+span, the bounds in either order. The original draws from the C
+library's `rand()`, 15 bits wide, so its `Random` never exceeds `from +
+32767` and its random fractions take one of 32768 values; Luma keeps
+neither limit, which no game could rely on.
 
 A saved game does not bring its random state back: after a load the
 draws go on from the running game's, as the original's do.
@@ -272,6 +268,12 @@ A left or right press follows these rules, in this order
 A release (`OnMouseLeftUp`, `OnMouseRightUp`) does nothing while a video
 plays; else the drag and the capture end and the event is raised.
 
+The headless player's `--click-at` and `--click-on` steps are always
+clicks of their own, however close in time and place (the player
+forgets the last click before each step, `World::forget_clicks`);
+`--double-click-at <x>,<y>` makes a click followed by the second press
+of a double click.
+
 **Double clicks.** A second press within 400 ms and 4 pixels of the
 last one is a double click (the original takes the system's settings,
 500 ms by default), and, as the system's message does, it **replaces**
@@ -297,9 +299,10 @@ loses such a click).
 The wheel raises `MouseWheelUp` or `MouseWheelDown` on the **focused
 window** when its scripts handle that event, else on the game
 (`CBGame::HandleMouseWheel`); a notch of the wheel is one event, in
-either direction. As in the original, a focused window that handles
+either direction. (In the original a focused window that handles
 `MouseWheelUp` but not `MouseWheelDown` gets `MouseWheelUp` when the
-wheel turns down. The headless player turns it with `--wheel up` or
+wheel turns down, a slip of its `else if`; Luma raises `MouseWheelDown`
+on the game then.) The headless player turns it with `--wheel up` or
 `--wheel down`.
 
 Closing the game's window raises `QuitGame` on the game when a game

@@ -574,6 +574,14 @@ impl World {
         self.clipboard = clipboard;
     }
 
+    /// Forgets the last clicks, so that the next press is a click and
+    /// not the second press of a double click, however soon it comes.
+    /// For tooling whose steps are separate clicks.
+    pub fn forget_clicks(&mut self) {
+        self.mouse.last_left_click = None;
+        self.mouse.last_right_click = None;
+    }
+
     /// Notes a key or a mouse button as held, by virtual key code, for
     /// `Keyboard.IsKeyDown`; nothing else happens.
     pub fn key_held(&mut self, code: i32) {

@@ -204,6 +204,9 @@ luma-player path/to/game --headless --type "Zoé, 3.5%" --repeat-key 8:5 --key c
 luma-player path/to/game --headless --scene scenes/minigame/minigame.scene --hold-key 39 --ticks 300 --entities
 luma-player path/to/game --headless --key 27 --wheel down --wheel down --entities
 
+# Steps on the same point are separate clicks; a double click is asked for
+luma-player path/to/game --headless --click-at 300,240 --click-at 300,240 --double-click-at 300,240
+
 # Move the mouse and click on the floor: the main actor walks there
 luma-player path/to/game --headless --scene scenes/room/room.scene --click-at 500,520 --ticks 300 --screenshot walk.png
 luma-player path/to/game --headless --scene scenes/room/room.scene --click Cupboard:Take --after 250 --then-scene scenes/hall/hall.scene --then-scene scenes/room/room.scene --entities

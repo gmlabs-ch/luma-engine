@@ -58,7 +58,12 @@ OPTIONS:
                           otherwise or the game forbids it with ALLOW_WINDOWED_MODE=FALSE)
     --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
                           node, e.g. --click Door or --click Freezer:LookAt
-    --click-at <x>,<y>    In headless mode, move the mouse there and click
+    --click-at <x>,<y>    In headless mode, move the mouse there and click; always a click of
+                          its own, never the second of a double click, however close the
+                          step before
+    --double-click-at <x>,<y>
+                          In headless mode, move the mouse there and double-click: a click,
+                          then a second press that is the double click (LeftDoubleClick)
     --click-on <node>     In headless mode, move the mouse over a scene node where it is
                           now (the centre of its hit area) and click, e.g. a wandering
                           character
@@ -102,7 +107,7 @@ OPTIONS:
                           in the save directory (save001.dsv) or its path
     --help                Show this message
 
---click, --click-at, --click-on, --right-click-at, --drag, --wheel, --key, --hold-key,
+--click, --click-at, --double-click-at, --click-on, --right-click-at, --drag, --wheel, --key, --hold-key,
 --repeat-key, --type and --wait are steps: they run in the order given, --after frames apart, starting one
 frame after the scene is up, once its scripts have placed the actor, as
 for a player who acts when the scene shows.
@@ -138,6 +143,8 @@ enum Step {
     /// Raise an event on a scene node by name (`node` or `node:event`).
     Node(String),
     ClickAt(i32, i32),
+    /// A click, then the second press of a double click.
+    DoubleClickAt(i32, i32),
     /// Click a scene node where it is at that moment.
     ClickOn(String),
     RightClickAt(i32, i32),
@@ -291,6 +298,14 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
                     .ok_or_else(|| format!("--click-at expects <x>,<y>, got `{v}`"))?;
                 steps.push(Step::ClickAt(x, y));
+            }
+            "--double-click-at" => {
+                let v = value(&mut i)?;
+                let (x, y) = v
+                    .split_once(',')
+                    .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
+                    .ok_or_else(|| format!("--double-click-at expects <x>,<y>, got `{v}`"))?;
+                steps.push(Step::DoubleClickAt(x, y));
             }
             "--click-on" => steps.push(Step::ClickOn(value(&mut i)?.clone())),
             "--type" => steps.push(Step::Type(value(&mut i)?.clone())),
@@ -611,8 +626,12 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                         }
                     }
                 }
+                // Each step is a click of its own: two steps on the same
+                // point a few frames apart are not a double click.
+                runtime.world.forget_clicks();
+                let double = matches!(step, Step::DoubleClickAt(..));
                 let (x, y, right) = match step {
-                    Step::ClickAt(x, y) => (*x, *y, false),
+                    Step::ClickAt(x, y) | Step::DoubleClickAt(x, y) => (*x, *y, false),
                     Step::ClickOn(node) => {
                         let point = runtime
                             .world
@@ -767,6 +786,18 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 if right {
                     runtime.mouse_right_up();
                 } else {
+                    runtime.mouse_left_up();
+                }
+                if double {
+                    // The second press, a frame later: the double click.
+                    for line in runtime.tick(options.dt) {
+                        println!("[{tick}] {line}");
+                    }
+                    println!("[{tick}] second press: double click");
+                    runtime.mouse_left_down();
+                    for line in runtime.tick(options.dt) {
+                        println!("[{tick}] {line}");
+                    }
                     runtime.mouse_left_up();
                 }
             }

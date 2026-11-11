@@ -34,7 +34,7 @@ How the list was made. For every class with a script interface, the names tested
 | `LOG` | function | **done** | Writes its argument to the game log (`sc: ...`). |
 | `Sleep` | function | **done** | Suspends the calling script for N milliseconds. |
 | `WaitFor` | function | **done** | Suspends the script until an object is ready (finished walking, talking, animating). |
-| `Random` | function | **done** | Random integer in [min, max], either order; as in WME a draw has 15 bits, so the result never exceeds min + 32767. Seeded from the clock at start; the generator is Luma's own, so sequences differ from WME's (see `docs/game-loop.md`). |
+| `Random` | function | **done** | Random integer in [min, max], either order, over the whole span (WME's 15-bit draws never exceed min + 32767). Seeded from the clock at start; the generator is Luma's own, so sequences differ from WME's (see `docs/game-loop.md`). |
 | `SetScriptTimeSlice` | function | **done** | Limits how long the calling script runs per frame before yielding. |
 | `MakeRGBA`, `MakeRGB`, `RGB` | function | **done** | Packs r, g, b (and a) into the engine's 0xAARRGGBB integer. |
 | `MakeHSL` | function | **done** | Builds an opaque colour integer from hue, saturation and lightness in 0..=255 (`CBUtils::HSLtoRGB`), single-precision arithmetic and byte truncation included. |

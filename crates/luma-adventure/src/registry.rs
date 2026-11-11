@@ -5,8 +5,8 @@
 //! Windows registry, and reads them from the `wme.ini` beside the game
 //! first, then from the registry. Luma keeps them in `settings.ini` in
 //! the save directory, under the registry's section names, and reads a
-//! game's own `wme.ini` first as the original does. See
-//! `docs/saving.md`.
+//! game's own `wme.ini` for the values never written, so that a value
+//! written is always read back. See `docs/saving.md`.
 //!
 //! Written with reference to `BRegistry.cpp` and `BGame.cpp`
 //! (`RegReadNumber`, `RegReadString`, `RegWriteNumber`,
@@ -23,8 +23,8 @@ pub const SETTINGS_INI: &str = "settings.ini";
 /// The section the script-visible settings live in.
 pub const PRIVATE_SECTION: &str = "PrivateSettings";
 
-/// The settings file a game may ship in its directory, read before the
-/// player's own (`CBRegistry::m_IniName`).
+/// The settings file a game may ship in its directory, which presets
+/// the values the player's own file lacks (`CBRegistry::m_IniName`).
 pub const GAME_INI: &str = "wme.ini";
 
 /// The largest `wme.ini` read; a settings file is a few lines.
@@ -154,36 +154,21 @@ impl World {
         }
     }
 
-    /// A text setting (`CBRegistry::ReadString`): the value of the
-    /// game's `wme.ini` when it has one that differs from `init`, else
-    /// the value the player's `settings.ini` holds, else `init`. As in
-    /// the original, a value in `wme.ini` hides whatever was written
-    /// since, unless it equals the default the reader passes.
+    /// A text setting (`CBRegistry::ReadString`): the value the
+    /// player's `settings.ini` holds, else the game's `wme.ini` preset,
+    /// else `init`. (The original looks in `wme.ini` first and never
+    /// writes there, so a preset hides whatever the game writes
+    /// afterwards; in Luma a value written is read back.)
     pub fn registry_string(&mut self, section: &str, key: &str, init: &str) -> String {
-        if let Some(value) = self.read_game_ini().get(section, key) {
-            if value != init {
-                return value.to_string();
-            }
-        }
-        self.read_ini()
-            .get(section, key)
-            .map_or_else(|| init.to_string(), str::to_string)
+        self.read_engine_setting(section, key)
+            .unwrap_or_else(|| init.to_string())
     }
 
     /// A number setting (`CBRegistry::ReadInt`): the leading integer of
-    /// the value, as `GetPrivateProfileInt` reads it, from the game's
-    /// `wme.ini` when it differs from `init`, else from the player's
-    /// `settings.ini`, else `init`.
+    /// the value, as `GetPrivateProfileInt` reads it, from the player's
+    /// `settings.ini`, else from the game's `wme.ini`, else `init`.
     pub fn registry_int(&mut self, section: &str, key: &str, init: i32) -> i32 {
-        if let Some(value) = self.read_game_ini().get(section, key) {
-            let value = luma_script::atoi(value);
-            if value != init {
-                return value;
-            }
-        }
-        self.read_ini()
-            .get(section, key)
-            .map_or(init, luma_script::atoi)
+        self.read_engine_int(section, key).unwrap_or(init)
     }
 
     /// A private setting as stored (`RegReadString` without its
@@ -202,13 +187,13 @@ impl World {
 
     /// A value the engine itself keeps between runs (`CBRegistry::
     /// ReadString` for a section of its own, such as `Video`): the
-    /// game's `wme.ini` first, then the player's `settings.ini`; `None`
+    /// player's `settings.ini` first, then the game's `wme.ini`; `None`
     /// when neither has the key.
     pub fn read_engine_setting(&mut self, section: &str, key: &str) -> Option<String> {
-        if let Some(value) = self.read_game_ini().get(section, key) {
+        if let Some(value) = self.read_ini().get(section, key) {
             return Some(value.to_string());
         }
-        self.read_ini().get(section, key).map(str::to_string)
+        self.read_game_ini().get(section, key).map(str::to_string)
     }
 
     /// A number the engine keeps between runs (`CBRegistry::ReadInt`):

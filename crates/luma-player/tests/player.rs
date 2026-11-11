@@ -116,6 +116,8 @@ fn renders_a_screenshot() {
 #[test]
 fn headless_steps_type_into_the_focused_editor() {
     const SCRIPT: &str = r#"
+global clicks = 0;
+global doubles = 0;
 global r1 = Random(0, 30000);
 global r2 = Random(0, 30000);
 global r3 = Random(0, 30000);
@@ -124,6 +126,16 @@ win.Visible = true;
 var name = win.GetWidget("name");
 name.Focus();
 Game.ChangeScene("room.scene");
+
+on "LeftClick"
+{
+  clicks = clicks + 1;
+}
+
+on "LeftDoubleClick"
+{
+  doubles = doubles + 1;
+}
 "#;
     let dir = temp_dir();
     let mut pkg = PackageBuilder::new("data");
@@ -191,6 +203,34 @@ Game.ChangeScene("room.scene");
         "--type", "ab", "--key", "ctrl+65", "--key", "ctrl+67", "--key", "35", "--key", "ctrl+86",
     ]);
     assert!(out.contains("text \"abab\""), "{out}");
+    // Two `--click-at` on the same point a frame apart are two clicks;
+    // `--double-click-at` is a click and a double click.
+    let out = run(&[
+        "--click-at",
+        "50,25",
+        "--click-at",
+        "50,25",
+        "--click-at",
+        "50,25",
+        "--global",
+        "clicks",
+        "--global",
+        "doubles",
+    ]);
+    assert!(out.contains("global clicks: Int(3)"), "{out}");
+    assert!(out.contains("global doubles: Int(0)"), "{out}");
+    let out = run(&[
+        "--click-at",
+        "50,25",
+        "--double-click-at",
+        "50,25",
+        "--global",
+        "clicks",
+        "--global",
+        "doubles",
+    ]);
+    assert!(out.contains("global clicks: Int(2)"), "{out}");
+    assert!(out.contains("global doubles: Int(1)"), "{out}");
     // Headless runs draw the same random numbers every time, a seed
     // gives others, and the clock others again.
     let draws = |steps: &[&str]| -> Vec<String> {

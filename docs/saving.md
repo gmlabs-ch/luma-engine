@@ -246,21 +246,20 @@ logged and the value is lost, as the original engine reports nothing
 to the script either.
 
 A game may ship a `wme.ini` in its directory (a loose file beside the
-packages) to preset values. As in the original (`CBRegistry::
-ReadString`, `ReadInt`), a read looks there first, in the same sections,
-and only then in the player's `settings.ini`. Writes never touch
-`wme.ini`, so a value it holds keeps hiding what the game writes
-afterwards, with one exception the original has too: when the value in
-`wme.ini` equals the default the script passes, the player's value is
-looked up. So `RegReadNumber("Volume", 80)` over a `wme.ini` saying
-`Volume=80` returns what the player last set, while
-`RegReadNumber("Volume", 100)` always returns 80. The file is read as
-the game's ANSI text; one larger than 1 MB is ignored.
+packages) to preset values, in the same sections. A read takes the
+player's `settings.ini` value when there is one, else the preset of
+`wme.ini`, else the default; writes never touch `wme.ini`. This differs
+from the original on purpose: it looks in `wme.ini` first
+(`CBRegistry::ReadString`, `ReadInt`) and writes to the registry, so a
+preset keeps hiding what the game writes afterwards (unless the script
+happens to read with a default equal to the preset). In Luma a value a
+script writes is read back as written. The file is read as the game's
+ANSI text; one larger than 1 MB is ignored.
 
 The same file holds the settings the engine keeps for itself, under the
 sections and keys of the original's registry (`World::
 read_engine_setting`, `read_engine_int`, `write_engine_setting`); a
-game's `wme.ini` is read first for these too:
+game's `wme.ini` presets these too:
 
 | Section | Key | Meaning |
 |---------|-----|---------|

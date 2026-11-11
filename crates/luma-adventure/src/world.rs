@@ -3594,34 +3594,27 @@ impl Runtime {
     /// The wheel turns (`CBGame::HandleMouseWheel`): `MouseWheelUp` for a
     /// positive `delta`, `MouseWheelDown` for a negative one, raised on
     /// the focused window when its scripts handle that event, else on
-    /// the game. As in the original, a focused window that handles
-    /// `MouseWheelUp` but not `MouseWheelDown` gets `MouseWheelUp` for
-    /// either direction.
+    /// the game. (The original raises `MouseWheelUp` on a focused
+    /// window that handles it but not `MouseWheelDown` when the wheel
+    /// turns down, a slip of its `else if`; Luma does not.)
     pub fn mouse_wheel(&mut self, delta: i32) {
         if delta == 0 {
             return;
-        }
-        if let Some(window) = self.world.focused_window() {
-            // The window's focused control comes first in the original
-            // (`CUIWindow::HandleMouseWheel`); no control uses the wheel.
-            let event = if delta < 0 && self.engine.can_handle_event(window, "MouseWheelDown") {
-                Some("MouseWheelDown")
-            } else if self.engine.can_handle_event(window, "MouseWheelUp") {
-                Some("MouseWheelUp")
-            } else {
-                None
-            };
-            if let Some(event) = event {
-                self.engine
-                    .apply_event(&mut self.world, window, event, false);
-                return;
-            }
         }
         let event = if delta < 0 {
             "MouseWheelDown"
         } else {
             "MouseWheelUp"
         };
+        if let Some(window) = self.world.focused_window() {
+            // The window's focused control comes first in the original
+            // (`CUIWindow::HandleMouseWheel`); no control uses the wheel.
+            if self.engine.can_handle_event(window, event) {
+                self.engine
+                    .apply_event(&mut self.world, window, event, false);
+                return;
+            }
+        }
         let game = self.world.game_id;
         self.engine.apply_event(&mut self.world, game, event, false);
     }

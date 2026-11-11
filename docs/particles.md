@@ -102,8 +102,7 @@ fade-in. The random values come from the world's generator, the one
 scripts' `Random` uses (see
 [game-loop.md](game-loop.md#random-numbers)): seeded from the clock
 when the game starts, so the pattern differs at each launch, and
-deterministic under a fixed seed. As in the original, a random fraction
-is one of 32768 values (`rand() / RAND_MAX`).
+deterministic under a fixed seed.
 
 ## Drawing
 
