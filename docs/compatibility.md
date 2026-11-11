@@ -183,8 +183,8 @@ How the list was made. For every class with a script interface, the names tested
 | `SetMusicVolume`, `SetMusicChannelVolume`, `GetMusicVolume`, `GetMusicChannelVolume` | method | **done** | Sets / reads a channel's volume. |
 | `MusicCrossfade` | method | **done** | Crossfades between two music channels over a duration. |
 | `GetSoundLength` | method | **done** | Duration in milliseconds of a sound file. |
-| `SetMousePos` | method | **done** | Moves the mouse cursor. |
-| `LockMouseRect` | method | **done** | Confines the mouse to a rectangle (edges put in order; applies while all four are non-zero, as in WME). Luma clamps the position the game sees and does not move the system cursor. |
+| `SetMousePos` | method | **done** | Moves the mouse cursor, kept on the screen; the front-end moves the system cursor there (`World::take_cursor_warp`). |
+| `LockMouseRect` | method | **done** | Confines the mouse to a rectangle (edges put in order; applies while all four are non-zero, as in WME). A mouse outside the rectangle is put back on its edge, the system cursor with it. |
 | `PlayVideo` | method | **no-op** | Deprecated AVI player (DirectShow, Windows codecs). Luma plays an Ogg Theora file given to it as `PlayTheora` does and refuses an `.avi` with a log line and `false`; AVI decoding is out of scope (see `docs/video.md`). |
 | `PlayTheora` | method | **done** | Plays an Ogg Theora video full-frame (file, type, x, y, freeze music, drop frames, subtitles). |
 | `QuitGame` | method | **done** | Ends the game. |
@@ -225,7 +225,7 @@ How the list was made. For every class with a script interface, the names tested
 | `CurrentTime` | get | **done** | Game timer in milliseconds (stops while frozen). |
 | `WindowsTime` | get | **done** | Real-time clock in milliseconds (timeGetTime). Luma returns the wall clock since the game started, which runs while frozen. |
 | `WindowedMode` | get | **done** | True when running windowed: the front-end says so (`World::set_windowed`); the player does, headless runs read false. |
-| `MouseX`, `MouseY` | get/set | **done** | Mouse position in game coordinates. |
+| `MouseX`, `MouseY` | get/set | **done** | Mouse position in game coordinates; setting one moves the system cursor too. |
 | `MainObject` | get/set | **done** | The object the player controls and the camera follows. |
 | `ActiveObject` | get | **done** | The object under the mouse. |
 | `ScreenWidth`, `ScreenHeight` | get | **done** | Game resolution. |

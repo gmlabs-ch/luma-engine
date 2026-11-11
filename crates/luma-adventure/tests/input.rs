@@ -98,6 +98,21 @@ on "Music"
   Game.PlayMusic("audio\long.wav");
 }
 
+on "Warp"
+{
+  Game.SetMousePos(500, 0 - 3);
+}
+
+on "WarpX"
+{
+  Game.MouseX = 10;
+}
+
+on "Lock"
+{
+  Game.LockMouseRect(20, 20, 10, 10);
+}
+
 on "Reorder"
 {
   var name = win.GetWidget("name");
@@ -635,5 +650,47 @@ fn an_inactive_window_pauses_the_sounds() {
         runtime.world.active_object(),
         runtime.world.widget(window, "ok")
     );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_game_moves_the_system_cursor() {
+    let (mut runtime, dir, _, _) = start();
+    let game = runtime.world.game_id();
+    let raise = |runtime: &mut Runtime, event: &str| {
+        runtime
+            .engine
+            .apply_event(&mut runtime.world, game, event, false);
+        runtime.tick(16);
+    };
+    let at = |runtime: &Runtime| (runtime.world.mouse().x, runtime.world.mouse().y);
+    // A mouse movement is the system's: nothing to move.
+    runtime.mouse_move(30, 5);
+    assert_eq!(runtime.world.take_cursor_warp(), None);
+    // `SetMousePos` keeps the point on the screen (64x32, far edges
+    // included) and asks the front-end to put the system cursor there.
+    raise(&mut runtime, "Warp");
+    assert_eq!(at(&runtime), (64, 0));
+    assert_eq!(runtime.world.take_cursor_warp(), Some((64, 0)));
+    assert_eq!(runtime.world.take_cursor_warp(), None, "asked once");
+    // `Game.MouseX = ...` moves it too (`ResetMousePos`).
+    raise(&mut runtime, "WarpX");
+    assert_eq!(at(&runtime), (10, 0));
+    assert_eq!(runtime.world.take_cursor_warp(), Some((10, 0)));
+    // The mouse lock, set while the mouse is outside the rectangle,
+    // brings it back at the next frame, and the system cursor with it.
+    raise(&mut runtime, "Lock");
+    assert_eq!(runtime.world.take_cursor_warp(), None);
+    runtime.tick(16);
+    assert_eq!(at(&runtime), (10, 10));
+    assert_eq!(runtime.world.take_cursor_warp(), Some((10, 10)));
+    // A movement out of the rectangle is put back on its edge; one
+    // inside is left alone.
+    runtime.mouse_move(40, 15);
+    assert_eq!(at(&runtime), (20, 15));
+    assert_eq!(runtime.world.take_cursor_warp(), Some((20, 15)));
+    runtime.mouse_move(12, 18);
+    assert_eq!(at(&runtime), (12, 18));
+    assert_eq!(runtime.world.take_cursor_warp(), None);
     std::fs::remove_dir_all(&dir).ok();
 }

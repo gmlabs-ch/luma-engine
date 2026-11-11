@@ -262,13 +262,24 @@ while an exclusive one had the focus gives it back. A window that is
 already the last of the list is left alone: it has the focus from the
 next frame.
 
-`Game.MouseX` and `Game.MouseY` are the mouse in game pixels
-(writable, as is `Game.SetMousePos`). `Game.LockMouseRect(left, top,
-right, bottom)` keeps the position the game sees inside a rectangle
-(the edges are put in order; a rectangle with a zero edge unlocks,
-since the original engine applies the lock only while all four edges
-are non-zero); the original engine also moves the system cursor back
-into the rectangle, which Luma does not. `Scene.MouseX` and `Scene.MouseY`
+`Game.MouseX` and `Game.MouseY` are the mouse in game pixels. They are
+writable, and `Game.SetMousePos(x, y)` moves the mouse to a point kept
+on the screen (0 to the width, 0 to the height). `Game.LockMouseRect(
+left, top, right, bottom)` keeps the mouse inside a rectangle (the
+edges are put in order; a rectangle with a zero edge unlocks, since the
+original engine applies the lock only while all four edges are
+non-zero): at every frame and every movement, a mouse outside is put
+back on the rectangle's edge (`CBGame::GetMousePos`).
+
+In all these cases, and for the accessibility cursor skip, the original
+moves the system cursor (`CBPlatform::SetCursorPos`). In Luma the game
+sees the new position at once and the front-end is told once
+(`World::take_cursor_warp`, in game pixels): `luma-player` moves the
+system cursor to that pixel of the letterboxed frame after the frame's
+update, so that the next mouse movement starts from there. Where the
+window system refuses to move the cursor (Wayland without a pointer
+lock), the position holds until the mouse moves again; this is said
+once on the error output. `Scene.MouseX` and `Scene.MouseY`
 add the scene's scroll offset and take off the scene viewport's origin
 (`SCENE_VIEWPORT` in the game file, `Game.SetSceneViewport`, see
 [formats/game.md](formats/game.md); a scene's own `VIEWPORT` or

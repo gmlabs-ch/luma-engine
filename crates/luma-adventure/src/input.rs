@@ -491,16 +491,53 @@ impl World {
         &self.mouse
     }
 
-    /// Moves the mouse to a point in game pixels, kept inside the lock
-    /// rectangle when one applies (`CBGame::GetMousePos`).
+    /// The pointer is at a point in game pixels, as the front-end
+    /// reports it (`CBGame::GetMousePos`). The game sees it kept inside
+    /// the lock rectangle when one applies; a pointer outside is put
+    /// back on the rectangle's edge, which the front-end learns from
+    /// [`World::take_cursor_warp`].
     pub fn set_mouse(&mut self, x: i32, y: i32) {
         self.pointer = (x, y);
-        let (x, y) = match self.mouse_lock() {
-            Some((left, top, right, bottom)) => (x.clamp(left, right), y.clamp(top, bottom)),
-            None => (x, y),
-        };
         self.mouse.x = x;
         self.mouse.y = y;
+        self.apply_mouse_lock();
+    }
+
+    /// Keeps the mouse inside the lock rectangle (`CBGame::
+    /// GetMousePos`, which every frame reads the pointer, clamps it and
+    /// moves the system cursor back when it was outside).
+    pub(crate) fn apply_mouse_lock(&mut self) {
+        let Some((left, top, right, bottom)) = self.mouse_lock() else {
+            return;
+        };
+        let (x, y) = (
+            self.mouse.x.clamp(left, right),
+            self.mouse.y.clamp(top, bottom),
+        );
+        if (x, y) != (self.mouse.x, self.mouse.y) {
+            self.warp_mouse(x, y);
+        }
+    }
+
+    /// The game moves the mouse (`CBPlatform::SetCursorPos`, from
+    /// `Game.SetMousePos`, `Game.MouseX` and `MouseY`, the mouse lock
+    /// and the accessibility cursor skip): the position the game sees
+    /// changes at once, and the front-end is asked to move the system
+    /// cursor there ([`World::take_cursor_warp`]), without which the
+    /// next mouse movement would undo the change.
+    pub fn warp_mouse(&mut self, x: i32, y: i32) {
+        self.pointer = (x, y);
+        self.mouse.x = x;
+        self.mouse.y = y;
+        self.cursor_warp = Some((x, y));
+        self.apply_mouse_lock();
+    }
+
+    /// Where the game last moved the mouse, in game pixels, when it did
+    /// since the last call: the front-end moves the system cursor
+    /// there.
+    pub fn take_cursor_warp(&mut self) -> Option<(i32, i32)> {
+        self.cursor_warp.take()
     }
 
     /// The keyboard state.

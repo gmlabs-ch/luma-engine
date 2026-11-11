@@ -493,8 +493,16 @@ impl World {
             "MainObject" => self.main_object = value.as_native(),
             "Subtitles" => self.subtitles = value.get_bool(self),
             "SubtitlesSpeed" => self.subtitles_speed = value.get_int(self),
-            "MouseX" => self.mouse.x = value.get_int(self),
-            "MouseY" => self.mouse.y = value.get_int(self),
+            // `m_MousePos` is set, then the system cursor is moved
+            // there (`ResetMousePos`).
+            "MouseX" => {
+                let x = value.get_int(self);
+                self.warp_mouse(x, self.mouse.y);
+            }
+            "MouseY" => {
+                let y = value.get_int(self);
+                self.warp_mouse(self.mouse.x, y);
+            }
             "SelectedItem" => self.select_item(value),
             "InventoryVisible" => self.inventory.visible = value.get_bool(self),
             "InventoryScrollOffset" => self.inventory.scroll_offset = value.get_int(self),
@@ -662,8 +670,10 @@ impl World {
                 Return::null()
             }
             "SetMousePos" => {
-                let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
-                self.set_mouse(x, y);
+                // Kept on the screen, its far edges included.
+                let x = arg(0).get_int(self).clamp(0, self.settings.width as i32);
+                let y = arg(1).get_int(self).clamp(0, self.settings.height as i32);
+                self.warp_mouse(x, y);
                 Return::null()
             }
             "FadeOut" | "FadeOutAsync" | "SystemFadeOut" | "SystemFadeOutAsync" | "FadeIn"

@@ -626,7 +626,7 @@ impl World {
             let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
             let cx = (x + w / 2).clamp(0, sw - 1);
             let cy = (y + h / 2).clamp(0, sh - 1);
-            self.set_mouse(cx, cy);
+            self.warp_mouse(cx, cy);
         }
     }
 

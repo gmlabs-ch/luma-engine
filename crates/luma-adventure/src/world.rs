@@ -151,6 +151,9 @@ pub struct World {
     /// Where the front-end last reported the pointer, in game pixels,
     /// before the mouse lock; it may lie outside the screen.
     pub(crate) pointer: (i32, i32),
+    /// Where the game moved the mouse since the front-end last asked
+    /// (`World::take_cursor_warp`).
+    pub(crate) cursor_warp: Option<(i32, i32)>,
     pub(crate) keyboard: Keyboard,
     pub(crate) active_object: Option<NativeId>,
     pub(crate) selected_item: Option<NativeId>,
@@ -325,6 +328,7 @@ impl World {
             failed_fonts: std::collections::HashSet::new(),
             mouse: Mouse::default(),
             pointer: (0, 0),
+            cursor_warp: None,
             keyboard: Keyboard::default(),
             active_object: None,
             selected_item: None,
@@ -841,8 +845,8 @@ impl World {
     /// Confines the mouse to a rectangle (`Game.LockMouseRect`): the
     /// edges are put in order, and a rectangle with a zero edge unlocks,
     /// since the original engine applies the lock only while all four
-    /// are non-zero. The lock clamps the position the game sees; the
-    /// system cursor is not moved.
+    /// are non-zero. The lock applies from the next frame or mouse
+    /// movement ([`World::apply_mouse_lock`]).
     pub fn lock_mouse_rect(&mut self, left: i32, top: i32, right: i32, bottom: i32) {
         let (left, right) = if right < left {
             (right, left)
@@ -3252,6 +3256,7 @@ impl Runtime {
             }
         }
         self.world.advance_time(dt);
+        self.world.apply_mouse_lock();
         self.world.reset_focused_window();
         if let Some((path, fade_in)) = self.world.scheduled_scene.take() {
             match self.world.load_scene(&mut self.engine, &path) {

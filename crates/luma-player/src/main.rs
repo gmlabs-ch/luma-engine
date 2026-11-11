@@ -5,6 +5,7 @@
 //! scripts without a window (`--headless`).
 
 mod keys;
+mod view;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -14,12 +15,12 @@ use luma::adventure::{Audio, Camera, GameSettings, Runtime, SceneView};
 use luma::archive::Vfs;
 use luma::formats::Rgba;
 use luma::formats::font::TextAlign;
-use luma::render::winit::dpi::PhysicalSize;
+use luma::render::winit::dpi::{PhysicalPosition, PhysicalSize};
 use luma::render::winit::event::{
     ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
 use luma::render::winit::keyboard::{Key, ModifiersState, NamedKey};
-use luma::render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig, letterbox};
+use luma::render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig};
 
 const USAGE: &str = "\
 luma-player - desktop player for Luma Engine
@@ -1098,6 +1099,7 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         size: PhysicalSize::new(settings.width, settings.height),
         modifiers: ModifiersState::empty(),
         started: false,
+        warp_failed: false,
         focused: true,
         occluded: false,
     };
@@ -1136,6 +1138,8 @@ struct GamePlayer {
     size: PhysicalSize<u32>,
     modifiers: ModifiersState,
     started: bool,
+    /// The system refused to move its cursor (said once).
+    warp_failed: bool,
     /// Whether the window has the keyboard focus.
     focused: bool,
     /// Whether the window is minimised or wholly hidden.
@@ -1158,14 +1162,10 @@ impl GamePlayer {
     /// A window position in game pixels, through the letterbox.
     fn to_game(&self, x: f64, y: f64) -> (i32, i32) {
         let settings = self.runtime.world.settings();
-        let (w, h) = (settings.width as f64, settings.height as f64);
-        let (vx, vy, vw, vh) = letterbox(w as f32, h as f32, self.size.width, self.size.height);
-        if vw <= 0.0 || vh <= 0.0 {
-            return (0, 0);
-        }
-        (
-            ((x - f64::from(vx)) * w / f64::from(vw)).floor() as i32,
-            ((y - f64::from(vy)) * h / f64::from(vh)).floor() as i32,
+        view::to_game(
+            (settings.width, settings.height),
+            (self.size.width, self.size.height),
+            (x, y),
         )
     }
 }
@@ -1296,6 +1296,26 @@ impl App for GamePlayer {
         }
         if self.runtime.world.quit_requested() {
             return Flow::Exit;
+        }
+        if let Some(point) = self.runtime.world.take_cursor_warp() {
+            // The game moved the mouse (`Game.SetMousePos`, the mouse
+            // lock...): the system cursor follows, where the window
+            // system allows it.
+            let settings = self.runtime.world.settings();
+            let (x, y) = view::to_window(
+                (settings.width, settings.height),
+                (frame.size.width, frame.size.height),
+                point,
+            );
+            if let Err(err) = frame
+                .window
+                .set_cursor_position(PhysicalPosition::new(x, y))
+            {
+                if !self.warp_failed {
+                    self.warp_failed = true;
+                    eprintln!("cannot move the system cursor: {err}");
+                }
+            }
         }
         self.runtime.world.upload(frame.renderer);
         if self.runtime.world.wants_frame() {

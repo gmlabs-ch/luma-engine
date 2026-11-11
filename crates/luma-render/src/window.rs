@@ -56,6 +56,8 @@ impl Default for WindowConfig {
 pub struct Frame<'a> {
     /// The renderer, to create textures.
     pub renderer: &'a Renderer,
+    /// The window, to move its cursor or read where it is.
+    pub window: &'a Window,
     /// Time since the previous frame.
     pub dt: Duration,
     /// Size of the drawable area in physical pixels.
@@ -243,6 +245,7 @@ impl<A: App> Runner<A> {
         let now = Instant::now();
         let frame = Frame {
             renderer: &state.renderer,
+            window: &state.window,
             dt: now - self.last_frame,
             size: PhysicalSize::new(state.config.width, state.config.height),
             scale_factor: state.window.scale_factor(),
