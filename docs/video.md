@@ -244,7 +244,7 @@ entity.PlayTheora(filename, looping, alphaFile, startTime)
 | `filename` | | The `.ogg` or `.ogv` file. |
 | `looping` | `false` | Whether the video starts again at its end. |
 | `alphaFile` | | An image whose alpha channel masks the frames, pixel by pixel (the frame stays opaque outside the image). No colour key applies (`SetAlphaImage`): an image without an alpha channel leaves the frames opaque. |
-| `startTime` | `0` | Where to start in the video, in milliseconds. |
+| `startTime` | `0` | Where to start in the video, in milliseconds. Playback starts at the first **key frame** at or after that time, and the sound from the same place (`SeekToTime`); see below. |
 
 The video takes the place of the entity's sprite (`CAdEntity::Display`):
 drawn at the entity's position (the top-left corner of its coded frame
@@ -274,6 +274,18 @@ position.
 | `IsTheoraPlaying()` | Whether a video plays and is not paused. |
 | `PauseTheora()`, `ResumeTheora()` | Hold / release the video and its sound; `true` when the state changed. |
 | `IsTheoraPaused()` | Whether the video is paused. |
+
+A start time does not start in the middle of a group of pictures: the
+engine reads on to the next key frame and takes that frame's time as
+the start (`CVidTheoraPlayer::SeekToTime`, `m_SeekingKeyframe`), so the
+video starts up to a key-frame interval later than asked. Luma starts
+at the first key frame whose time is not before the start time. The
+original is a little coarser, in ways that depend on the layout of the
+file and are not reproduced: it looks for the first Ogg page whose last
+frame reaches the time, drops what it had read of the file after that
+page (it reads in blocks of 4096 bytes) and takes the first key frame
+that follows; and it then counts time and subtitle frames from that
+point as if the video began there.
 
 A looping video is opened again at each round by the original
 (`ResetStream` calls `Initialize` and `Play` without a volume), with two

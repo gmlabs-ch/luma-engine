@@ -477,10 +477,26 @@ pub(crate) fn step_player(
             .pending
             .as_ref()
             .is_some_and(|f| f.time_ms < movie_time);
-        // Before the start, the frames up to the start time are skipped
-        // (`SeekToTime`).
+        // Before the start (`SeekToTime`, `m_SeekingKeyframe`): the
+        // frames are passed up to the first key frame at or after the
+        // start time, and that key frame's time becomes the time offset:
+        // playback starts there, up to a key-frame interval after the
+        // time asked for, and the sound from the same place.
         let seeking = !player.started && player.time_offset_ms != 0;
-        if !late || !fresh || (!seeking && (player.dont_drop_frames || !player.started)) {
+        if seeking {
+            let key_time = player
+                .pending
+                .as_ref()
+                .filter(|f| !late && f.keyframe)
+                .map(|f| f.time_ms);
+            if let Some(time) = key_time {
+                player.time_offset_ms = time;
+                break;
+            }
+            player.pending = None;
+            continue;
+        }
+        if !late || !fresh || player.dont_drop_frames || !player.started {
             break;
         }
         player.pending = None;
@@ -1236,6 +1252,34 @@ mod tests {
         assert_eq!(s.shown(), Some("Last"));
         s.update(200);
         assert_eq!(s.shown(), None);
+    }
+
+    /// `CVidTheoraPlayer::SeekToTime`: playback starts at a key frame.
+    #[test]
+    fn a_start_time_begins_at_the_next_key_frame() {
+        // 20 frames at 10 per second, a key frame every eighth.
+        let clip = luma_video::synthetic_clip(32, 32, 20, 10);
+        let mut log = Vec::new();
+        let mut player = player_of(clip.clone(), None);
+        player.time_offset_ms = 500;
+        assert!(!step_player(&mut player, None, 1000, &mut log));
+        let frame = player.frame.as_ref().unwrap();
+        assert!(frame.keyframe);
+        assert_eq!((frame.index, frame.time_ms), (8, 800));
+        assert_eq!(player.time_offset_ms, 800);
+        // The movie goes on from the key frame.
+        assert!(!step_player(&mut player, None, 1100, &mut log));
+        assert_eq!(player.frame_index(), Some(9));
+        // A start time on a key frame starts there.
+        let mut player = player_of(clip.clone(), None);
+        player.time_offset_ms = 1600;
+        assert!(!step_player(&mut player, None, 0, &mut log));
+        assert_eq!(player.frame_index(), Some(16));
+        // Past the last key frame there is nothing to show.
+        let mut player = player_of(clip, None);
+        player.time_offset_ms = 1700;
+        assert!(step_player(&mut player, None, 0, &mut log));
+        assert!(log.is_empty(), "{log:?}");
     }
 
     /// `CVidTheoraPlayer::Play` places the coded frame, not the picture.
