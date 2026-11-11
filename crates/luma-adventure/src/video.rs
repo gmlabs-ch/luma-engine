@@ -398,9 +398,9 @@ pub(crate) fn step_player(
         player.started = true;
         player.start_clock = now;
         if let (Some(sound), Some(audio)) = (player.sound, audio) {
-            if player.time_offset_ms != 0 {
-                audio.set_position_ms(sound, player.time_offset_ms);
-            }
+            // `Play` starts a sound where its start position says, and
+            // keeps that position for the next play: set it each time.
+            audio.set_start_ms(sound, player.time_offset_ms);
             audio.play(sound, false);
         }
     }

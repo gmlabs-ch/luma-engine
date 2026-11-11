@@ -1111,6 +1111,20 @@ impl SceneView {
         self.talks.values_mut().map(|t| &mut t.sentence)
     }
 
+    /// The speech sound of the sentence an entity is saying.
+    pub(crate) fn speech_sound(&self, r: EntityRef) -> Option<luma_audio::SoundId> {
+        self.talks.get(&r)?.sentence.sound
+    }
+
+    /// The entities saying a sentence with a speech sound.
+    pub(crate) fn speaking_entities(&self) -> Vec<EntityRef> {
+        self.talks
+            .iter()
+            .filter(|(_, t)| t.sentence.sound.is_some())
+            .map(|(r, _)| *r)
+            .collect()
+    }
+
     /// Ends every sentence older than 300 ms (`FinishSentences`).
     pub fn skip_sentences(&mut self, timer: u64) {
         for talk in self.talks.values_mut() {

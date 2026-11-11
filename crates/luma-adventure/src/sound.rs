@@ -2,14 +2,14 @@
 //! music channels, the crossfade between two of them, and the speech
 //! files of sentences (see `docs/audio.md`).
 //!
-//! Written with reference to `BObject.cpp`, `BGame.cpp`, `AdGame.cpp` and
-//! `BSoundMgr.cpp` of WME Lite (MIT License, Copyright (c) 2011 Jan
-//! Nedoma); see `NOTICE`.
+//! Written with reference to `BObject.cpp`, `BGame.cpp`, `BSoundMgr.cpp`,
+//! `AdGame.cpp`, `AdObject.cpp` and `AdSentence.cpp` of Wintermute Engine
+//! 1.x (MIT License, Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use luma_audio::{Audio, Clip, SoundEffect, SoundId, SoundType};
+use luma_audio::{Audio, Clip, PAN_LEFT, PAN_RIGHT, SoundEffect, SoundId, SoundType};
 use luma_script::NativeId;
 
 use crate::objects::Kind;
@@ -26,9 +26,6 @@ pub struct ObjectSound {
     pub id: SoundId,
     /// The file it came from.
     pub filename: String,
-    /// An event raised on the owner when the sound ends
-    /// (`PlaySoundEvent`).
-    pub event: Option<String>,
 }
 
 /// The effect an object applies to its sounds (`m_SFXType` and
@@ -101,6 +98,11 @@ pub struct ObjectSfx {
     pub volume: i32,
     /// The effect applied to the object's sounds (`m_SFXType`).
     pub effect: Option<SfxEffect>,
+    /// An event raised on the object when its sound is not playing
+    /// (`m_SoundEvent`, set by `PlaySoundEvent`). It belongs to the
+    /// object, not to the sound: it outlives a `StopSound` and waits for
+    /// the next sound loaded.
+    pub event: Option<String>,
 }
 
 impl Default for ObjectSfx {
@@ -110,6 +112,7 @@ impl Default for ObjectSfx {
             start_ms: 0,
             volume: 100,
             effect: None,
+            event: None,
         }
     }
 }
@@ -168,13 +171,22 @@ impl Sounds {
         }
     }
 
-    /// The pan of a point on screen (`CBSoundMgr::PosToPan`): the range
-    /// from half a screen left of it to half a screen right of it, with
-    /// the screen width `width`.
-    pub fn pos_to_pan(x: i32, width: i32) -> f32 {
-        let width = width as f32;
-        let relative = ((x as f32 + 0.5 * width) / (width * 2.0)).clamp(0.0, 1.0);
-        -1.0 + relative * 2.0
+    /// The pan of a point on screen (`CBSoundMgr::PosToPan`), in
+    /// DirectSound's unit (hundredths of a decibel taken off the far
+    /// channel): a margin of five screen widths on each side of the
+    /// screen of width `width`, linear from full left to full right
+    /// across the eleven. The centre of the screen is 0, its edges about
+    /// -909 and +909; the far channel only falls silent five screens
+    /// away. Farther than that the value is out of DirectSound's range
+    /// and the sound keeps the pan it had.
+    pub fn pos_to_pan(x: i32, width: i32) -> i32 {
+        let margin = i64::from(width) * 5;
+        let (min, max) = (-margin, i64::from(width) + margin);
+        if max == min {
+            return 0;
+        }
+        let relative = (i64::from(x) + margin) as f32 / (max - min) as f32;
+        (PAN_LEFT as f32 + relative * (PAN_RIGHT - PAN_LEFT) as f32) as i32
     }
 
     /// Adds a speech directory (`AddSpeechDir`), once.
@@ -269,11 +281,46 @@ impl World {
             .map_or(0, |(clip, _)| clip.duration_ms())
     }
 
+    /// Whether the object has the sound methods: every `CBObject` of
+    /// the engine does (the game, the scene and its layers, regions and
+    /// waypoint groups, actors, entities, items, windows and controls,
+    /// particle emitters, `new Object`s).
     fn can_own_sound(&self, owner: NativeId) -> bool {
         matches!(
             self.objects.get(owner).map(|n| &n.kind),
-            Some(Kind::Game | Kind::Entity(_) | Kind::Actor | Kind::Actor3D)
+            Some(
+                Kind::Game
+                    | Kind::Scene
+                    | Kind::Layer(_)
+                    | Kind::Region { .. }
+                    | Kind::EntityRegion(_)
+                    | Kind::WaypointGroup(_)
+                    | Kind::Entity(_)
+                    | Kind::Actor
+                    | Kind::Actor3D
+                    | Kind::Attachment3D(_)
+                    | Kind::Control
+                    | Kind::Item
+                    | Kind::Emitter(_)
+                    | Kind::Object
+            )
         )
+    }
+
+    /// Whether the engine runs `UpdateSounds` on the object each frame:
+    /// the game always, an actor or an entity while it is active. Only
+    /// these raise the sound event, follow their position between the
+    /// speakers and re-apply their effect; the other objects' sounds
+    /// just play.
+    fn updates_sounds(&self, owner: NativeId) -> bool {
+        match self.objects.get(owner).map(|n| n.kind.clone()) {
+            Some(Kind::Game) => true,
+            Some(Kind::Actor) => self.actor(owner).is_some_and(|a| a.def.active),
+            #[cfg(feature = "3d")]
+            Some(Kind::Actor3D) => self.actor3d(owner).is_some_and(|a| a.active),
+            Some(Kind::Entity(r)) => self.entity_def(r).is_some_and(|e| e.active),
+            _ => false,
+        }
     }
 
     /// Loads an object's sound effect and plays it when `play_now`
@@ -306,9 +353,7 @@ impl World {
                 }
                 if play_now {
                     if let Some(s) = self.sounds.objects.get_mut(&owner) {
-                        if let Some(sound) = &mut s.sound {
-                            sound.event = event;
-                        }
+                        s.event = event;
                     }
                     if loop_start_ms != 0 {
                         self.sounds.audio.set_loop_start_ms(sound.id, loop_start_ms);
@@ -322,7 +367,11 @@ impl World {
                 let Some((clip, path)) = self.load_clip(filename) else {
                     return false;
                 };
-                let id = self.sounds.audio.add(clip, SoundType::Sfx, state.volume);
+                // The engine asks for an object's sound to be streamed.
+                let id = self
+                    .sounds
+                    .audio
+                    .add_streamed(clip, SoundType::Sfx, state.volume);
                 if state.start_ms != 0 {
                     self.sounds.audio.set_position_ms(id, state.start_ms);
                 }
@@ -330,15 +379,13 @@ impl World {
                 self.sounds
                     .audio
                     .set_effect(id, state.effect.map(SoundEffect::from));
-                let sound = ObjectSound {
-                    id,
-                    filename: path,
-                    event: if play_now { event } else { None },
-                };
+                let sound = ObjectSound { id, filename: path };
                 let entry = self.sounds.objects.entry(owner).or_default();
                 entry.sound = Some(sound);
                 entry.start_ms = 0;
                 if play_now {
+                    // `SetSoundEvent`: a load alone leaves the event.
+                    entry.event = event;
                     if loop_start_ms != 0 {
                         self.sounds.audio.set_loop_start_ms(id, loop_start_ms);
                     }
@@ -359,15 +406,19 @@ impl World {
         }
         let state = self.sounds.objects.entry(owner).or_default();
         state.effect = effect;
-        if let Some(sound) = state.sound.as_ref().map(|s| s.id) {
+        let sound = state.sound.as_ref().map(|s| s.id);
+        // Only the objects the engine updates each frame re-apply it to
+        // the sound they have; the others use it for the next sound.
+        if let Some(sound) = sound.filter(|_| self.updates_sounds(owner)) {
             self.sounds
                 .audio
                 .set_effect(sound, effect.map(SoundEffect::from));
         }
     }
 
-    /// Stops an object's sound (`StopSFX`), unloading it when asked.
-    /// Whether the object had one.
+    /// Stops an object's sound (`StopSFX`), unloading it when asked
+    /// (the default of the engine, which `StopSound` uses for every
+    /// object but a sound entity). Whether the object had one.
     pub fn stop_sfx(&mut self, owner: NativeId, unload: bool) -> bool {
         let Some(state) = self.sounds.objects.get_mut(&owner) else {
             return false;
@@ -481,10 +532,14 @@ impl World {
         }
     }
 
-    /// The pan of an object's sounds when it pans them (`SoundPanning`):
-    /// that of its position on screen; `None` when it does not.
-    fn sound_pan_of(&self, owner: NativeId) -> Option<f32> {
+    /// The pan of an object's sounds when it pans them (`SoundPanning`,
+    /// `CBObject::UpdateOneSound`): that of its position on screen,
+    /// less the scroll offset; `None` when it does not. The game itself
+    /// stands at the centre of the screen, so its sounds drift with the
+    /// scroll offset alone.
+    fn sound_pan_of(&self, owner: NativeId) -> Option<i32> {
         let x = match self.objects.get(owner).map(|n| n.kind.clone()) {
+            Some(Kind::Game) => Some(self.settings.width as i32 / 2),
             Some(Kind::Actor) => self
                 .actor(owner)
                 .filter(|a| a.def.active && a.def.sound_panning)
@@ -506,10 +561,33 @@ impl World {
         ))
     }
 
+    /// The speech sound of the sentence an object is saying.
+    pub fn speech_sound_of(&self, owner: NativeId) -> Option<SoundId> {
+        match self.objects.get(owner).map(|n| n.kind.clone())? {
+            Kind::Actor => self.actor(owner)?.sentence.as_ref()?.sound,
+            #[cfg(feature = "3d")]
+            Kind::Actor3D => self.actor3d(owner)?.sentence.as_ref()?.sound,
+            Kind::Entity(r) => self.view_of(r)?.speech_sound(r),
+            _ => None,
+        }
+    }
+
+    /// Centres an object's sound and the speech of its sentence
+    /// (`CAdObject::ResetSoundPan`): what turning `SoundPanning` off
+    /// does.
+    pub(crate) fn reset_sound_pan(&mut self, owner: NativeId) {
+        let speech = self.speech_sound_of(owner);
+        let own = self.sfx_of(owner).map(|s| s.id);
+        for id in speech.into_iter().chain(own) {
+            self.sounds.audio.set_pan(id, 0);
+        }
+    }
+
     /// Plays the sound of a sprite frame that became current
     /// (`CBFrame::OneTimeDisplay`): a sound of its own beside the
-    /// object's `PlaySound` one, panned with the object when it pans its
-    /// sounds (`CBObject::UpdateOneSound`), dropped when it ends.
+    /// object's `PlaySound` one, given the object's pan when it pans its
+    /// sounds and the object's effect (`CBObject::UpdateOneSound`) as it
+    /// starts, dropped when it ends.
     pub(crate) fn play_frame_sound(&mut self, owner: NativeId, file: &str) {
         let Some((clip, _)) = self.load_clip(file) else {
             return;
@@ -517,6 +595,9 @@ impl World {
         let id = self.sounds.audio.add(clip, SoundType::Sfx, 100);
         if let Some(pan) = self.sound_pan_of(owner) {
             self.sounds.audio.set_pan(id, pan);
+        }
+        if let Some(effect) = self.sounds.objects.get(&owner).and_then(|s| s.effect) {
+            self.sounds.audio.set_effect(id, Some(effect.into()));
         }
         self.sounds.audio.play(id, false);
         self.sounds.frame_sounds.entry(owner).or_default().push(id);
@@ -544,7 +625,8 @@ impl World {
         let audio = &mut self.sounds.audio;
         self.sounds.frame_sounds.retain(|_, ids| {
             ids.retain(|id| {
-                if audio.is_playing(*id) {
+                // A sound the freeze holds has not ended.
+                if audio.is_active(*id) {
                     true
                 } else {
                     audio.remove(*id);
@@ -555,36 +637,79 @@ impl World {
         });
     }
 
-    /// One frame of the objects' sounds (`CBObject::UpdateSounds`): a
-    /// sound event fires when its sound ended, the sounds of the objects
-    /// that pan follow their position on screen, and the frame sounds
-    /// that ended are forgotten.
+    /// One frame of the objects' sounds (`CBObject::UpdateSounds`,
+    /// `CAdObject::UpdateSounds`), for the objects the engine updates
+    /// (the game, the active actors and entities): the sound event fires
+    /// when the object's sound is not playing (a sound held by a frozen
+    /// game is not, so the event fires then), the object's sound and the
+    /// speech of its sentence follow its position on screen and take its
+    /// effect; then the frame sounds that ended are forgotten.
     pub fn update_sounds(&mut self) {
+        self.update_crossfade();
         let owners: Vec<NativeId> = self.sounds.objects.keys().copied().collect();
         for owner in owners {
-            let Some(sound) = self.sfx_of(owner).cloned() else {
+            if !self.updates_sounds(owner) {
+                continue;
+            }
+            let Some(sound) = self.sfx_of(owner).map(|s| s.id) else {
                 continue;
             };
-            if let Some(event) = &sound.event {
-                if !self.sounds.audio.is_playing(sound.id) {
-                    let event = event.clone();
-                    if let Some(s) = self
-                        .sounds
-                        .objects
-                        .get_mut(&owner)
-                        .and_then(|s| s.sound.as_mut())
-                    {
-                        s.event = None;
-                    }
+            if !self.sounds.audio.is_playing(sound) {
+                let event = self
+                    .sounds
+                    .objects
+                    .get_mut(&owner)
+                    .and_then(|s| s.event.take());
+                if let Some(event) = event {
                     self.queue_event(owner, event);
                 }
             }
             if let Some(pan) = self.sound_pan_of(owner) {
-                self.sounds.audio.set_pan(sound.id, pan);
+                self.sounds.audio.set_pan(sound, pan);
             }
         }
+        // The speech of the sentences being said.
+        let mut speakers: Vec<NativeId> = self
+            .actors
+            .iter()
+            .filter(|(_, a)| a.sentence.as_ref().is_some_and(|s| s.sound.is_some()))
+            .map(|(id, _)| *id)
+            .collect();
+        #[cfg(feature = "3d")]
+        speakers.extend(
+            self.actors3d
+                .iter()
+                .filter(|(_, a)| a.sentence.as_ref().is_some_and(|s| s.sound.is_some()))
+                .map(|(id, _)| *id),
+        );
+        let talking: Vec<crate::scene_view::EntityRef> = self
+            .scene
+            .iter()
+            .chain([&self.game_view])
+            .flat_map(|view| view.speaking_entities())
+            .collect();
+        for r in talking {
+            speakers.extend(
+                self.objects
+                    .find(|k| matches!(k, Kind::Entity(e) if *e == r)),
+            );
+        }
+        for owner in speakers {
+            if !self.updates_sounds(owner) {
+                continue;
+            }
+            let Some(sound) = self.speech_sound_of(owner) else {
+                continue;
+            };
+            if let Some(pan) = self.sound_pan_of(owner) {
+                self.sounds.audio.set_pan(sound, pan);
+            }
+            let effect = self.sounds.objects.get(&owner).and_then(|s| s.effect);
+            self.sounds
+                .audio
+                .set_effect(sound, effect.map(SoundEffect::from));
+        }
         self.drop_ended_frame_sounds();
-        self.update_crossfade();
     }
 
     /// Plays music on a channel (`CBGame::PlayMusic`), replacing what
@@ -610,9 +735,11 @@ impl World {
         let id = self
             .sounds
             .audio
-            .add(clip, SoundType::Music, private_volume);
+            .add_streamed(clip, SoundType::Music, private_volume);
         let start = std::mem::take(&mut self.sounds.music_start_time[channel]);
-        self.sounds.audio.set_position_ms(id, start);
+        if start != 0 {
+            self.sounds.audio.set_position_ms(id, start);
+        }
         if loop_start_ms != 0 {
             self.sounds.audio.set_loop_start_ms(id, loop_start_ms);
         }
@@ -731,11 +858,16 @@ impl World {
     /// One frame of the crossfade (`CBGame::UpdateMusicCrossfade`): the
     /// first channel fades out while the second fades in, on the wall
     /// clock; at the end the first stops and the channels are swapped
-    /// when asked.
+    /// when asked. Nothing moves while the game is frozen (the clock
+    /// goes on, so a fade whose time passed during the freeze ends at
+    /// the unfreeze).
     fn update_crossfade(&mut self) {
         let Some(fade) = self.sounds.crossfade.clone() else {
             return;
         };
+        if self.ui.frozen {
+            return;
+        }
         let (Some(first), Some(second)) = (
             self.music(fade.channel1).map(|m| m.id),
             self.music(fade.channel2).map(|m| m.id),
@@ -761,9 +893,14 @@ impl World {
                     .swap(fade.channel1, fade.channel2);
             }
         } else {
-            let progress = (elapsed as f64 / fade.length as f64 * 100.0) as i32;
-            self.sounds.audio.set_private_volume(first, 100 - progress);
-            self.sounds.audio.set_private_volume(second, progress);
+            // The engine truncates each volume on its own.
+            let progress = elapsed as f32 / fade.length as f32 * 100.0;
+            self.sounds
+                .audio
+                .set_private_volume(first, (100.0 - progress) as i32);
+            self.sounds
+                .audio
+                .set_private_volume(second, progress as i32);
         }
     }
 
@@ -786,21 +923,28 @@ impl World {
     pub(crate) fn start_speech(&mut self, filename: &str) -> Option<(SoundId, u64)> {
         let (clip, _) = self.load_clip(filename)?;
         let length = clip.duration_ms();
-        let id = self.sounds.audio.add(clip, SoundType::Speech, 100);
+        let id = self.sounds.audio.add_streamed(clip, SoundType::Speech, 100);
         self.sounds.audio.play(id, false);
         Some((id, length))
     }
 
-    /// Ends the sentences whose speech sound finished, and unloads the
-    /// sounds of the sentences that ended (`TimeIsUp` with a sound).
+    /// Ends the sentences whose speech sound is neither playing nor
+    /// paused by a script (`TimeIsUp` in `CAdActor::Update`,
+    /// `CAdEntity::Update`, `CAdActor3DX::Update`), and unloads their
+    /// sounds. A sentence with a sound lasts exactly as long as the
+    /// sound plays, whatever its duration. A sound the frozen game holds
+    /// is not playing (`CBSoundBuffer::IsPlaying`), so a freeze ends the
+    /// sentences of actors and entities; the 3D actors are not updated
+    /// while frozen and keep theirs.
     pub(crate) fn update_speech(&mut self) {
         let mut finished: Vec<SoundId> = Vec::new();
+        let audio = &self.sounds.audio;
+        let ended = |id: SoundId| !audio.is_playing(id) && !audio.is_paused(id);
         for (_, actor) in &mut self.actors {
             let talking = actor.is_talking();
             if let Some(sentence) = &mut actor.sentence {
                 if let Some(id) = sentence.sound {
-                    let ended =
-                        !self.sounds.audio.is_playing(id) && !self.sounds.audio.is_paused(id);
+                    let ended = ended(id);
                     if ended {
                         sentence.finish();
                     }
@@ -811,12 +955,29 @@ impl World {
                 }
             }
         }
-        let audio = &self.sounds.audio;
+        #[cfg(feature = "3d")]
+        if !self.ui.frozen {
+            for (_, actor) in &mut self.actors3d {
+                let talking = actor.is_talking();
+                if let Some(sentence) = &mut actor.sentence {
+                    if let Some(id) = sentence.sound {
+                        let ended = ended(id);
+                        if ended {
+                            sentence.finish();
+                        }
+                        if !talking || ended {
+                            finished.push(id);
+                            sentence.sound = None;
+                        }
+                    }
+                }
+            }
+        }
         let views = self.scene.iter_mut().chain([&mut self.game_view]);
         for view in views {
             for sentence in view.sentences_mut() {
                 if let Some(id) = sentence.sound {
-                    if !audio.is_playing(id) && !audio.is_paused(id) {
+                    if ended(id) {
                         sentence.finish();
                         finished.push(id);
                         sentence.sound = None;
@@ -834,6 +995,14 @@ impl World {
     pub(crate) fn stop_speech(&mut self) {
         let mut stopped: Vec<SoundId> = Vec::new();
         for (_, actor) in &mut self.actors {
+            if let Some(sentence) = &mut actor.sentence {
+                if sentence.duration == 0 {
+                    stopped.extend(sentence.sound.take());
+                }
+            }
+        }
+        #[cfg(feature = "3d")]
+        for (_, actor) in &mut self.actors3d {
             if let Some(sentence) = &mut actor.sentence {
                 if sentence.duration == 0 {
                     stopped.extend(sentence.sound.take());
@@ -861,11 +1030,16 @@ mod tests {
 
     #[test]
     fn pans_across_the_screen() {
-        assert_eq!(Sounds::pos_to_pan(0, 100), -0.5);
-        assert_eq!(Sounds::pos_to_pan(50, 100), 0.0);
-        assert_eq!(Sounds::pos_to_pan(100, 100), 0.5);
-        assert_eq!(Sounds::pos_to_pan(-100, 100), -1.0);
-        assert_eq!(Sounds::pos_to_pan(400, 100), 1.0);
+        // `CBSoundMgr::PosToPan`: five screens of margin on each side.
+        assert_eq!(Sounds::pos_to_pan(400, 800), 0);
+        assert_eq!(Sounds::pos_to_pan(0, 800), -909);
+        assert_eq!(Sounds::pos_to_pan(800, 800), 909);
+        assert_eq!(Sounds::pos_to_pan(-4000, 800), -10000);
+        assert_eq!(Sounds::pos_to_pan(4800, 800), 10000);
+        // Farther than the margin the value leaves DirectSound's range.
+        assert!(Sounds::pos_to_pan(-4800, 800) < -10000);
+        assert!(Sounds::pos_to_pan(5600, 800) > 10000);
+        assert_eq!(Sounds::pos_to_pan(10, 0), 0);
     }
 
     #[test]
