@@ -26,6 +26,10 @@ use crate::scene_view::key;
 /// The number of rendered texts a TrueType font keeps.
 const CACHED_TEXTS: usize = 30;
 
+/// The widest image a text without a box is rendered to: wider than any
+/// screen a game draws on, so nothing visible is lost.
+const MAX_UNBOUNDED_WIDTH: i32 = 4096;
+
 /// System font files tried when a TrueType font is not in the game.
 const SYSTEM_FONTS: &[&str] = &[
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
@@ -586,6 +590,11 @@ impl TrueTypeFont {
     /// white glyphs with their coverage as alpha, to be tinted by each
     /// layer. Returns the image and the offset the engine draws it
     /// higher by.
+    ///
+    /// A negative width means no box, as for [`wrap`](Self::wrap) and
+    /// for the bitmap fonts: the lines are never broken for their
+    /// length, start at the left whatever the alignment, and the image
+    /// is as wide as the widest of them (an editor's line).
     pub fn render(
         &mut self,
         text: &str,
@@ -593,13 +602,22 @@ impl TrueTypeFont {
         align: TextAlign,
         max_height: i32,
     ) -> (Image, i32) {
-        let lines = self.wrap(text, width, max_height);
+        let boxed = width >= 0;
+        let lines = self.wrap(text, if boxed { width } else { -1 }, max_height);
         let wrapped_height = lines.len() as i32 * self.line_height;
         let mut text_height = lines.len() as i32 * (self.max_char_height + self.ascender as i32);
         if wrapped_height > text_height {
             text_height = wrapped_height;
         }
-        let width = width.max(1);
+        let (width, align) = if boxed {
+            (width.max(1), align)
+        } else {
+            // The widest line, with room for a last glyph that reaches
+            // past its advance (an italic).
+            let widest = lines.iter().map(|l| l.1).max().unwrap_or(0);
+            let width = widest.saturating_add(self.px.ceil() as i32);
+            (width.clamp(1, MAX_UNBOUNDED_WIDTH), TextAlign::Left)
+        };
         let text_height = text_height.max(1);
         let mut image = Image {
             width: width as u32,
@@ -691,6 +709,23 @@ impl TrueTypeFont {
         } else {
             self.texts.push(cached);
         }
+    }
+
+    /// The size of the image a text was prepared to, if it was: what
+    /// [`Font::draw`] shows of it once uploaded.
+    pub fn prepared_size(
+        &self,
+        text: &str,
+        width: i32,
+        align: TextAlign,
+        max_height: i32,
+    ) -> Option<(u32, u32)> {
+        self.texts
+            .iter()
+            .find(|t| {
+                t.text == text && t.width == width && t.align == align && t.max_height == max_height
+            })
+            .map(|t| (t.image.width, t.image.height))
     }
 
     fn upload(&mut self, renderer: &Renderer) {
@@ -962,6 +997,77 @@ mod tests {
         let (back, _) = font.render("ab", 100, TextAlign::Left, -1);
         assert_eq!(same.pixels, rtl.pixels);
         assert_ne!(back.pixels, rtl.pixels);
+    }
+
+    /// A negative width is a single line of any length, as for the
+    /// bitmap fonts: the image is as wide as the line, not one pixel.
+    #[test]
+    fn truetype_fonts_render_one_unbounded_line_with_a_negative_width() {
+        let Some((source, bytes)) = system_font() else {
+            eprintln!("skipped: no system font");
+            return;
+        };
+        let FontFile::TrueType(def) =
+            FontFile::parse(b"TTFONT { SIZE=12 COLOR {255,255,255} ALPHA=255 }").unwrap()
+        else {
+            panic!()
+        };
+        let mut font = TrueTypeFont::from_bytes(def, &source, &bytes).unwrap();
+        let text = "Lab with axe, a long name no box holds";
+        let (line_width, height) = font.measure(text, -1);
+        assert_eq!(height, font.line_height, "one line");
+        let (image, _) = font.render(text, -1, TextAlign::Center, -1);
+        assert!(
+            image.width as i32 >= line_width,
+            "{} < {line_width}",
+            image.width
+        );
+        assert!((image.width as i32) < line_width + 2 * font.line_height);
+        // The ink reaches the end of the line, and starts at the left
+        // whatever the alignment asked.
+        let column_has_ink = |image: &Image, x: u32| {
+            (0..image.height).any(|y| image.pixels[((y * image.width + x) * 4 + 3) as usize] > 0)
+        };
+        let last_ink = (0..image.width)
+            .rev()
+            .find(|&x| column_has_ink(&image, x))
+            .unwrap();
+        let first_ink = (0..image.width)
+            .find(|&x| column_has_ink(&image, x))
+            .unwrap();
+        assert!(
+            last_ink as i32 > line_width - font.line_height,
+            "{last_ink}"
+        );
+        assert!((first_ink as i32) < font.line_height, "{first_ink}");
+        let (left, _) = font.render(text, -1, TextAlign::Left, -1);
+        assert_eq!(left.pixels, image.pixels);
+
+        // What is prepared is what is drawn: same arguments, same image.
+        font.prepare(text, -1, TextAlign::Left, -1);
+        assert_eq!(
+            font.prepared_size(text, -1, TextAlign::Left, -1),
+            Some((image.width, image.height))
+        );
+        assert_eq!(font.prepared_size(text, 50, TextAlign::Left, -1), None);
+
+        // A line breaks only where the text says so, and an absurd
+        // length does not make an absurd image.
+        assert_eq!(
+            font.render("a\nb", -1, TextAlign::Left, -1).0.height as i32,
+            {
+                let lines = 2;
+                (lines * font.line_height)
+                    .max(lines * (font.max_char_height + font.ascender as i32))
+            }
+        );
+        let endless = "wide ".repeat(4000);
+        let (image, _) = font.render(&endless, -1, TextAlign::Left, -1);
+        assert_eq!(image.width as i32, MAX_UNBOUNDED_WIDTH);
+        // A box still wraps and keeps its width.
+        let (image, _) = font.render(text, 60, TextAlign::Left, -1);
+        assert_eq!(image.width, 60);
+        assert!(image.height as i32 >= 2 * font.line_height);
     }
 
     /// A game's text as its files hold it: one `char` per UTF-8 byte.

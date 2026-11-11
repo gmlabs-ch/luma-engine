@@ -155,6 +155,17 @@ the right edge, `Backspace` deletes the character after the caret and
 `Delete` the one before, `Home` and `End` swap, and a typed character
 leaves the caret before it, as the original engine's editor does.
 
+The editor shows its text on one line, from the first character that
+keeps the caret inside the box, at `FRAME_WIDTH` from the left and the
+top of the control, with the caret's character at the caret while it
+blinks on. The original engine (`CUIEdit::Display`) draws the parts
+before and after the caret separately, each in the width left up to
+the right edge of the box and one line high, so that a text longer
+than the box stops at the last word that fits; Luma Engine draws the
+line whole, without a box (a font width of `-1`, see
+[font.md](font.md#truetype-fonts-ttfont)), so the end of a text longer
+than the box runs past its right edge.
+
 The text of an editor is made of characters, and the caret moves by
 whole characters. In a UTF-8 game (`Game.TextEncoding` 1) a script
 reading `Text` gets them as UTF-8, like the rest of the game's text,

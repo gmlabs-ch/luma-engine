@@ -128,6 +128,13 @@ space is dropped. `\n` breaks too. Lines beyond the maximum height are
 dropped. The text width is the widest line, the height the number of
 lines times the line height.
 
+A negative width means no box, for both kinds of font: the text is one
+line of any length (`\n` still breaks it), drawn from the left whatever
+the alignment. A TrueType font then renders the text to an image as
+wide as its widest line (at most 4096 pixels). This is a convention of
+Luma Engine for the callers that place a line themselves, the editors;
+the original engine always gives its fonts a width.
+
 Glyphs the font lacks are skipped. Kerning is applied when the font has
 a `kern` table.
 

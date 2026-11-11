@@ -169,6 +169,14 @@ fn game() -> std::path::PathBuf {
         "edit.window",
         b"WINDOW { NAME=\"w\" X=0 Y=0 WIDTH=60 HEIGHT=40 EDIT { NAME=\"name\" X=1 Y=1 WIDTH=50 HEIGHT=10 } }".to_vec(),
     );
+    pkg.add_file(
+        "tt.font",
+        b"TTFONT { SIZE=8 FILENAME=\"none.ttf\" COLOR {255,255,255} ALPHA=255 }".to_vec(),
+    );
+    pkg.add_file(
+        "tt.window",
+        b"WINDOW { NAME=\"t\" X=0 Y=0 WIDTH=60 HEIGHT=40 FONT=\"tt.font\" EDIT { NAME=\"name\" X=2 Y=2 WIDTH=56 HEIGHT=14 FONT=\"tt.font\" CURSOR_BLINK_RATE=0 } }".to_vec(),
+    );
     pkg.add_file("art\\red.png", png(4, 4, [255, 0, 0, 255]));
     pkg.add_file("art\\green.png", png(4, 4, [0, 255, 0, 255]));
     pkg.add_file(
@@ -502,6 +510,79 @@ fn a_utf8_string_table_switches_the_text_to_utf8() {
         runtime.world.get_property(edit, "Text"),
         Some(Value::from("caf\u{fffd}"))
     );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// An editor draws its line without a box (a width of -1): a TrueType
+/// font renders it as wide as the text, not into a one-pixel image.
+#[test]
+fn an_editor_with_a_truetype_font_shows_what_is_typed() {
+    use luma_adventure::Font;
+    use luma_formats::font::TextAlign;
+    let (dir, mut runtime, _) = start();
+    let game = runtime.world.game_id();
+    let window = call_native(
+        &mut runtime,
+        game,
+        "LoadWindow",
+        &[Value::from("tt.window")],
+    )
+    .as_native()
+    .unwrap();
+    let edit = call_native(&mut runtime, window, "GetWidget", &[Value::from("name")])
+        .as_native()
+        .unwrap();
+    for ch in "Lab axe".chars() {
+        runtime.world.edit_key(edit, 0, Some(ch));
+    }
+    // The caret goes inside the text: the line with the caret is the
+    // one prepared.
+    runtime.world.edit_key(edit, 37, None);
+    runtime.tick(16);
+    let Some(Font::TrueType(font)) = runtime.world.fonts().get("tt.font") else {
+        eprintln!("skipped: no system font to stand for the game's");
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    };
+    let cursor = runtime
+        .world
+        .control(edit)
+        .unwrap()
+        .edit()
+        .unwrap()
+        .cursor_char
+        .clone();
+    let with_caret = format!("Lab ax{cursor}e");
+    for line in ["Lab axe", with_caret.as_str()] {
+        let (width, height) = font
+            .prepared_size(line, -1, TextAlign::Left, -1)
+            .unwrap_or_else(|| panic!("{line:?} is not prepared"));
+        assert!(width > 20 && height >= 8, "{line:?}: {width}x{height}");
+    }
+
+    // Drawn, the line is a quad of that size (needs a GPU for the text's
+    // texture).
+    if let Ok(gpu) = luma_render::Gpu::headless() {
+        let renderer = luma_render::Renderer::new(gpu);
+        runtime.world.upload(&renderer);
+        let Some(Font::TrueType(font)) = runtime.world.fonts().get("tt.font") else {
+            unreachable!()
+        };
+        let (width, _) = font
+            .prepared_size("Lab axe", -1, TextAlign::Left, -1)
+            .unwrap();
+        let (caret_width, _) = font
+            .prepared_size(&with_caret, -1, TextAlign::Left, -1)
+            .unwrap();
+        let mut list = luma_render::DrawList::new(64.0, 48.0);
+        runtime.draw(&mut list, None);
+        assert!(
+            list.quads()
+                .iter()
+                .any(|q| q.dst.w == width as f32 || q.dst.w == caret_width as f32),
+            "the editor's line is drawn"
+        );
+    }
     std::fs::remove_dir_all(&dir).ok();
 }
 
