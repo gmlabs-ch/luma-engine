@@ -144,6 +144,9 @@ pub struct World {
     pub(crate) subtitles_speed: i32,
     pub(crate) talk_skip_button: TalkSkipButton,
     pub(crate) sentences: Vec<SentenceDraw>,
+    /// The fonts of talking objects that could not be loaded, so that
+    /// each is tried and reported once.
+    failed_fonts: std::collections::HashSet<String>,
     pub(crate) mouse: Mouse,
     pub(crate) keyboard: Keyboard,
     pub(crate) active_object: Option<NativeId>,
@@ -314,6 +317,7 @@ impl World {
             subtitles_speed: 70,
             talk_skip_button: TalkSkipButton::Left,
             sentences: Vec::new(),
+            failed_fonts: std::collections::HashSet::new(),
             mouse: Mouse::default(),
             keyboard: Keyboard::default(),
             active_object: None,
@@ -1759,7 +1763,10 @@ impl World {
         if let Some(white) = white {
             self.draw_access_hint(list, white);
         }
-        if self.subtitles {
+        // `CAdGame::DisplaySentences(m_State==GAME_FROZEN)`: the sentences
+        // are not shown while the game is frozen (a system-exclusive
+        // window, such as the menu, is up).
+        if self.subtitles && !self.is_frozen() {
             for draw in &self.sentences {
                 if let Some(font) = self.fonts.get(&draw.font) {
                     font.draw(list, &draw.text, draw.x, draw.y, draw.width, draw.align, -1);
@@ -2115,17 +2122,37 @@ impl World {
         (self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as u32
     }
 
-    /// The font an object talks with: its own, else the system font.
-    pub fn font_of(&self, id: NativeId) -> Option<String> {
-        let own = match self.objects.get(id).map(|n| &n.kind) {
+    /// The font an object's file gives it (`FONT`) or a script set.
+    fn own_font(&self, id: NativeId) -> Option<String> {
+        match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor) => self.actor(id).and_then(|a| a.def.font.clone()),
             #[cfg(feature = "3d")]
             Some(Kind::Actor3D) => self.actor3d(id).and_then(|a| a.font.clone()),
             Some(Kind::Entity(r)) => self.entity_def(*r).and_then(|e| e.font.clone()),
             _ => None,
-        };
-        own.filter(|f| self.fonts.get(f).is_some())
+        }
+    }
+
+    /// The font an object talks with: its own, else the system font.
+    pub fn font_of(&self, id: NativeId) -> Option<String> {
+        self.own_font(id)
+            .filter(|f| self.fonts.get(f).is_some())
             .or_else(|| self.system_font.clone())
+    }
+
+    /// Loads the font an object's file names, if it is not loaded yet.
+    /// The original engine loads it with the object (`TOKEN_FONT` in
+    /// `CAdEntity::LoadBuffer` and `CAdActor::LoadBuffer`); Luma loads it
+    /// when the object first talks.
+    fn load_own_font(&mut self, id: NativeId) {
+        if let Some(font) = self.own_font(id) {
+            if self.fonts.get(&font).is_none()
+                && !self.failed_fonts.contains(&font)
+                && !self.load_font(&font)
+            {
+                self.failed_fonts.insert(font);
+            }
+        }
     }
 
     /// Sets an object's font (`SetFont`); `None` restores the system
@@ -2235,6 +2262,7 @@ impl World {
         self.stop_speech();
         let raw = text.to_string();
         let text = self.expand(text);
+        self.load_own_font(id);
         let font = self.font_of(id);
         let mut duration = u64::try_from(duration).unwrap_or(0);
         // The speech file: the one given, else the one named after the

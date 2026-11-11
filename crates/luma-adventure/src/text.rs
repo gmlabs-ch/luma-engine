@@ -131,6 +131,14 @@ impl Font {
     }
 }
 
+/// A negative width means a single line of any length, for the callers
+/// that lay the text out themselves (an editor's line). The engine's
+/// layout takes the width as it is: with a negative one every character
+/// would be too wide and nothing would be drawn.
+fn unbounded(width: i32) -> i32 {
+    if width < 0 { i32::MAX / 2 } else { width }
+}
+
 /// A bitmap font with its tile image.
 #[derive(Debug)]
 pub struct BitmapFont {
@@ -192,7 +200,14 @@ impl BitmapFont {
     /// The height of a text in a box.
     pub fn text_height(&self, text: &str, width: i32) -> i32 {
         self.def
-            .layout(&self.widths, &latin1(text), width, TextAlign::Left, -1, -1)
+            .layout(
+                &self.widths,
+                &latin1(text),
+                unbounded(width),
+                TextAlign::Left,
+                -1,
+                -1,
+            )
             .height
     }
 
@@ -216,9 +231,15 @@ impl BitmapFont {
         let Some(texture) = &self.texture else {
             return;
         };
-        let layout = self
-            .def
-            .layout(&self.widths, &latin1(text), width, align, max_height, -1);
+        let layout = self.def.layout(
+            &self.widths,
+            &latin1(text),
+            unbounded(width),
+            // Without a width there is nothing to centre the line in.
+            if width < 0 { TextAlign::Left } else { align },
+            max_height,
+            -1,
+        );
         for line in &layout.lines {
             let mut cx = x + line.x;
             for &c in &line.chars {

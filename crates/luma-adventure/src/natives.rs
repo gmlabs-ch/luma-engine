@@ -1353,7 +1353,14 @@ impl World {
         let Some(entity) = view.entity(r) else {
             return 0;
         };
-        let Some(loaded) = entity.sprite.as_deref().and_then(|p| view.sprite(p)) else {
+        // The sprite being shown (a talk sprite, a played animation), as
+        // the frame index is its own; else the entity's sprite.
+        let shown = view.shown_sprite(r);
+        let Some(loaded) = shown
+            .as_deref()
+            .or(entity.sprite.as_deref())
+            .and_then(|p| view.sprite(p))
+        else {
             return 0;
         };
         // A game-level entity is scaled by the scene it is shown in.

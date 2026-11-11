@@ -64,7 +64,9 @@ nodes, see [3d-actors.md](3d-actors.md) section 10), the windows marked
 `IN_GAME`, the inventory box, the response box while a dialogue waits
 for a choice, the other windows (so a menu opened during a dialogue
 covers the responses, and takes the clicks over them; `CAdGame::
-DisplayContent`), the sentences, the cursor, the fader's
+DisplayContent`), the sentences (not while the game is frozen by a
+system-exclusive window such as a menu: `DisplaySentences`; they come
+back when it closes), the cursor, the fader's
 colour over everything, the loading icon (see
 [saving.md](saving.md#loading-and-saving-screens-loading-icon)), and
 last the messages of `Game.Msg`: short
@@ -204,7 +206,8 @@ others, and its items are active objects through their sprites.
 The cursor drawn (`CBGame::ShowCursor`), in order: nothing while
 `Game.HideCursor`; the `NONINTERACTIVE_CURSOR` while the game is not
 interactive; the active object's own `CURSOR`; the `ACTIVE_CURSOR` over
-any active object; the `CURSOR`. A cursor that was not shown last frame
+an active object that can be used (an entity, an actor or an item, the
+engine's `usable` flag; not a window or a button); the `CURSOR`. A cursor that was not shown last frame
 restarts its animation. `Game.SetActiveCursor`, `RemoveActiveCursor`,
 `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`,
 `GetActiveCursor` and `GetWaitCursor` change and read them;

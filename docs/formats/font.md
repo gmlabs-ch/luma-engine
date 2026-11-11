@@ -142,6 +142,13 @@ a `kern` table.
 the text above the object and plays its talk sprites until the sentence
 ends. The text is expanded through the string table.
 
+- **Font.** The object's own (`FONT` in its file, or `SetFont`), else
+  the game's system font. The original engine loads the font with the
+  object; Luma loads it when the object first talks.
+- **Height.** The object's height is the largest hotspot `y` of the
+  frame it shows, of the sprite it shows (a talk sprite or a played
+  animation, not only its base sprite), scaled with the object
+  (`CAdObject::GetHeight`).
 - **Duration.** The `duration` argument when positive; else the sound's
   length when a sound plays; else `max(1000, SUBTITLES_SPEED *
   length)` milliseconds, with the length in characters of the expanded

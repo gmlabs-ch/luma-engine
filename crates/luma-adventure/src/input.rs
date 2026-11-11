@@ -467,7 +467,14 @@ impl World {
                     return Some(own);
                 }
             }
-            if self.cursors.active.is_some() {
+            // Only over what can be used (`GetExtendedFlag("usable")`:
+            // the scene's objects and the items), not over a window or
+            // a button.
+            let usable = matches!(
+                self.objects.get(active).map(|n| &n.kind),
+                Some(Kind::Actor | Kind::Actor3D | Kind::Entity(_) | Kind::Item)
+            );
+            if usable && self.cursors.active.is_some() {
                 return self.cursors.active.clone();
             }
         }

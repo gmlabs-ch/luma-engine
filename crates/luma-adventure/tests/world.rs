@@ -5995,3 +5995,310 @@ fn button_templates_are_read_from_the_game() {
         "{log:?}"
     );
 }
+
+/// The fixture game plus loose files: a font only some objects name, a
+/// scene whose entities talk or play animations, and an actor with a font.
+fn defects_game() -> std::path::PathBuf {
+    let dir = game();
+    let write = |name: &str, body: &str| {
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    };
+    write(
+        "fonts/own.font",
+        "FONT { IMAGE=\"art\\font.png\" COLUMNS=16 TILE_WIDTH=8 TILE_HEIGHT=12 DEFAULT_WIDTH=3 }",
+    );
+    write(
+        "art/one.sprite",
+        "SPRITE { LOOPING=FALSE FRAME { DELAY=100 IMAGE=\"art\\red.png\" HOTSPOT {0,8} } }",
+    );
+    write(
+        "art/three.sprite",
+        "SPRITE { LOOPING=TRUE FRAME { DELAY=20 IMAGE=\"art\\red.png\" HOTSPOT {0,8} } FRAME { DELAY=20 IMAGE=\"art\\green.png\" HOTSPOT {0,8} } FRAME { DELAY=20 IMAGE=\"art\\red.png\" HOTSPOT {0,8} } }",
+    );
+    write(
+        "actors/ann.actor",
+        "ACTOR { NAME=\"ann\" X=10 Y=24 SCALABLE=FALSE FONT=\"fonts\\own.font\" STAND { SPRITESET { LEFT=\"art\\stand.sprite\" } } }",
+    );
+    write(
+        "scenes/fonty.scene",
+        "SCENE {
+  NAME=\"Fonty\"
+  LAYER {
+    NAME=\"main\" MAIN=TRUE WIDTH=32 HEIGHT=32
+    ENTITY { NAME=\"talker\" X=16 Y=28 SPRITE=\"art\\one.sprite\" FONT=\"fonts\\own.font\" }
+    ENTITY { NAME=\"lost\" X=16 Y=28 SPRITE=\"art\\one.sprite\" FONT=\"fonts\\gone.font\" }
+    ENTITY { NAME=\"anim\" X=16 Y=28 SPRITE=\"art\\one.sprite\" }
+  }
+}",
+    );
+    dir
+}
+
+fn defects_runtime() -> (Runtime, std::path::PathBuf) {
+    let dir = defects_game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    runtime.change_scene("scenes\\fonty.scene").unwrap();
+    runtime.tick(16);
+    runtime.world.take_log();
+    (runtime, dir)
+}
+
+#[test]
+fn an_object_loads_the_font_of_its_file_when_it_first_talks() {
+    let (mut runtime, dir) = defects_runtime();
+    let talker = runtime.world.find_node("talker").unwrap();
+    assert!(
+        runtime.world.fonts().get("fonts\\own.font").is_none(),
+        "nothing else loads the entity's font"
+    );
+    call_native(&mut runtime, talker, "TalkAsync", &[Value::from("Hi")]);
+    runtime.tick(16);
+    assert!(runtime.world.fonts().get("fonts\\own.font").is_some());
+    let sentence = runtime
+        .world
+        .sentences()
+        .iter()
+        .find(|s| s.text == "Hi")
+        .expect("the entity's sentence");
+    assert_eq!(sentence.font, "fonts\\own.font");
+    assert_ne!(Some(sentence.font.as_str()), runtime.world.system_font());
+
+    // An actor whose file names a font loads it the same way.
+    let game = runtime.world.game_id();
+    let ann = call_native(
+        &mut runtime,
+        game,
+        "LoadActor",
+        &[Value::from("actors\\ann.actor")],
+    )
+    .as_native()
+    .expect("the actor loads");
+    runtime.world.fonts_mut().take_missing();
+    call_native(&mut runtime, ann, "TalkAsync", &[Value::from("Ann says")]);
+    runtime.tick(16);
+    let sentence = runtime
+        .world
+        .sentences()
+        .iter()
+        .find(|s| s.text == "Ann says")
+        .expect("the actor's sentence");
+    assert_eq!(sentence.font, "fonts\\own.font");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_missing_object_font_falls_back_to_the_system_font_and_is_logged() {
+    let (mut runtime, dir) = defects_runtime();
+    let lost = runtime.world.find_node("lost").unwrap();
+    call_native(&mut runtime, lost, "TalkAsync", &[Value::from("Lost")]);
+    let log = runtime.world.take_log();
+    runtime.tick(16);
+    assert!(
+        log.iter().any(|l| l.contains("Error loading font")),
+        "{log:?}"
+    );
+    let sentence = runtime
+        .world
+        .sentences()
+        .iter()
+        .find(|s| s.text == "Lost")
+        .expect("the sentence");
+    assert_eq!(Some(sentence.font.as_str()), runtime.world.system_font());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_bitmap_font_lays_a_text_out_on_one_line_with_width_minus_one() {
+    let dir = defects_game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut font = luma_adventure::Font::load(&vfs, "fonts\\sys.font").unwrap();
+    let long = "a long text that no box of this width could hold on one line";
+    assert_eq!(font.text_height(long, -1), font.line_height());
+    assert_eq!(font.text_height("", -1), font.line_height());
+    assert!(
+        font.text_height(long, 20) > font.line_height(),
+        "a bounded width wraps"
+    );
+    assert_eq!(font.text_height(long, 100_000), font.line_height());
+
+    // Drawn, every character is a quad (needs a GPU for the tile texture).
+    if let Ok(gpu) = luma_render::Gpu::headless() {
+        let renderer = luma_render::Renderer::new(gpu);
+        font.upload(&renderer);
+        let mut list = luma_render::DrawList::new(32.0, 32.0);
+        font.draw(
+            &mut list,
+            "Hello",
+            0,
+            0,
+            -1,
+            luma_formats::font::TextAlign::Left,
+            -1,
+        );
+        assert_eq!(list.quads().len(), 5, "one line of five characters");
+        let ys: Vec<f32> = list.quads().iter().map(|q| q.dst.y).collect();
+        assert!(ys.iter().all(|y| *y == ys[0]), "{ys:?}");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn sentences_are_not_drawn_while_a_system_exclusive_window_freezes_the_game() {
+    let (mut runtime, dir, _) = runtime_with_window_shown();
+    let lamp = runtime.world.find_node("lamp").unwrap();
+    call_native(&mut runtime, lamp, "TalkAsync", &[Value::from("Hello")]);
+    runtime.tick(16);
+    assert_eq!(runtime.world.sentences().len(), 1);
+    let win = runtime.world.window_ids()[0];
+    let gpu = luma_render::Gpu::headless().ok();
+    let renderer = gpu.map(luma_render::Renderer::new);
+    let count = |runtime: &mut Runtime| -> Option<usize> {
+        let renderer = renderer.as_ref()?;
+        runtime.world.upload(renderer);
+        let mut list = luma_render::DrawList::new(32.0, 32.0);
+        runtime.draw(&mut list, None);
+        Some(list.quads().len())
+    };
+    let before = count(&mut runtime);
+    assert!(!runtime.world.is_frozen());
+
+    call_native(&mut runtime, win, "GoSystemExclusive", &[]);
+    runtime.tick(16);
+    assert!(runtime.world.is_frozen());
+    let frozen = count(&mut runtime);
+    if let (Some(before), Some(frozen)) = (before, frozen) {
+        assert!(
+            frozen < before,
+            "the sentence is not drawn: {frozen} >= {before}"
+        );
+    }
+
+    // The sentence is still there and comes back when the window closes.
+    call_native(&mut runtime, win, "Close", &[]);
+    runtime
+        .world
+        .set_property(win, "Visible", &Value::Bool(true));
+    runtime.tick(16);
+    assert!(!runtime.world.is_frozen());
+    assert_eq!(runtime.world.sentences().len(), 1);
+    if let (Some(before), Some(after)) = (before, count(&mut runtime)) {
+        assert_eq!(before, after);
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn an_entity_keeps_its_height_while_an_animation_is_past_its_first_frame() {
+    use luma_adventure::EntityRef;
+    let (mut runtime, dir) = defects_runtime();
+    let anim = runtime.world.find_node("anim").unwrap();
+    let r = EntityRef::Node { layer: 0, index: 2 };
+    let height = |runtime: &Runtime| runtime.world.get_property(anim, "Height");
+    assert_eq!(height(&runtime), Some(Value::Int(8)));
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            anim,
+            "PlayAnimAsync",
+            &[Value::from("art\\three.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    let mut seen = Vec::new();
+    for _ in 0..12 {
+        runtime.tick(16);
+        let frame = runtime.world.scene().unwrap().frame_of(r);
+        seen.push(frame);
+        assert_eq!(height(&runtime), Some(Value::Int(8)), "frame {frame}");
+    }
+    assert!(
+        seen.iter().any(|f| *f > 0),
+        "the animation advanced: {seen:?}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn the_active_cursor_is_shown_over_usable_objects_only() {
+    let (mut runtime, dir, (x, y)) = runtime_with_window_shown();
+    std::fs::write(
+        dir.join("c.window"),
+        b"WINDOW { NAME=\"cw\" X=0 Y=20 WIDTH=32 HEIGHT=12
+  BUTTON { NAME=\"plain\" X=0 Y=0 WIDTH=8 HEIGHT=8 }
+  BUTTON { NAME=\"own\" X=16 Y=0 WIDTH=8 HEIGHT=8 CURSOR=\"art\\red.png\" }
+}",
+    )
+    .unwrap();
+    let normal = Some("sprites\\cursor.sprite");
+    let active = Some("art\\green.png");
+
+    // Over a window button: the normal cursor.
+    runtime.mouse_move(x, y);
+    runtime.tick(16);
+    runtime.tick(16);
+    let win = runtime.world.window_ids()[0];
+    let ok = runtime.world.widget(win, "OK").unwrap();
+    assert_eq!(runtime.world.active_object(), Some(ok));
+    assert_eq!(runtime.world.cursors().shown(), normal);
+
+    // Close the test window; over the scene's entity: the active cursor.
+    runtime
+        .world
+        .set_property(win, "Visible", &Value::Bool(false));
+    let prop_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    runtime.world.skip_to(0, 0);
+    runtime.mouse_move(6, 7);
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(prop));
+    assert_eq!(runtime.world.cursors().shown(), active);
+
+    // A window opened over it: its buttons show the normal cursor, unless
+    // they have a cursor of their own.
+    let cw = runtime
+        .world
+        .load_window(&mut runtime.engine, "c.window")
+        .expect("the window loads");
+    runtime
+        .world
+        .set_property(cw, "Visible", &Value::Bool(true));
+    runtime.tick(16);
+    let plain = runtime.world.widget(cw, "plain").unwrap();
+    let own = runtime.world.widget(cw, "own").unwrap();
+    let at = |runtime: &Runtime, id| {
+        let c = runtime.world.control(id).unwrap();
+        let w = runtime.world.control(cw).unwrap();
+        (w.x + c.x + 2, w.y + c.y + 2)
+    };
+    let (px, py) = at(&runtime, plain);
+    runtime.mouse_move(px, py);
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(plain));
+    assert_eq!(runtime.world.cursors().shown(), normal);
+    let (ox, oy) = at(&runtime, own);
+    runtime.mouse_move(ox, oy);
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(own));
+    assert_eq!(runtime.world.cursors().shown(), Some("art\\red.png"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
