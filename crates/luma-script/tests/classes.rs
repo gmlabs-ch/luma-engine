@@ -653,41 +653,32 @@ fn strings_count_characters_in_a_utf8_game() {
             .value,
         i(10)
     );
-    // `Split` looks the low byte of each character up among the bytes
-    // of the separator string, as the original's `strchr` does: `ý`
-    // (bytes C3 BD) does not split at `ý` (U+00FD)...
+    // `Split` separates at whole characters (the original compares
+    // low bytes with the separator's UTF-8 bytes, a defect).
     let parts = string
         .call_method("Split", &[s(&text_to_utf8("ý"))], &mut host)
         .unwrap()
         .value
         .as_native()
         .unwrap();
-    assert_eq!(host.get_property(parts, "Length").unwrap(), i(1));
-    assert_eq!(host.get_property(parts, "0").unwrap(), s(&raw));
-    // ... `Ã` (bytes C3 83) splits at `Ã` (U+00C3), and a comma splits
-    // at `Ĭ` (U+012C) as well as at itself.
-    let mut odd = StringObject::new(&[Value::from(text_to_utf8("xÃy,zĬw"))], &host);
-    let parts = odd
-        .call_method("Split", &[s(&text_to_utf8("Ã"))], &mut host)
-        .unwrap()
-        .value
-        .as_native()
-        .unwrap();
-    assert_eq!(host.get_property(parts, "Length").unwrap(), i(2));
-    assert_eq!(host.get_property(parts, "0").unwrap(), s("x"));
     assert_eq!(
-        host.get_property(parts, "1").unwrap(),
-        s(&text_to_utf8("y,zĬw"))
+        host.get_property(parts, "0").unwrap(),
+        s(&text_to_utf8("Žluťoučk"))
     );
+    assert_eq!(host.get_property(parts, "Length").unwrap(), i(2));
+    // `Ĭ` (U+012C), whose low byte is a comma's, is no separator.
+    let mut odd = StringObject::new(&[Value::from(text_to_utf8("x,zĬw"))], &host);
     let parts = odd
         .call_method("Split", &[], &mut host)
         .unwrap()
         .value
         .as_native()
         .unwrap();
-    assert_eq!(host.get_property(parts, "Length").unwrap(), i(3));
-    assert_eq!(host.get_property(parts, "1").unwrap(), s("z"));
-    assert_eq!(host.get_property(parts, "2").unwrap(), s("w"));
+    assert_eq!(host.get_property(parts, "Length").unwrap(), i(2));
+    assert_eq!(
+        host.get_property(parts, "1").unwrap(),
+        s(&text_to_utf8("zĬw"))
+    );
 
     // Bytes that are not UTF-8 are replaced, not a panic.
     let mut broken = StringObject::new(&[Value::from("caf\u{e9}")], &host);

@@ -187,30 +187,22 @@ impl StringObject {
             }
             // Every character of the argument separates; a missing
             // argument means a comma. An empty text gives one empty part.
-            // The original looks each character up with `strchr` in the
-            // separator string as the game holds it: in a UTF-8 game
-            // that compares the low byte of the character with the UTF-8
-            // bytes of the separators, so a separator outside ASCII does
-            // not split at itself but at the characters whose low byte
-            // is one of its bytes, and `Ĭ` (U+012C) splits like a comma.
+            // Each character of the argument is a separator, in a UTF-8
+            // game as in an ANSI one. The original, in a UTF-8 game,
+            // looks the low byte of each character up among the UTF-8
+            // bytes of the separators (`strchr` on a wide character), a
+            // defect that is not reproduced.
             "Split" => {
                 let separators_arg = arg(args, 0);
                 let separators: Vec<char> = if separators_arg.is_null() {
                     vec![',']
                 } else {
-                    separators_arg.get_string(host).chars().collect()
+                    decode(separators_arg.get_string(host)).chars().collect()
                 };
                 let mut parts = Vec::new();
                 let mut part = String::new();
                 for &c in &chars {
-                    let looked_up = if utf8 {
-                        char::from(u32::from(c) as u8)
-                    } else {
-                        c
-                    };
-                    // A character whose low byte is 0 finds the end of
-                    // the separator string, as `strchr` does.
-                    if separators.contains(&looked_up) || (utf8 && looked_up == '\0') {
+                    if separators.contains(&c) {
                         parts.push(Value::String(encode(std::mem::take(&mut part))));
                     } else {
                         part.push(c);
