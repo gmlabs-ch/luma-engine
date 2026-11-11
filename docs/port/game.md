@@ -6,114 +6,114 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBAccessMgr::CBAccessMgr` | unreviewed |  |
-| `CBAccessMgr::~CBAccessMgr` | unreviewed |  |
-| `CBAccessMgr::Initialize` | unreviewed |  |
-| `CBAccessMgr::InitLoop` | unreviewed |  |
-| `CBAccessMgr::DisplayBeforeGUI` | unreviewed |  |
-| `CBAccessMgr::DisplayAfterGUI` | unreviewed |  |
-| `CBAccessMgr::DisplayInternal` | unreviewed |  |
-| `CBAccessMgr::SetHintRect` | unreviewed |  |
-| `CBAccessMgr::SetActiveObject` | unreviewed |  |
-| `CBAccessMgr::GetActiveObject` | unreviewed |  |
-| `CBAccessMgr::Speak` | unreviewed |  |
-| `CBAccessMgr::Stop` | unreviewed |  |
-| `CBAccessMgr::GetNextObject` | unreviewed |  |
-| `CBAccessMgr::GetPrevObject` | unreviewed |  |
+| `CBAccessMgr::CBAccessMgr` | done | `Accessibility::new` (`luma-adventure/src/accessibility.rs`): no voice, no picked object, no hint, last kind caption. |
+| `CBAccessMgr::~CBAccessMgr` | replaced | Rust ownership; `CommandSpeech::drop` stops the speech process. |
+| `CBAccessMgr::Initialize` | partial | `World::init_accessibility`: a voice is taken only when text-to-speech is on. The voice is macOS's `say` command (`CommandSpeech::system`); on Windows and Linux there is none, where the original uses SAPI. |
+| `CBAccessMgr::InitLoop` | done | `World::update_accessibility` recomputes `Accessibility::hint` every frame (cleared when nothing is picked or the object is not on screen). |
+| `CBAccessMgr::DisplayBeforeGUI` | partial | The hint is always drawn after the normal windows (`World::draw_access_hint` in `World::draw`). WME draws the frame of a scene object here, before the normal windows, so a window covers it (`m_HintAfterGUI` false). |
+| `CBAccessMgr::DisplayAfterGUI` | done | `World::draw_access_hint` after `draw_windows(false)`, for a picked control. |
+| `CBAccessMgr::DisplayInternal` | partial | `World::draw_access_hint` (red, 4 pixels, only while Ctrl is held and keyboard play is on) and `World::update_accessibility` (the cursor jumps to the centre of the rectangle, kept on screen, once per pick). Different: the jump happens whether or not Ctrl is held (WME: only while it is, inside this function); the position the game sees moves, the system cursor does not. |
+| `CBAccessMgr::SetHintRect` | replaced | The rectangle comes from the object's hit area (`World::hit_rect`) or the control's rectangle in `update_accessibility`, instead of each object's `Display` handing it over. |
+| `CBAccessMgr::SetActiveObject` | done | `Accessibility::active`, `clear_active` (also clears the previous pick); ignored when keyboard play is off since nothing sets it then. |
+| `CBAccessMgr::GetActiveObject` | done | `Accessibility::active`. |
+| `CBAccessMgr::Speak` | done | `Accessibility::speak`: nothing without a voice, when the kind's switch is off or for an empty text; the text is read in the game's encoding (`World::access_speak`); the queue is purged unless the last text was speech. |
+| `CBAccessMgr::Stop` | done | `Accessibility::stop`: the voice stops and the last kind goes back to caption. |
+| `CBAccessMgr::GetNextObject` | done | `World::access_key` with `next_access_object(.., true)`. |
+| `CBAccessMgr::GetPrevObject` | done | `World::access_key` with `next_access_object(.., false)`. |
 
 ## `wme_base/BActiveRect.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBActiveRect::CBActiveRect` | unreviewed |  |
-| `CBActiveRect::CBActiveRect #2` | unreviewed |  |
-| `CBActiveRect::CBActiveRect #3` | unreviewed |  |
-| `CBActiveRect::CBActiveRect #4` | unreviewed |  |
-| `CBActiveRect::CBActiveRect #5` | unreviewed |  |
-| `CBActiveRect::~CBActiveRect` | unreviewed |  |
-| `CBActiveRect::ClipRect` | unreviewed |  |
+| `CBActiveRect::CBActiveRect` | n/a | The empty constructor is never used by the engine. |
+| `CBActiveRect::CBActiveRect #2` | done | `HitShape::Pixels` with `PixelArea` (`luma-adventure/src/input.rs`): owner, sub-frame image, rectangle, zoom per axis, `precise`. |
+| `CBActiveRect::CBActiveRect #3` | todo | The bounding rectangle of a legacy MS3D model (`C3DModel`, `CAdActor3D`). Luma refuses legacy 3D actors (`docs/3d-actors.md` section 13). |
+| `CBActiveRect::CBActiveRect #4` | done | `HitArea::model3d` (`HitShape::Model3D`): the projected rectangle of an X model, confirmed by a pick into the model. |
+| `CBActiveRect::CBActiveRect #5` | done | `HitShape::Polygon` with `HitArea::layer_offset`: the region's points tested with the offset added back, as the rectangle is moved by `-Offset` and the offset kept. |
+| `CBActiveRect::~CBActiveRect` | replaced | Rust ownership. |
+| `CBActiveRect::ClipRect` | todo | Clips the rectangle to the current viewport (`GetCurrentViewportRect`) and notes how much was cut off the left and top. Luma's hit areas are not clipped: the part of a scene object lying outside the scene viewport still takes the mouse. |
 
 ## `wme_base/BAnimTransitionTime.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBAnimTransitionTime::CBAnimTransitionTime` | unreviewed |  |
-| `CBAnimTransitionTime::CBAnimTransitionTime #2` | unreviewed |  |
-| `CBAnimTransitionTime::~CBAnimTransitionTime` | unreviewed |  |
-| `CBAnimTransitionTime::Persist` | unreviewed |  |
+| `CBAnimTransitionTime::CBAnimTransitionTime` | done | `TransitionTime` (`luma-3d/src/animation.rs`): from, to, time. |
+| `CBAnimTransitionTime::CBAnimTransitionTime #2` | done | Empty entry for loading; serde builds Luma's. |
+| `CBAnimTransitionTime::~CBAnimTransitionTime` | replaced | Rust ownership. |
+| `CBAnimTransitionTime::Persist` | done | The table is part of the animated model's saved state (`transition_times`, `luma-3d/src/animation.rs`). |
 
 ## `wme_base/BBase.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBBase::CBBase` | unreviewed |  |
-| `CBBase::CBBase #2` | unreviewed |  |
-| `CBBase::~CBBase` | unreviewed |  |
-| `CBBase::GetEditorProp` | unreviewed |  |
-| `CBBase::SetEditorProp` | unreviewed |  |
-| `CBBase::ParseEditorProperty` | unreviewed |  |
-| `CBBase::ParseEditorProperty EDITOR_PROPERTY` | unreviewed |  |
-| `CBBase::ParseEditorProperty NAME` | unreviewed |  |
-| `CBBase::ParseEditorProperty VALUE` | unreviewed |  |
-| `CBBase::SaveAsText` | unreviewed |  |
+| `CBBase::CBBase` | replaced | No common base class; objects hold what they need and get the world passed in. |
+| `CBBase::CBBase #2` | replaced | See the first constructor. |
+| `CBBase::~CBBase` | replaced | Rust ownership. |
+| `CBBase::GetEditorProp` | n/a | Editor properties are only kept in editor mode. |
+| `CBBase::SetEditorProp` | n/a | Editor properties are only kept in editor mode. |
+| `CBBase::ParseEditorProperty` | n/a | Returns at once unless `Game->m_EditorMode`; Luma's loaders skip `EDITOR_PROPERTY`. |
+| `CBBase::ParseEditorProperty EDITOR_PROPERTY` | n/a | Editor mode only. |
+| `CBBase::ParseEditorProperty NAME` | n/a | Editor mode only. |
+| `CBBase::ParseEditorProperty VALUE` | n/a | Editor mode only. |
+| `CBBase::SaveAsText` | n/a | Writes the editor properties; editor only. |
 
 ## `wme_base/BEvent.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBEvent::CBEvent` | unreviewed |  |
-| `CBEvent::CBEvent #2` | unreviewed |  |
-| `CBEvent::~CBEvent` | unreviewed |  |
-| `CBEvent::GetEventName` | unreviewed |  |
-| `CBEvent::SetScript` | unreviewed |  |
-| `CBEvent::SetName` | unreviewed |  |
-| `CBEvent::LoadFile` | unreviewed |  |
-| `CBEvent::LoadBuffer` | unreviewed |  |
-| `CBEvent::LoadBuffer EVENT` | unreviewed |  |
-| `CBEvent::LoadBuffer NAME` | unreviewed |  |
-| `CBEvent::LoadBuffer SCRIPT` | unreviewed |  |
-| `CBEvent::Persist` | unreviewed |  |
+| `CBEvent::CBEvent` | n/a | Dead code in the original: nothing in `wme_base` or `wme_ad` creates a `CBEvent` or a `CBEventSet` (the event system from before scripts); only `BObject.h` forward-declares the set. |
+| `CBEvent::CBEvent #2` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
+| `CBEvent::~CBEvent` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
+| `CBEvent::GetEventName` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
+| `CBEvent::SetScript` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
+| `CBEvent::SetName` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
+| `CBEvent::LoadFile` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
+| `CBEvent::LoadBuffer` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
+| `CBEvent::LoadBuffer EVENT` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
+| `CBEvent::LoadBuffer NAME` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
+| `CBEvent::LoadBuffer SCRIPT` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
+| `CBEvent::Persist` | n/a | Dead code in the original, see `CBEvent::CBEvent`. |
 
 ## `wme_base/BEventSet.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBEventSet::CBEventSet` | unreviewed |  |
-| `CBEventSet::~CBEventSet` | unreviewed |  |
-| `CBEventSet::LoadFile` | unreviewed |  |
-| `CBEventSet::LoadBuffer` | unreviewed |  |
-| `CBEventSet::LoadBuffer EVENTS` | unreviewed |  |
-| `CBEventSet::LoadBuffer EVENT` | unreviewed |  |
-| `CBEventSet::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CBEventSet::LoadBuffer INIT` | unreviewed |  |
-| `CBEventSet::LoadBuffer SHUTDOWN` | unreviewed |  |
-| `CBEventSet::LoadBuffer LEFT_CLICK` | unreviewed |  |
-| `CBEventSet::LoadBuffer RIGHT_CLICK` | unreviewed |  |
-| `CBEventSet::LoadBuffer MIDDLE_CLICK` | unreviewed |  |
-| `CBEventSet::LoadBuffer LEFT_RELEASE` | unreviewed |  |
-| `CBEventSet::LoadBuffer RIGHT_RELEASE` | unreviewed |  |
-| `CBEventSet::LoadBuffer MIDDLE_RELEASE` | unreviewed |  |
-| `CBEventSet::LoadBuffer LEFT_DBLCLICK` | unreviewed |  |
-| `CBEventSet::LoadBuffer PRESS` | unreviewed |  |
-| `CBEventSet::LoadBuffer MOUSE_OVER` | unreviewed |  |
-| `CBEventSet::LoadBuffer IDLE` | unreviewed |  |
-| `CBEventSet::ApplyEvent` | unreviewed |  |
-| `CBEventSet::SaveAsText` | unreviewed |  |
-| `CBEventSet::Persist` | unreviewed |  |
+| `CBEventSet::CBEventSet` | n/a | Dead code in the original: no object owns or loads an event set (see `CBEvent::CBEvent`); the `EVENTS` key of the game file is accepted and ignored. |
+| `CBEventSet::~CBEventSet` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadFile` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer EVENTS` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer EVENT` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer TEMPLATE` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer INIT` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer SHUTDOWN` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer LEFT_CLICK` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer RIGHT_CLICK` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer MIDDLE_CLICK` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer LEFT_RELEASE` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer RIGHT_RELEASE` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer MIDDLE_RELEASE` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer LEFT_DBLCLICK` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer PRESS` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer MOUSE_OVER` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::LoadBuffer IDLE` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::ApplyEvent` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::SaveAsText` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
+| `CBEventSet::Persist` | n/a | Dead code in the original, see `CBEventSet::CBEventSet`. |
 
 ## `wme_base/BFader.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBFader::CBFader` | unreviewed |  |
-| `CBFader::~CBFader` | unreviewed |  |
-| `CBFader::Update` | unreviewed |  |
-| `CBFader::Display` | unreviewed |  |
-| `CBFader::Deactivate` | unreviewed |  |
-| `CBFader::FadeIn` | unreviewed |  |
-| `CBFader::FadeOut` | unreviewed |  |
-| `CBFader::GetCurrentColor` | unreviewed |  |
-| `CBFader::Persist` | unreviewed |  |
+| `CBFader::CBFader` | done | `Fader::default` (`luma-adventure/src/fader.rs`): inactive, ready, black, alpha 0, duration 1000, not system. |
+| `CBFader::~CBFader` | replaced | Rust ownership. |
+| `CBFader::Update` | done | `Fader::update`: nothing while inactive; the alpha goes from source to target over the duration on the game timer, or the live clock for a system fade; ready at the end, inactive once ready at alpha 0. |
+| `CBFader::Display` | done | `World::draw_fade` (`input.rs`) for the game's fader, over the whole screen after the cursor; `draw_scene_fade` for the scene's, over the scene viewport. |
+| `CBFader::Deactivate` | done | `Fader::deactivate`. |
+| `CBFader::FadeIn` | done | `Fader::fade_in`. |
+| `CBFader::FadeOut` | done | `Fader::fade_out`: starts from the alpha shown now. |
+| `CBFader::GetCurrentColor` | done | `Fader::color_int`. |
+| `CBFader::Persist` | partial | Serde on `Fader`, every field. Different: on load WME sets the start time of a system fade to 0, which ends it at once; Luma restores the live clock with the game, so a system fade goes on where it was. |
 
 ## `wme_base/BFrame.cpp`
 
@@ -345,57 +345,57 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBGameExHelper::CBGameExHelper` | unreviewed |  |
-| `CBGameExHelper::~CBGameExHelper` | unreviewed |  |
-| `CBGameExHelper::RegisterGame` | unreviewed |  |
-| `CBGameExHelper::UnregisterGame` | unreviewed |  |
-| `CBGameExHelper::AddToGameExplorerA` | unreviewed |  |
-| `CBGameExHelper::AddToGameExplorerW` | unreviewed |  |
-| `CBGameExHelper::RemoveFromGameExplorer` | unreviewed |  |
-| `CBGameExHelper::CreateTaskA` | unreviewed |  |
-| `CBGameExHelper::CreateTaskW` | unreviewed |  |
-| `CBGameExHelper::RemoveTasks` | unreviewed |  |
-| `CBGameExHelper::CreateShortcut` | unreviewed |  |
-| `CBGameExHelper::CreateShortcutToURL` | unreviewed |  |
-| `CBGameExHelper::SetupRichSavedGamesW` | unreviewed |  |
-| `CBGameExHelper::RemoveRichSavedGamesW` | unreviewed |  |
-| `CBGameExHelper::SetupRichSavedGamesA` | unreviewed |  |
-| `CBGameExHelper::RemoveRichSavedGamesA` | unreviewed |  |
+| `CBGameExHelper::CBGameExHelper` | n/a | Registers the game with the Windows Vista Games Explorer (COM `IGameExplorer`). |
+| `CBGameExHelper::~CBGameExHelper` | n/a | Windows Games Explorer. |
+| `CBGameExHelper::RegisterGame` | n/a | Windows Games Explorer. |
+| `CBGameExHelper::UnregisterGame` | n/a | Windows Games Explorer. |
+| `CBGameExHelper::AddToGameExplorerA` | n/a | Windows Games Explorer. |
+| `CBGameExHelper::AddToGameExplorerW` | n/a | Windows Games Explorer. |
+| `CBGameExHelper::RemoveFromGameExplorer` | n/a | Windows Games Explorer. |
+| `CBGameExHelper::CreateTaskA` | n/a | Windows Games Explorer task shortcuts. |
+| `CBGameExHelper::CreateTaskW` | n/a | Windows Games Explorer task shortcuts. |
+| `CBGameExHelper::RemoveTasks` | n/a | Windows Games Explorer task shortcuts. |
+| `CBGameExHelper::CreateShortcut` | n/a | Windows shell shortcut (`IShellLink`). |
+| `CBGameExHelper::CreateShortcutToURL` | n/a | Windows shell shortcut. |
+| `CBGameExHelper::SetupRichSavedGamesW` | n/a | Windows registry file association for rich saved games. |
+| `CBGameExHelper::RemoveRichSavedGamesW` | n/a | Windows registry file association for rich saved games. |
+| `CBGameExHelper::SetupRichSavedGamesA` | n/a | Windows registry file association for rich saved games. |
+| `CBGameExHelper::RemoveRichSavedGamesA` | n/a | Windows registry file association for rich saved games. |
 
 ## `wme_base/BKeyboard.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBKeyboard::CBKeyboard` | unreviewed |  |
-| `CBKeyboard::~CBKeyboard` | unreviewed |  |
-| `CBKeyboard::Create` | unreviewed |  |
-| `CBKeyboard::ReAcquire` | unreviewed |  |
-| `CBKeyboard::UnAcquire` | unreviewed |  |
-| `CBKeyboard::Update` | unreviewed |  |
-| `CBKeyboard::Key` | unreviewed |  |
+| `CBKeyboard::CBKeyboard` | n/a | DirectInput keyboard device; never created by the engine (the keyboard goes through window messages and `CBKeyboardState`). |
+| `CBKeyboard::~CBKeyboard` | n/a | DirectInput, unused. |
+| `CBKeyboard::Create` | n/a | DirectInput, unused. |
+| `CBKeyboard::ReAcquire` | n/a | DirectInput, unused. |
+| `CBKeyboard::UnAcquire` | n/a | DirectInput, unused. |
+| `CBKeyboard::Update` | n/a | DirectInput, unused. |
+| `CBKeyboard::Key` | n/a | DirectInput, unused. |
 
 ## `wme_base/BKeyboardState.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBKeyboardState::CBKeyboardState` | unreviewed |  |
-| `CBKeyboardState::~CBKeyboardState` | unreviewed |  |
-| `CBKeyboardState::ScCallMethod` | unreviewed |  |
-| `CBKeyboardState::ScGetProperty` | unreviewed |  |
-| `CBKeyboardState::ScSetProperty` | unreviewed |  |
-| `CBKeyboardState::ScToString` | unreviewed |  |
-| `CBKeyboardState::ReadKey` | unreviewed |  |
-| `CBKeyboardState::Persist` | unreviewed |  |
+| `CBKeyboardState::CBKeyboardState` | done | `Keyboard::default` (`luma-adventure/src/input.rs`): not printable, code 0, no modifier. |
+| `CBKeyboardState::~CBKeyboardState` | replaced | Rust ownership. |
+| `CBKeyboardState::ScCallMethod` | partial | `World::native_call` for `Kind::Keyboard` (`natives.rs`): `IsKeyDown` with a code, or a string whose first letter is taken upper-case. Different: WME asks the system (`GetAsyncKeyState`), which also answers for the mouse buttons (`VK_LBUTTON` 1, `VK_RBUTTON` 2, `VK_MBUTTON` 4) and for keys the window never received; Luma answers from the keys its front-end reported (`Keyboard::down`), so the mouse buttons and unmapped keys always read up. |
+| `CBKeyboardState::ScGetProperty` | partial | `World::native_get` for `Kind::Keyboard`: `Type`, `Key`, `Printable`, `KeyCode`, `IsShift`, `IsAlt`, `IsControl`. Different, from how `ReadKey` is fed: `KeyCode` is the key's upper-case code even when a character came with it, where WME then holds the character code (`a` is 97, not 65) and `Printable` true; `Key` holds a whole character where WME gives one byte. |
+| `CBKeyboardState::ScSetProperty` | done | No settable property in either (the original's body is commented out). |
+| `CBKeyboardState::ScToString` | partial | `Natives::to_string` gives `[native object]` for the keyboard; WME gives `[keyboard state]`. |
+| `CBKeyboardState::ReadKey` | partial | `World::key_down` (`input.rs`). WME calls it twice per key: for `WM_KEYDOWN` (not printable, the virtual key code) and for `WM_CHAR` (printable, the character code), the second overwriting the first before the `Keypress` handlers run; the modifiers are read from the system at each call. Luma records one event with the virtual code, the character and the modifiers the front-end gives; `luma-player` gives punctuation its ASCII code as the virtual code (`.` is 46, `VK_DELETE`), see `CBGame::HandleKeypress`. |
+| `CBKeyboardState::Persist` | done | Serde on `Keyboard` (code, character, printable, modifiers); `m_CurrentKeyData` has no use. |
 
 ## `wme_base/BNamedObject.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBNamedObject::CBNamedObject` | unreviewed |  |
-| `CBNamedObject::CBNamedObject #2` | unreviewed |  |
-| `CBNamedObject::CBNamedObject #3` | unreviewed |  |
-| `CBNamedObject::~CBNamedObject` | unreviewed |  |
-| `CBNamedObject::SetName` | unreviewed |  |
+| `CBNamedObject::CBNamedObject` | replaced | Names are plain `String` fields of each definition. |
+| `CBNamedObject::CBNamedObject #2` | replaced | See the first constructor. |
+| `CBNamedObject::CBNamedObject #3` | replaced | See the first constructor. |
+| `CBNamedObject::~CBNamedObject` | replaced | Rust ownership. |
+| `CBNamedObject::SetName` | done | The `Name` setters of each kind (`game_set`, `entity_set`, `region_set`...). |
 
 ## `wme_base/BObject.cpp`
 
@@ -441,48 +441,48 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBPoint::CBPoint` | unreviewed |  |
-| `CBPoint::~CBPoint` | unreviewed |  |
-| `CBPoint::CBPoint #2` | unreviewed |  |
-| `CBPoint::Persist` | unreviewed |  |
+| `CBPoint::CBPoint` | done | `luma_formats::scene::Point` (`Default`: 0, 0). |
+| `CBPoint::~CBPoint` | replaced | Rust ownership. |
+| `CBPoint::CBPoint #2` | done | `Point { x, y }`. |
+| `CBPoint::Persist` | done | Serde on `Point`. |
 
 ## `wme_base/BQuickMsg.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBQuickMsg::CBQuickMsg` | unreviewed |  |
-| `CBQuickMsg::~CBQuickMsg` | unreviewed |  |
-| `CBQuickMsg::GetText` | unreviewed |  |
+| `CBQuickMsg::CBQuickMsg` | partial | `QuickMessage` (`luma-adventure/src/world.rs`): the text and its start. The start is the game timer; WME takes `m_CurrentTime`, the system clock, so its three seconds run while the game is frozen. |
+| `CBQuickMsg::~CBQuickMsg` | replaced | Rust ownership. |
+| `CBQuickMsg::GetText` | done | `QuickMessage::text`. |
 
 ## `wme_base/BRegion.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBRegion::CBRegion` | unreviewed |  |
-| `CBRegion::~CBRegion` | unreviewed |  |
-| `CBRegion::Cleanup` | unreviewed |  |
-| `CBRegion::CreateRegion` | unreviewed |  |
-| `CBRegion::PointInRegion` | unreviewed |  |
-| `CBRegion::LoadFile` | unreviewed |  |
-| `CBRegion::LoadBuffer` | unreviewed |  |
-| `CBRegion::LoadBuffer REGION` | unreviewed |  |
-| `CBRegion::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CBRegion::LoadBuffer NAME` | unreviewed |  |
-| `CBRegion::LoadBuffer ACTIVE` | unreviewed |  |
-| `CBRegion::LoadBuffer POINT` | unreviewed |  |
-| `CBRegion::LoadBuffer CAPTION` | unreviewed |  |
-| `CBRegion::LoadBuffer SCRIPT` | unreviewed |  |
-| `CBRegion::LoadBuffer EDITOR_SELECTED_POINT` | unreviewed |  |
-| `CBRegion::LoadBuffer PROPERTY` | unreviewed |  |
-| `CBRegion::ScCallMethod` | unreviewed |  |
-| `CBRegion::ScGetProperty` | unreviewed |  |
-| `CBRegion::ScSetProperty` | unreviewed |  |
-| `CBRegion::ScToString` | unreviewed |  |
-| `CBRegion::SaveAsText` | unreviewed |  |
-| `CBRegion::Persist` | unreviewed |  |
-| `CBRegion::PtInPolygon` | unreviewed |  |
-| `CBRegion::GetBoundingRect` | unreviewed |  |
-| `CBRegion::Mimic` | unreviewed |  |
+| `CBRegion::CBRegion` | done | `luma_formats::scene::Region::default` (`luma-formats/src/scene.rs`): active, no points. |
+| `CBRegion::~CBRegion` | replaced | Rust ownership. |
+| `CBRegion::Cleanup` | replaced | Rust ownership. |
+| `CBRegion::CreateRegion` | replaced | The bounding rectangle is computed when asked (`Region::bounds`) instead of being cached in `m_Rect`. |
+| `CBRegion::PointInRegion` | done | `Region::contains`: fewer than three points is outside; inside the bounding rectangle (right and bottom edges excluded), then the polygon test. |
+| `CBRegion::LoadFile` | todo | Loads a region from its own `REGION` file. Luma only parses regions inside scenes and entities (`Region::from_node`); no code loads a region file (it is reached through `TEMPLATE`). |
+| `CBRegion::LoadBuffer` | partial | `Region::from_node`. Different: unknown keys are skipped (WME: syntax error). The points are replaced, then `CreateRegion`, as in WME. |
+| `CBRegion::LoadBuffer REGION` | done | `Region::from_node` on the `REGION` block of an entity or a layer. |
+| `CBRegion::LoadBuffer TEMPLATE` | partial | Parsed into `Region::template`, never used: WME loads the named region file first (`LoadFile`). Parsed, not used. |
+| `CBRegion::LoadBuffer NAME` | done | `Region::name`. |
+| `CBRegion::LoadBuffer ACTIVE` | done | `Region::active`. |
+| `CBRegion::LoadBuffer POINT` | done | `Region::points`. |
+| `CBRegion::LoadBuffer CAPTION` | done | `Region::caption`, expanded through the string table when the scene loads (`World::load_scene`). |
+| `CBRegion::LoadBuffer SCRIPT` | done | `Region::scripts`, attached when the scene loads (`World::load_scene`). |
+| `CBRegion::LoadBuffer EDITOR_SELECTED_POINT` | n/a | SceneEdit only. |
+| `CBRegion::LoadBuffer PROPERTY` | partial | Parsed into `Region::properties`, never applied to the region object as script properties. Parsed, not used. |
+| `CBRegion::ScCallMethod` | partial | `World::region_call` (`natives_region.rs`): `AddPoint`, `InsertPoint`, `SetPoint`, `RemovePoint`, `GetPoint` agree. Different: `SkipTo` moves the polygon so that its bounding box starts at the point; in WME it only sets the object's unused position (`CBObject::SkipTo`). The sound and cursor methods of `CBObject` are missing on regions. |
+| `CBRegion::ScGetProperty` | partial | `World::region_get`: `Type`, `Name`, `Active`, `NumPoints`, `Caption` agree. Different: `X`, `Y` read the bounding box's corner (WME: the object's position, 0 unless set); the other `CBObject` properties (`Height`, `Movable`, `Scale`...) are not answered. |
+| `CBRegion::ScSetProperty` | done | `World::region_set`: `Name`, `Active`, `Caption`. |
+| `CBRegion::ScToString` | partial | `Natives::to_string` gives `[<name>]` for a scene region and `[native object]` for an entity's; WME gives `[region]`. |
+| `CBRegion::SaveAsText` | n/a | Editor only. |
+| `CBRegion::Persist` | done | Serde on `Region` (active, points, name, caption) within the scene and entity state. The `m_LastMimic*` cache has no counterpart (see `Mimic`). |
+| `CBRegion::PtInPolygon` | done | `Region::contains`: the same crossing count, term for term. |
+| `CBRegion::GetBoundingRect` | done | `Region::bounds`: min and max of the points; `None` (empty) without points. |
+| `CBRegion::Mimic` | done | `mimic` (`luma-adventure/src/actor.rs`): each point scaled by the percentage, truncated, then moved to the position; recomputed on demand rather than cached. |
 
 ## `wme_base/BSprite.cpp`
 
@@ -576,33 +576,33 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBTransitionMgr::CBTransitionMgr` | unreviewed |  |
-| `CBTransitionMgr::~CBTransitionMgr` | unreviewed |  |
-| `CBTransitionMgr::IsReady` | unreviewed |  |
-| `CBTransitionMgr::Start` | unreviewed |  |
-| `CBTransitionMgr::Update` | unreviewed |  |
+| `CBTransitionMgr::CBTransitionMgr` | replaced | No transition manager: the fade of a scene change runs through the game's fader (`Runtime::tick`, `world.rs`). See `Start` and `Update` for what that loses. |
+| `CBTransitionMgr::~CBTransitionMgr` | replaced | Rust ownership. |
+| `CBTransitionMgr::IsReady` | todo | `CAdGame::InitLoop` waits for it before changing scene (the fade-out must end first). Luma changes scene at the next frame. |
+| `CBTransitionMgr::Start` | partial | Only `TRANSITION_FADE_IN` exists, as `world.fader.fade_in(black, 200 ms, system)` in `Runtime::tick`. Missing: `TRANSITION_FADE_OUT`, which `Game.ChangeScene(file, fadeOut = true, ...)` starts with `NonInteractive` true: the screen goes to black over 200 ms with the game not interactive, and only then does the scene change; Luma's `ChangeScene` ignores its second argument and cuts. Missing: the interactive state kept in `m_OrigInteractive` and put back when a transition ends. |
+| `CBTransitionMgr::Update` | partial | The fade-in is the game fader's (`Fader::update`), not a separate black layer drawn last (`Renderer->Fade`). So it replaces whatever fade a script set: after `Game.FadeOut(...)` then `ChangeScene`, WME stays black under the script's fade until the script fades in; Luma's scene fade-in clears the fader after 200 ms and shows the scene. The fade-out branch is missing (see `Start`). |
 
 ## `wme_base/BTreeNode.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBTreeNode::CBTreeNode` | unreviewed |  |
-| `CBTreeNode::~CBTreeNode` | unreviewed |  |
-| `CBTreeNode::AttachChild` | unreviewed |  |
-| `CBTreeNode::DetachChild` | unreviewed |  |
-| `CBTreeNode::DeleteChildren` | unreviewed |  |
+| `CBTreeNode::CBTreeNode` | n/a | Intrusive tree container that no class of the engine uses. |
+| `CBTreeNode::~CBTreeNode` | n/a | Unused container, see the constructor. |
+| `CBTreeNode::AttachChild` | n/a | Unused container, see the constructor. |
+| `CBTreeNode::DetachChild` | n/a | Unused container, see the constructor. |
+| `CBTreeNode::DeleteChildren` | n/a | Unused container, see the constructor. |
 
 ## `wme_base/BViewport.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBViewport::CBViewport` | unreviewed |  |
-| `CBViewport::~CBViewport` | unreviewed |  |
-| `CBViewport::Persist` | unreviewed |  |
-| `CBViewport::SetRect` | unreviewed |  |
-| `CBViewport::GetRect` | unreviewed |  |
-| `CBViewport::GetWidth` | unreviewed |  |
-| `CBViewport::GetHeight` | unreviewed |  |
+| `CBViewport::CBViewport` | done | `World::scene_viewport` (`None`: the whole screen) and `Scene::viewport` (`luma-formats`). |
+| `CBViewport::~CBViewport` | replaced | Rust ownership. |
+| `CBViewport::Persist` | done | `scene_viewport` is in the saved world state (`save.rs`), the scene's own with the scene. |
+| `CBViewport::SetRect` | partial | `Game.SetSceneViewport` (`natives.rs`) and `World::viewport`. Missing: the clamp to the screen (`left`, `top` not below 0, `right`, `bottom` not past the renderer's size) that WME applies unless `NoCheck`. |
+| `CBViewport::GetRect` | done | `World::viewport`. |
+| `CBViewport::GetWidth` | done | `World::viewport` width. |
+| `CBViewport::GetHeight` | done | `World::viewport` height. |
 
 ## `wme_base/PartEmitter.cpp`
 
