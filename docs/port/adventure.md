@@ -563,34 +563,34 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdObject::CAdObject` | unreviewed |  |
-| `CAdObject::~CAdObject` | unreviewed |  |
-| `CAdObject::PlayAnim` | unreviewed |  |
-| `CAdObject::Display` | unreviewed |  |
-| `CAdObject::Update` | unreviewed |  |
-| `CAdObject::ScCallMethod` | unreviewed |  |
-| `CAdObject::ScGetProperty` | unreviewed |  |
-| `CAdObject::ScSetProperty` | unreviewed |  |
-| `CAdObject::ScToString` | unreviewed |  |
-| `CAdObject::SetFont` | unreviewed |  |
-| `CAdObject::GetHeight` | unreviewed |  |
-| `CAdObject::Talk` | unreviewed |  |
-| `CAdObject::Reset` | unreviewed |  |
-| `CAdObject::Persist` | unreviewed |  |
-| `CAdObject::UpdateSounds` | unreviewed |  |
-| `CAdObject::ResetSoundPan` | unreviewed |  |
-| `CAdObject::GetExtendedFlag` | unreviewed |  |
-| `CAdObject::SaveAsText` | unreviewed |  |
-| `CAdObject::UpdateBlockRegion` | unreviewed |  |
-| `CAdObject::GetInventory` | unreviewed |  |
-| `CAdObject::AfterMove` | unreviewed |  |
-| `CAdObject::InvalidateCurrRegions` | unreviewed |  |
-| `CAdObject::GetScale` | unreviewed |  |
-| `CAdObject::UpdateSpriteAttachments` | unreviewed |  |
-| `CAdObject::DisplaySpriteAttachments` | unreviewed |  |
-| `CAdObject::DisplaySpriteAttachment` | unreviewed |  |
-| `CAdObject::CreateParticleEmitter` | unreviewed |  |
-| `CAdObject::UpdatePartEmitter` | unreviewed |  |
+| `CAdObject::CAdObject` | done | `luma-adventure/src/objects.rs` `ObjectState::default`, `talk.rs` `SubtitleMods::default` (relative, centred, width 0), `luma-formats` `Actor`/`Entity` defaults (active): not scene-independent, items not ignored, no stick region, no inventory, no emitter, no forced talk animation. |
+| `CAdObject::~CAdObject` | replaced | Rust ownership; the observable parts are done by `world.rs` `unload_object` / `load_scene`: the attachments (`remove_attachments_of`), the emitter and the inventory go with the object. |
+| `CAdObject::PlayAnim` | partial | `luma-adventure/src/scene_view.rs` `SceneView::play_anim` (entities) and `actor.rs` `Actor::play_anim` (the sprite-file branch): the sprite is loaded, the state becomes playing, a failure is logged with the original's message. Missing: the entity of a window's container (`EntityRef::Ui`) always fails (`natives.rs` `entity_call`), and items have a stub (`natives_item.rs`). |
+| `CAdObject::Display` | done | Empty in the original. |
+| `CAdObject::Update` | done | Empty in the original. |
+| `CAdObject::ScCallMethod` | partial | `luma-adventure/src/natives.rs` `entity_call` / `talk_call` / `inventory_call`, `natives_actor.rs` `actor_call`, `natives_object.rs` `object_call`, `natives_particles.rs` `emitter_owner_call`. Different: (1) `Reset` on an entity only restarts its sprite animation and ends a `PlayAnim`; it does not finish a sentence being said nor release the scripts waiting for the object (`ScEngine->ResetObject`), and the original does not restart the sprite; (2) `HasItem(itemObject)` answers false, the original accepts the item object as well as its name; (3) `GetItem(null)` and out-of-range agree, but `TakeItem`/`DropItem` errors are logged, not script runtime errors; (4) `Talk` on a container's entity says nothing (no sentence, the script does not wait); (5) on items (`CAdItem` is a `CAdObject`) `Talk`, `TalkAsync`, `StopTalk`, `PlayAnim`, `PlayAnimAsync`, `Reset` are stubs and `TakeItem`, `DropItem`, `GetItem`, `HasItem`, `StickToRegion`, `CreateParticleEmitter`, `DeleteParticleEmitter`, `AddAttachment`, `RemoveAttachment`, `GetAttachment` are missing; (6) `GetAttachment(name)` returns the right post-attachment where the original, by a bug, indexes the pre list. PlayAnim, IsTalking, StopTalk, ForceTalkAnim, Talk (align clamped to 0..2), StickToRegion, SetFont, GetFont, TakeItem, DropItem, CreateParticleEmitter, DeleteParticleEmitter, AddAttachment (pre-display by default), RemoveAttachment agree for actors and entities. |
+| `CAdObject::ScGetProperty` | partial | `luma-adventure/src/natives.rs` `entity_get`, `natives_actor.rs` `actor_get`, `natives_object.rs` `object_get`: Active, IgnoreItems, SceneIndependent, SubtitlesWidth, SubtitlesPosRelative, SubtitlesPosX, SubtitlesPosY, SubtitlesPosXCenter, NumItems, ParticleEmitter, NumAttachments for actors and entities. Missing on items (`natives_item.rs` `item_get`): `Active` is always true and IgnoreItems, the Subtitles properties, NumItems, ParticleEmitter and NumAttachments are not there (they read as null). |
+| `CAdObject::ScSetProperty` | partial | `luma-adventure/src/natives.rs` `entity_set`, `natives_actor.rs` `actor_set`, `natives_object.rs` `object_set` for actors and entities. Missing on items: Active, IgnoreItems and the Subtitles properties are stored as plain script properties with no effect. |
+| `CAdObject::ScToString` | partial | `world.rs` `Natives::to_string`: an entity or an item gives `[<its name>]`; the original gives `[ad object]` for every adventure object that does not override it (entities and items do not). |
+| `CAdObject::SetFont` | done | `world.rs` `set_font`: the font is loaded; `null` or a font that does not load leaves the system font. |
+| `CAdObject::GetHeight` | done | `natives.rs` `entity_height`, `actor.rs` `Actor::height`, `scene_view.rs` `frame_height`: the largest hotspot Y of the current frame's sub-frames, times the scene zoom at the object when it is scalable. |
+| `CAdObject::Talk` | partial | `world.rs` `World::talk`: text expanded, speech file given or found by the string key, duration from the sound else from the text (at least 1000 ms), width and position rules, scroll offset, `ForceTalkAnim` forgotten once used, text-to-speech without a sound. Missing or different: (1) the sentence does not take the object's freezable flag (`m_Sentence->m_Freezable`, see `CAdGame::DisplaySentences`); (2) `m_Sentence->SetupTalkFile(Sound)` (the `.talk` definition beside the sound) is not called here, see `CAdSentence`; (3) an object that is not an actor, a 3D actor or a scene/game entity cannot talk: a container's entity and an item get no sentence; (4) an empty sound name is treated as none (automatic lookup), the original tries to load it and gets no sound. |
+| `CAdObject::Reset` | partial | `actor.rs` `Actor::reset` with `engine.reset_object` (the `Reset` method, `load_scene`) agrees. For entities `load_scene` does the three steps (`reset_anim`, `stop_talk`, `reset_object`) for the game's entities, but the script method `Entity.Reset` only calls `reset_entity_anim`: a sentence is not finished and waiting scripts are not released. |
+| `CAdObject::Persist` | replaced | serde: `objects.rs` `ObjectState` (scene independence, forced talk animation, stick region, attachments, inventory), the definition (`Actor::def`, the scene's `Entity`: active, ignore items, font, block region, waypoints), `Actor` (state, next state, sentence, sprites, current regions), `SceneView` (entities' talks, played animations, subtitle mods), `World::emitters`. |
+| `CAdObject::UpdateSounds` | partial | `sound.rs` `update_sounds` pans the object's own sound. Missing: the sentence's speech sound is not panned with the object (`AutoSoundPanning`) and does not get the object's sound effect (`ApplyFX`); `start_speech` plays it centred. |
+| `CAdObject::ResetSoundPan` | todo | When `SoundPanning` is set to false the original centres the object's sound and its speech sound; Luma only stops updating the pan (`sound.rs` `sound_pan_of` returns none), so the sound stays where it was. |
+| `CAdObject::GetExtendedFlag` | done | `input.rs` `cursor_to_show` and `inventory.rs` `update_item_cursor`: actors, 3D actors, entities and items are `usable`, windows and controls are not. |
+| `CAdObject::SaveAsText` | n/a | Only reached from the editors' `SaveAsText` of scenes, actors and entities; no script method or engine path calls it. |
+| `CAdObject::UpdateBlockRegion` | partial | `actor.rs` `Actor::block_polygon` and `waypoints` (`mimic` with the scene scale at the actor's Y when scalable), used by `world.rs` `obstacles_for`. and `actor.rs` `entity_block_polygon` / `entity_waypoints` for the scene's entities. Different: the game's own entities (`Game.LoadEntity`) and the 3D actors are not counted as obstacles, and the scene's layer-node entities are, where the original's `IsBlockedAt` only looks at the scene's and the game's free objects. |
+| `CAdObject::GetInventory` | done | `inventory.rs` `object_inventory_mut`: created on first use (`taken_items_of` reads an empty one without creating it). |
+| `CAdObject::AfterMove` | partial | `actor.rs` `Actor::after_move`: `ActorEntry` for the regions entered, then `ActorLeave` for those left. Missing: it only runs for an actor's walk, its frames' MOVE and `SkipTo`. The original also runs it when a script sets `X` or `Y` (`CBObject::ScSetProperty`), and for entities (`SkipTo`, `X`, `Y`), so regions get `ActorEntry`/`ActorLeave` for entities too. |
+| `CAdObject::InvalidateCurrRegions` | done | `actor.rs` `Actor::invalidate_regions`, from `world.rs` `load_scene`. |
+| `CAdObject::GetScale` | partial | `luma-formats/src/scene.rs` `Scene::object_scale`: 100 unless scalable, ScaleX/ScaleY when either is set (the other 100), else Scale, else the scene zoom plus RelativeScale. Different: the original treats a negative Scale, ScaleX or ScaleY as not set; Luma keeps a negative number a script assigns (`Some(-1.0)`) and scales by it. Only `null` unsets. |
+| `CAdObject::UpdateSpriteAttachments` | replaced | The attachments are entities of the game view, advanced with it every frame (`world.rs` `update_scene`), not from their owner's update: an attachment of an inactive owner keeps animating. |
+| `CAdObject::DisplaySpriteAttachments` | done | `scene_edit.rs` `attachment_draws`: the pre list before the owner, the post list after, each in order. |
+| `CAdObject::DisplaySpriteAttachment` | partial | `scene_edit.rs` `attachment_draws` and `input.rs` `attachment_hits`: inactive attachments skipped, position = owner + offset * owner scale / 100, the owner's scale, rotation, tint and blend mode, hit as the owner. Different: the attachment is drawn as a bare sprite, not through `CAdEntity::Display`, so its own region, particle emitter and sound update are not applied; the scaled offset is truncated before the addition (one pixel off for negative offsets). |
+| `CAdObject::CreateParticleEmitter` | done | `natives_particles.rs` `create_particle_emitter`: the follow flag and offsets are set again on an existing emitter, then it is updated once. |
+| `CAdObject::UpdatePartEmitter` | done | `natives_particles.rs` `update_emitter` / `owner_placement`: a following emitter sits at the owner plus the offset times the owner's scale. (Luma updates every emitter each frame; the original only from an active owner's update.) |
 
 ## `wme_ad/AdObject3D.cpp`
 
