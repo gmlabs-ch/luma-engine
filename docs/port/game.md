@@ -245,7 +245,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBGame::LoadSettings REQUIRE_3D_ACCELERATION` | n/a | Tells the Windows device selection to refuse software rendering; wgpu always renders on the GPU. |
 | `CBGame::LoadSettings REQUIRE_SOUND` | todo | When true the original refuses to start without a sound device (device selection); Luma skips the key and starts silent. |
 | `CBGame::LoadSettings HWTL_MODE` | n/a | Direct3D hardware transform and lighting mode. |
-| `CBGame::LoadSettings ALLOW_WINDOWED_MODE` | todo | Whether the player may run the game in a window (settings dialog and device selection). Skipped: `luma-player` always opens a window. |
+| `CBGame::LoadSettings ALLOW_WINDOWED_MODE` | done | `GameSettings::parse` (`luma-adventure/src/settings.rs`) reads it into `allow_windowed`; `luma-player` runs the game full screen only when it is false (`play`, `view::windowed_mode`), unless `Debug/AllowWindowed` of `settings.ini` overrides it, as the original's registry value does. |
 | `CBGame::LoadSettings ALLOW_ACCESSIBILITY_TAB` | partial | Luma reads the key from the `GAME` block of `default.game` (`GameFile::allow_accessibility_tab`), where WME's `LoadBuffer` does not accept it; WME reads it here, in the `SETTINGS` block of `startup.settings`, which `GameSettings::parse` skips. The effect (speech, keyboard play and pause forced off, `Accessibility::read_settings`) is right once the key is read from the right file. |
 | `CBGame::LoadSettings ALLOW_ABOUT_TAB` | n/a | A tab of the Windows settings dialog. |
 | `CBGame::LoadSettings ALLOW_ADVANCED` | n/a | The advanced button of the Windows settings dialog. |

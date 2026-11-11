@@ -694,3 +694,43 @@ fn the_game_moves_the_system_cursor() {
     assert_eq!(runtime.world.take_cursor_warp(), None);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn the_engine_keeps_its_own_settings_beside_the_games() {
+    let (mut runtime, dir, _, _) = start();
+    assert_eq!(runtime.world.read_engine_int("Video", "WindowPosX"), None);
+    assert!(runtime.world.write_setting("Lang", "fr"));
+    assert!(
+        runtime
+            .world
+            .write_engine_setting("Video", "WindowPosX", "-120")
+    );
+    assert!(
+        runtime
+            .world
+            .write_engine_setting("Video", "WindowPosY", "48")
+    );
+    assert!(runtime.world.write_engine_setting("Video", "Windowed", "0"));
+    assert_eq!(
+        runtime.world.read_engine_int("video", "windowposx"),
+        Some(-120)
+    );
+    assert_eq!(
+        runtime.world.read_engine_int("Video", "WindowPosY"),
+        Some(48)
+    );
+    assert_eq!(runtime.world.read_engine_int("Video", "Windowed"), Some(0));
+    // As `GetPrivateProfileInt`: the leading integer, 0 without one.
+    assert!(
+        runtime
+            .world
+            .write_engine_setting("Video", "Windowed", "true")
+    );
+    assert_eq!(runtime.world.read_engine_int("Video", "Windowed"), Some(0));
+    // The game's private settings are a section of the same file.
+    assert_eq!(runtime.world.read_setting("Lang").as_deref(), Some("fr"));
+    assert_eq!(runtime.world.read_setting("WindowPosX"), None);
+    let text = std::fs::read_to_string(runtime.world.settings_ini_path()).unwrap();
+    assert!(text.contains("[Video]\nWindowPosX=-120\n"), "{text}");
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -142,8 +142,29 @@ impl World {
     /// Stores a private setting (`RegWriteString`, `RegWriteNumber`);
     /// whether the file could be written.
     pub fn write_setting(&mut self, key: &str, value: &str) -> bool {
+        self.write_engine_setting(PRIVATE_SECTION, key, value)
+    }
+
+    /// A value the engine itself keeps between runs (`CBRegistry::
+    /// ReadString` for a section of its own, such as `Video`), `None`
+    /// when it was never written.
+    pub fn read_engine_setting(&mut self, section: &str, key: &str) -> Option<String> {
+        self.read_ini().get(section, key).map(str::to_string)
+    }
+
+    /// A number the engine keeps between runs (`CBRegistry::ReadInt`):
+    /// the leading integer of the value, as `GetPrivateProfileInt`
+    /// reads it; `None` when the key is absent.
+    pub fn read_engine_int(&mut self, section: &str, key: &str) -> Option<i32> {
+        self.read_engine_setting(section, key)
+            .map(|value| luma_script::atoi(&value))
+    }
+
+    /// Stores a value the engine keeps between runs (`CBRegistry::
+    /// WriteString`, `WriteInt`); whether the file could be written.
+    pub fn write_engine_setting(&mut self, section: &str, key: &str, value: &str) -> bool {
         let mut ini = self.read_ini();
-        ini.set(PRIVATE_SECTION, key, value);
+        ini.set(section, key, value);
         let path = self.settings_ini_path();
         let written = path
             .parent()

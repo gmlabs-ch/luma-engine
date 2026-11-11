@@ -19,6 +19,9 @@ pub struct GameSettings {
     pub height: u32,
     /// `STRING_TABLE`: a string table loaded before the game file's.
     pub string_table: Option<String>,
+    /// `ALLOW_WINDOWED_MODE`: whether the game may run in a window
+    /// (true by default); when false it runs full screen only.
+    pub allow_windowed: bool,
 }
 
 impl Default for GameSettings {
@@ -29,6 +32,7 @@ impl Default for GameSettings {
             width: 800,
             height: 600,
             string_table: None,
+            allow_windowed: true,
         }
     }
 }
@@ -60,6 +64,9 @@ impl GameSettings {
         if let Some(table) = root.get_str("STRING_TABLE") {
             settings.string_table = Some(table.to_string());
         }
+        if let Some(allow) = root.get_bool("ALLOW_WINDOWED_MODE") {
+            settings.allow_windowed = allow;
+        }
         if let Some(res) = root.get_ints("RESOLUTION") {
             if let [w, h, ..] = res[..] {
                 if w > 0 && h > 0 {
@@ -85,6 +92,9 @@ mod tests {
         assert_eq!(s.width, 1024);
         assert_eq!(s.height, 768);
         assert_eq!(s.string_table, None);
+        assert!(s.allow_windowed, "allowed unless the game says otherwise");
+        let s = GameSettings::parse(b"SETTINGS { ALLOW_WINDOWED_MODE=FALSE }").unwrap();
+        assert!(!s.allow_windowed);
         let s = GameSettings::parse(
             b"SETTINGS {\n  GAME=\"default.game\"\n  STRING_TABLE=\"string.tab\"\n  RESOLUTION { 320,200 }\n}\n",
         )

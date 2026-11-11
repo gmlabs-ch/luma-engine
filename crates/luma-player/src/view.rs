@@ -33,9 +33,30 @@ pub fn to_window(game: (u32, u32), size: (u32, u32), (x, y): (i32, i32)) -> (f64
     )
 }
 
+/// Whether the game runs in a window (`CHWManager`): never when the
+/// game forbids it (`ALLOW_WINDOWED_MODE = FALSE`); else what the
+/// player asks on the command line, else the choice kept in the
+/// settings (`Video/Windowed`), else a window.
+pub fn windowed_mode(allow_windowed: bool, asked: Option<bool>, saved: Option<bool>) -> bool {
+    allow_windowed && asked.or(saved).unwrap_or(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_game_the_command_line_then_the_settings_choose_the_window() {
+        assert!(windowed_mode(true, None, None), "a window by default");
+        assert!(!windowed_mode(true, None, Some(false)));
+        assert!(windowed_mode(true, None, Some(true)));
+        assert!(windowed_mode(true, Some(true), Some(false)));
+        assert!(!windowed_mode(true, Some(false), Some(true)));
+        // A game that forbids the window runs full screen whatever is
+        // asked.
+        assert!(!windowed_mode(false, None, None));
+        assert!(!windowed_mode(false, Some(true), Some(true)));
+    }
 
     #[test]
     fn window_and_game_positions_map_both_ways() {

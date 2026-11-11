@@ -10,9 +10,12 @@ Lite's `BGame`, `AdGame`, `BRenderer`, `BKeyboardState`, `BFader`,
 `luma-player <game>` opens a window at a whole multiple of the game's
 resolution (the largest that keeps the window at most 1280 points wide,
 or `--scale <n>`; the frame is letterboxed when the window has another
-shape, see [rendering.md](rendering.md#coordinates)), loads `default.game`, attaches the
-game's scripts and schedules its `STARTUP_SCENE`. Every frame then runs,
-in this order (`Runtime::tick`):
+shape, see [rendering.md](rendering.md#coordinates)), or runs full
+screen (see [Window or full screen](#window-or-full-screen)), loads
+`default.game`, attaches the game's scripts and schedules its
+`STARTUP_SCENE`; `--load <slot>` or `--savegame <file>` then loads a
+saved game before the first frame, as the original's `-savegame` does.
+Every frame then runs, in this order (`Runtime::tick`):
 
 1. a game load asked last frame (`Game.LoadGame`) happens, replacing
    everything below with the saved state (see [saving.md](saving.md));
@@ -54,6 +57,41 @@ mouse again before it is dispatched, and a release that arrives before
 any frame saw the press waits for the end of the next frame: the
 `LeftRelease` event is raised then, and the button fires on the frame
 after. This is Luma's own; the original engine lost such clicks.
+
+### Window or full screen
+
+The original lets the player choose between full screen and a window in
+its settings dialog (`CDlgPageDisplay::OnWindowed`), keeps the choice in
+`Video/Windowed` (`CHWManager::SaveSettings`, `LoadSettings`) and only
+offers the window when the game's `startup.settings` allows it
+(`ALLOW_WINDOWED_MODE`, true by default; the `Debug/AllowWindowed`
+setting overrides it). Luma has no settings dialog; `luma-player`
+decides in this order (`view::windowed_mode`):
+
+1. a game that forbids the window runs **full screen**, whatever is
+   asked (`ALLOW_WINDOWED_MODE = FALSE`, unless `[Debug] AllowWindowed=1`
+   in `settings.ini`);
+2. `--fullscreen` or `--windowed` on the command line;
+3. `[Video] Windowed` in `settings.ini` (`0` full screen, another
+   number a window), written by hand: nothing in Luma writes it;
+4. a window. This differs from the original on purpose: its dialog
+   proposes full screen until the player ticks the window box.
+
+Full screen is a borderless window covering the desktop at the
+desktop's resolution, with the game's frame scaled and letterboxed in
+it; the original changes the display mode to the game's resolution, or
+keeps the desktop's with the aspect ratio maintained when the player
+asks (`DesktopRes`, `MaintainAspect`), which is what Luma always does.
+The mouse stays on the game's frame, as the original confines the
+cursor to the visible area (`CBRenderer::ClipCursor`).
+`Game.WindowedMode` tells the scripts which of the two the game runs in.
+
+In a window, the window opens where it was when the game last ended:
+its position is written to `[Video] WindowPosX` and `WindowPosY` of
+`settings.ini` on exit and read at start (`CBPlatform::MessageLoop`,
+`Initialize`); a position that is on no screen any more is ignored. The
+original keeps it relative to the monitor it chose; Luma keeps the
+desktop position the window system reports.
 
 ### When the window is not active
 
@@ -124,8 +162,8 @@ system's `timeGetTime`; both only make sense as differences), `FPS` the
 number of frames of the last whole second, counted as the original
 engine does (`m_FramesRendered` moved to `m_Fps` when `m_FpsTime`
 passes 1000 ms, so the value is `0` during the first second).
-`WindowedMode` is whether a front-end opened a window (the player says
-so; headless runs read `false`), `SoundAvailable` whether an audio
+`WindowedMode` is whether the game runs in a window rather than full
+screen (the player says so; headless runs read `false`), `SoundAvailable` whether an audio
 device was opened, `AcceleratedMode` (and `Accelerated`) always true
 with wgpu. `TextEncoding` is `0` (ANSI) or `1` (UTF-8): set by every
 string table loaded (a byte order mark means UTF-8, as in the original

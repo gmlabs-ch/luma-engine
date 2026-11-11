@@ -49,6 +49,9 @@ OPTIONS:
     --mute                Play no sound (the sounds still run, silently, on the game clock)
     --scale <n>           Open the window at n times the game's resolution (by default the
                           largest whole number that keeps it within 1280 points wide)
+    --fullscreen          Run the game full screen (the frame fills the desktop, letterboxed)
+    --windowed            Run the game in a window (the default, unless the settings say
+                          otherwise or the game forbids it with ALLOW_WINDOWED_MODE=FALSE)
     --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
                           node, e.g. --click Door or --click Freezer:LookAt
     --click-at <x>,<y>    In headless mode, move the mouse there and click
@@ -89,9 +92,10 @@ OPTIONS:
                           (repeatable)
     --save <slot>         In headless mode, save the game to that slot after the clicks and
                           the scene changes (as Game.SaveGame does)
-    --load <slot>         In headless mode, load that slot before the first frame (as
-                          Game.LoadGame does); the game's own scripts are replaced by the
-                          saved ones
+    --load <slot>         Load that slot before the first frame (as Game.LoadGame does);
+                          the game's own scripts are replaced by the saved ones
+    --savegame <file>     Load that saved game before the first frame, by its file name
+                          in the save directory (save001.dsv) or its path
     --help                Show this message
 
 --click, --click-at, --click-on, --right-click-at, --drag, --wheel, --key, --hold-key,
@@ -160,6 +164,8 @@ struct Options {
     mute: bool,
     /// Window size as a multiple of the game's resolution (`--scale`).
     scale: Option<u32>,
+    /// `--windowed` (true) or `--fullscreen` (false).
+    windowed: Option<bool>,
     steps: Vec<Step>,
     hover_at: Option<(i32, i32)>,
     after: u64,
@@ -185,6 +191,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut font = None;
     let mut mute = false;
     let mut scale = None;
+    let mut windowed = None;
     let mut steps = Vec::new();
     let mut hover_at = None;
     let mut after = 3;
@@ -231,6 +238,14 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--say" => say = Some(value(&mut i)?.clone()),
             "--font" => font = Some(value(&mut i)?.clone()),
             "--mute" => mute = true,
+            "--fullscreen" => windowed = Some(false),
+            "--windowed" => windowed = Some(true),
+            "--savegame" => {
+                let v = value(&mut i)?;
+                load = Some(save_slot_of(v).ok_or_else(|| {
+                    format!("--savegame expects a saved game named save<slot>.dsv, got `{v}`")
+                })?);
+            }
             "--scale" => {
                 let v = value(&mut i)?;
                 scale = Some(
@@ -400,6 +415,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         font,
         mute,
         scale,
+        windowed,
         steps,
         hover_at,
         after,
@@ -409,6 +425,20 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         save,
         load,
     })
+}
+
+/// The slot of a saved game's file (`save007.dsv`, with or without a
+/// directory): the original's `-savegame <file>` names the file, Luma's
+/// saved games are found by slot in the game's save directory.
+fn save_slot_of(file: &str) -> Option<i32> {
+    let name = Path::new(file).file_name()?.to_str()?.to_ascii_lowercase();
+    let digits = name
+        .strip_prefix("save")?
+        .strip_suffix(&format!(".{}", luma::adventure::SAVE_EXTENSION))?;
+    if digits.is_empty() || digits.len() > 6 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 fn main() -> ExitCode {
@@ -1078,7 +1108,31 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         .ok()
         .and_then(|v| v.parse().ok());
     let mut runtime = runtime;
-    runtime.world.set_windowed(true);
+    // Window or full screen (`CHWManager`): what the command line asks,
+    // else the choice kept in the settings (`Video/Windowed`), else a
+    // window; full screen only when the game forbids the window
+    // (`ALLOW_WINDOWED_MODE`, which `Debug/AllowWindowed` overrides).
+    let allow_windowed = runtime
+        .world
+        .read_engine_int("Debug", "AllowWindowed")
+        .map_or(settings.allow_windowed, |v| v != 0);
+    let saved = runtime
+        .world
+        .read_engine_int("Video", "Windowed")
+        .map(|v| v != 0);
+    let windowed = view::windowed_mode(allow_windowed, options.windowed, saved);
+    if options.windowed == Some(true) && !windowed {
+        eprintln!("this game runs full screen only (ALLOW_WINDOWED_MODE=FALSE)");
+    }
+    runtime.world.set_windowed(windowed);
+    // The window opens where it was left (`Video/WindowPosX`, `WindowPosY`).
+    let position = match (
+        runtime.world.read_engine_int("Video", "WindowPosX"),
+        runtime.world.read_engine_int("Video", "WindowPosY"),
+    ) {
+        (Some(x), Some(y)) => Some((x, y)),
+        _ => None,
+    };
     // The editors copy to and paste from the system's clipboard; when
     // it cannot be reached, they keep the game's own.
     match arboard::Clipboard::new() {
@@ -1099,6 +1153,9 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         size: PhysicalSize::new(settings.width, settings.height),
         modifiers: ModifiersState::empty(),
         started: false,
+        load: options.load,
+        windowed,
+        window_position: None,
         warp_failed: false,
         focused: true,
         occluded: false,
@@ -1109,6 +1166,8 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
             width: settings.width.saturating_mul(scale).clamp(1, 16384),
             height: settings.height.saturating_mul(scale).clamp(1, 16384),
             cursor_visible: false,
+            fullscreen: !windowed,
+            position,
             ..WindowConfig::default()
         },
         player,
@@ -1138,6 +1197,14 @@ struct GamePlayer {
     size: PhysicalSize<u32>,
     modifiers: ModifiersState,
     started: bool,
+    /// A saved game to load before the first frame (`--load`,
+    /// `--savegame`).
+    load: Option<i32>,
+    /// Whether the game runs in a window, else full screen.
+    windowed: bool,
+    /// Where the window's top-left corner is on the desktop, once
+    /// known, to open it there next time.
+    window_position: Option<(i32, i32)>,
     /// The system refused to move its cursor (said once).
     warp_failed: bool,
     /// Whether the window has the keyboard focus.
@@ -1179,8 +1246,22 @@ impl App for GamePlayer {
     fn event(&mut self, event: &WindowEvent) -> Flow {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
-                let (x, y) = self.to_game(position.x, position.y);
+                let (mut x, mut y) = self.to_game(position.x, position.y);
+                if !self.windowed {
+                    // Full screen keeps the cursor on the game's frame
+                    // (`CBRenderer::ClipCursor`).
+                    let settings = self.runtime.world.settings();
+                    x = x.clamp(0, settings.width as i32 - 1);
+                    y = y.clamp(0, settings.height as i32 - 1);
+                }
                 self.runtime.mouse_move(x, y);
+            }
+            WindowEvent::Moved(position) => {
+                // A minimised window reports a place far off the desktop
+                // on some systems: not one to come back to.
+                if self.windowed && !self.occluded && position.x > -30000 && position.y > -30000 {
+                    self.window_position = Some((position.x, position.y));
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => match (button, state) {
                 (MouseButton::Left, ElementState::Pressed) => self.runtime.mouse_left_down(),
@@ -1277,6 +1358,18 @@ impl App for GamePlayer {
         if !self.started {
             self.started = true;
             self.runtime.start();
+            if let Some(slot) = self.load {
+                // As the original's `-savegame`: the saved game loads
+                // right after the start-up.
+                self.runtime.world.schedule_load(slot);
+            }
+            if self.windowed && self.window_position.is_none() {
+                self.window_position = frame
+                    .window
+                    .outer_position()
+                    .ok()
+                    .map(|position| (position.x, position.y));
+            }
         }
         if !self.runtime.is_active() {
             // The system asked for a repaint while the game sleeps: the
@@ -1350,6 +1443,19 @@ impl App for GamePlayer {
             // window keeps showing the last one presented.
             _ if self.runtime.world.suspended_rendering() => Flow::Skip,
             _ => Flow::Continue,
+        }
+    }
+}
+
+impl Drop for GamePlayer {
+    /// The window's position is remembered for the next run
+    /// (`CBPlatform::MessageLoop` on exit), unless the game ran full
+    /// screen.
+    fn drop(&mut self) {
+        if let (true, Some((x, y))) = (self.windowed, self.window_position) {
+            let world = &mut self.runtime.world;
+            world.write_engine_setting("Video", "WindowPosX", &x.to_string());
+            world.write_engine_setting("Video", "WindowPosY", &y.to_string());
         }
     }
 }
@@ -1435,5 +1541,40 @@ impl App for Player {
             Some(limit) if frame.frame_index + 1 >= limit => Flow::Exit,
             _ => Flow::Continue,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_saved_game_file_names_its_slot() {
+        assert_eq!(save_slot_of("save007.dsv"), Some(7));
+        assert_eq!(save_slot_of("SAVE120.DSV"), Some(120));
+        assert_eq!(save_slot_of("/games/saves/save001.dsv"), Some(1));
+        assert_eq!(save_slot_of("save.dsv"), None);
+        assert_eq!(save_slot_of("save-1.dsv"), None);
+        assert_eq!(save_slot_of("save1234567.dsv"), None);
+        assert_eq!(save_slot_of("notes.txt"), None);
+        assert_eq!(save_slot_of(""), None);
+    }
+
+    #[test]
+    fn window_options_are_parsed() {
+        let args = |list: &[&str]| -> Vec<String> { list.iter().map(|a| a.to_string()).collect() };
+        let options = parse_args(&args(&["game"])).unwrap();
+        assert_eq!((options.windowed, options.load), (None, None));
+        let options = parse_args(&args(&[
+            "game",
+            "--fullscreen",
+            "--savegame",
+            "save003.dsv",
+        ]))
+        .unwrap();
+        assert_eq!((options.windowed, options.load), (Some(false), Some(3)));
+        let options = parse_args(&args(&["game", "--windowed", "--load", "2"])).unwrap();
+        assert_eq!((options.windowed, options.load), (Some(true), Some(2)));
+        assert!(parse_args(&args(&["game", "--savegame", "x.txt"])).is_err());
     }
 }

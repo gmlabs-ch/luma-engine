@@ -245,6 +245,20 @@ logged and the value is lost, as the original engine reports nothing
 to the script either. The section name is the original engine's, so a
 game's values can be copied from its `wme.ini` by hand.
 
+The same file holds the settings the engine keeps for itself, under the
+sections and keys of the original's registry (`World::
+read_engine_setting`, `read_engine_int`, `write_engine_setting`):
+
+| Section | Key | Meaning |
+|---------|-----|---------|
+| `Video` | `Windowed` | `0` runs the game full screen, another number in a window (read by `luma-player`, written by hand; see [game-loop.md](game-loop.md#window-or-full-screen)). |
+| `Video` | `WindowPosX`, `WindowPosY` | Where the window was when the game last ended; written by `luma-player` on exit, read at start. |
+| `Debug` | `AllowWindowed` | Overrides the game's `ALLOW_WINDOWED_MODE`. |
+| `Accessibility` | | See [game-loop.md](game-loop.md#accessibility). |
+
+Numbers are read as `GetPrivateProfileInt` reads them: the leading
+integer of the value, `0` when there is none.
+
 ### Accessibility settings
 
 The same file holds the player's accessibility switches, in an

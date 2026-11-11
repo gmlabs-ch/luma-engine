@@ -149,6 +149,10 @@ The player shows one scene of a game, without running its scripts yet:
 # Play a game: its scripts pick the scenes, the mouse and the keyboard go to them
 luma-player path/to/game
 
+# Play full screen, or start from a saved game
+luma-player path/to/game --fullscreen
+luma-player path/to/game --load 3
+
 # Show one scene without running the game
 luma-player path/to/game --scene scenes/room/room.scene
 

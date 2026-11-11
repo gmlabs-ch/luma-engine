@@ -224,7 +224,7 @@ How the list was made. For every class with a script interface, the names tested
 | `Hwnd` | get | **no-op** | Windows window handle (HWND); meaningless outside Windows. |
 | `CurrentTime` | get | **done** | Game timer in milliseconds (stops while frozen). |
 | `WindowsTime` | get | **done** | Real-time clock in milliseconds (timeGetTime). Luma returns the wall clock since the game started, which runs while frozen. |
-| `WindowedMode` | get | **done** | True when running windowed: the front-end says so (`World::set_windowed`); the player does, headless runs read false. |
+| `WindowedMode` | get | **done** | True when running in a window, false full screen: the front-end says so (`World::set_windowed`); headless runs read false. |
 | `MouseX`, `MouseY` | get/set | **done** | Mouse position in game coordinates; setting one moves the system cursor too. |
 | `MainObject` | get/set | **done** | The object the player controls and the camera follows. |
 | `ActiveObject` | get | **done** | The object under the mouse. |

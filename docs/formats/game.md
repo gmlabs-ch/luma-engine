@@ -1,6 +1,10 @@
 # Game definition and string tables
 
-`startup.settings` names the game definition file (`GAME="default.game"`)
+`startup.settings` says whether the game may run in a window
+(`ALLOW_WINDOWED_MODE`, true by default; when false `luma-player` runs
+it full screen only, see
+[../game-loop.md](../game-loop.md#window-or-full-screen)) and names the
+game definition file (`GAME="default.game"`)
 and the resolution; `default.game` describes the game object: its name,
 the scripts attached to it, the system font, the cursors, and the
 interface files of the adventure layer. Both are
