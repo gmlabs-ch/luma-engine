@@ -4073,7 +4073,9 @@ fn objects_have_their_own_cursor_caption_slots_and_flags() {
             &mut runtime,
             prop,
             "SetCursor",
-            &[Value::from("missing.sprite")]
+            // A file that is not a sprite: one that does not exist would
+            // load as the placeholder image.
+            &[Value::from("default.game")]
         ),
         Value::Bool(false)
     );
@@ -4258,7 +4260,7 @@ fn talk_sprite_sets_forced_talk_anims_and_sprite_objects() {
             &mut runtime,
             prop,
             "AddTalkSprite",
-            &[Value::from("missing.sprite"), Value::Bool(false)]
+            &[Value::from("default.game"), Value::Bool(false)]
         ),
         Value::Bool(false)
     );
@@ -4382,7 +4384,7 @@ fn talk_sprite_sets_forced_talk_anims_and_sprite_objects() {
             &mut runtime,
             prop,
             "ForceTalkAnim",
-            &[Value::from("missing.sprite")]
+            &[Value::from("default.game")]
         ),
         Value::Bool(true)
     );
@@ -4481,7 +4483,7 @@ fn talk_sprite_sets_forced_talk_anims_and_sprite_objects() {
             &mut runtime,
             actor,
             "AddTalkSprite",
-            &[Value::from("missing.sprite"), Value::Bool(false)]
+            &[Value::from("default.game"), Value::Bool(false)]
         ),
         Value::Bool(false)
     );
@@ -6001,6 +6003,44 @@ fn button_templates_are_read_from_the_game() {
         log.iter()
             .any(|l| l.contains("Error parsing WINDOW file 'lost.window'")
                 && l.contains("gone.button")),
+        "{log:?}"
+    );
+}
+
+/// `CBGame::LoadBuffer`: a game without a system font gets the engine's
+/// built-in one, the caption goes through the string table when the file
+/// is read, and a package that cannot be read is logged and skipped
+/// (`CBFileManager::RegisterPackages`).
+#[test]
+fn a_bare_game_gets_the_built_in_font_and_its_caption_is_expanded() {
+    let dir = temp_dir();
+    let mut pkg = PackageBuilder::new("data");
+    pkg.add_file(
+        "startup.settings",
+        b"SETTINGS { GAME=\"default.game\" STRING_TABLE=\"s.tab\" RESOLUTION { 32,32 } }".to_vec(),
+    );
+    pkg.add_file("s.tab", b"CAP\tTranslated\r\n".to_vec());
+    pkg.add_file(
+        "default.game",
+        b"GAME { NAME=\"T\" CAPTION=\"/CAP/Fallback\" SHADOW_IMAGE=\"art\\shadow.png\" SYSTEM_FONT=\"gone.font\" }".to_vec(),
+    );
+    std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
+    std::fs::write(dir.join("broken.dcp"), b"not a package").unwrap();
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    assert_eq!(runtime.world.system_font(), Some("system_font.fnt"));
+    let game = runtime.world.game_id();
+    assert_eq!(
+        runtime.world.get_property(game, "Caption"),
+        Some(Value::from("Translated"))
+    );
+    assert_eq!(
+        runtime.world.game_file().shadow_image.as_deref(),
+        Some("art\\shadow.png")
+    );
+    let log = runtime.world.take_log();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("broken.dcp") && l.contains("Ignoring")),
         "{log:?}"
     );
 }

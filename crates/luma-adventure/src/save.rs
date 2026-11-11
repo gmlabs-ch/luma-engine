@@ -382,9 +382,9 @@ impl World {
     /// The directory the game was opened from.
     pub fn game_directory(&self) -> PathBuf {
         self.vfs
-            .directories()
-            .first()
-            .cloned()
+            .game_directory()
+            .map(Path::to_path_buf)
+            .or_else(|| self.vfs.directories().first().cloned())
             .unwrap_or_else(|| PathBuf::from("."))
     }
 

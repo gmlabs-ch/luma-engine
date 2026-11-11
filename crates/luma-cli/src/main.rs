@@ -133,6 +133,10 @@ fn open(game: &Path) -> Result<Vfs, Failure> {
         Ok(vfs)
     } else {
         let vfs = Vfs::open_game(game)?;
+        // The packages the engine would ignore.
+        for warning in vfs.warnings() {
+            eprintln!("{}", warning.trim_start());
+        }
         if vfs.packages().is_empty() {
             return Err(Failure::Error(format!(
                 "{}: no .dcp package found",

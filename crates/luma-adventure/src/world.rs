@@ -253,7 +253,10 @@ impl World {
 
     /// Opens a game with a given audio system (`Audio::null()` for tests
     /// and silent runs).
-    pub fn with_audio(vfs: Vfs, audio: Audio) -> Result<World> {
+    pub fn with_audio(mut vfs: Vfs, audio: Audio) -> Result<World> {
+        // The engine's own files (the fallback font, the placeholder of
+        // a missing image) are found after the game's.
+        crate::resources::register(&mut vfs);
         let settings = GameSettings::load(&vfs)?;
         let bytes = vfs.read(&settings.game_file)?;
         let game_file = {
@@ -387,6 +390,10 @@ impl World {
             save_dir_checked: false,
             access: Accessibility::new(),
         };
+        // What the scan of the packages had to say (`RegisterPackages`).
+        for line in world.vfs.warnings().to_vec() {
+            world.log(line);
+        }
         // Each `STRING_TABLE` of the settings is loaded as the original
         // does (`LoadFile(file)`, which empties the table first): the
         // last one is the game's table.
@@ -405,6 +412,17 @@ impl World {
                 world.system_font = Some(path);
             }
         }
+        // Without a system font of its own the game gets the engine's
+        // (`CBGame::LoadBuffer`: `AddFont("system_font.fnt")`).
+        if world.system_font.is_none() && world.load_font(crate::resources::SYSTEM_FONT) {
+            world.system_font = Some(crate::resources::SYSTEM_FONT.to_string());
+        }
+        // `SHADOW_IMAGE`: the image of the simple shadows of 3D actors.
+        // Without the key the engine's own shadow is drawn.
+        world.shadow_image = world.game_file.shadow_image.clone();
+        // `SetCaption` looks the caption up in the string table when the
+        // game file is read.
+        world.caption = world.expand(&world.caption.clone());
         if let Some(path) = world.game_file.video_font.clone() {
             if world.load_font(&path) {
                 world.video_font = Some(path);

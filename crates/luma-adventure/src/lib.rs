@@ -72,6 +72,7 @@ pub mod objects;
 pub mod particles;
 pub mod path;
 pub mod registry;
+pub mod resources;
 pub mod responses;
 pub mod save;
 #[cfg(feature = "3d")]

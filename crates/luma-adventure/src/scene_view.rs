@@ -294,6 +294,16 @@ pub(crate) fn key(path: &str) -> String {
     path.replace('\\', "/").to_ascii_lowercase()
 }
 
+/// The file an image is read from: itself, or the engine's placeholder
+/// when it does not exist (`CBSurfaceStorage::AddSurface`).
+fn placeholder_for<'a>(vfs: &Vfs, image: &'a str) -> &'a str {
+    if !vfs.exists(image) && vfs.exists(crate::resources::INVALID_IMAGE) {
+        crate::resources::INVALID_IMAGE
+    } else {
+        image
+    }
+}
+
 fn texture_key(path: &str, color_key: Rgb) -> String {
     format!(
         "{}|{},{},{}",
@@ -310,9 +320,12 @@ impl SpriteBank {
         SpriteBank::default()
     }
 
-    /// Loads a sprite definition if it is not loaded yet. A missing or
-    /// broken sprite is recorded in [`SpriteBank::missing`], not an
-    /// error. Returns whether the sprite is available.
+    /// Loads a sprite definition if it is not loaded yet
+    /// (`CBSprite::LoadFile`). A file that does not exist is replaced by
+    /// the engine's placeholder image and the sprite loads; the miss is
+    /// recorded in [`SpriteBank::missing`] all the same, for the log. A
+    /// sprite file that cannot be parsed is recorded there too, and is
+    /// not available. Returns whether the sprite is available.
     pub fn add_sprite(&mut self, vfs: &Vfs, path: &str) -> bool {
         let k = key(path);
         if self.sprites.contains_key(&k) {
@@ -321,7 +334,13 @@ impl SpriteBank {
         if self.missing.iter().any(|(p, _)| key(p) == k) {
             return false;
         }
-        let sprite = if Sprite::is_image_path(path) {
+        let sprite = if !vfs.exists(path) && vfs.exists(crate::resources::INVALID_IMAGE) {
+            self.missing.push((
+                path.to_string(),
+                "file not found, the placeholder image is shown".to_string(),
+            ));
+            Sprite::from_image(crate::resources::INVALID_IMAGE)
+        } else if Sprite::is_image_path(path) {
             Sprite::from_image(path)
         } else {
             match vfs
@@ -362,7 +381,7 @@ impl SpriteBank {
                 continue;
             }
             let decoded = vfs
-                .read(&image)
+                .read(placeholder_for(vfs, &image))
                 .map_err(|e| e.to_string())
                 .and_then(|bytes| {
                     luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
@@ -409,9 +428,12 @@ impl SpriteBank {
             if self.missing.iter().any(|(p, _)| *p == path) {
                 return None;
             }
-            let decoded = vfs.read(path).map_err(|e| e.to_string()).and_then(|bytes| {
-                luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
-            });
+            let decoded = vfs
+                .read(placeholder_for(vfs, path))
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| {
+                    luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
+                });
             match decoded {
                 Ok(image) => {
                     self.masks.insert(k.clone(), Mask::of(&image));

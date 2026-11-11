@@ -292,7 +292,14 @@ fn reports_missing_games_and_packages() {
     fs::write(empty.join("bad.dcp"), b"not a package at all").unwrap();
     let out = luma(&["list", empty.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("not a WME package"));
+    // A file that is not a package is ignored, as the engine does, and
+    // said so.
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        stderr.contains("not a WME package") && stderr.contains("Ignoring"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("no .dcp package found"), "{stderr}");
     fs::remove_dir_all(&empty).unwrap();
 }
 
