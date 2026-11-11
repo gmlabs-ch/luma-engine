@@ -323,8 +323,9 @@ the text still raises it once.
 
 Copy and paste go through a clipboard the front-end provides
 (`World::set_clipboard`; `luma-adventure` has no platform code).
-Without one the game keeps a clipboard of its own, so that what one
-editor copies another pastes.
+`luma-player` gives the system's in a window (the `arboard` crate);
+without one (the headless player, tests) the game keeps a clipboard of
+its own, so that what one editor copies another pastes.
 
 Luma differs from the original on purpose in three places, all defects
 of the original that no game could rely on:

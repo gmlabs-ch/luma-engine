@@ -1078,6 +1078,14 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         .and_then(|v| v.parse().ok());
     let mut runtime = runtime;
     runtime.world.set_windowed(true);
+    // The editors copy to and paste from the system's clipboard; when
+    // it cannot be reached, they keep the game's own.
+    match arboard::Clipboard::new() {
+        Ok(clipboard) => runtime
+            .world
+            .set_clipboard(Box::new(SystemClipboard(clipboard))),
+        Err(err) => eprintln!("no system clipboard: {err}"),
+    }
     // Games of the time are 320 to 1024 pixels wide: open the window at a
     // whole multiple of that, so that a small game is not a stamp on a
     // modern screen. The frame is letterboxed into whatever the window is.
@@ -1102,6 +1110,20 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         player,
     )
     .map_err(|e| e.to_string())
+}
+
+/// The system's clipboard, for the game's editors (Ctrl+C, Ctrl+X,
+/// Ctrl+V).
+struct SystemClipboard(arboard::Clipboard);
+
+impl luma::adventure::Clipboard for SystemClipboard {
+    fn get_text(&mut self) -> Option<String> {
+        self.0.get_text().ok()
+    }
+
+    fn set_text(&mut self, text: &str) -> bool {
+        self.0.set_text(text).is_ok()
+    }
 }
 
 /// The game running in a window.
