@@ -467,13 +467,16 @@ impl World {
             return;
         }
         let caption = self.spoken_caption(id);
-        self.access.speak(&caption, SpeechKind::Caption);
+        self.access_speak(&caption, SpeechKind::Caption);
     }
 
     /// Speaks a text (`Game.AccOutputText`, a sentence without a speech
-    /// file, a key typed).
+    /// file, a key typed). The text is the game's, spoken as the
+    /// characters it holds in the game's encoding (`CBAccessMgr::Speak`
+    /// converts it to wide characters).
     pub fn access_speak(&mut self, text: &str, kind: SpeechKind) {
-        self.access.speak(text, kind);
+        let text = self.display_text(text);
+        self.access.speak(&text, kind);
     }
 
     // ----------------------------------------------------------------

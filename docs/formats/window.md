@@ -155,6 +155,12 @@ the right edge, `Backspace` deletes the character after the caret and
 `Delete` the one before, `Home` and `End` swap, and a typed character
 leaves the caret before it, as the original engine's editor does.
 
+The text of an editor is made of characters, and the caret moves by
+whole characters. In a UTF-8 game (`Game.TextEncoding` 1) a script
+reading `Text` gets them as UTF-8, like the rest of the game's text,
+and what it writes to `Text` is decoded (see
+[font.md](font.md#text-encoding)).
+
 ## `TILED_IMAGE` (`.tiled`)
 
 An image cut into nine tiles: the corners are drawn once, the edges

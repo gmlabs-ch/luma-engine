@@ -548,6 +548,16 @@ impl Control {
     }
 }
 
+/// The two lines an editor shows, from the first character in view:
+/// the text alone, and the text with the caret's character at the
+/// caret.
+fn edit_lines(text: &str, scroll: usize, caret: usize, cursor_char: &str) -> (String, String) {
+    let shown = text.get(scroll..).unwrap_or("");
+    let before = text.get(scroll.min(caret)..caret).unwrap_or("");
+    let after = text.get(caret..).unwrap_or("");
+    (shown.to_string(), format!("{before}{cursor_char}{after}"))
+}
+
 /// The windows of a game and what freezing them holds.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Ui {
@@ -2112,10 +2122,13 @@ impl World {
         // Keep the caret in view.
         let mut align_offset = 0;
         if let Some(font) = &font {
-            let cursor_width = self.measure_text_width(Some(font), &cursor_char);
+            // The editor's text and caret are characters, whatever the
+            // game's encoding (`CUIEdit::Display` draws them as ANSI);
+            // the fonts take text as the game holds it.
+            let cursor_width = self.measure_text_width(Some(font), &self.game_text(&cursor_char));
             loop {
-                let shown = text.get(scroll..sel_end).unwrap_or("");
-                let w = self.measure_text_width(Some(font), shown);
+                let shown = self.game_text(text.get(scroll..sel_end).unwrap_or(""));
+                let w = self.measure_text_width(Some(font), &shown);
                 if w <= width - cursor_width - 2 * frame || scroll >= text.len() {
                     break;
                 }
@@ -2125,8 +2138,8 @@ impl World {
                 }
             }
             scroll = scroll.min(sel_end);
-            let shown = text.get(scroll..).unwrap_or("").to_string();
-            let with_caret = format!("{shown}{cursor_char}");
+            let (shown, with_caret) = edit_lines(&text, scroll, sel_end, &cursor_char);
+            let (shown, with_caret) = (self.game_text(&shown), self.game_text(&with_caret));
             // Right-to-left text sits against the right edge: it starts
             // after the room the text and the caret leave.
             if rtl {
@@ -2137,7 +2150,6 @@ impl World {
             if let Some(f) = self.fonts.get_mut(font) {
                 f.prepare(&shown, -1, TextAlign::Left, -1);
                 f.prepare(&with_caret, -1, TextAlign::Left, -1);
-                f.prepare(&cursor_char, -1, TextAlign::Left, -1);
             }
         }
         let blink = blink_rate > 0 && clock.saturating_sub(last_blink) >= blink_rate as u64;
@@ -2487,7 +2499,8 @@ impl World {
         }
         // The key typed is read out (`CUIEdit::HandleKeypress`).
         if let Some(ch) = typed {
-            self.access_speak(&ch.to_string(), crate::accessibility::SpeechKind::Keypress);
+            let spoken = self.game_text(&ch.to_string());
+            self.access_speak(&spoken, crate::accessibility::SpeechKind::Keypress);
         }
         handled
     }
@@ -2789,22 +2802,19 @@ impl World {
             .control_font(control.font.as_deref())
             .and_then(|f| self.fonts.get(&f));
         let Some(font) = font else { return };
-        let shown = control
-            .text
-            .get(e.scroll_offset.min(control.text.len())..)
-            .unwrap_or("");
+        // The two lines `update_edit` prepared: a TrueType font only
+        // draws a text it was given before.
+        let (shown, with_caret) = edit_lines(
+            &control.text,
+            e.scroll_offset.min(control.text.len()),
+            e.sel_end.min(control.text.len()),
+            &e.cursor_char,
+        );
         let frame = e.frame_width + e.align_offset;
-        let caret_at = e.sel_end.min(control.text.len());
         if e.cursor_visible && self.is_focused(id) {
-            let before = control
-                .text
-                .get(e.scroll_offset.min(caret_at)..caret_at)
-                .unwrap_or("");
-            let after = control.text.get(caret_at..).unwrap_or("");
-            let with_caret = format!("{before}{}{after}", e.cursor_char);
             font.draw(
                 list,
-                &with_caret,
+                &self.game_text(&with_caret),
                 x + frame,
                 y + e.frame_width,
                 -1,
@@ -2814,7 +2824,7 @@ impl World {
         } else {
             font.draw(
                 list,
-                shown,
+                &self.game_text(&shown),
                 x + frame,
                 y + e.frame_width,
                 -1,

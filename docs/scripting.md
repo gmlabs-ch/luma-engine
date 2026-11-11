@@ -341,10 +341,14 @@ variable holding one replaces the object, as `POP_VAR` does in the
 original (it copies anything but a native), so `s = "text"` leaves a
 plain string.
 
-Strings are sequences of characters: every position, length and index
-counts characters, which is what the original does with a UTF-8 game
-and, each byte being one character, with a Latin-1 game. Text read from
-and written to files is Latin-1, as the engine reads the game's files.
+Strings hold the game's text as its files do, bytes; every position,
+length and index counts characters: the bytes in an ANSI game, the
+characters the bytes encode in a UTF-8 game (`Game.TextEncoding` 1),
+where the original goes through wide strings and Luma Engine decodes
+the text, works on it and encodes the result (bytes that are not valid
+UTF-8 count as one replacement character each). `"text".Length` follows
+the same rule. Text read from and written to files is the bytes
+themselves.
 
 | Class | Properties | Methods | Notes |
 |-------|------------|---------|-------|
@@ -377,7 +381,6 @@ Deliberate differences from the original:
 
 ## Not yet
 
-- `.talk` files timing talk sprites to a sound; text in UTF-8 string
-  tables is drawn as Latin-1.
+- `.talk` files timing talk sprites to a sound.
 - Streaming of long sounds.
 - The debugger protocol (`DBG_LINE` is read but only used for messages).

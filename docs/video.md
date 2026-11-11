@@ -160,7 +160,9 @@ video); the start frame only decides when the next subtitle takes over.
 Lines without a start, or with `{1}{1}`, are ignored. The subtitles show
 while `Game.VideoSubtitles` is on (`VIDEO_SUBTITLES` of `default.game`),
 centred at the bottom of the screen, five pixels above the edge, with
-the game's `VIDEO_FONT`, or its `SYSTEM_FONT` without one.
+the game's `VIDEO_FONT`, or its `SYSTEM_FONT` without one. The text is
+read in the game's encoding like any other text the font draws (see
+[formats/font.md](formats/font.md#text-encoding)).
 
 ## Not yet
 

@@ -151,6 +151,13 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("items.items", ITEMS.to_vec());
     pkg.add_file("rtl.tab", b"@right-to-left\r\nGREET\tShalom\r\n".to_vec());
     pkg.add_file(
+        "utf8.tab",
+        "\u{feff}GREET\té č Ж Ω\r\nTWO\tun|deux\r\n"
+            .as_bytes()
+            .to_vec(),
+    );
+    pkg.add_file("ansi.tab", b"GREET\tcaf\xe9\r\n".to_vec());
+    pkg.add_file(
         "art\\free.entity",
         b"ENTITY { NAME=\"free\" SPRITE=\"art\\green.png\" X=3 Y=4 }".to_vec(),
     );
@@ -394,6 +401,107 @@ fn right_to_left_text_is_a_flag_the_fonts_and_editors_follow() {
     // after the caret, Home went to the end, Delete took the one before
     // it, and "d" went in before the caret.
     assert_eq!(runtime.world.control(edit).unwrap().text, "bd");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A string table with a byte order mark makes the game's text UTF-8
+/// (`CBStringTable::LoadFile`): the text stays as the file holds it and
+/// is read as UTF-8 wherever characters matter.
+#[test]
+fn a_utf8_string_table_switches_the_text_to_utf8() {
+    use luma_script::Natives;
+    use luma_script::classes::text_to_utf8;
+    let (dir, mut runtime, _) = start();
+    assert!(runtime.world.load_string_table("utf8.tab", true));
+    assert!(runtime.world.text_utf8());
+    assert!(runtime.world.fonts().utf8());
+    let game = runtime.world.game_id();
+    assert_eq!(
+        runtime.world.get_property(game, "TextEncoding"),
+        Some(Value::Int(1))
+    );
+
+    // The table's text, expanded from a reference, as characters.
+    let raw = runtime.world.strings().expand("/GREET/Hello");
+    assert_eq!(raw, text_to_utf8("é č Ж Ω"));
+    assert_eq!(runtime.world.display_text(&raw), "é č Ж Ω");
+    assert_eq!(
+        runtime
+            .world
+            .display_text(&runtime.world.strings().expand("/TWO/x")),
+        "un\ndeux"
+    );
+    // A script counts the characters, not the bytes.
+    assert_eq!(
+        Value::from(raw.clone()).get_property("Length", &runtime.world),
+        Some(Value::Int(7))
+    );
+
+    // An editor holds characters: the caret and the keys move by whole
+    // characters, and scripts read and write its text as UTF-8
+    // (`CUIEdit::ScGetProperty`, `ScSetProperty`).
+    const VK_BACK: i32 = 8;
+    const VK_LEFT: i32 = 37;
+    const VK_DELETE: i32 = 46;
+    let window = call_native(
+        &mut runtime,
+        game,
+        "LoadWindow",
+        &[Value::from("edit.window")],
+    )
+    .as_native()
+    .unwrap();
+    let edit = call_native(&mut runtime, window, "GetWidget", &[Value::from("name")])
+        .as_native()
+        .unwrap();
+    for (code, text) in [
+        (0, Some('é')),
+        (0, Some('Ж')),
+        (0, Some('Ω')),
+        (0, Some('z')),
+        (VK_LEFT, None),
+        (VK_LEFT, None),
+        (VK_BACK, None),
+        (VK_LEFT, None),
+        (VK_DELETE, None),
+        (0, Some('č')),
+    ] {
+        runtime.world.edit_key(edit, code, text);
+        let control = runtime.world.control(edit).unwrap();
+        let caret = control.edit().unwrap().sel_end;
+        assert!(
+            control.text.is_char_boundary(caret),
+            "{:?} at {caret}",
+            control.text
+        );
+    }
+    assert_eq!(runtime.world.control(edit).unwrap().text, "čΩz");
+    assert_eq!(
+        runtime.world.get_property(edit, "Text"),
+        Some(Value::from(text_to_utf8("čΩz")))
+    );
+    runtime
+        .world
+        .set_property(edit, "Text", &Value::from(text_to_utf8("Łódź")));
+    assert_eq!(runtime.world.control(edit).unwrap().text, "Łódź");
+    // The frame lays the editor out without a panic, text that is not
+    // UTF-8 included.
+    runtime.tick(16);
+    runtime
+        .world
+        .set_property(edit, "Text", &Value::from("caf\u{e9}"));
+    runtime.tick(16);
+
+    // A table without the mark turns ANSI back on.
+    assert!(runtime.world.load_string_table("ansi.tab", true));
+    assert!(!runtime.world.text_utf8());
+    assert!(!runtime.world.fonts().utf8());
+    let raw = runtime.world.strings().expand("/GREET/x");
+    assert_eq!(runtime.world.display_text(&raw), "café");
+    assert_eq!(
+        runtime.world.get_property(edit, "Text"),
+        Some(Value::from("caf\u{fffd}"))
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 

@@ -531,6 +531,41 @@ impl World {
         self.text_rtl
     }
 
+    /// Whether the game's text is UTF-8 (`Game.TextEncoding` 1).
+    pub fn text_utf8(&self) -> bool {
+        self.text_encoding == 1
+    }
+
+    /// Sets the encoding of the game's text (`Game.TextEncoding`, a
+    /// string table's byte order mark): 0 for ANSI, 1 for UTF-8. The
+    /// text itself stays as the files hold it; the fonts, the `String`
+    /// class and the screen reader read it in this encoding.
+    pub fn set_text_encoding(&mut self, encoding: i32) {
+        // `NUM_TEXT_ENCODINGS` is 2: ANSI and UTF-8.
+        self.text_encoding = encoding.clamp(0, 1);
+        self.fonts.set_utf8(self.text_encoding == 1);
+    }
+
+    /// A text of the game as characters, for a front-end to show or
+    /// speak: its bytes read as UTF-8 in a UTF-8 game.
+    pub fn display_text(&self, text: &str) -> String {
+        if self.text_utf8() {
+            luma_script::classes::utf8_to_text(text)
+        } else {
+            text.to_string()
+        }
+    }
+
+    /// A text made of characters (typed, or an editor's) as the game
+    /// holds text: its UTF-8 bytes in a UTF-8 game.
+    pub(crate) fn game_text(&self, text: &str) -> String {
+        if self.text_utf8() {
+            luma_script::classes::text_to_utf8(text)
+        } else {
+            text.to_string()
+        }
+    }
+
     /// Sets right-to-left text (`Game.TextRTL`, a string table's
     /// `@right-to-left`): the TrueType fonts lay their lines out from
     /// the last glyph and the editors mirror their keys.
@@ -908,7 +943,7 @@ impl World {
                 self.log(format!("string table '{path}': {count} strings"));
                 // A byte order mark switches the game to UTF-8 text
                 // (`CBStringTable::LoadFile`); any other table back to ANSI.
-                self.text_encoding = i32::from(self.strings.utf8);
+                self.set_text_encoding(i32::from(self.strings.utf8));
                 // `@right-to-left` turns right-to-left text on
                 // (`CBStringTable::AddString`); nothing turns it off.
                 if self.strings.right_to_left {
@@ -2864,6 +2899,10 @@ impl Natives for World {
         {
             object.assign_scalar(value);
         }
+    }
+
+    fn text_utf8(&self) -> bool {
+        self.text_encoding == 1
     }
 }
 

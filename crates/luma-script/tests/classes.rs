@@ -33,6 +33,7 @@ struct ClassesHost {
     next_id: u64,
     log: Vec<String>,
     now: i64,
+    utf8: bool,
 }
 
 impl ClassesHost {
@@ -46,6 +47,7 @@ impl ClassesHost {
             next_id: 1,
             log: Vec::new(),
             now: NOW,
+            utf8: false,
         }
     }
 
@@ -113,6 +115,10 @@ impl Natives for ClassesHost {
         if let Some((object, _)) = self.objects.get_mut(&id) {
             object.assign_scalar(value);
         }
+    }
+
+    fn text_utf8(&self) -> bool {
+        self.utf8
     }
 }
 
@@ -601,6 +607,72 @@ fn string_case_index_and_split() {
     assert_eq!(result["split4Text"], s("a,"));
     assert_eq!(result["split4Len"], i(2));
     assert!(host.errors().is_empty(), "{:?}", host.log);
+}
+
+/// In a UTF-8 game a string holds UTF-8 bytes, one `char` each, and the
+/// class works on the characters they encode (`SXString.cpp` goes
+/// through wide strings).
+#[test]
+fn strings_count_characters_in_a_utf8_game() {
+    use luma_script::classes::{StringObject, text_to_utf8};
+    let mut host = ClassesHost::new(Vec::new());
+    let raw = text_to_utf8("Žluťoučký kůň, Ж");
+    let mut string = StringObject::new(&[Value::from(raw.clone())], &host);
+    let text = |r: Option<luma_script::Return>| r.unwrap().value.get_string(&());
+
+    // An ANSI game counts the bytes.
+    assert_eq!(string.get_property("Length", false), i(23));
+    assert_eq!(
+        Value::from(raw.clone()).get_property("Length", &host),
+        Some(i(23))
+    );
+
+    host.utf8 = true;
+    assert_eq!(string.get_property("Length", true), i(16));
+    assert_eq!(
+        Value::from(raw.clone()).get_property("Length", &host),
+        Some(i(16))
+    );
+    assert_eq!(
+        text(string.call_method("Substring", &[i(2), i(4)], &mut host)),
+        text_to_utf8("uťo")
+    );
+    assert_eq!(
+        text(string.call_method("Substr", &[i(10), i(3)], &mut host)),
+        text_to_utf8("kůň")
+    );
+    assert_eq!(
+        text(string.call_method("ToUpperCase", &[], &mut host)),
+        text_to_utf8("ŽLUŤOUČKÝ KŮŇ, Ж")
+    );
+    assert_eq!(
+        string
+            .call_method("IndexOf", &[s(&text_to_utf8("kůň")), i(0)], &mut host)
+            .unwrap()
+            .value,
+        i(10)
+    );
+    let parts = string
+        .call_method("Split", &[s(&text_to_utf8("ý"))], &mut host)
+        .unwrap()
+        .value
+        .as_native()
+        .unwrap();
+    assert_eq!(
+        host.get_property(parts, "0").unwrap(),
+        s(&text_to_utf8("Žluťoučk"))
+    );
+    assert_eq!(host.get_property(parts, "Length").unwrap(), i(2));
+
+    // Bytes that are not UTF-8 are replaced, not a panic.
+    let mut broken = StringObject::new(&[Value::from("caf\u{e9}")], &host);
+    assert_eq!(broken.get_property("Length", true), i(4));
+    assert!(
+        broken
+            .call_method("Substring", &[i(0), i(9)], &mut host)
+            .is_some()
+    );
+    std::fs::remove_dir_all(&host.dir).ok();
 }
 
 #[test]

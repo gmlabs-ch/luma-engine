@@ -897,7 +897,11 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
     for sentence in runtime.world.sentences() {
         println!(
             "sentence {:?} with {} at ({}, {}), width {}",
-            sentence.text, sentence.font, sentence.x, sentence.y, sentence.width
+            runtime.world.display_text(&sentence.text),
+            sentence.font,
+            sentence.x,
+            sentence.y,
+            sentence.width
         );
     }
     if let Some(output) = &options.screenshot {

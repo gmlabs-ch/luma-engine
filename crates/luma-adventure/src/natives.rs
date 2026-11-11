@@ -513,8 +513,8 @@ impl World {
                 self.set_volume_property(name, percent);
             }
             "TextEncoding" => {
-                // `NUM_TEXT_ENCODINGS` is 2: ANSI and UTF-8.
-                self.text_encoding = value.get_int(self).clamp(0, 1);
+                let encoding = value.get_int(self);
+                self.set_text_encoding(encoding);
             }
             "MaxShadowType" => self.max_shadow_type = value.get_int(self).clamp(0, 3) as u8,
             "Shadows" => self.max_shadow_type = if value.get_bool(self) { 3 } else { 0 },

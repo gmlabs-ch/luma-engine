@@ -4,7 +4,14 @@
 //!
 //! Written with reference to `BFontBitmap.cpp`, `BFontTT.cpp` and
 //! `BFontStorage.cpp` of WME Lite (MIT License, Copyright (c) 2011 Jan
-//! Nedoma); see `NOTICE`.
+//! Nedoma) and to `BFontBitmap.cpp`, `BFontTT.cpp`, `BTextUtils.cpp` and
+//! `UIEdit.cpp` of Wintermute Engine 1.x (MIT License, Copyright (c)
+//! 2003-2013 Jan Nedoma); see `NOTICE`.
+//!
+//! The text a font is given is the game's, held as its files hold it:
+//! one `char` per byte. A font reads it in the game's encoding
+//! (`Game.TextEncoding`, see [`FontBank::set_utf8`]): the bytes are
+//! Windows-1252 characters in an ANSI game, UTF-8 in a UTF-8 game.
 
 use std::collections::HashMap;
 
@@ -12,6 +19,7 @@ use luma_archive::Vfs;
 use luma_formats::font::{BitmapFontDef, FontFile, TextAlign, TrueTypeFontDef};
 use luma_formats::{DEFAULT_COLOR_KEY, Image, Rgb, Rgba, Sprite};
 use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
+use luma_script::classes::utf8_to_text;
 
 use crate::scene_view::key;
 
@@ -48,6 +56,45 @@ pub fn latin1(text: &str) -> Vec<u8> {
         .collect()
 }
 
+/// The characters Windows-1252 puts at `0x80..=0x9F`, where Latin-1 has
+/// control codes; U+FFFD for the five bytes it leaves unused.
+const WINDOWS_1252: [char; 32] = [
+    '€', '\u{fffd}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{fffd}', 'Ž',
+    '\u{fffd}', '\u{fffd}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{fffd}',
+    'ž', 'Ÿ',
+];
+
+/// The characters of an ANSI game's text, for a TrueType font: each
+/// byte is a Windows-1252 character, the code page the original engine
+/// draws ANSI text with on a western system. Characters beyond a byte
+/// are kept.
+fn ansi_to_text(raw: &str) -> String {
+    raw.chars()
+        .map(|c| match u32::from(c) {
+            code @ 0x80..=0x9F => match WINDOWS_1252[(code - 0x80) as usize] {
+                '\u{fffd}' => c,
+                mapped => mapped,
+            },
+            _ => c,
+        })
+        .collect()
+}
+
+/// The Windows-1252 bytes of a text, `?` for the characters the code
+/// page lacks (`CBTextUtils::Utf8ToAnsi`): what a bitmap font draws of
+/// a UTF-8 game's text.
+fn text_to_ansi(text: &str) -> Vec<u8> {
+    text.chars()
+        .map(|c| match u32::from(c) {
+            code @ (0..=0x7F | 0xA0..=0xFF) => code as u8,
+            _ => WINDOWS_1252
+                .iter()
+                .position(|&w| w == c && w != '\u{fffd}')
+                .map_or(b'?', |at| 0x80 + at as u8),
+        })
+        .collect()
+}
+
 impl Font {
     /// Loads a `.font` file and what it needs (the tile image, the
     /// TrueType file).
@@ -73,15 +120,15 @@ impl Font {
     pub fn text_height(&mut self, text: &str, width: i32) -> i32 {
         match self {
             Font::Bitmap(f) => f.text_height(text, width),
-            Font::TrueType(f) => f.measure(text, width).1,
+            Font::TrueType(f) => f.measure(&f.characters(text), width).1,
         }
     }
 
     /// The width of a text on one line.
     pub fn text_width(&mut self, text: &str) -> i32 {
         match self {
-            Font::Bitmap(f) => f.def.text_width(&f.widths, &latin1(text), -1),
-            Font::TrueType(f) => f.measure(text, -1).0,
+            Font::Bitmap(f) => f.def.text_width(&f.widths, &f.codes(text), -1),
+            Font::TrueType(f) => f.measure(&f.characters(text), -1).0,
         }
     }
 
@@ -99,6 +146,14 @@ impl Font {
         match self {
             Font::Bitmap(f) => f.upload(renderer),
             Font::TrueType(f) => f.upload(renderer),
+        }
+    }
+
+    /// Reads the text as UTF-8 (`Game.TextEncoding`), or as ANSI.
+    pub fn set_utf8(&mut self, utf8: bool) {
+        match self {
+            Font::Bitmap(f) => f.utf8 = utf8,
+            Font::TrueType(f) => f.set_utf8(utf8),
         }
     }
 
@@ -150,6 +205,8 @@ pub struct BitmapFont {
     pub image_path: String,
     image: Image,
     texture: Option<Texture>,
+    /// Whether the text is UTF-8 (`Game.TextEncoding`).
+    utf8: bool,
 }
 
 impl BitmapFont {
@@ -182,6 +239,7 @@ impl BitmapFont {
             image_path,
             image,
             texture: None,
+            utf8: false,
         })
     }
 
@@ -194,6 +252,19 @@ impl BitmapFont {
             image_path: image_path.to_string(),
             image,
             texture: None,
+            utf8: false,
+        }
+    }
+
+    /// The tile codes of a text: its bytes in an ANSI game; in a UTF-8
+    /// game its characters converted to the ANSI code page, `?` for
+    /// those it lacks (`CBFontBitmap::TextHeightDraw` calls
+    /// `Utf8ToAnsi`).
+    fn codes(&self, text: &str) -> Vec<u8> {
+        if self.utf8 {
+            text_to_ansi(&utf8_to_text(text))
+        } else {
+            latin1(text)
         }
     }
 
@@ -202,7 +273,7 @@ impl BitmapFont {
         self.def
             .layout(
                 &self.widths,
-                &latin1(text),
+                &self.codes(text),
                 unbounded(width),
                 TextAlign::Left,
                 -1,
@@ -233,7 +304,7 @@ impl BitmapFont {
         };
         let layout = self.def.layout(
             &self.widths,
-            &latin1(text),
+            &self.codes(text),
             unbounded(width),
             // Without a width there is nothing to centre the line in.
             if width < 0 { TextAlign::Left } else { align },
@@ -305,6 +376,8 @@ pub struct TrueTypeFont {
     texts: Vec<CachedText>,
     /// Whether lines are laid out right to left (`Game.TextRTL`).
     rtl: bool,
+    /// Whether the text is UTF-8 (`Game.TextEncoding`).
+    utf8: bool,
 }
 
 impl TrueTypeFont {
@@ -363,7 +436,28 @@ impl TrueTypeFont {
             glyphs: HashMap::new(),
             texts: Vec::new(),
             rtl: false,
+            utf8: false,
         })
+    }
+
+    /// Reads the text as UTF-8 or as ANSI; the texts rendered so far go
+    /// when the encoding changes.
+    pub fn set_utf8(&mut self, utf8: bool) {
+        if self.utf8 != utf8 {
+            self.utf8 = utf8;
+            self.texts.clear();
+        }
+    }
+
+    /// The characters of a game text in the game's encoding
+    /// (`CBTextUtils::ConvertToNative`): what [`wrap`](Self::wrap),
+    /// [`measure`](Self::measure) and [`render`](Self::render) take.
+    pub fn characters(&self, text: &str) -> String {
+        if self.utf8 {
+            utf8_to_text(text)
+        } else {
+            ansi_to_text(text)
+        }
     }
 
     /// Lays lines out right to left when `rtl`; the texts rendered so
@@ -404,7 +498,7 @@ impl TrueTypeFont {
         Some(advance + kerning)
     }
 
-    /// Breaks a text into lines for a box of `max_width`
+    /// Breaks a text (its characters) into lines for a box of `max_width`
     /// (`CBFontTT::WrapText`): each line with its width. Negative limits
     /// mean none.
     pub fn wrap(&mut self, text: &str, max_width: i32, max_height: i32) -> Vec<(String, i32)> {
@@ -564,7 +658,7 @@ impl TrueTypeFont {
         -(self.descender / 2.0)
     }
 
-    /// Renders a text into the cache if it is not there.
+    /// Renders a game text into the cache if it is not there.
     pub fn prepare(&mut self, text: &str, width: i32, align: TextAlign, max_height: i32) {
         if text.is_empty() {
             return;
@@ -577,7 +671,8 @@ impl TrueTypeFont {
             self.texts[i].priority = next_priority;
             return;
         }
-        let (image, offset) = self.render(text, width, align, max_height);
+        let characters = self.characters(text);
+        let (image, offset) = self.render(&characters, width, align, max_height);
         let cached = CachedText {
             text: text.to_string(),
             width,
@@ -684,6 +779,8 @@ pub struct FontBank {
     missing: Vec<(String, String)>,
     /// Whether text is laid out right to left (`Game.TextRTL`).
     rtl: bool,
+    /// Whether text is UTF-8 (`Game.TextEncoding`).
+    utf8: bool,
 }
 
 impl FontBank {
@@ -705,6 +802,7 @@ impl FontBank {
         match Font::load(vfs, path) {
             Ok(mut font) => {
                 font.set_rtl(self.rtl);
+                font.set_utf8(self.utf8);
                 self.fonts.insert(k, font);
                 true
             }
@@ -737,6 +835,21 @@ impl FontBank {
     /// Whether text is laid out right to left.
     pub fn rtl(&self) -> bool {
         self.rtl
+    }
+
+    /// Reads the text the fonts are given as UTF-8 (`Game.TextEncoding`
+    /// 1, what a string table with a byte order mark turns on) or as
+    /// ANSI; fonts loaded later follow.
+    pub fn set_utf8(&mut self, utf8: bool) {
+        self.utf8 = utf8;
+        for font in self.fonts.values_mut() {
+            font.set_utf8(utf8);
+        }
+    }
+
+    /// Whether text is read as UTF-8.
+    pub fn utf8(&self) -> bool {
+        self.utf8
     }
 
     /// Fonts that could not be loaded, with the reason.
@@ -849,6 +962,97 @@ mod tests {
         let (back, _) = font.render("ab", 100, TextAlign::Left, -1);
         assert_eq!(same.pixels, rtl.pixels);
         assert_ne!(back.pixels, rtl.pixels);
+    }
+
+    /// A game's text as its files hold it: one `char` per UTF-8 byte.
+    fn raw(text: &str) -> String {
+        luma_script::classes::text_to_utf8(text)
+    }
+
+    #[test]
+    fn bitmap_fonts_read_utf8_text_through_the_ansi_code_page() {
+        let def = BitmapFontDef {
+            image: Some("f.png".into()),
+            columns: 16,
+            tile_width: 8,
+            tile_height: 10,
+            default_width: 4,
+            ..BitmapFontDef::default()
+        };
+        let image = Image {
+            width: 128,
+            height: 160,
+            pixels: vec![0; 128 * 160 * 4],
+            has_alpha_channel: true,
+        };
+        let mut font = Font::Bitmap(Box::new(BitmapFont::from_image(def, "f.png", image)));
+        // ANSI: a tile per byte, so the two bytes of a UTF-8 `é` are two.
+        assert_eq!(font.text_width(&raw("été")), 20);
+        font.set_utf8(true);
+        assert_eq!(font.text_width(&raw("été")), 12, "a tile per character");
+        assert_eq!(
+            font.text_width(&raw("ЖΩ")),
+            8,
+            "`?` for what the page lacks"
+        );
+        assert_eq!(font.text_height(&raw("été été"), 14), 20);
+        let Font::Bitmap(bitmap) = &font else {
+            panic!()
+        };
+        assert_eq!(bitmap.codes(&raw("é’€œЖ")), b"\xe9\x92\x80\x9c?");
+        // Bytes that are not UTF-8 are replaced, not a panic.
+        assert_eq!(bitmap.codes("caf\u{e9}"), b"caf?");
+        assert_eq!(text_to_ansi("\u{fffd}"), b"?");
+    }
+
+    #[test]
+    fn ansi_text_is_windows_1252_for_truetype_fonts() {
+        assert_eq!(
+            ansi_to_text("caf\u{e9} \u{84}x\u{93} \u{80}\u{81}"),
+            "café „x“ €\u{81}"
+        );
+        assert_eq!(text_to_ansi("café „x“ €"), b"caf\xe9 \x84x\x93 \x80");
+    }
+
+    #[test]
+    fn truetype_fonts_read_utf8_text_one_glyph_per_character() {
+        let Some((source, bytes)) = system_font() else {
+            eprintln!("skipped: no system font");
+            return;
+        };
+        let FontFile::TrueType(def) =
+            FontFile::parse(b"TTFONT { SIZE=12 COLOR {255,255,255} ALPHA=255 }").unwrap()
+        else {
+            panic!()
+        };
+        let mut font = Font::TrueType(Box::new(
+            TrueTypeFont::from_bytes(def, &source, &bytes).unwrap(),
+        ));
+        let sentence = "L'été déjà fini à Noël";
+        // What the characters measure, laid out directly.
+        let expected = match &mut font {
+            Font::TrueType(f) => f.measure(sentence, -1).0,
+            Font::Bitmap(_) => unreachable!(),
+        };
+        let ansi = font.text_width(&raw(sentence));
+        font.set_utf8(true);
+        let utf8 = font.text_width(&raw(sentence));
+        assert_eq!(utf8, expected, "one glyph per character");
+        assert!(ansi > utf8, "read as ANSI, each accent is two glyphs");
+        let Font::TrueType(f) = &mut font else {
+            unreachable!()
+        };
+        assert_eq!(f.characters(&raw("é č Ж Ω")), "é č Ж Ω");
+        let lines = f.wrap(&f.characters(&raw(sentence)), -1, -1);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].0.chars().count(), sentence.chars().count());
+        // The cache is keyed by the text as given and goes with the
+        // encoding; text that is not UTF-8 renders without a panic.
+        f.prepare(&raw(sentence), 300, TextAlign::Left, -1);
+        f.prepare("caf\u{e9}\u{ff}", 300, TextAlign::Left, -1);
+        assert_eq!(f.texts.len(), 2);
+        f.set_utf8(false);
+        assert!(f.texts.is_empty());
     }
 
     /// Every `.font` of the local test game loads and measures text.

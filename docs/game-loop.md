@@ -106,7 +106,9 @@ so; headless runs read `false`), `SoundAvailable` whether an audio
 device was opened, `AcceleratedMode` (and `Accelerated`) always true
 with wgpu. `TextEncoding` is `0` (ANSI) or `1` (UTF-8): set by every
 string table loaded (a byte order mark means UTF-8, as in the original
-engine) and by the script. `TextRTL` turns right-to-left text on, for
+engine) and by the script; the fonts, the `String` class, the editors
+and the screen reader read the game's text in that encoding (see
+[formats/font.md](formats/font.md#text-encoding)). `TextRTL` turns right-to-left text on, for
 the TrueType fonts and the editors (set by a string table's
 `@right-to-left` entry or by the script; see
 [formats/font.md](formats/font.md#notes-for-implementers)). `Game.GetFileChecksum(file, hex)` is the

@@ -3,7 +3,7 @@
 //! Written with reference to `SXString.cpp` of Wintermute Engine 1.x
 //! (MIT License, Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
-use super::{ArrayObject, ClassHost, ClassObject, arg};
+use super::{ArrayObject, ClassHost, ClassObject, arg, text_to_utf8, utf8_to_text};
 use crate::host::Return;
 use crate::value::{Natives, Value};
 
@@ -67,10 +67,13 @@ impl StringObject {
         }
     }
 
-    /// `Type`, `Length`, `Capacity`; any other name reads `null`.
-    pub fn get_property(&self, name: &str) -> Value {
+    /// `Type`, `Length`, `Capacity`; any other name reads `null`. The
+    /// length counts characters: in a UTF-8 game (`utf8`), those the
+    /// text's bytes encode.
+    pub fn get_property(&self, name: &str, utf8: bool) -> Value {
         match name {
             "Type" => Value::from("string"),
+            "Length" if utf8 => Value::Int(utf8_to_text(&self.text).chars().count() as i32),
             "Length" => Value::Int(self.len()),
             "Capacity" => Value::Int(self.capacity),
             _ => Value::Null,
@@ -98,14 +101,20 @@ impl StringObject {
     }
 
     /// `Substring`, `Substr`, `ToUpperCase`, `ToLowerCase`, `IndexOf`,
-    /// `Split`.
+    /// `Split`. In a UTF-8 game the methods work on the characters the
+    /// text encodes and give UTF-8 text back, as the original engine
+    /// does through wide strings.
     pub fn call_method<H: ClassHost>(
         &mut self,
         name: &str,
         args: &[Value],
         host: &mut H,
     ) -> Option<Return> {
-        let chars: Vec<char> = self.text.chars().collect();
+        let utf8 = host.text_utf8();
+        // Text in, as characters; text out, as the game holds it.
+        let decode = |text: String| if utf8 { utf8_to_text(&text) } else { text };
+        let encode = |text: String| if utf8 { text_to_utf8(&text) } else { text };
+        let chars: Vec<char> = decode(self.text.clone()).chars().collect();
         let len = chars.len() as i64;
         Some(match name {
             // Positions are inclusive; they are swapped when reversed and
@@ -118,7 +127,7 @@ impl StringObject {
                 }
                 let start = clamp(start, len);
                 let end = clamp(end, len);
-                Return::value(Self::slice(&chars, start, (end - start + 1).max(0)))
+                Return::value(encode(Self::slice(&chars, start, (end - start + 1).max(0))))
             }
             // A missing length means "to the end"; a length of zero or
             // less gives an empty string.
@@ -135,9 +144,9 @@ impl StringObject {
                 } else {
                     clamp(start + length - 1, len)
                 };
-                Return::value(Self::slice(&chars, start, (end - start + 1).max(0)))
+                Return::value(encode(Self::slice(&chars, start, (end - start + 1).max(0))))
             }
-            "ToUpperCase" => Return::value(
+            "ToUpperCase" => Return::value(encode(
                 chars
                     .iter()
                     .map(|&c| {
@@ -148,8 +157,8 @@ impl StringObject {
                         }
                     })
                     .collect::<String>(),
-            ),
-            "ToLowerCase" => Return::value(
+            )),
+            "ToLowerCase" => Return::value(encode(
                 chars
                     .iter()
                     .map(|&c| {
@@ -160,10 +169,10 @@ impl StringObject {
                         }
                     })
                     .collect::<String>(),
-            ),
+            )),
             // The position of a substring at or after `index`, or -1.
             "IndexOf" => {
-                let needle: Vec<char> = arg(args, 0).get_string(host).chars().collect();
+                let needle: Vec<char> = decode(arg(args, 0).get_string(host)).chars().collect();
                 let index = clamp(i64::from(arg(args, 1).get_int(host)), len) as usize;
                 let found = (index..=chars.len())
                     .find(|&i| chars[i..].starts_with(&needle))
@@ -177,18 +186,18 @@ impl StringObject {
                 let separators: Vec<char> = if separators_arg.is_null() {
                     vec![',']
                 } else {
-                    separators_arg.get_string(host).chars().collect()
+                    decode(separators_arg.get_string(host)).chars().collect()
                 };
                 let mut parts = Vec::new();
                 let mut part = String::new();
                 for &c in &chars {
                     if separators.contains(&c) {
-                        parts.push(Value::String(std::mem::take(&mut part)));
+                        parts.push(Value::String(encode(std::mem::take(&mut part))));
                     } else {
                         part.push(c);
                     }
                 }
-                parts.push(Value::String(part));
+                parts.push(Value::String(encode(part)));
                 let array = ArrayObject::from_values(parts);
                 let id = host.create_object(ClassObject::Array(array));
                 Return::value(Value::Native(id))

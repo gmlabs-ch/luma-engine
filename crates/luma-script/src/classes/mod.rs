@@ -16,11 +16,13 @@
 //! them. What the classes need from the embedding program, files, the
 //! clock and new handles, goes through the [`ClassHost`] trait.
 //!
-//! Strings are sequences of `char`s: every index, length and position
-//! counts characters, which is what the original engine does with a
-//! UTF-8 game and, since a Latin-1 game's bytes are one character each,
-//! with an ANSI game too. Text written to and read from files is
-//! Latin-1, as the rest of the engine reads game files.
+//! Strings hold the game's text as its files do, one `char` per byte
+//! (see [`utf8_to_text`]). Every index, length and position counts
+//! characters: the bytes of an ANSI game and, when the host says the
+//! game's text is UTF-8 ([`Natives::text_utf8`]), the characters those
+//! bytes encode, as the original engine does by going through wide
+//! strings. Text written to and read from files is the bytes
+//! themselves.
 
 use std::cmp::Ordering;
 use std::path::PathBuf;
@@ -215,7 +217,7 @@ impl ClassObject {
     /// directory's paths.
     pub fn get_property<H: ClassHost + ?Sized>(&self, name: &str, host: &H) -> Option<Value> {
         match self {
-            ClassObject::String(s) => Some(s.get_property(name)),
+            ClassObject::String(s) => Some(s.get_property(name, host.text_utf8())),
             ClassObject::Array(a) => Some(a.get_property(name)),
             ClassObject::Date(d) => Some(d.get_property(name)),
             ClassObject::File(f) => f.get_property(name),
@@ -291,6 +293,27 @@ pub fn text_from_bytes(bytes: &[u8]) -> String {
     bytes.iter().map(|&b| char::from(b)).collect()
 }
 
+/// The characters of a text whose `char`s are the bytes of UTF-8 text,
+/// which is how the engine holds the text of a UTF-8 game
+/// (`Game.TextEncoding`): game files are read one `char` per byte, and
+/// the encoding only matters where characters do, when text is drawn,
+/// measured or cut. Bytes that are not valid UTF-8 become U+FFFD. A text
+/// holding a `char` beyond U+00FF cannot be bytes: it is characters
+/// already and is returned as it is.
+pub fn utf8_to_text(raw: &str) -> String {
+    if raw.is_ascii() || raw.chars().any(|c| u32::from(c) > 0xFF) {
+        return raw.to_string();
+    }
+    let bytes: Vec<u8> = raw.chars().map(|c| u32::from(c) as u8).collect();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// The reverse of [`utf8_to_text`]: the UTF-8 bytes of a text, one
+/// `char` per byte.
+pub fn text_to_utf8(text: &str) -> String {
+    text.bytes().map(char::from).collect()
+}
+
 /// A file name a script gives, as a path relative to a directory the
 /// host chooses: `\` and `/` both separate, `.` components are dropped.
 /// `None` for an empty name, an absolute path (a leading separator or a
@@ -337,6 +360,20 @@ mod tests {
         assert_eq!(relative_path("C:\\game\\x"), None);
         assert_eq!(relative_path(""), None);
         assert_eq!(relative_path("."), None);
+    }
+
+    #[test]
+    fn utf8_text_is_held_one_char_per_byte() {
+        let raw = text_from_bytes("é č Ж Ω".as_bytes());
+        assert_eq!(raw.chars().count(), 11);
+        assert_eq!(utf8_to_text(&raw), "é č Ж Ω");
+        assert_eq!(text_to_utf8("é č Ж Ω"), raw);
+        assert_eq!(utf8_to_text("plain"), "plain");
+        // Invalid bytes are replaced, never a panic; a character beyond
+        // a byte means the text is decoded already.
+        assert_eq!(utf8_to_text("caf\u{e9}"), "caf\u{fffd}");
+        assert_eq!(utf8_to_text("\u{c3}"), "\u{fffd}");
+        assert_eq!(utf8_to_text("Ж\u{e9}"), "Ж\u{e9}");
     }
 
     #[test]

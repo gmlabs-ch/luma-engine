@@ -49,6 +49,10 @@ impl World {
             "Height" => Some(Value::Int(c.height)),
             "Visible" => Some(Value::Bool(c.visible)),
             "Disabled" => Some(Value::Bool(c.disabled)),
+            // An editor's text is characters; the script gets it as the
+            // game holds text (`CUIEdit::ScGetProperty` calls
+            // `AnsiToUtf8` in a UTF-8 game).
+            "Text" if c.edit().is_some() => Some(Value::from(self.game_text(&c.text))),
             "Text" => Some(Value::from(c.text.clone())),
             "Ready" => Some(Value::Bool(c.window().is_none_or(|w| w.ready))),
             "Filename" => Some(
@@ -145,6 +149,9 @@ impl World {
             }
             _ => {}
         }
+        // An editor keeps characters (`CUIEdit::ScSetProperty` calls
+        // `Utf8ToAnsi` in a UTF-8 game).
+        let edit_text = self.display_text(&text);
         let Some(c) = self.control_mut(id) else {
             return false;
         };
@@ -158,6 +165,7 @@ impl World {
             "Height" => c.height = int,
             "Visible" => c.visible = flag,
             "Disabled" => c.disabled = flag,
+            "Text" if c.edit().is_some() => c.set_text(&edit_text),
             "Text" => c.set_text(&text),
             _ => {
                 return match &mut c.kind {

@@ -747,6 +747,7 @@ impl World {
             self.load_ui_image(&image);
         }
         self.fonts.set_rtl(self.text_rtl);
+        self.fonts.set_utf8(self.text_encoding == 1);
         for font in fonts {
             self.load_font(&font);
         }

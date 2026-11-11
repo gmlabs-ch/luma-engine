@@ -8,6 +8,12 @@
 //! the text, in which `|` stands for a line break. Lines starting with `;`
 //! are comments. A UTF-8 byte order mark switches the game to UTF-8 text.
 //! Identifiers are case-insensitive.
+//!
+//! The text is kept as the file holds it, one `char` per byte, like the
+//! text of every other game file: the encoding is a setting of the game
+//! (`Game.TextEncoding`, which the mark turns to UTF-8) applied where
+//! the text is drawn, measured or cut, not a property of each string. A
+//! UTF-8 table's `é` is therefore the two `char`s U+00C3 U+00A9 here.
 
 use std::collections::HashMap;
 
@@ -17,7 +23,7 @@ pub struct StringTable {
     strings: HashMap<String, String>,
     /// Whether the last file loaded started with a UTF-8 byte order mark.
     pub utf8: bool,
-    /// Whether the table declared `@right-to-left`.
+    /// Whether the last file loaded declared `@right-to-left`.
     pub right_to_left: bool,
 }
 
@@ -40,6 +46,7 @@ impl StringTable {
         if clear_old {
             self.strings.clear();
         }
+        self.right_to_left = false;
         let bytes = match bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
             Some(rest) => {
                 self.utf8 = true;
@@ -163,6 +170,29 @@ mod tests {
         assert!(table.utf8);
         assert!(table.right_to_left);
         assert_eq!(table.len(), 1);
+    }
+
+    #[test]
+    fn a_utf8_table_keeps_its_bytes() {
+        let file = "\u{feff}ACCENT\tété|č Ж Ω\r\nREF\t/ACCENT/x\r\n";
+        let table = StringTable::parse(file.as_bytes());
+        assert!(table.utf8);
+        let bytes = |text: &str| -> Vec<u8> { text.chars().map(|c| c as u8).collect() };
+        let text = table.get("ACCENT").unwrap();
+        assert!(text.chars().all(|c| u32::from(c) < 0x100));
+        assert_eq!(bytes(text), "été\nč Ж Ω".as_bytes());
+        assert_eq!(
+            bytes(&table.expand("/REF/fallback")),
+            "été\nč Ж Ω".as_bytes()
+        );
+        assert_eq!(table.expand("/NONE/fallback"), "fallback");
+
+        // The flags are those of the last file loaded.
+        let mut table = StringTable::parse(b"\xEF\xBB\xBF@right-to-left\nA\tb\n");
+        table.load(b"A\tcaf\xe9\n", true);
+        assert!(!table.utf8);
+        assert!(!table.right_to_left);
+        assert_eq!(table.get("A"), Some("café"));
     }
 
     #[test]

@@ -1,15 +1,17 @@
 # Fonts (`.font`)
 
 A font file describes either a **bitmap font** (`FONT`): a grid of
-character tiles in an image, one tile per Latin-1 code, or a **TrueType
+character tiles in an image, one tile per 8-bit character code, or a **TrueType
 font** (`TTFONT`): a `.ttf` file, a size, and one or more coloured layers
 drawn with an offset (outlines and shadows). The engine picks the kind
 from the first keyword of the file.
 
 Sources: the MIT-licensed [WME Lite](https://github.com/MnemonicWME/wmelite)
 sources (`BFont.cpp`, `BFontBitmap.cpp`, `BFontTT.cpp`, `BFontStorage.cpp`,
-`FontGlyphCache.cpp`, `AdSentence.cpp`, `AdObject.cpp`) and analysis of
-game files.
+`FontGlyphCache.cpp`, `AdSentence.cpp`, `AdObject.cpp`), the MIT-licensed
+Wintermute Engine 1.x sources (`BFontBitmap.cpp`, `BFontTT.cpp`,
+`BTextUtils.cpp`, `BStringTable.cpp`, `UIEdit.cpp`, `SXString.cpp`) for
+the text encoding, and analysis of game files.
 
 Implemented by `luma_formats::font` (the files, the bitmap metrics and
 line breaking) and `luma_adventure::text` (loading, TrueType
@@ -46,11 +48,12 @@ FONT
 | `WIDTHS_FRAME` | int | `0` | With `SPRITE`, the frame measured by `AUTO_WIDTH`. |
 | `EDITOR_PROPERTY` | block | | Editor state, ignored. |
 
-Character `c` (a Latin-1 code, 0 to 255) is tile number `c`, row `c /
+Character `c` (a code from 0 to 255) is tile number `c`, row `c /
 COLUMNS`, column `c % COLUMNS`, drawn from the image at `(column *
-TILE_WIDTH, row * TILE_HEIGHT)` with its width and `TILE_HEIGHT`. Text is
-Latin-1; a game whose string table is UTF-8 has its text converted to
-Latin-1 first.
+TILE_WIDTH, row * TILE_HEIGHT)` with its width and `TILE_HEIGHT`. The
+codes are the bytes of the text in an ANSI game; a UTF-8 game has its
+text converted to the ANSI code page first (see
+[Text encoding](#text-encoding)).
 
 **Automatic widths.** For every tile, the width is one more than the
 right-most column holding a pixel with alpha above 128, scanning each row
@@ -128,6 +131,49 @@ lines times the line height.
 Glyphs the font lacks are skipped. Kerning is applied when the font has
 a `kern` table.
 
+## Text encoding
+
+The engine holds the game's text as the game's files hold it: bytes,
+whatever they encode. This is true of the string table, of the string
+constants of compiled scripts, of the captions and texts of definition
+files and of video subtitles; in Luma Engine each byte is one `char` of
+a string, so a UTF-8 `é` is held as the two characters U+00C3 U+00A9.
+The encoding is one setting of the game, `Game.TextEncoding`: `0` for
+ANSI, `1` for UTF-8. Loading a string table sets it: UTF-8 when the
+file starts with the UTF-8 byte order mark, ANSI otherwise
+(`CBStringTable::LoadFile`); a script can set it too. It is applied
+where characters matter:
+
+- **TrueType fonts** draw and measure the characters the bytes encode
+  (`CBTextUtils::ConvertToNative`). In a UTF-8 game the bytes are
+  decoded as UTF-8; a sequence that is not valid UTF-8 becomes U+FFFD
+  (the original engine draws such a text as ANSI or not at all,
+  depending on the Windows version). In an ANSI game each byte is a
+  Windows-1252 character: Latin-1, plus the typographic quotes, dashes,
+  `€`, `œ` and the others at `0x80` to `0x9F`. The original engine
+  uses the code page of the system it runs on; Luma Engine always uses
+  Windows-1252, the one western games are written in.
+- **Bitmap fonts** have one tile per byte. In an ANSI game the bytes of
+  the text are the tile numbers. In a UTF-8 game the text is decoded and
+  each character converted to its Windows-1252 byte, `?` for the
+  characters the code page lacks (`CBTextUtils::Utf8ToAnsi`): a bitmap
+  font cannot show Cyrillic or Greek text.
+- **Scripts** count characters: the `Length` of a string and the
+  positions of the `String` class are bytes in an ANSI game, the
+  characters the bytes encode in a UTF-8 game (see
+  [scripting](../scripting.md)).
+- **Editors** (`EDIT` controls) hold characters, not bytes: their text
+  and caret are drawn as they are whatever the encoding, and in a UTF-8
+  game a script reading `Text` gets UTF-8 and the text it writes is
+  decoded (`CUIEdit::ScGetProperty`, `ScSetProperty`, `Display`). The
+  original editor only takes the characters of the ANSI code page; Luma
+  Engine's takes any character the keyboard gives.
+- **The screen reader** is given characters (`CBAccessMgr::Speak`).
+
+A string that holds a character beyond U+00FF cannot be bytes; it is
+taken as characters already. The texts a TrueType font has cached are
+dropped when the encoding changes.
+
 ## Where fonts are used
 
 | Use | Font |
@@ -189,8 +235,8 @@ not. `StopTalk` ends it; `IsTalking` says whether one is playing.
 
 ## Notes for implementers
 
-- Bitmap fonts index tiles by Latin-1 code; characters outside Latin-1
-  draw as `?`.
+- Bitmap fonts index tiles by byte; in a UTF-8 game, characters outside
+  Windows-1252 draw as `?` (see [Text encoding](#text-encoding)).
 - Right-to-left text (`Game.TextRTL`, turned on by a string table's
   `@right-to-left` entry or by a script) makes a TrueType font lay each
   line's glyphs out from the last to the first, the reading order GDI

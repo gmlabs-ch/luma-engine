@@ -57,9 +57,11 @@ pub struct Subtitle {
 
 /// Parses a `.sub` file (`CVidSubtitler::LoadSubtitles`): each line is
 /// `{start}{end}text`; lines without a start, with no text, or with
-/// `{1}{1}` are dropped.
+/// `{1}{1}` are dropped. The text is kept as the file holds it, one
+/// `char` per byte, like the rest of the game's text: the font reads it
+/// in the game's encoding when it is drawn.
 pub fn parse_subtitles(bytes: &[u8]) -> Vec<Subtitle> {
-    let text = String::from_utf8_lossy(bytes);
+    let text: String = bytes.iter().map(|&b| char::from(b)).collect();
     let mut out = Vec::new();
     for line in text.split(['\n', '\0']) {
         let line = line.strip_suffix('\r').unwrap_or(line);

@@ -77,6 +77,15 @@ pub trait Natives {
     /// the native may take the value, as the `String` class does. The
     /// default ignores it.
     fn assign_scalar(&mut self, _id: NativeId, _value: &Value) {}
+
+    /// Whether the game's text is UTF-8 (`Game.TextEncoding`): strings
+    /// then hold UTF-8 bytes, one `char` each, and lengths and positions
+    /// count the characters they encode (see
+    /// [`utf8_to_text`](crate::classes::utf8_to_text)). The default is an
+    /// ANSI game, one character per byte.
+    fn text_utf8(&self) -> bool {
+        false
+    }
 }
 
 /// A host without native objects, for tests and tools.
@@ -363,7 +372,13 @@ impl Value {
     /// property of a native (asked to the host) or of an object.
     pub fn get_property(&self, name: &str, natives: &dyn Natives) -> Option<Value> {
         match self {
-            Value::String(s) if name == "Length" => Some(Value::Int(s.chars().count() as i32)),
+            // `CBTextUtils::GetTextLength`: the characters of a UTF-8
+            // game's text, not its bytes.
+            Value::String(s) if name == "Length" => Some(Value::Int(if natives.text_utf8() {
+                crate::classes::utf8_to_text(s).chars().count() as i32
+            } else {
+                s.chars().count() as i32
+            })),
             Value::Native(id) => natives.get_property(*id, name),
             Value::Object(props) => props.get(name).cloned(),
             _ => None,
