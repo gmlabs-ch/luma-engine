@@ -228,20 +228,20 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdAttach3DX::CAdAttach3DX` | unreviewed |  |
-| `CAdAttach3DX::~CAdAttach3DX` | unreviewed |  |
-| `CAdAttach3DX::Init` | unreviewed |  |
-| `CAdAttach3DX::Update` | unreviewed |  |
-| `CAdAttach3DX::Display` | unreviewed |  |
-| `CAdAttach3DX::DisplayShadowVol` | unreviewed |  |
-| `CAdAttach3DX::GetParentBone` | unreviewed |  |
-| `CAdAttach3DX::ScCallMethod` | unreviewed |  |
-| `CAdAttach3DX::ScGetProperty` | unreviewed |  |
-| `CAdAttach3DX::ScSetProperty` | unreviewed |  |
-| `CAdAttach3DX::ScToString` | unreviewed |  |
-| `CAdAttach3DX::Persist` | unreviewed |  |
-| `CAdAttach3DX::InvalidateDeviceObjects` | unreviewed |  |
-| `CAdAttach3DX::RestoreDeviceObjects` | unreviewed |  |
+| `CAdAttach3DX::CAdAttach3DX` | partial | `Actor3d::add_attachment` builds the `Attachment3d`: active, offset 0, angle 0, scale 1, no drop to floor, the actor as owner. Different: `draw_backfaces` starts false; the original inherits `m_DrawBackfaces = true` from `CBObject` (its `DrawBackfaces` property reads true). |
+| `CAdAttach3DX::~CAdAttach3DX` | replaced | Rust ownership: `Actor3d::remove_attachment` or the replacement in `add_attachment` drops it; `World` removes its script object. |
+| `CAdAttach3DX::Init` | done | `Actor3d::add_attachment`: keeps the bone and the name, loads the `.x` model (`Model::parse`); a file that does not load gives `Error adding attachment`. The model's owner is the actor: its animation events and transition times go there (`Actor3d::update`, `Attachment3d::play_anim`). |
+| `CAdAttach3DX::Update` | done | `Attachment3d::update`: own matrix x bone x actor world, the model's animation, the projected rectangle. The original also projects the attachment's own offset into its `X`/`Y`, which Luma does not expose (see `ScGetProperty`). |
+| `CAdAttach3DX::Display` | partial | `draw3d.rs` `model_items` (`ModelDraw::of_attachment`): drawn after the actor's model with the full matrix and the actor's lights; the owner's rectangle is registered through `Actor3d::hit_rects` when the actor is interactive. Different: back faces are culled according to the attachment's own `draw_backfaces` (false by default: culled). In the original the attachment's model is created with the **actor** as owner, and `CXModel::Render` culls by `m_Owner->m_DrawBackfaces`: an attachment is drawn two-sided whenever the actor is (`DRAW_BACKFACES`, true by default) and its own `DrawBackfaces` has no effect. |
+| `CAdAttach3DX::DisplayShadowVol` | done | `draw3d.rs` `shadow_items`, `ShadowType::Stencil`: each attachment's silhouette is extruded in its own space with its full matrix and counted into the stencil with the actor's (`ModelDraw::all`). |
+| `CAdAttach3DX::GetParentBone` | done | `Attachment3d::bone`. |
+| `CAdAttach3DX::ScCallMethod` | partial | `natives_actor3d.rs` `attachment3d_call`: `PlayAnim`/`PlayAnimAsync`, `PlayAnimChannel`/`Async` (restarted, transition 0 on an empty channel else the actor's time for the pair, no stop transition; the blocking forms wait on an always-ready object) and `StopAnimChannel` (at once) agree. Different: `StopAnim` stops channel 0 only; the original's `m_ModelX->StopAnim(0)` resolves to `StopAnim(DWORD TransitionTime)` and stops all ten channels. Inherited methods: see `CAdObject3D::ScCallMethod`. |
+| `CAdAttach3DX::ScGetProperty` | partial | `attachment3d_get`: `Type` (`attachment`), `Name`, `Active`, `Ready`, `PosX`, `PosY`, `PosZ`, `Angle`, `Scale`, `DrawBackfaces` (default differs, see the constructor). Missing from `CAdObject3D`: `Velocity`, `AngularVelocity`/`AngVelocity` (1), `DropToFloor` (false), `ShadowType` (3), `Shadow`, `SimpleShadow`, `ShadowColor`, `AmbientLightColor`; from `CBObject`/`CAdObject`: `X`, `Y`, `Height`, `Caption`, `Registrable` and the rest. Extensions: `Bone`, `DirectionAngle`/`DirAngle`, and `Filename` returns the model file (original: null, `Init` never sets it). |
+| `CAdAttach3DX::ScSetProperty` | partial | `attachment3d_set`: `Name`, `Active`, `PosX`, `PosY`, `PosZ`, `Angle`, `Scale`, `DrawBackfaces`. Missing setters with an effect in the original: `DropToFloor` (the attachment's offset is then re-seated on the walk planes at each update) and `X`/`Y` (the offset becomes the walk-plane point under that pixel). The other inherited setters only store a value there too; Luma keeps them as script properties. |
+| `CAdAttach3DX::ScToString` | done | `world.rs`: `[attachment object]`. |
+| `CAdAttach3DX::Persist` | done | serde on `Attachment3d`: name, bone, model file with the animation state, active, offset, angle, scale, backfaces; the model is read again by `Actor3d::reload`. The owner is implicit (the attachment lives in its actor). |
+| `CAdAttach3DX::InvalidateDeviceObjects` | n/a | Direct3D device loss; `luma-render` owns the GPU resources. |
+| `CAdAttach3DX::RestoreDeviceObjects` | n/a | Direct3D device restore; see `InvalidateDeviceObjects`. |
 
 ## `wme_ad/AdBlock.cpp`
 
@@ -596,24 +596,24 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdObject3D::CAdObject3D` | unreviewed |  |
-| `CAdObject3D::~CAdObject3D` | unreviewed |  |
-| `CAdObject3D::ClearIgnoredLights` | unreviewed |  |
-| `CAdObject3D::AddIgnoredLight` | unreviewed |  |
-| `CAdObject3D::RemoveIgnoredLight` | unreviewed |  |
-| `CAdObject3D::Update` | unreviewed |  |
-| `CAdObject3D::Convert3DTo2D` | unreviewed |  |
-| `CAdObject3D::Display` | unreviewed |  |
-| `CAdObject3D::SetupLights` | unreviewed |  |
-| `CAdObject3D::ScCallMethod` | unreviewed |  |
-| `CAdObject3D::ScGetProperty` | unreviewed |  |
-| `CAdObject3D::ScSetProperty` | unreviewed |  |
-| `CAdObject3D::ScToString` | unreviewed |  |
-| `CAdObject3D::Persist` | unreviewed |  |
-| `CAdObject3D::SkipTo` | unreviewed |  |
-| `CAdObject3D::GetShadowVolume` | unreviewed |  |
-| `CAdObject3D::GetBonePosition2D` | unreviewed |  |
-| `CAdObject3D::GetBonePosition3D` | unreviewed |  |
+| `CAdObject3D::CAdObject3D` | partial | `luma-3d/src/actor3d.rs` `Actor3dDef::default` and `luma-adventure/src/actor3d.rs` `Actor3d::from_definition`: velocity and angular velocity 1, drop to floor on, shadow type stencil, state and next state `Ready`, no stance animation, no ambient override agree. Different, among the defaults a 3D actor inherits from `CBObject`: `sound_panning` starts false where `m_AutoSoundPanning` is true, so the sounds of a 3D actor are not panned with its position until a script sets `SoundPanning`. `last_position` starts as NaN to force the first 2D position (the original starts at the origin and so leaves `X`/`Y` at 0 for an actor placed exactly there). |
+| `CAdObject3D::~CAdObject3D` | replaced | Rust ownership; the shadow volume is not an object that outlives a frame (see `GetShadowVolume`). |
+| `CAdObject3D::ClearIgnoredLights` | replaced | Rust ownership: `Actor3d::ignored_lights` is a `Vec<String>` dropped with the actor; the old-saved-game branch of `Persist` that calls it has no counterpart. |
+| `CAdObject3D::AddIgnoredLight` | done | `natives_actor3d.rs` `actor3d_call` `AddIgnoredLight`: added once (names compared without case), always true. |
+| `CAdObject3D::RemoveIgnoredLight` | done | `actor3d_call` `RemoveIgnoredLight`: removes the name (without case), false when it was not there. |
+| `CAdObject3D::Update` | done | End of `Actor3d::update`: drop to the floor (`height_at(position, 5.0)`, unchanged when no walk plane is under it), world matrix (`world_matrix`: rotation about Y, uniform scale, translation), then the 2D position when the 3D one changed. For attachments `Attachment3d::update` only builds the matrix: see `CAdAttach3DX::ScSetProperty` for `DropToFloor` on an attachment. |
+| `CAdObject3D::Convert3DTo2D` | done | `luma-3d/src/camera.rs` `Projection::project` of the object's position: viewport projection plus the scroll offset less the viewport origin, truncated. |
+| `CAdObject3D::Display` | done | Empty in the original; the subclasses draw. |
+| `CAdObject3D::SetupLights` | done | `World::three_d_draws`: `Scene3d::lights_for(geometry, actor position, ignored lights)` per actor; the attachments are lit as their actor. |
+| `CAdObject3D::ScCallMethod` | partial | `natives_actor3d.rs` `actor3d_call` (`SkipTo`, `SkipTo3D`, `GetBonePosition2D`, `GetBonePosition3D`, `AddIgnoredLight`, `RemoveIgnoredLight`) and `attachment3d_call`. Different: (1) `GetBonePosition2D` returns `X` and `Y` as floats (original: integers) and, for an unknown bone or without geometry, an object with no members (original: `X = 0`, `Y = 0`). (2) `GetBonePosition3D` for an unknown bone returns an object with no members (original: `X`, `Y`, `Z` = 0). (3) On an attachment only `SkipTo3D` and `GetBonePosition2D/3D` exist: `SkipTo`, `AddIgnoredLight`, `RemoveIgnoredLight` and the methods inherited from `CAdObject`/`CBObject` beyond cursor and caption (sounds, `Talk`, items, particle emitter) are missing. |
+| `CAdObject3D::ScGetProperty` | partial | `natives_actor3d.rs` `actor3d_get`: `Angle`, `PosX`, `PosY`, `PosZ`, `Velocity`, `AngularVelocity`/`AngVelocity`, `DropToFloor`, `ShadowType`, `Shadow`, `SimpleShadow`, `ShadowColor`, `Scale` (x 100), `DrawBackfaces`, `AmbientLightColor` (null when unset) agree. Missing on a 3D actor, from the `CBObject` it inherits: `Zoomable`/`Scalable`, `Rotatable`, `ScaleX`, `ScaleY`, `RelativeScale`, `Rotate`, `RelativeRotate`, `Colorable` read null instead of their defaults (true, false, null, null, 0, null, 0, true). `NumAttachments` counts the bone attachments (original: the 2D attachments, always 0). For attachments see `CAdAttach3DX::ScGetProperty`. |
+| `CAdObject3D::ScSetProperty` | partial | `natives_actor3d.rs` `actor3d_set`: `Angle` (not normalised), `PosX`, `PosY`, `PosZ`, `X`/`Y` (the 3D position follows when the exact conversion succeeds), `Velocity`, `AngularVelocity`/`AngVelocity`, `DropToFloor`, `Shadow`, `ShadowType` (clamped), `SimpleShadow`, `ShadowColor`, `Scale`, `DrawBackfaces`, `AmbientLightColor` (null clears) agree. Missing on a 3D actor: the `CBObject` setters `Zoomable`/`Scalable`, `ScaleX`, `ScaleY`, `RelativeScale`, `Rotatable`, `Rotate`, `RelativeRotate`, `Colorable` are kept as plain script properties; of these `Zoomable`, `Scale*` and `RelativeScale` matter to the particle emitter offsets (see `CAdActor3DX::UpdatePartEmitter`) and the blocked region. For attachments see `CAdAttach3DX::ScSetProperty`. |
+| `CAdObject3D::ScToString` | done | `[ad object3d]` is never seen: both subclasses override it (`world.rs`: `[actor3dx object]`, `[attachment object]`). |
+| `CAdObject3D::Persist` | done | serde on `Actor3d`: `angular_velocity`, `drop_to_floor`, `temp_skel_anim`, `last_position`, `velocity`, `ignored_lights`, `ambient_light_color`; the shadow volume is rebuilt each frame. |
+| `CAdObject3D::SkipTo` | done | `Actor3d::skip_to`: exact or tolerant conversion; on success the 3D position and `X`/`Y` are set, else nothing changes. The script method uses the exact one, as the original. |
+| `CAdObject3D::GetShadowVolume` | replaced | No cached `C3DShadowVolume`: `draw3d.rs` `shadow_items` builds the volume's vertices every frame (`add_shadow_volume`), as the original does with `Update = true`. |
+| `CAdObject3D::GetBonePosition2D` | done | `Actor3d::bone_position` (bone combined matrix x world matrix applied to the origin), then `Projection::project`; the failure case is under `ScCallMethod`. |
+| `CAdObject3D::GetBonePosition3D` | done | `Actor3d::bone_position(bone, offset)` and `Attachment3d::bone_position`: the offset through the bone's combined matrix and the object's world matrix; `None` for an unknown bone or without a model. |
 
 ## `wme_ad/AdPath.cpp`
 
