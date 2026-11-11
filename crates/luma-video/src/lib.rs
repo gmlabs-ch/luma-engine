@@ -171,8 +171,9 @@ fn decoder_comment_header(packet: &[u8]) -> Vec<u8> {
 /// leaves frames out (its granule positions skip the missing frames,
 /// with no zero-length packet in their place) on its real clock.
 ///
-/// A position that marks no frame, or one that would go back in time,
-/// is ignored.
+/// A position that marks no frame, one that would go back in time, or
+/// one that jumps further ahead than [`MAX_FRAME_GAP`] (a damaged or
+/// hostile file must not make the video wait for years) is ignored.
 fn next_frame_number(
     ident: &TheoraIdentHeader,
     previous: Option<u64>,
@@ -184,10 +185,19 @@ fn next_frame_number(
         .filter(|granule| *granule != u64::MAX)
         .and_then(|granule| ident.frame_index_from_granule_position(granule).ok());
     match stated {
-        Some(number) if previous.is_none_or(|p| number >= p) => number,
+        Some(number)
+            if previous.is_none_or(|p| number >= p)
+                && number <= following.saturating_add(MAX_FRAME_GAP) =>
+        {
+            number
+        }
         _ => following,
     }
 }
+
+/// The most frames a stream may leave out between two pictures: two
+/// minutes at 30 frames per second.
+const MAX_FRAME_GAP: u64 = 3600;
 
 /// The sound track of a video file as an Ogg file of its own: the
 /// packets of the first Vorbis stream, on the same pages and with the
@@ -745,6 +755,14 @@ mod tests {
         assert_eq!(next_frame_number(&ident, Some(4), Some(u64::MAX)), 5);
         assert_eq!(next_frame_number(&ident, Some(4), Some(0)), 5);
         assert_eq!(next_frame_number(&ident, Some(u64::MAX), None), u64::MAX);
+        // A jump of up to two minutes of frames is a gap; a longer one is
+        // a damaged position, and the packet follows the one before.
+        assert_eq!(
+            next_frame_number(&ident, Some(4), Some(at(3604, 3600))),
+            3604
+        );
+        assert_eq!(next_frame_number(&ident, Some(4), Some(at(9000, 8960))), 5);
+        assert_eq!(next_frame_number(&ident, None, Some(at(9000, 8960))), 0);
         // Before bitstream 3.2.1 the position held the frame's index, not
         // the count of frames.
         let legacy = TheoraIdentHeader {

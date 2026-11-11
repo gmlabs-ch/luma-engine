@@ -37,7 +37,10 @@ granule positions of the Ogg pages, not from counting packets:
 - any other packet comes one frame after the packet before it, the
   first one being frame 0;
 - a position that marks no frame (all ones: no packet ends on the page;
-  or a header's zero) or that would go back in time is ignored.
+  or a header's zero), that would go back in time, or that jumps more
+  than 3600 frames ahead (two minutes at 30 frames per second: Luma's
+  own bound, so that a damaged file cannot make the video wait without
+  end) is ignored.
 
 In a regular stream the two agree and frame `n` is the `n`th packet.
 They differ in streams whose encoder was fed an irregular source and
@@ -262,5 +265,8 @@ read in the game's encoding like any other text the font draws (see
 - `SetTheoraTexture` on 3D actors, with the rest of the 3D module.
 - An entity's video in saved games.
 - The White Chamber's own videos (`assets\data0001.ogg` and the others)
-  are not in the itch.io release used for testing; the engine logs the
-  missing file and the game goes on to the next scene.
+  are not in the itch.io release: there the engine logs the missing file
+  and the game goes on to the next scene. With the eight files of the
+  game's source pack they all play, with the frame counts and durations
+  the files state; their sound was checked by its decoded length, not
+  by ear.
