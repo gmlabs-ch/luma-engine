@@ -6,67 +6,67 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdActor::CAdActor` | unreviewed |  |
-| `CAdActor::SetDefaultAnimNames` | unreviewed |  |
-| `CAdActor::~CAdActor` | unreviewed |  |
-| `CAdActor::LoadFile` | unreviewed |  |
-| `CAdActor::LoadBuffer` | unreviewed |  |
-| `CAdActor::LoadBuffer ACTOR` | unreviewed |  |
-| `CAdActor::LoadBuffer X` | unreviewed |  |
-| `CAdActor::LoadBuffer Y` | unreviewed |  |
-| `CAdActor::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdActor::LoadBuffer NAME` | unreviewed |  |
-| `CAdActor::LoadBuffer SCALABLE` | unreviewed |  |
-| `CAdActor::LoadBuffer REGISTRABLE` | unreviewed |  |
-| `CAdActor::LoadBuffer INTERACTIVE` | unreviewed |  |
-| `CAdActor::LoadBuffer SHADOWABLE` | unreviewed |  |
-| `CAdActor::LoadBuffer COLORABLE` | unreviewed |  |
-| `CAdActor::LoadBuffer ACTIVE` | unreviewed |  |
-| `CAdActor::LoadBuffer WALK` | unreviewed |  |
-| `CAdActor::LoadBuffer STAND` | unreviewed |  |
-| `CAdActor::LoadBuffer TALK_SPECIAL` | unreviewed |  |
-| `CAdActor::LoadBuffer TALK` | unreviewed |  |
-| `CAdActor::LoadBuffer TURN_LEFT` | unreviewed |  |
-| `CAdActor::LoadBuffer TURN_RIGHT` | unreviewed |  |
-| `CAdActor::LoadBuffer EVENTS` | unreviewed |  |
-| `CAdActor::LoadBuffer FONT` | unreviewed |  |
-| `CAdActor::LoadBuffer CURSOR` | unreviewed |  |
-| `CAdActor::LoadBuffer SCRIPT` | unreviewed |  |
-| `CAdActor::LoadBuffer SOUND_VOLUME` | unreviewed |  |
-| `CAdActor::LoadBuffer SOUND_PANNING` | unreviewed |  |
-| `CAdActor::LoadBuffer CAPTION` | unreviewed |  |
-| `CAdActor::LoadBuffer PROPERTY` | unreviewed |  |
-| `CAdActor::LoadBuffer BLOCKED_REGION` | unreviewed |  |
-| `CAdActor::LoadBuffer WAYPOINTS` | unreviewed |  |
-| `CAdActor::LoadBuffer IGNORE_ITEMS` | unreviewed |  |
-| `CAdActor::LoadBuffer ROTABLE` | unreviewed |  |
-| `CAdActor::LoadBuffer ROTATABLE` | unreviewed |  |
-| `CAdActor::LoadBuffer ALPHA_COLOR` | unreviewed |  |
-| `CAdActor::LoadBuffer SCALE` | unreviewed |  |
-| `CAdActor::LoadBuffer RELATIVE_SCALE` | unreviewed |  |
-| `CAdActor::LoadBuffer ALPHA` | unreviewed |  |
-| `CAdActor::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdActor::LoadBuffer ANIMATION` | unreviewed |  |
-| `CAdActor::TurnTo` | unreviewed |  |
-| `CAdActor::GoTo` | unreviewed |  |
-| `CAdActor::Display` | unreviewed |  |
-| `CAdActor::Update` | unreviewed |  |
-| `CAdActor::FollowPath` | unreviewed |  |
-| `CAdActor::GetNextStep` | unreviewed |  |
-| `CAdActor::InitLine` | unreviewed |  |
-| `CAdActor::ScCallMethod` | unreviewed |  |
-| `CAdActor::ScGetProperty` | unreviewed |  |
-| `CAdActor::ScSetProperty` | unreviewed |  |
-| `CAdActor::ScToString` | unreviewed |  |
-| `CAdActor::GetTalkStance` | unreviewed |  |
-| `CAdActor::GetTalkStanceOld` | unreviewed |  |
-| `CAdActor::Persist` | unreviewed |  |
-| `CAdActor::AngleToDirection` | unreviewed |  |
-| `CAdActor::GetHeight` | unreviewed |  |
-| `CAdActor::GetAnimByName` | unreviewed |  |
-| `CAdActor::MergeAnims` | unreviewed |  |
-| `CAdActor::MergeAnims ANIMATION` | unreviewed |  |
-| `CAdActor::PlayAnim` | unreviewed |  |
+| `CAdActor::CAdActor` | done | `luma-adventure/src/actor.rs` `Actor::from_definition`: faces left, no walk-after direction, empty path, default animation names. |
+| `CAdActor::SetDefaultAnimNames` | done | `luma-adventure/src/actor.rs` `Actor::from_definition`: `talk`, `idle`, `walk`, `turnleft`, `turnright`. |
+| `CAdActor::~CAdActor` | replaced | Rust ownership. |
+| `CAdActor::LoadFile` | done | `luma-adventure/src/actor.rs` `Actor::load`, `world.rs` `load_actor`: a file that cannot be read or parsed is logged and gives no actor; the file name is kept (`Actor::filename`). |
+| `CAdActor::LoadBuffer` | partial | `luma-formats/src/actor.rs` `Actor::apply` with `luma-adventure/src/actor.rs` `load_definition`: `ACTOR` root required, state ready after loading, an `ALPHA` without colour means white. Different: (1) see `TEMPLATE`; (2) a key the original does not know (it fails the load with a syntax error) is skipped, and Luma reads `STOP_ON_BLOCKED`, which this source has not; (3) a `CURSOR` that does not load does not fail the load. |
+| `CAdActor::LoadBuffer ACTOR` | done | `luma-formats/src/actor.rs` `Actor::merge`: the `ACTOR` block is required. |
+| `CAdActor::LoadBuffer X` | done | `luma-formats/src/actor.rs` `Actor::apply`, start position (`Actor::from_definition`). |
+| `CAdActor::LoadBuffer Y` | done | `luma-formats/src/actor.rs` `Actor::apply`. |
+| `CAdActor::LoadBuffer TEMPLATE` | partial | `luma-adventure/src/actor.rs` `load_definition` loads the template chain first, then the file over it. The original loads the template where the key stands: keys written before `TEMPLATE` are overridden by the template, which Luma never does. Two quirks of the original are not reproduced: the template's `ALPHA_COLOR`/`ALPHA` are lost when the file sets none (the outer `LoadBuffer` ends with `m_AlphaColor = DRGBA(0,0,0,0)`), Luma keeps the template's tint; and `Filename` becomes the template's file name (the nested `LoadFile` overwrites `m_Filename`), Luma keeps the actor file's. Luma also stops at 8 levels and at a file naming itself. |
+| `CAdActor::LoadBuffer NAME` | done | `luma-formats/src/actor.rs` `Actor::apply`. |
+| `CAdActor::LoadBuffer SCALABLE` | done | `luma-formats/src/actor.rs` `Actor::apply`; used by `Actor::transform`, `height`, `mimic_scale`. |
+| `CAdActor::LoadBuffer REGISTRABLE` | done | `luma-formats/src/actor.rs` `Actor::apply`; `input.rs` `actor_hits`. |
+| `CAdActor::LoadBuffer INTERACTIVE` | done | Same field as `REGISTRABLE`. |
+| `CAdActor::LoadBuffer SHADOWABLE` | done | `luma-formats/src/actor.rs` `Actor::apply`; `Actor::tint` takes the scene's colour at the actor. |
+| `CAdActor::LoadBuffer COLORABLE` | done | Same field as `SHADOWABLE`. |
+| `CAdActor::LoadBuffer ACTIVE` | done | `luma-formats/src/actor.rs` `Actor::apply`; inactive actors are not updated, drawn or hit. |
+| `CAdActor::LoadBuffer WALK` | done | `luma-formats/src/actor.rs` `Actor::apply` (`SpriteSet::from_wrapper`: the block must hold a `SPRITESET`, else the load fails), replaces the previous set; `Actor::walk_sprite`. Texture lifetime and cache type: n/a. |
+| `CAdActor::LoadBuffer STAND` | done | `luma-formats/src/actor.rs` `Actor::apply`, replaces the previous set; `Actor::stand_sprite`. |
+| `CAdActor::LoadBuffer TALK_SPECIAL` | done | `luma-formats/src/actor.rs` `Actor::apply`, added to the list; `Actor::talk_stance`. |
+| `CAdActor::LoadBuffer TALK` | done | `luma-formats/src/actor.rs` `Actor::apply`, added to the list; `Actor::talk_stance`. |
+| `CAdActor::LoadBuffer TURN_LEFT` | done | `luma-formats/src/actor.rs` `Actor::apply`; `Actor::turn_sprite`. |
+| `CAdActor::LoadBuffer TURN_RIGHT` | done | `luma-formats/src/actor.rs` `Actor::apply`; `Actor::turn_sprite`. |
+| `CAdActor::LoadBuffer EVENTS` | done | Accepted and ignored by the original (no case in the switch); Luma skips it too. |
+| `CAdActor::LoadBuffer FONT` | partial | Read (`luma-formats/src/actor.rs` `Actor::apply`) and used for the actor's speech, but loaded at the first `Talk` (`world.rs` `load_own_font`), not with the file; `GetFont` returns the file name even when the font cannot be loaded (the original has no font then and returns null). |
+| `CAdActor::LoadBuffer CURSOR` | done | `luma-formats/src/actor.rs` `Actor::apply`, `natives_object.rs` `object_cursor`, shown by `input.rs` `cursor_to_show` (a failure to load: see `LoadBuffer`). |
+| `CAdActor::LoadBuffer SCRIPT` | done | `luma-formats/src/actor.rs` `Actor::apply`; attached by `world.rs` `load_actor`. |
+| `CAdActor::LoadBuffer SOUND_VOLUME` | partial | Parsed into `Actor::sound_volume`, which nothing reads: the actor's sounds start at volume 100 whatever the file says. The original sets `m_SFXVolume`, used by `PlaySound` and returned by `GetSoundVolume`. |
+| `CAdActor::LoadBuffer SOUND_PANNING` | done | `luma-formats/src/actor.rs` `Actor::apply`; `sound.rs` `sound_pan_of`. |
+| `CAdActor::LoadBuffer CAPTION` | done | `luma-formats/src/actor.rs` `Actor::apply`, expanded through the string table by `world.rs` `load_actor`. |
+| `CAdActor::LoadBuffer PROPERTY` | done | `luma-formats/src/actor.rs` `Actor::apply`; set as script properties by `world.rs` `load_actor`. |
+| `CAdActor::LoadBuffer BLOCKED_REGION` | done | `luma-formats/src/actor.rs` `Actor::apply`; `luma-adventure/src/actor.rs` `Actor::block_polygon`, used by `world.rs` `obstacles_for`. |
+| `CAdActor::LoadBuffer WAYPOINTS` | done | `luma-formats/src/actor.rs` `Actor::apply`; `luma-adventure/src/actor.rs` `Actor::waypoints`, used by `world.rs` `obstacles_for`. |
+| `CAdActor::LoadBuffer IGNORE_ITEMS` | done | `luma-formats/src/actor.rs` `Actor::apply`; `input.rs` `actor_hits`: not registered while an item is selected. |
+| `CAdActor::LoadBuffer ROTABLE` | done | `luma-formats/src/actor.rs` `Actor::apply`; `Actor::transform`. |
+| `CAdActor::LoadBuffer ROTATABLE` | done | Same field as `ROTABLE`. |
+| `CAdActor::LoadBuffer ALPHA_COLOR` | done | `luma-formats/src/actor.rs` `Actor::apply`: with `ALPHA` it makes the tint (`Actor::tint`); all zero means none. (Inherited from a template: see `TEMPLATE`.) |
+| `CAdActor::LoadBuffer SCALE` | done | `luma-formats/src/actor.rs` `Actor::apply`, an integer; `Scene::object_scale`. |
+| `CAdActor::LoadBuffer RELATIVE_SCALE` | done | `luma-formats/src/actor.rs` `Actor::apply`, an integer; `Scene::object_scale`. |
+| `CAdActor::LoadBuffer ALPHA` | done | `luma-formats/src/actor.rs` `Actor::apply`: an alpha without colour gives white. |
+| `CAdActor::LoadBuffer EDITOR_PROPERTY` | n/a | `CBBase::ParseEditorProperty` returns at once when the game is not in editor mode. |
+| `CAdActor::LoadBuffer ANIMATION` | done | `luma-formats/src/actor.rs` `Actor::apply`: a sprite set read directly from the block, added to the list; `Actor::animation`. |
+| `CAdActor::TurnTo` | done | `luma-adventure/src/actor.rs` `Actor::turn_to`: the shortest of the three differences, less than two steps is no turn. |
+| `CAdActor::GoTo` | done | `luma-adventure/src/actor.rs` `Actor::go_to`: nothing when already walking to that corrected target, else path reset, target corrected (`path.rs` `Floor::correct_target`, free objects counted), state searching. |
+| `CAdActor::Display` | done | `world.rs` `drawables` / `scene_draw_parts` with `luma-adventure/src/actor.rs` `Actor::drawable`, `tint`, `transform`; `input.rs` `actor_hits` (not registered when not interactive or `IgnoreItems` with a selected item); attachments before and after; the emitter after; `sound.rs` `update_sounds`; the accessibility hint from the hit rectangle. |
+| `CAdActor::Update` | partial | `luma-adventure/src/actor.rs` `Actor::update`. Different: (1) the default standing sprite is chosen before the state switch, not after it: while turning without a turn sprite for the new direction (`turn_step` sets `current_sprite` to none) the actor has no sprite and is not drawn for that frame, and on the frame a turn ends it shows the standing sprite of the previous direction; the same when walking without a walk sprite. The original falls back to `STAND` (or the idle animation) in the new direction after the switch. (2) A frame's `MOVE` is added unscaled; the original scales it by the scene zoom at the actor when scalable (`GetCurrentFrame(zoom, zoom)`). (3) `TimeIsUp` with a speech sound: the original waits for the sound to stop, whatever the duration; Luma also ends the sentence when the duration (the given one, else the sound's length) has passed. (4) `m_Sentence->Update(m_Dir)` and the sprite a talk definition gives (`m_Sentence->m_CurrentSprite`) are missing: no `.talk` definitions. The rest agrees: finished animations, turning, path states, talk stances, block region, ready flag, emitter and attachments. |
+| `CAdActor::FollowPath` | done | `luma-adventure/src/actor.rs` `Actor::follow_path`: path points equal to the position are skipped; nothing left turns to the after-walk direction or goes ready. |
+| `CAdActor::GetNextStep` | partial | `luma-adventure/src/actor.rs` `Actor::next_step`. Different: (1) the step length comes from the frame's unscaled `MOVE`; the original uses the `MOVE` scaled by the scene zoom at the actor, so in Luma a scaled-down actor walks as fast as a full-size one; (2) `is_blocked_at(.., false)` treats a point outside every region as free, the original's `IsBlockedAt` starts from blocked (`ret = true`), so a step leaving the walkable regions restarts the walk there (`GoTo`) and here goes through; (3) on a block Luma raises `ActorIsBlocked` and honours `STOP_ON_BLOCKED`, which this source has not; (4) without a walk sprite the actor has no sprite (see `Update`). |
+| `CAdActor::InitLine` | done | `luma-adventure/src/actor.rs` `Actor::init_line`: step count, steps per axis, next state following path, turn towards the segment (angle with 180/3.14, truncated). A zero-length segment is guarded (the original divides by zero). |
+| `CAdActor::ScCallMethod` | partial | `natives_actor.rs` `actor_call`. Different: `GoToObject` refuses an entity of the game (`Game.CreateEntity`, `Game.LoadEntity`) and a container's entity, only the scene's are accepted; `TurnTo(object)` turns only towards a 2D actor, a scene entity or a region (to its bounding box corner), the original uses the position of any valid object (3D actor, window, game entity, a region's own 0,0); Luma adds `SetStopOnBlocked` / `GetStopOnBlocked`. GoTo, GoToAsync, TurnTo(direction), IsWalking, MergeAnims, UnloadAnim, HasAnim agree. |
+| `CAdActor::ScGetProperty` | done | `natives_actor.rs` `actor_get`: Direction, Type, TalkAnimName, WalkAnimName, IdleAnimName, TurnLeftAnimName, TurnRightAnimName. |
+| `CAdActor::ScSetProperty` | done | `natives_actor.rs` `actor_set`: Direction (0..7 only) and the five animation names, `null` restoring the default. |
+| `CAdActor::ScToString` | done | `world.rs` `Natives::to_string`: `[actor object]`. |
+| `CAdActor::GetTalkStance` | done | `luma-adventure/src/actor.rs` `Actor::talk_stance` and `world.rs` `forced_talk_sprite`: the forced sprite first, then the old way when the actor has `TALK` sets, else the animation named like the stance, else a random animation named `TalkAnimName`, else `STAND` or the idle animation. (Luma's random generator, not `rand()`.) |
+| `CAdActor::GetTalkStanceOld` | done | `luma-adventure/src/actor.rs` `Actor::talk_stance`: the special then the generic set of that name, else a random generic set, else `STAND`. |
+| `CAdActor::Persist` | replaced | serde derive on `luma-adventure/src/actor.rs` `Actor`: direction, path and its index, the line state (`pf_*`), target, target direction, after-walk direction, the sprite sets and animations (`def`), the animation names, the sprites in use. |
+| `CAdActor::AngleToDirection` | done | `luma-formats/src/scene.rs` `Direction::from_angle`: the same eight ranges, down otherwise. |
+| `CAdActor::GetHeight` | done | `luma-adventure/src/actor.rs` `Actor::height`: the current sprite, else the standing one, then `frame_height`. |
+| `CAdActor::GetAnimByName` | done | `luma-formats/src/actor.rs` `Actor::animation`: first of that name, without case. |
+| `CAdActor::MergeAnims` | partial | `luma-adventure/src/actor.rs` `Actor::merge_anims`. On a bad file only: the original keeps the animations read before the faulty one and returns false; Luma adds none. |
+| `CAdActor::MergeAnims ANIMATION` | done | `luma-formats/src/actor.rs` `Actor::merge_animations`: every top-level `ANIMATION` block. |
+| `CAdActor::PlayAnim` | done | `luma-adventure/src/actor.rs` `Actor::play_anim`: the animation of that name with a sprite for the direction (reset, state playing-anim-set), else the sprite file (`CAdObject::PlayAnim`). |
 
 ## `wme_ad/AdActor3D.cpp`
 
