@@ -6,28 +6,28 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSound::CBSound` | unreviewed |  |
-| `CBSound::~CBSound` | unreviewed |  |
-| `CBSound::SetSound` | unreviewed |  |
-| `CBSound::SetSoundSimple` | unreviewed |  |
-| `CBSound::GetLength` | unreviewed |  |
-| `CBSound::Play` | unreviewed |  |
-| `CBSound::Stop` | unreviewed |  |
-| `CBSound::Pause` | unreviewed |  |
-| `CBSound::Resume` | unreviewed |  |
-| `CBSound::Persist` | unreviewed |  |
-| `CBSound::IsPlaying` | unreviewed |  |
-| `CBSound::IsPaused` | unreviewed |  |
-| `CBSound::SetPositionTime` | unreviewed |  |
-| `CBSound::GetPositionTime` | unreviewed |  |
-| `CBSound::SetVolume` | unreviewed |  |
-| `CBSound::SetPrivateVolume` | unreviewed |  |
-| `CBSound::GetVolume` | unreviewed |  |
-| `CBSound::SetLoopStart` | unreviewed |  |
-| `CBSound::SetPan` | unreviewed |  |
-| `CBSound::LoadRawData` | unreviewed |  |
-| `CBSound::GetRawData` | unreviewed |  |
-| `CBSound::ApplyFX` | unreviewed |  |
+| `CBSound::CBSound` | done | No separate object: the owner's state (`ObjectSfx`, `MusicChannel` in `crates/luma-adventure/src/sound.rs`) plus the `Voice` in `crates/luma-audio/src/audio.rs`; type SFX, not looping, not paused, position 0, loop start 0, no effect, as here. |
+| `CBSound::~CBSound` | replaced | `Audio::remove` from `stop_sfx(unload)`, `stop_music`, `drop_orphan_sounds`, `update_speech` in `crates/luma-adventure/src/sound.rs`; removing stops the sound, as `RemoveSound` does. |
+| `CBSound::SetSound` | done | `World::load_clip` + `Audio::add` in `play_sfx`, `play_music`, `start_speech` (`crates/luma-adventure/src/sound.rs`): the old sound is removed first, a file that cannot be loaded gives `false`. Without a sound device the original fails here every time; see `CBSoundMgr::Initialize`. |
+| `CBSound::SetSoundSimple` | done | `World::restore_sound` in `crates/luma-adventure/src/save.rs`: position, looping, own volume, loop start, resumed when it was playing; freeze-paused sounds are held again by `pause_all` in `restore_sounds`. Luma also puts a script-paused sound back at its position (the original lost it). Which sounds are saved at all: see `CBSound::Persist`. |
+| `CBSound::GetLength` | done | `Audio::length_ms` / `Clip::duration_ms`; 0 without a sound (`World::sound_length` in `crates/luma-adventure/src/sound.rs`). |
+| `CBSound::Play` | partial | `Audio::play` in `crates/luma-audio/src/audio.rs`. (1) The original always restarts: `Stop()` then play from `m_SoundPosition`, whether the sound was playing or paused; Luma lets a playing sound go on and resumes a paused one from where it was (visible on `PlaySound()` without a file on a sound still playing, and on a `PauseSound()` followed by `PlaySound()`). (2) `m_SoundPosition` set while the sound was not playing (`SetSoundPosition`, `SOUND_START_TIME`, a loaded game) is never cleared by the original, so every later `Play` starts there again; Luma uses the start position once (`mem::take` of `start_ms`) and `Audio::stop` resets it to 0. |
+| `CBSound::Stop` | done | `Audio::stop` in `crates/luma-audio/src/audio.rs`: stopped, back to the start, no longer paused. |
+| `CBSound::Pause` | partial | `Audio::pause` in `crates/luma-audio/src/audio.rs`. The original sets `m_SoundPaused` even when the sound is not playing, so `PauseSound()` on a stopped or finished sound followed by `ResumeSound()` starts it from the beginning; Luma pauses only a playing sound and the later resume does nothing. The `FreezePaused` argument is never passed by the engine. |
+| `CBSound::Resume` | partial | `Audio::resume` in `crates/luma-audio/src/audio.rs`. The original resumes only a sound paused through `CBSound::Pause` (`m_SoundPaused`); Luma resumes any voice Kira holds paused, so a `ResumeSound()` called while the game is frozen restarts a sound that `PauseAll` holds (and clears its freeze flag), which the original refuses. |
+| `CBSound::Persist` | partial | `sounds_state` / `restore_sounds` in `crates/luma-adventure/src/save.rs` keep, for each object's sound and each music channel: file, position, playing, script-paused, looping, loop start, own volume (type and streaming flag are implied; the freeze state is rebuilt from the game's). Missing: the `CBSound` of a sentence (speech stops at a load instead of going on) and of sprite frames (`frame_sounds`, documented as not kept) are not saved. Luma saves the position of a paused sound, which the original does not. |
+| `CBSound::IsPlaying` | partial | `Audio::is_playing` in `crates/luma-audio/src/audio.rs`; differs while frozen, see `CBSoundBuffer::IsPlaying`. |
+| `CBSound::IsPaused` | partial | `Audio::is_paused` in `crates/luma-audio/src/audio.rs` reads Kira's paused state, so it is also true for a sound held by `pause_all`; the original is the script pause flag only (`m_SoundPaused`), false for a freeze-paused sound. Only the sentence end test (`TimeIsUp`) reads it. |
+| `CBSound::SetPositionTime` | done | `Audio::set_position_ms` in `crates/luma-audio/src/audio.rs`: seeks a started sound, else kept for the next start. The original also keeps that start for every later `Play`: see `CBSound::Play`. |
+| `CBSound::GetPositionTime` | done | `World::sfx_position`, `music_position` in `crates/luma-adventure/src/sound.rs`: 0 when not playing, else `Audio::position_ms`. For a streamed sound the original reports the decode position, ahead of what is heard; see `CBSoundWAV::GetPosition`. |
+| `CBSound::SetVolume` | done | `Audio::set_private_volume` in `crates/luma-audio/src/audio.rs`. |
+| `CBSound::SetPrivateVolume` | n/a | Never called in the engine (stores the value without applying it); the Theora player calls the buffer's own `SetPrivateVolume`. |
+| `CBSound::GetVolume` | done | `Audio::private_volume`; 0 without a sound (`World::sfx_volume`, `music_volume` in `crates/luma-adventure/src/sound.rs`). |
+| `CBSound::SetLoopStart` | partial | `Audio::set_loop_start_ms` in `crates/luma-audio/src/audio.rs` loops every looping sound from the loop start. In the original the loop start only acts on streamed buffers (`LoadSegment`): music, and files over 1 MB; a non-streamed looping sound (a file of 1 MB or less played with `PlaySound(file, true, loopStart)`) loops whole, from 0. |
+| `CBSound::SetPan` | done | `Audio::set_pan` in `crates/luma-audio/src/audio.rs`; the scale of the value differs, see `CBSoundMgr::PosToPan`. |
+| `CBSound::LoadRawData` | n/a | Only called by `GetRawData`, itself only used by the .NET wrapper of the tools (`WSound.h`); no script or engine path. |
+| `CBSound::GetRawData` | n/a | Reads a PCM sample at a time for the tools' .NET wrapper (`WSound.h`); not called by the engine and not reachable from scripts. |
+| `CBSound::ApplyFX` | done | `World::set_sfx_effect` in `crates/luma-adventure/src/sound.rs` and `Audio::set_effect` in `crates/luma-audio/src/audio.rs`: applied when the sound is loaded and when the object's effect changes, nothing done when it is the same. What the effect sounds like: `CBSoundBuffer::ApplyFX`. |
 
 ## `wme_base/BSoundAVI.cpp`
 
@@ -45,49 +45,49 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSoundBuffer::CBSoundBuffer` | unreviewed |  |
-| `CBSoundBuffer::~CBSoundBuffer` | unreviewed |  |
-| `CBSoundBuffer::SetStreaming` | unreviewed |  |
-| `CBSoundBuffer::LoadFromFile` | unreviewed |  |
-| `CBSoundBuffer::CreateSoundBuffer` | unreviewed |  |
-| `CBSoundBuffer::Play` | unreviewed |  |
-| `CBSoundBuffer::Resume` | unreviewed |  |
-| `CBSoundBuffer::Stop` | unreviewed |  |
-| `CBSoundBuffer::Pause` | unreviewed |  |
-| `CBSoundBuffer::Restore` | unreviewed |  |
-| `CBSoundBuffer::Update` | unreviewed |  |
-| `CBSoundBuffer::GetLength` | unreviewed |  |
-| `CBSoundBuffer::SetType` | unreviewed |  |
-| `CBSoundBuffer::SetVolume` | unreviewed |  |
-| `CBSoundBuffer::SetPrivateVolume` | unreviewed |  |
-| `CBSoundBuffer::IsPlaying` | unreviewed |  |
-| `CBSoundBuffer::GetPosition` | unreviewed |  |
-| `CBSoundBuffer::SetPosition` | unreviewed |  |
-| `CBSoundBuffer::SetPan` | unreviewed |  |
-| `CBSoundBuffer::GetRawData` | unreviewed |  |
-| `CBSoundBuffer::ApplyFX` | unreviewed |  |
+| `CBSoundBuffer::CBSoundBuffer` | done | `Voice` built by `Audio::add` in `crates/luma-audio/src/audio.rs`: own volume 100 unless given, not looping, loop start 0, type SFX unless given, not freeze-paused. |
+| `CBSoundBuffer::~CBSoundBuffer` | replaced | `Audio::remove` in `crates/luma-audio/src/audio.rs` stops the Kira handle; the rest is ownership. |
+| `CBSoundBuffer::SetStreaming` | replaced | No streaming: every file is decoded whole into memory (`luma_audio::decode`, `docs/audio.md`), whatever its size, the `Streamed` argument, the 1 MB threshold or `ForceNonStreamedSounds`. What depended on a buffer being streamed is noted at `CBSound::SetLoopStart` and `CBSoundWAV::GetPosition`. |
+| `CBSoundBuffer::LoadFromFile` | replaced | `World::load_clip` in `crates/luma-adventure/src/sound.rs` reads the file through the packages and decodes it once (cached by path); a missing file logs `Error opening sound file` and the sound is not created, as here. The switch to streaming above 1 MB has no equivalent (see `SetStreaming`). |
+| `CBSoundBuffer::CreateSoundBuffer` | replaced | Kira `StaticSoundData`; no DirectSound buffer, no stream blocks (16 blocks over `SoundBufferSize` seconds), no retry without effects. |
+| `CBSoundBuffer::Play` | partial | `Audio::play` in `crates/luma-audio/src/audio.rs`: sets the looping flag and starts at the start sample, but does not stop and restart a sound already playing or paused as the original does; see `CBSound::Play`. |
+| `CBSoundBuffer::Resume` | done | `Audio::resume` in `crates/luma-audio/src/audio.rs`: goes on from the current position with the looping flag. |
+| `CBSoundBuffer::Stop` | done | `Audio::stop` in `crates/luma-audio/src/audio.rs`: stops and rewinds. |
+| `CBSoundBuffer::Pause` | done | `Audio::pause` in `crates/luma-audio/src/audio.rs`. |
+| `CBSoundBuffer::Restore` | n/a | Restores a DirectSound buffer lost to another application. |
+| `CBSoundBuffer::Update` | replaced | Refills the stream blocks and stops a streamed sound once its last block was played; Kira plays decoded data and ends the sound itself. A streamed sound in the original is reported playing up to one block (about 190 ms at the default buffer size) after its last sample, which delays `IsSoundPlaying` and sound events by that much; Luma ends at the last sample. |
+| `CBSoundBuffer::GetLength` | done | `Clip::duration_ms` in `crates/luma-audio/src/clip.rs`. |
+| `CBSoundBuffer::SetType` | done | The `SoundType` given to `Audio::add` in `crates/luma-audio/src/audio.rs`. |
+| `CBSoundBuffer::SetVolume` | partial | `Audio::voice_decibels` + `gain` in `crates/luma-audio/src/audio.rs`: same arithmetic (type volume / 100 x own volume, the remaining fraction cubed, x -100 dB), without the original's integer truncation of the product (under 0.5 %, inaudible). Out of range the two differ: an own volume above 100 or below 0 makes the original compute a value DirectSound refuses, so the sound keeps the loudness it had (error logged); Luma clamps to full volume or silence. Kira also floors at -60 dB where DirectSound goes to -100 dB. |
+| `CBSoundBuffer::SetPrivateVolume` | done | `Audio::set_private_volume` in `crates/luma-audio/src/audio.rs`: stores the value and applies it with the type's global volume. |
+| `CBSoundBuffer::IsPlaying` | partial | `Audio::is_playing` in `crates/luma-audio/src/audio.rs` counts a sound held by `pause_all` as playing: that is the WME Lite rule, not this one, which reads the DirectSound status and is false for any paused buffer. Consequences in 1.x that Luma does not reproduce: `IsSoundPlaying()` and `IsMusicPlaying()` are false while the game is frozen; a game saved while frozen (a save menu) records its sounds as not playing and without their position, so after loading, the music held by the freeze starts again from the beginning at the unfreeze. Decide which rule is wanted; Luma keeps the position. |
+| `CBSoundBuffer::GetPosition` | done | Base stub returning 0; the real ones are the WAV and OGG rows. |
+| `CBSoundBuffer::SetPosition` | done | Base stub; the real ones are the WAV and OGG rows. |
+| `CBSoundBuffer::SetPan` | partial | `Audio::set_pan` in `crates/luma-audio/src/audio.rs` takes -1..1 for Kira's equal-power pan (the near channel gains up to +3 dB, the far one fades to silence); DirectSound's pan is an attenuation of the far channel only, in hundredths of a decibel. With the mapping of `CBSoundMgr::PosToPan` the two do not sound alike; see that row. |
+| `CBSoundBuffer::GetRawData` | n/a | Stub that always fails; see `CBSound::GetRawData`. |
+| `CBSoundBuffer::ApplyFX` | partial | `Audio::set_effect` / `SoundEffect::params` in `crates/luma-audio/src/audio.rs` on Kira's delay and reverb, an approximation (`docs/audio.md`, Sound effects): the echo has one delay line (the mean of the left and right delays) instead of one per channel; the reverb's time and high-frequency ratio become the feedback and damping of another algorithm than `DSFXWavesReverb`. Switching the kind of effect restarts the Kira sound at its position, where the original pauses and resumes the buffer. |
 
 ## `wme_base/BSoundMgr.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSoundMgr::CBSoundMgr` | unreviewed |  |
-| `CBSoundMgr::~CBSoundMgr` | unreviewed |  |
-| `CBSoundMgr::Cleanup` | unreviewed |  |
-| `CBSoundMgr::Initialize` | unreviewed |  |
-| `CBSoundMgr::InitLoop` | unreviewed |  |
-| `CBSoundMgr::AddSound` | unreviewed |  |
-| `CBSoundMgr::AddSound #2` | unreviewed |  |
-| `CBSoundMgr::RemoveSound` | unreviewed |  |
-| `CBSoundMgr::SetVolumeWave` | unreviewed |  |
-| `CBSoundMgr::SetVolume` | unreviewed |  |
-| `CBSoundMgr::SetVolumePercent` | unreviewed |  |
-| `CBSoundMgr::GetVolumePercent` | unreviewed |  |
-| `CBSoundMgr::SetMasterVolumePercent` | unreviewed |  |
-| `CBSoundMgr::GetMasterVolumePercent` | unreviewed |  |
-| `CBSoundMgr::PauseAll` | unreviewed |  |
-| `CBSoundMgr::ResumeAll` | unreviewed |  |
-| `CBSoundMgr::PosToPan` | unreviewed |  |
+| `CBSoundMgr::CBSoundMgr` | done | `Audio::from_manager` in `crates/luma-audio/src/audio.rs`: the three type volumes at 100 % (200 on the original's 0-200 scale). |
+| `CBSoundMgr::~CBSoundMgr` | partial | Missing: at exit the original writes the four volumes to the game's settings (`[Audio]` `MasterVolume`, `SFXVolume`, `SpeechVolume`, `MusicVolume`), so the player's volume choices survive from one run to the next; Luma writes nothing (the settings store exists: `crates/luma-adventure/src/registry.rs`). Restoring the system's wave volume is n/a. |
+| `CBSoundMgr::Cleanup` | replaced | `Audio::clear` in `crates/luma-audio/src/audio.rs` and ownership. |
+| `CBSoundMgr::Initialize` | partial | `Audio::new` in `crates/luma-audio/src/audio.rs`. (1) Missing: the original reads the four volumes back from the game's settings (`[Audio]` keys, defaults 200 = 100 % and the device's current volume for the master); Luma always starts at 100. (2) Without a device (or with sound disabled in the settings dialog) the original sets `m_SoundAvailable` false and every `AddSound` returns nothing: `PlaySound` returns false, `IsSoundPlaying` is false, sound events never fire, sentences are timed by their text. Luma instead plays on a silent backend driven by the game clock (`Audio::null`, a decision recorded in `docs/audio.md`), so those calls behave as with a device; `Game.SoundAvailable` reports the device. DirectSound cooperative level and wave device caps are n/a. |
+| `CBSoundMgr::InitLoop` | replaced | Updates the stream buffers every frame; Kira mixes on its own thread, and `Audio::tick` in `crates/luma-audio/src/audio.rs` advances the silent backend. |
+| `CBSoundMgr::AddSound` | done | `World::load_clip` in `crates/luma-adventure/src/sound.rs` (a `.wav` replaced by the `.ogg` of the same name when it exists; load error logged and no sound) + `Audio::add` in `crates/luma-audio/src/audio.rs` (own volume as given, the type's global volume applied when it plays). The original picks the decoder by extension (`.ogg`, else WAV); Luma by content. Returns nothing when there is no device: see `Initialize`. |
+| `CBSoundMgr::AddSound #2` | done | The video's sound track: `Audio::add` with `SoundType::Sfx` in `World::open_video` (`crates/luma-adventure/src/video.rs`). |
+| `CBSoundMgr::RemoveSound` | done | `Audio::remove` in `crates/luma-audio/src/audio.rs`. |
+| `CBSoundMgr::SetVolumeWave` | replaced | `Audio::apply_master` in `crates/luma-audio/src/audio.rs`: the volume of Kira's main track, a linear factor like `waveOutSetVolume`, on Luma's own output only instead of the system's wave device. |
+| `CBSoundMgr::SetVolume` | done | `Audio::set_volume` in `crates/luma-audio/src/audio.rs`: stores the type's volume and reapplies it to every sound of the type. |
+| `CBSoundMgr::SetVolumePercent` | partial | `Audio::set_volume` in `crates/luma-audio/src/audio.rs` clamps to 0..100. The original takes a byte and does not clamp: `SetGlobalSFXVolume(150)` stores 150 (read back as 150 by `GetGlobalSFXVolume`), and since DirectSound refuses the resulting value the sounds keep their loudness; a negative value wraps (-1 is 255). |
+| `CBSoundMgr::GetVolumePercent` | done | `Audio::volume` in `crates/luma-audio/src/audio.rs`. |
+| `CBSoundMgr::SetMasterVolumePercent` | done | `Audio::set_master_volume` in `crates/luma-audio/src/audio.rs`: linear, both channels alike; clamped to 0..100 (the original takes a byte). |
+| `CBSoundMgr::GetMasterVolumePercent` | done | `Audio::master_volume` in `crates/luma-audio/src/audio.rs`. Before any `SetGlobalMasterVolume` the original reports the device's volume or the stored setting, Luma 100; see `Initialize`. |
+| `CBSoundMgr::PauseAll` | done | `Audio::pause_all` in `crates/luma-audio/src/audio.rs`, called by `World::freeze` (`crates/luma-adventure/src/ui.rs`): every playing sound, the music only when asked, marked freeze-paused. The other caller, `CBGame::OnActivate` (the window losing focus pauses every sound), is not in this table; Luma's player has no such call. |
+| `CBSoundMgr::ResumeAll` | partial | `Audio::resume_all` in `crates/luma-audio/src/audio.rs`. One case differs: in the original a sound stopped while it was freeze-paused (`StopSound()` from a script still running during the freeze) keeps its flag and is started again from the beginning by `ResumeAll`; Luma's `stop` clears the flag and the sound stays stopped. Probably an oversight of the original; listed so the choice is explicit. |
+| `CBSoundMgr::PosToPan` | partial | `Sounds::pos_to_pan` in `crates/luma-adventure/src/sound.rs` does not follow this function. Original: a margin of five screen widths on each side, pan = -10000 + (X + 5W) / 11W x 20000 hundredths of a decibel: centre 0, the screen edges about -909 / +909 (the far channel 9 dB down, the near one untouched), and the far channel only reaches silence five screens away. Luma: -1 + (X + W/2) / 2W x 2 clamped, fed to Kira's equal-power pan: the screen edges give -0.5 / +0.5 (far channel -3 dB, near channel +1.8 dB) and the sound is hard left or right half a screen outside the view. So objects pan less on screen and far more just off screen than in the original. The `Y` argument is unused in both. |
 
 ## `wme_base/BSoundOGG.cpp`
 
