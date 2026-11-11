@@ -415,10 +415,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CSXMath::CSXMath` | done | `luma-adventure/src/world.rs`: one `Kind::Math` native, published as the global `Math` |
 | `CSXMath::~CSXMath` | replaced | Rust ownership |
-| `CSXMath::ScCallMethod` | partial | `luma-adventure/src/natives.rs` `math_call` has every method, but `Sin`, `Cos`, `Tan`, `Sinh`, `Cosh` and `Tanh` take **degrees** in the original (it applies `DegreeToRadian` to the argument first) and radians in Luma: `Math.Sin(90)` is 1 in the original, 0.894 in Luma. `Acos`, `Asin`, `Atan`, `Atan2` return radians in both. Also a string argument is read with `atof` in the original (`"12abc"` is 12) and with a whole-string parse in Luma (0); `math_call` should use `Value::get_float` |
-| `CSXMath::ScGetProperty` | partial | `natives.rs` `native_get` for `Kind::Math`: `Type` is `math`. `PI` is the single-precision constant in the original (`3.141592653589793f`, that is 3.1415927410125732 once widened) and the double-precision one in Luma; they differ from the 8th digit |
-| `CSXMath::DegreeToRadian` | partial | `natives.rs` `math_call` `DegToRad` uses `f64::to_radians`; the original multiplies by a single-precision `PI / 180.0f`, so results differ from the 8th significant digit. Not applied to the arguments of the trigonometric methods: see `ScCallMethod` |
-| `CSXMath::RadianToDegree` | partial | `natives.rs` `math_call` `RadToDeg` uses `f64::to_degrees`; the original multiplies by a single-precision `180.0f / PI`, so results differ from the 8th significant digit |
+| `CSXMath::ScCallMethod` | done | `luma-adventure/src/natives.rs` `math_call`: every method, the arguments read with `Value::get_float` (a string like `atof`), `Sin`, `Cos`, `Tan`, `Sinh`, `Cosh` and `Tanh` on degrees (`degree_to_radian` first), the inverse functions in radians, every result a float |
+| `CSXMath::ScGetProperty` | done | `natives.rs` `native_get` for `Kind::Math`: `Type` is `math`, `PI` the single-precision constant widened (`MATH_PI`, 3.1415927410125732) |
+| `CSXMath::DegreeToRadian` | done | `natives.rs` `degree_to_radian`: the value times the single-precision `PI / 180.0f`; used by `DegToRad` and the trigonometric methods |
+| `CSXMath::RadianToDegree` | done | `natives.rs` `radian_to_degree`: the value times the single-precision `180.0f / PI` |
 | `CSXMath::Persist` | replaced | nothing to save; the object is one of the natives saved with the world |
 
 ## `wme_base/SXMemBuffer.cpp`

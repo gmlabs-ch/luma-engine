@@ -85,7 +85,7 @@ impl World {
             },
             Kind::Math => match name {
                 "Type" => Some(Value::from("math")),
-                "PI" => Some(Value::Float(std::f64::consts::PI)),
+                "PI" => Some(Value::Float(f64::from(MATH_PI))),
                 _ => None,
             },
             Kind::Fader => match name {
@@ -233,7 +233,7 @@ impl World {
                 }
                 _ => None,
             },
-            Kind::Math => math_call(name, args).map(Return::value),
+            Kind::Math => math_call(name, args, self).map(Return::value),
             Kind::ResponseBox => None,
             Kind::Fader | Kind::SceneFader => None,
             Kind::Scene => self.scene_call(name, args, ctx),
@@ -1896,18 +1896,29 @@ impl World {
     }
 }
 
-/// The `Math` object's methods (`SXMath`): every one takes floats and
-/// returns a float, as the original engine does (`Floor` included).
-fn math_call(name: &str, args: &[Value]) -> Option<Value> {
-    let arg = |i: usize| -> f64 {
-        match args.get(i) {
-            Some(Value::Int(n)) => f64::from(*n),
-            Some(Value::Float(f)) => *f,
-            Some(Value::Bool(b)) => f64::from(u8::from(*b)),
-            Some(Value::String(s)) => s.trim().parse().unwrap_or(0.0),
-            _ => 0.0,
-        }
-    };
+/// `PI` of `SXMath.cpp`: a single-precision constant (`3.141592653589793f`),
+/// so what scripts read is 3.1415927410125732.
+const MATH_PI: f32 = std::f32::consts::PI;
+
+/// `CSXMath::DegreeToRadian`: the factor is computed in single precision
+/// (`PI / 180.0f`), then widened.
+fn degree_to_radian(value: f64) -> f64 {
+    value * f64::from(MATH_PI / 180.0f32)
+}
+
+/// `CSXMath::RadianToDegree`: the factor is computed in single precision
+/// (`180.0f / PI`), then widened.
+fn radian_to_degree(value: f64) -> f64 {
+    value * f64::from(180.0f32 / MATH_PI)
+}
+
+/// The `Math` object's methods (`CSXMath::ScCallMethod`): every one takes
+/// floats (`GetFloat`: a string is read like `atof`) and returns a float,
+/// `Floor` included. `Sin`, `Cos`, `Tan`, `Sinh`, `Cosh` and `Tanh` take
+/// degrees: the original converts the argument with `DegreeToRadian`
+/// first. The inverse functions return radians.
+fn math_call(name: &str, args: &[Value], natives: &dyn luma_script::Natives) -> Option<Value> {
+    let arg = |i: usize| -> f64 { args.get(i).map_or(0.0, |v| v.get_float(natives)) };
     let x = arg(0);
     let result = match name {
         "Abs" => x.abs(),
@@ -1916,20 +1927,20 @@ fn math_call(name: &str, args: &[Value]) -> Option<Value> {
         "Atan" => x.atan(),
         "Atan2" => x.atan2(arg(1)),
         "Ceil" => x.ceil(),
-        "Cos" => x.cos(),
-        "Cosh" => x.cosh(),
+        "Cos" => degree_to_radian(x).cos(),
+        "Cosh" => degree_to_radian(x).cosh(),
         "Exp" => x.exp(),
         "Floor" => x.floor(),
         "Log" => x.ln(),
         "Log10" => x.log10(),
         "Pow" => x.powf(arg(1)),
-        "Sin" => x.sin(),
-        "Sinh" => x.sinh(),
-        "Tan" => x.tan(),
-        "Tanh" => x.tanh(),
+        "Sin" => degree_to_radian(x).sin(),
+        "Sinh" => degree_to_radian(x).sinh(),
+        "Tan" => degree_to_radian(x).tan(),
+        "Tanh" => degree_to_radian(x).tanh(),
         "Sqrt" => x.sqrt(),
-        "DegToRad" => x.to_radians(),
-        "RadToDeg" => x.to_degrees(),
+        "DegToRad" => degree_to_radian(x),
+        "RadToDeg" => radian_to_degree(x),
         _ => return None,
     };
     Some(Value::Float(result))

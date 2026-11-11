@@ -753,9 +753,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Abs`, `Acos`, `Asin`, `Atan`, `Atan2`, `Ceil`, `Cos`, `Cosh`, `Exp`, `Floor`, `Log`, `Log10`, `Pow`, `Sin`, `Sinh`, `Tan`, `Tanh`, `Sqrt`, `DegToRad`, `RadToDeg` | method | **done** | The C math function of that name on floats; every result is a float (Floor and Ceil included). |
+| `Abs`, `Acos`, `Asin`, `Atan`, `Atan2`, `Ceil`, `Cos`, `Cosh`, `Exp`, `Floor`, `Log`, `Log10`, `Pow`, `Sin`, `Sinh`, `Tan`, `Tanh`, `Sqrt`, `DegToRad`, `RadToDeg` | method | **done** | The C math function of that name on floats; every result is a float (Floor and Ceil included). `Sin`, `Cos`, `Tan`, `Sinh`, `Cosh` and `Tanh` take degrees, as in WME; the inverse functions return radians. A string argument is read like `atof`. |
 | `Type` | get | **done** | `math`. |
-| `PI` | get | **done** | The constant pi. |
+| `PI` | get | **done** | The constant pi in single precision, as in WME (3.1415927410125732). |
 
 ### CSXString (`new String`)
 
