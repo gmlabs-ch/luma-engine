@@ -334,233 +334,233 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBImage::CBImage` | unreviewed |  |
-| `CBImage::~CBImage` | unreviewed |  |
-| `CBImage::FreeAll` | unreviewed |  |
-| `CBImage::LoadFile` | unreviewed |  |
-| `CBImage::Convert` | unreviewed |  |
-| `CBImage::CreateSurface` | unreviewed |  |
-| `CBImage::CreatePalette` | unreviewed |  |
-| `CBImage::LoadBMPFile` | unreviewed |  |
-| `CBImage::LoadTGAFile` | unreviewed |  |
-| `CBImage::SaveBMPFile` | unreviewed |  |
-| `CBImage::Resize` | unreviewed |  |
-| `CBImage::CreateBMPBuffer` | unreviewed |  |
-| `CBImage::GetImageInfoJPG` | unreviewed |  |
-| `CBImage::LoadJPGFile` | unreviewed |  |
-| `CBImage::Grayscale` | unreviewed |  |
-| `CBImage::CreateSurface #2` | unreviewed |  |
-| `CBImage::CreateFromRaw` | unreviewed |  |
-| `CBImage::GetAlphaAt` | unreviewed |  |
-| `CBImage::CopyFrom` | unreviewed |  |
+| `CBImage::CBImage` | replaced | `luma-formats/src/image.rs` `Image`: always 8-bit RGBA, no paletted state. |
+| `CBImage::~CBImage` | replaced | Rust ownership. |
+| `CBImage::FreeAll` | replaced | Rust ownership. |
+| `CBImage::LoadFile` | partial | `image.rs` `decode`. In the Direct3D renderer this loader is used only for images larger than the device's texture limit (then cut in tiles, nothing to port), for `savegame:` thumbnails and for the Theora alpha image. Differences: the type is chosen by extension in the original (`.bmp`, `.tga`, `.png`, `.jpg`, anything else fails), by content in Luma; `savegame:<slot>` names (read as BMP, turned grey when the name ends in `,g`) are not supported. |
+| `CBImage::Convert` | replaced | Palette to true colour; the `image` crate always expands to RGB(A). The reverse branch is a dead stub in the original. |
+| `CBImage::CreateSurface` | n/a | Fills a DirectDraw surface in the display's pixel format. |
+| `CBImage::CreatePalette` | n/a | DirectDraw palette for 8-bit display modes. |
+| `CBImage::LoadBMPFile` | replaced | `image` crate BMP decoder through `decode`; the alpha byte of a 32-bit BMP is ignored in both. The crate also reads RLE and bit-field files the original rejects. |
+| `CBImage::LoadTGAFile` | replaced | `image` crate TGA decoder through `decode`; 32-bit files keep their alpha, bottom-up files are flipped. |
+| `CBImage::SaveBMPFile` | done | `image.rs` `Image::to_bmp` and `luma-adventure/src/capture.rs` `write_image`: 24-bit uncompressed BMP. |
+| `CBImage::Resize` | replaced | `image.rs` `Image::resized` (the `image` crate's triangle filter for the original's two-pass bilinear scale); values can differ by rounding. |
+| `CBImage::CreateBMPBuffer` | replaced | The saved-game thumbnail is stored as PNG in Luma's own save format (`capture.rs` `deliver_frame`, `save.rs`) instead of a BMP buffer. |
+| `CBImage::GetImageInfoJPG` | replaced | The size is known once `decode` has run; no header-only probe. |
+| `CBImage::LoadJPGFile` | replaced | `image` crate JPEG decoder through `decode`, RGB, opaque. |
+| `CBImage::Grayscale` | todo | Turns the image grey (`0.30 R + 0.59 G + 0.11 B`); applied to a `savegame:<slot>,g` thumbnail (load menus showing other slots in grey). Not in Luma, with the `savegame:` names. |
+| `CBImage::CreateSurface #2` | replaced | Builds a surface from an in-memory image; its only caller is the TrueType text cache (`BFontTT.cpp`), which Luma replaces with its own glyph rasteriser and textures (`luma-adventure/src/font_face.rs`). |
+| `CBImage::CreateFromRaw` | replaced | Turns a GDI text bitmap into white pixels whose alpha is the rendered intensity; replaced by Luma's glyph rasteriser (`font_face.rs`); compare the coverage rule in the UI table. |
+| `CBImage::GetAlphaAt` | partial | Alpha of a pixel, 255 outside the image; used by `CVidTheoraPlayer::GetAlphaAt` for a video's alpha mask image. To be confirmed with `SetAlphaImage` in the sound-video table; `luma_formats::Image::pixel` gives the value but returns `None` outside. |
+| `CBImage::CopyFrom` | replaced | Copy or bilinear resize of the screenshot into the thumbnail: `capture.rs` `deliver_frame` with `Image::resized`. The rich thumbnail (256 wide) belongs to the saved-game browser of the tools and has no counterpart. |
 
 ## `wme_base/BRenderD3D.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBRenderD3D::CBRenderD3D` | unreviewed |  |
-| `CBRenderD3D::~CBRenderD3D` | unreviewed |  |
-| `CBRenderD3D::InitRenderer` | unreviewed |  |
-| `CBRenderD3D::InitLoop` | unreviewed |  |
-| `CBRenderD3D::Flip` | unreviewed |  |
-| `CBRenderD3D::Fill` | unreviewed |  |
-| `CBRenderD3D::ResetDevice` | unreviewed |  |
-| `CBRenderD3D::SwitchFullscreen` | unreviewed |  |
-| `CBRenderD3D::Setup2D` | unreviewed |  |
-| `CBRenderD3D::Setup3D` | unreviewed |  |
-| `CBRenderD3D::SetAmbientLightRenderState` | unreviewed |  |
-| `CBRenderD3D::Setup3DCustom` | unreviewed |  |
-| `CBRenderD3D::SetupLines` | unreviewed |  |
-| `CBRenderD3D::DrawSprite` | unreviewed |  |
-| `CBRenderD3D::DrawSpriteEx` | unreviewed |  |
-| `CBRenderD3D::CommitSpriteBatch` | unreviewed |  |
-| `CBRenderD3D::StartSpriteBatch` | unreviewed |  |
-| `CBRenderD3D::EndSpriteBatch` | unreviewed |  |
-| `CBRenderD3D::BuildMatrix` | unreviewed |  |
-| `CBRenderD3D::TransformVertices` | unreviewed |  |
-| `CBRenderD3D::SetProjection` | unreviewed |  |
-| `CBRenderD3D::GetProjectionParams` | unreviewed |  |
-| `CBRenderD3D::DrawLine` | unreviewed |  |
-| `CBRenderD3D::WindowedBlt` | unreviewed |  |
-| `CBRenderD3D::Fade` | unreviewed |  |
-| `CBRenderD3D::FadeToColor` | unreviewed |  |
-| `CBRenderD3D::RestoreDeviceObjects` | unreviewed |  |
-| `CBRenderD3D::CreateShaderQuad` | unreviewed |  |
-| `CBRenderD3D::DrawShaderQuad` | unreviewed |  |
-| `CBRenderD3D::InvalidateDeviceObjects` | unreviewed |  |
-| `CBRenderD3D::SetViewport` | unreviewed |  |
-| `CBRenderD3D::TakeScreenshot` | unreviewed |  |
-| `CBRenderD3D::UsingStencilBuffer` | unreviewed |  |
-| `CBRenderD3D::EnableShadows` | unreviewed |  |
-| `CBRenderD3D::DisableShadows` | unreviewed |  |
-| `CBRenderD3D::DisplayShadow` | unreviewed |  |
-| `CBRenderD3D::DumpData` | unreviewed |  |
-| `CBRenderD3D::SetSpriteBlendMode` | unreviewed |  |
-| `CBRenderD3D::DisplayDebugInfo` | unreviewed |  |
-| `CBRenderD3D::StencilSupported` | unreviewed |  |
-| `CBRenderD3D::GetName` | unreviewed |  |
-| `CBRenderD3D::GetMaxActiveLights` | unreviewed |  |
-| `CBRenderD3D::InvalidateTexture` | unreviewed |  |
-| `CBRenderD3D::SetAmbientLightColor` | unreviewed |  |
-| `CBRenderD3D::SetDefaultAmbientLightColor` | unreviewed |  |
+| `CBRenderD3D::CBRenderD3D` | partial | Defaults that matter: FOV `pi/4` until a camera is set, near 90, far 10000 (`luma-3d/src/camera.rs` `DEFAULT_NEAR_PLANE`, `DEFAULT_FAR_PLANE`), ambient colour black without override (`MeshDraw::new`), blend mode normal. The `pi/4` default FOV has no counterpart (Luma always has a camera when it draws 3D, as the original does in practice). Buffer sizes and device handles are replaced by wgpu buffers. |
+| `CBRenderD3D::~CBRenderD3D` | replaced | Rust ownership of the wgpu device, buffers and pipelines. |
+| `CBRenderD3D::InitRenderer` | partial | `luma-render/src/gpu.rs` `Gpu::with_surface`, `window.rs` `run`. Missing: the windowed or full-screen choice (`m_Windowed`; Luma only opens a window), the game drawn at its own resolution centred in a larger display mode (`m_DrawOffsetX = (RealWidth - Width) / 2`, no stretch) where Luma always scales to the largest letterbox rectangle, the multisampling choice (the original antialiases 3D with the selected `MultiSampleType`, Luma renders 3D without MSAA), `MaxShadowType >= SHADOW_STENCIL` deciding whether a stencil buffer exists (Luma always has one), and `ClipCursor`. Texture-size limits and forced subdivision have no meaning (see `CBImage` tiles). |
+| `CBRenderD3D::InitLoop` | replaced | `Renderer::render` starts one render pass per frame; the 2D state is the quad pipeline, set per draw. |
+| `CBRenderD3D::Flip` | replaced | `window.rs` presents the surface texture; device loss is handled by reconfiguring the surface. |
+| `CBRenderD3D::Fill` | done | `Renderer::render_direct`: the pass clears colour, depth and stencil over the whole target; the game always clears to black (`WindowConfig::clear`). The `rect` argument is ignored by the original too. |
+| `CBRenderD3D::ResetDevice` | replaced | wgpu surface reconfiguration on resize or loss (`window.rs`); textures survive, so nothing is reloaded. |
+| `CBRenderD3D::SwitchFullscreen` | n/a | Returns `E_FAIL` in the original (no longer supported). |
+| `CBRenderD3D::Setup2D` | partial | `luma-render/src/renderer.rs` quad pipeline and `quad.wgsl`: bilinear min/mag, no mipmaps, no depth test, texture times vertex colour for colour and alpha, alpha blending, no lighting or fog. Differences: (1) the original leaves the texture address mode at the Direct3D default (wrap), Luma clamps to the edge, so a scaled sprite's border does not bleed the opposite edge (deliberate); (2) the original culls counter-clockwise quads, so a sprite drawn with a negative scale on one axis disappears; Luma has no culling for quads and draws it flipped (check the callers that can pass a negative zoom); (3) the alpha test `>= 0` passes everything, same as none. |
+| `CBRenderD3D::Setup3D` | partial | `mesh.wgsl` and `Renderer::ensure_mesh_pipeline`: normalised normals, texture times lit colour, alpha from the texture only, alpha test at 8/255, depth test and write, trilinear filtering, ambient colour, lighting, linear vertex fog, near/far defaults 90 and 10000 with negative camera values meaning default (`luma-3d/src/camera.rs` `Projection::new`). Differences: (1) without a texture Direct3D takes the `TEXTURE` argument as opaque white, so alpha is 1 whatever the material; Luma uses the material's diffuse alpha (`mesh.wgsl` `select(in.color.a, texel.a, textured)`), unless `CXMesh::Render` changes the stage (see that row); (2) multisample antialiasing of the 3D pass is not done; (3) dithering has no counterpart (32-bit target); (4) `SPECULARENABLE` is on in the original: lights have no specular colour so it adds nothing, as `docs/rendering.md` says. |
+| `CBRenderD3D::SetAmbientLightRenderState` | done | `luma-adventure/src/draw3d.rs` `model_items`: the draw's ambient is the actor's override when it has one, else the scene's `ambient_light_color`, passed in `MeshDraw::ambient`. |
+| `CBRenderD3D::Setup3DCustom` | n/a | Only called by `CAdScene::Display3DContent`, itself reachable only from the commented-out mirror code in `CAdScene::TraverseNodes`. |
+| `CBRenderD3D::SetupLines` | todo | Wireframe, untextured, unlit state for `DrawLine`; Luma has no line pipeline (`docs/rendering.md`, Not yet). Users: accessibility hint, loading indicator bar, geometry overlay. |
+| `CBRenderD3D::DrawSprite` | done | `luma-adventure/src/scene_view.rs` `place_transformed` then `DrawList::push_with`: zoom in percent per axis, no rotation. See `DrawSpriteEx` for the size truncation. |
+| `CBRenderD3D::DrawSpriteEx` | partial | `scene_view.rs` `place_transformed`, `renderer.rs` `quad_vertices`, `rotated_corners`: source rectangle over the texture size for the coordinates, mirror by swapping them, colour as tint, rotation around the centre in the same sense, letterbox offset. Differences: (1) the original's quad is `(right - left) * ScaleX` wide as a float, Luma truncates the scaled width and height to whole pixels (`(w * zx).trunc()`), so a zoomed sprite can be up to one pixel smaller; (2) `AlphaDisable` (opaque draw without blending, used by `CBSurfaceD3D::Display` and `DisplayZoom` for video frames) has no flag, harmless while such textures are fully opaque; (3) `m_ForceAlphaColor` replaces the colour of every sprite of a window with `ALPHA_COLOR`: `ui.rs` `window.alpha_color.unwrap_or(tint)` does it for the window's own drawing, to be verified per control in the UI table (TrueType text keeps its colour and takes only the alpha, `BFontTT.cpp`); (4) vertices are not moved by `-0.5` before the rotation (sub-pixel). |
+| `CBRenderD3D::CommitSpriteBatch` | replaced | `Renderer::render_direct` draws consecutive quads of one texture and blend mode in one call. |
+| `CBRenderD3D::StartSpriteBatch` | replaced | Batching is automatic in `Renderer::render_direct`; no observable effect. |
+| `CBRenderD3D::EndSpriteBatch` | replaced | See `StartSpriteBatch`. |
+| `CBRenderD3D::BuildMatrix` | done | `renderer.rs` `rotated_corners`: translate to the centre, rotate about Z, translate back; the scaling passed is always 1. |
+| `CBRenderD3D::TransformVertices` | done | `renderer.rs` `rotated_corners` (`x' = px + dx cos - dy sin`, `y' = py + dx sin + dy cos`). |
+| `CBRenderD3D::SetProjection` | done | `luma-3d/src/camera.rs` `Projection::new`: same aspect, `_11`/`_22` scale, integer margins and `_31`/`_32` terms; the offset is the scroll less the viewport origin (the letterbox offset cancels out in Luma, which projects in logical pixels). |
+| `CBRenderD3D::GetProjectionParams` | done | `luma-3d/src/camera.rs` `Projection::new` (`mod_width`, `mod_height`, a layer shorter than the screen raised to the screen height) and `ViewSetup::for_scene`. `Game->m_EditorResolutionWidth/Height` are never set at run time. |
+| `CBRenderD3D::DrawLine` | todo | Draws a one-pixel coloured line (after `SetupLines`). Luma has no line primitive: the loading indicator bar (`CBGame::DisplayIndicator`) and the geometry overlay are not drawn, the accessibility hint uses filled bars (see `CBRenderer::DrawRect`). |
+| `CBRenderD3D::WindowedBlt` | n/a | Calls `Flip` from the Win32 paint path while paused. |
+| `CBRenderD3D::Fade` | done | A black rectangle of alpha `255 - Alpha` over the current viewport: Luma draws the scene-change fade as the screen fader's rectangle (`luma-adventure/src/input.rs` `draw_fade`, `world.rs` scheduled scene with `SCENE_FADE_MS`). The transition logic itself is `CBTransitionMgr` (game table). |
+| `CBRenderD3D::FadeToColor` | partial | `input.rs` `draw_fade` (whole screen) and `draw_scene_fade` (scene viewport), `ui.rs` window `fade_color`: an alpha-blended rectangle of the colour. Difference: the original fills the current viewport rectangle whichever caller it is; a window's `FADE_COLOR` drawn while a viewport is pushed is limited to it. Luma chooses the rectangle per caller; verify the window case in the UI table. |
+| `CBRenderD3D::RestoreDeviceObjects` | replaced | wgpu buffers are created once in `Renderer::new` and grown on demand; no device-loss reload. |
+| `CBRenderD3D::CreateShaderQuad` | n/a | Full-screen quad for the post-processing effect scripts (`C3DEffectScript`), which no engine code path runs (see `C3DEffectScript` rows). |
+| `CBRenderD3D::DrawShaderQuad` | n/a | See `CreateShaderQuad`. |
+| `CBRenderD3D::InvalidateDeviceObjects` | replaced | No device-loss handling needed with wgpu. |
+| `CBRenderD3D::SetViewport` | todo | Sets the device viewport, which clips all drawing to a rectangle: the scene viewport (`CAdScene::TraverseNodes` through `PushViewport`), a window with `CLIP_CONTENTS`, entity containers. `luma-render` has no scissor or clip rectangle (`DrawList` has none): a scene larger than its viewport is drawn over the rest of the screen (`docs/game-loop.md` says so) and `clip_contents` in `luma-adventure/src/ui.rs` is stored but never applied. Note the 3D projection also depends on the viewport (already handled in `Projection::new`). |
+| `CBRenderD3D::TakeScreenshot` | partial | `luma-adventure/src/capture.rs` and `luma-player/src/main.rs` (`wants_frame`, `deliver_frame`, `Offscreen::read`). Differences: the original reads the front buffer at once, so the call returns the frame on screen and the script sees the result immediately; Luma captures the next frame rendered, after the call returned. The original's image is `m_RealWidth x m_RealHeight` clipped to the window (the letterbox bars included in full screen); Luma's is the logical frame. |
+| `CBRenderD3D::UsingStencilBuffer` | done | Always true in Luma: every target has a `Depth24PlusStencil8` buffer (`Renderer::ensure_depth`). |
+| `CBRenderD3D::EnableShadows` | replaced | Allocates the shadow generator; Luma builds shadow items per frame in `luma-adventure/src/draw3d.rs`, nothing to enable. |
+| `CBRenderD3D::DisableShadows` | replaced | See `EnableShadows`. |
+| `CBRenderD3D::DisplayShadow` | done | `luma-adventure/src/draw3d.rs`: the simple and flat shadows are emitted only when the effective shadow type is above none; see the `C3DShadowGen` rows for the drawing itself. |
+| `CBRenderD3D::DumpData` | n/a | Debug dump of texture sizes to a CSV file (`Game.DumpTextureStats`), tied to Direct3D texture padding; a no-op native in Luma. |
+| `CBRenderD3D::SetSpriteBlendMode` | done | `luma-render/src/renderer.rs` `blend_state`: normal `src_alpha, 1 - src_alpha`, additive `src_alpha, one`, subtractive `zero, 1 - src_color`; the alpha channel of the target is kept covered (not visible on screen). |
+| `CBRenderD3D::DisplayDebugInfo` | todo | Draws `PolyCount: N` at the right, 20 pixels down, with the system font when the game runs in debug mode. Luma draws no debug overlay (see `CBGame::DisplayDebugInfo` in the game table). |
+| `CBRenderD3D::StencilSupported` | done | `Game.IsShadowTypeSupported(3)` reads true: Luma always has a stencil buffer (`luma-adventure/src/natives.rs`). |
+| `CBRenderD3D::GetName` | n/a | Renderer name for the debug overlay (`Direct3D8`, `Direct3D9`, with `HW T&L`); comes with `DisplayDebugInfo` if that is ported. |
+| `CBRenderD3D::GetMaxActiveLights` | done | `luma-adventure/src/scene3d.rs` `MAX_LIGHTS` = 8 and `Game.MaxActiveLights` = 8 (`natives.rs`), the figure of the fixed-function devices; the original asks the device and reads 100 when the device says unlimited. |
+| `CBRenderD3D::InvalidateTexture` | replaced | `Renderer::forget` drops the bind group of a texture; no last-texture cache to invalidate. |
+| `CBRenderD3D::SetAmbientLightColor` | done | `luma-adventure/src/draw3d.rs` `model_items`: an actor's `AmbientLightColor` replaces the scene's for its own meshes. |
+| `CBRenderD3D::SetDefaultAmbientLightColor` | done | The override is per draw in Luma (`MeshDraw::ambient`), so it ends with the actor's meshes as in `CAdActor3DX::Display`. |
 
 ## `wme_base/BRenderDD.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBRenderDD::CBRenderDD` | unreviewed |  |
-| `CBRenderDD::~CBRenderDD` | unreviewed |  |
-| `CBRenderDD::InitSurfaces` | unreviewed |  |
-| `CBRenderDD::ReleaseAll` | unreviewed |  |
-| `CBRenderDD::GetFreeVideoMem` | unreviewed |  |
-| `CBRenderDD::GetUsedVideoMem` | unreviewed |  |
-| `CBRenderDD::SetPaletteFile` | unreviewed |  |
-| `CBRenderDD::SwitchFullscreen` | unreviewed |  |
-| `CBRenderDD::Flip` | unreviewed |  |
-| `CBRenderDD::InitRenderer` | unreviewed |  |
-| `CBRenderDD::OnWindowChange` | unreviewed |  |
-| `CBRenderDD::Fill` | unreviewed |  |
-| `CBRenderDD::WindowedBlt` | unreviewed |  |
-| `CBRenderDD::Setup2D` | unreviewed |  |
-| `CBRenderDD::Setup3D` | unreviewed |  |
-| `CBRenderDD::SetupLines` | unreviewed |  |
-| `CBRenderDD::DrawLine` | unreviewed |  |
-| `CBRenderDD::Fade` | unreviewed |  |
-| `CBRenderDD::FadeToColor` | unreviewed |  |
-| `CBRenderDD::SetViewport` | unreviewed |  |
-| `CBRenderDD::TakeScreenshot` | unreviewed |  |
-| `CBRenderDD::DisplayDebugInfo` | unreviewed |  |
+| `CBRenderDD::CBRenderDD` | n/a | DirectDraw software renderer state. Luma has one renderer, which behaves as the Direct3D one (`CBRenderD3D` rows); the DirectDraw-only behaviours (no alpha, no rotation, no blend modes, `2D_ONLY` sub-frames) are not reproduced on purpose (`scene_view.rs` `is_drawn`). |
+| `CBRenderDD::~CBRenderDD` | n/a | DirectDraw device management. |
+| `CBRenderDD::InitSurfaces` | n/a | DirectDraw front and back buffers, clipper and 8-bit palette. |
+| `CBRenderDD::ReleaseAll` | n/a | DirectDraw device management. |
+| `CBRenderDD::GetFreeVideoMem` | n/a | DirectDraw video memory query for the debug overlay. |
+| `CBRenderDD::GetUsedVideoMem` | n/a | DirectDraw video memory query for the debug overlay. |
+| `CBRenderDD::SetPaletteFile` | n/a | Palette for 8-bit display modes, DirectDraw only. |
+| `CBRenderDD::SwitchFullscreen` | n/a | DirectDraw mode switch; no full-screen mode in Luma (see `CBRenderD3D::InitRenderer`). |
+| `CBRenderDD::Flip` | replaced | `window.rs` presents the wgpu surface. The 100 fps cap of the windowed DirectDraw path has no counterpart (frame pacing is the swap chain's). |
+| `CBRenderDD::InitRenderer` | n/a | DirectDraw device creation; see `CBRenderD3D::InitRenderer`. |
+| `CBRenderDD::OnWindowChange` | replaced | Window move and resize are handled by winit and the surface reconfiguration in `window.rs`. |
+| `CBRenderDD::Fill` | replaced | See `CBRenderD3D::Fill`. |
+| `CBRenderDD::WindowedBlt` | n/a | Win32 paint path while paused. |
+| `CBRenderDD::Setup2D` | n/a | Empty in the DirectDraw renderer. |
+| `CBRenderDD::Setup3D` | n/a | Empty in the DirectDraw renderer. |
+| `CBRenderDD::SetupLines` | n/a | Empty in the DirectDraw renderer. |
+| `CBRenderDD::DrawLine` | todo | GDI line on the back buffer; same gap as `CBRenderD3D::DrawLine`. |
+| `CBRenderDD::Fade` | n/a | Returns at once (`// sloooow`): the DirectDraw renderer does not fade. |
+| `CBRenderDD::FadeToColor` | replaced | Fills the rectangle only when the colour is opaque; Luma always blends, as Direct3D does (`CBRenderD3D::FadeToColor`). |
+| `CBRenderDD::SetViewport` | todo | Stores the rectangle that `CBSurfaceDD` blits are clipped to; same gap as `CBRenderD3D::SetViewport`. |
+| `CBRenderDD::TakeScreenshot` | replaced | See `CBRenderD3D::TakeScreenshot`. |
+| `CBRenderDD::DisplayDebugInfo` | n/a | Video memory figures of DirectDraw in the debug overlay. |
 
 ## `wme_base/BRenderer.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBRenderer::CBRenderer` | unreviewed |  |
-| `CBRenderer::~CBRenderer` | unreviewed |  |
-| `CBRenderer::InitLoop` | unreviewed |  |
-| `CBRenderer::GetObjectAt` | unreviewed |  |
-| `CBRenderer::DeleteRectList` | unreviewed |  |
-| `CBRenderer::SwitchFullscreen` | unreviewed |  |
-| `CBRenderer::Flip` | unreviewed |  |
-| `CBRenderer::InitRenderer` | unreviewed |  |
-| `CBRenderer::OnWindowChange` | unreviewed |  |
-| `CBRenderer::Fill` | unreviewed |  |
-| `CBRenderer::WindowedBlt` | unreviewed |  |
-| `CBRenderer::Setup2D` | unreviewed |  |
-| `CBRenderer::SetupLines` | unreviewed |  |
-| `CBRenderer::Setup3D` | unreviewed |  |
-| `CBRenderer::Setup3DCustom` | unreviewed |  |
-| `CBRenderer::DrawLine` | unreviewed |  |
-| `CBRenderer::DrawRect` | unreviewed |  |
-| `CBRenderer::Fade` | unreviewed |  |
-| `CBRenderer::FadeToColor` | unreviewed |  |
-| `CBRenderer::SetViewport` | unreviewed |  |
-| `CBRenderer::SetScreenViewport` | unreviewed |  |
-| `CBRenderer::SetViewport #2` | unreviewed |  |
-| `CBRenderer::TakeScreenshot` | unreviewed |  |
-| `CBRenderer::ClipCursor` | unreviewed |  |
-| `CBRenderer::UnclipCursor` | unreviewed |  |
-| `CBRenderer::PointInViewport` | unreviewed |  |
+| `CBRenderer::CBRenderer` | partial | `luma-render/src/renderer.rs` `Renderer::new` and `window.rs` `WindowConfig`. `m_DrawOffsetX/Y` (letterbox) is `renderer::letterbox`; `m_Windowed` has no counterpart (Luma has no full-screen mode); `m_ForceAlphaColor` is the per-window tint in `luma-adventure/src/ui.rs` (see `CBRenderD3D::DrawSpriteEx`). |
+| `CBRenderer::~CBRenderer` | replaced | Rust ownership; the hit list is a `Vec` of `World`. No cursor clip to release (see `CBRenderer::ClipCursor`). |
+| `CBRenderer::InitLoop` | done | `luma-adventure/src/input.rs`: `World::hits` is rebuilt from scratch every frame before `object_at`, as `DeleteRectList` empties `m_RectList`. |
+| `CBRenderer::GetObjectAt` | partial | `luma-adventure/src/input.rs` `World::object_at`, `PixelArea::contains` (last drawn first, `PtInRect` bounds, frame formula with the source corner added before the zoom division, mirror as `Width - XX`). Differences: (1) `Mask::of` (`scene_view.rs`) calls a pixel opaque when alpha `> 128`, the original when alpha `>= 128` (`IsTransparentAt`: transparent when `< 128`); (2) a rotated sprite is hit where it is drawn, the original tests the unrotated rectangle (deliberate, documented in `unrotate`); (3) `CBActiveRect::ClipRect` is not ported: the original clips every rectangle to the current viewport (scene viewport, clipped window) and shifts the pixel lookup by `m_OffsetX/Y`, Luma hits objects outside the viewport; (4) a 3D model's rectangle is tested inclusive of right and bottom (`<=`), `PtInRect` excludes them; (5) the `m_Model` (`C3DModel`, MS3D) branch has no counterpart. |
+| `CBRenderer::DeleteRectList` | replaced | `World::hits` is a `Vec` cleared and refilled each frame. |
+| `CBRenderer::SwitchFullscreen` | n/a | Only changes Win32 window styles, and `CBRenderD3D::SwitchFullscreen` returns `E_FAIL` (no longer supported in the original). |
+| `CBRenderer::Flip` | replaced | Base stub; presenting is `luma-render/src/window.rs` (`surface.present`), skipped on `Flow::Skip`. |
+| `CBRenderer::InitRenderer` | replaced | Base stub; see `CBRenderD3D::InitRenderer`. |
+| `CBRenderer::OnWindowChange` | replaced | Base stub; a resize reconfigures the wgpu surface in `window.rs`. |
+| `CBRenderer::Fill` | replaced | Base stub; see `CBRenderD3D::Fill`. |
+| `CBRenderer::WindowedBlt` | n/a | Base stub; presents the back buffer of the Win32 paint path while the game is paused. |
+| `CBRenderer::Setup2D` | replaced | Base stub; see `CBRenderD3D::Setup2D`. |
+| `CBRenderer::SetupLines` | replaced | Base stub; see `CBRenderD3D::SetupLines`. |
+| `CBRenderer::Setup3D` | replaced | Base stub; see `CBRenderD3D::Setup3D`. |
+| `CBRenderer::Setup3DCustom` | n/a | Base stub; see `CBRenderD3D::Setup3DCustom`. |
+| `CBRenderer::DrawLine` | todo | Base stub; see `CBRenderD3D::DrawLine`: Luma has no line primitive. |
+| `CBRenderer::DrawRect` | partial | Only caller is the accessibility hint (`BAccessMgr.cpp`): `luma-adventure/src/accessibility.rs` `draw_access_hint` draws four filled bars of width 4 instead of 4 nested 1-pixel outlines. The original's bottom and right lines lie on `Y2-i` and `X2-i` (so the frame covers `X1..=X2`, `Y1..=Y2`), Luma's bars cover `l..r`, `t..b` exclusive: one pixel short on the right and bottom. No general `DrawRect` exists. |
+| `CBRenderer::Fade` | replaced | Base stub; see `CBRenderD3D::Fade`. |
+| `CBRenderer::FadeToColor` | replaced | Base stub; see `CBRenderD3D::FadeToColor`. |
+| `CBRenderer::SetViewport` | todo | Base stub; see `CBRenderD3D::SetViewport`: Luma has no clip rectangle. |
+| `CBRenderer::SetScreenViewport` | todo | Resets the device viewport to the game rectangle after a clipped part (`CAdGame::DisplayContent`, `CAdScene`). Nothing to reset in Luma because nothing is ever clipped; comes with `CBRenderD3D::SetViewport`. |
+| `CBRenderer::SetViewport #2` | todo | Sets the clip rectangle from a `RECT` plus the letterbox offset (`CBGame::PushViewport`/`PopViewport`). Not in Luma; see `CBRenderD3D::SetViewport`. |
+| `CBRenderer::TakeScreenshot` | replaced | Base stub; see `CBRenderD3D::TakeScreenshot`. |
+| `CBRenderer::ClipCursor` | todo | In full-screen mode confines the system cursor to the game rectangle (`m_DrawOffset`, `m_Width`, `m_Height`), so the mouse cannot go into the letterbox bars. Luma has neither a full-screen mode nor a cursor grab (`luma-render/src/window.rs`); the mouse can leave the game area and positions outside it are passed on. |
+| `CBRenderer::UnclipCursor` | todo | Releases the cursor confinement of `ClipCursor` (on exit and when the window loses focus). Comes with `ClipCursor`. |
+| `CBRenderer::PointInViewport` | partial | Used by `CAdGame::ValidMouse` to ignore the mouse outside the game rectangle (inclusive of `m_DrawOffset + m_Width/Height`). Luma maps window pixels through `renderer::letterbox` in the player but has no test rejecting a position in the bars; check `ValidMouse` in the adventure table. |
 
 ## `wme_base/BSurface.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSurface::CBSurface` | unreviewed |  |
-| `CBSurface::~CBSurface` | unreviewed |  |
-| `CBSurface::Create` | unreviewed |  |
-| `CBSurface::Restore` | unreviewed |  |
-| `CBSurface::IsTransparentAt` | unreviewed |  |
-| `CBSurface::Display` | unreviewed |  |
-| `CBSurface::DisplayTrans` | unreviewed |  |
-| `CBSurface::DisplayTransZoom` | unreviewed |  |
-| `CBSurface::DisplayZoom` | unreviewed |  |
-| `CBSurface::DisplayHalfTrans` | unreviewed |  |
-| `CBSurface::DisplayTransform` | unreviewed |  |
-| `CBSurface::Create #2` | unreviewed |  |
-| `CBSurface::StartPixelOp` | unreviewed |  |
-| `CBSurface::EndPixelOp` | unreviewed |  |
-| `CBSurface::GetPixel` | unreviewed |  |
-| `CBSurface::PutPixel` | unreviewed |  |
-| `CBSurface::ComparePixel` | unreviewed |  |
-| `CBSurface::IsTransparentAtLite` | unreviewed |  |
-| `CBSurface::Invalidate` | unreviewed |  |
-| `CBSurface::PrepareToDraw` | unreviewed |  |
-| `CBSurface::SetFilename` | unreviewed |  |
-| `CBSurface::SetSize` | unreviewed |  |
+| `CBSurface::CBSurface` | replaced | `luma-render/src/texture.rs` `Texture` and the `SpriteBank` maps; reference count, lifetime and validity are Rust ownership (see `CBSurfaceStorage`). |
+| `CBSurface::~CBSurface` | replaced | Rust ownership. |
+| `CBSurface::Create` | replaced | Base stub; see `CBSurfaceD3D::Create`. |
+| `CBSurface::Restore` | n/a | Base stub; DirectDraw surface loss. |
+| `CBSurface::IsTransparentAt` | replaced | Base stub; see `CBSurfaceD3D::IsTransparentAt`. |
+| `CBSurface::Display` | replaced | Base stub; see `CBSurfaceD3D::Display`. |
+| `CBSurface::DisplayTrans` | replaced | Base stub; see `CBSurfaceD3D::DisplayTrans`. |
+| `CBSurface::DisplayTransZoom` | replaced | Base stub; see `CBSurfaceD3D::DisplayTransZoom`. |
+| `CBSurface::DisplayZoom` | replaced | Base stub; see `CBSurfaceD3D::DisplayZoom`. |
+| `CBSurface::DisplayHalfTrans` | n/a | Base stub; the DirectDraw checkerboard draw is never called by the engine. |
+| `CBSurface::DisplayTransform` | replaced | Base version drops the rotation (DirectDraw); Luma always rotates, see `CBSurfaceD3D::DisplayTransform`. |
+| `CBSurface::Create #2` | replaced | Base stub; see `CBSurfaceD3D::Create #2`. |
+| `CBSurface::StartPixelOp` | replaced | Base stub; see `CBSurfaceD3D::StartPixelOp`. |
+| `CBSurface::EndPixelOp` | replaced | Base stub; see `CBSurfaceD3D::EndPixelOp`. |
+| `CBSurface::GetPixel` | todo | Base stub; see `CBSurfaceD3D::GetPixel`. |
+| `CBSurface::PutPixel` | todo | Base stub; see `CBSurfaceD3D::PutPixel`. |
+| `CBSurface::ComparePixel` | n/a | Base stub; never called by the engine. |
+| `CBSurface::IsTransparentAtLite` | replaced | Base stub; see `CBSurfaceD3D::IsTransparentAtLite`. |
+| `CBSurface::Invalidate` | replaced | Base stub; see `CBSurfaceD3D::Invalidate`. |
+| `CBSurface::PrepareToDraw` | replaced | Reloads a surface the cache had dropped and stamps its last use; Luma keeps every texture of a bank loaded (`SpriteBank::upload`), so nothing is reloaded. No visible difference. |
+| `CBSurface::SetFilename` | replaced | The path is the key of the `SpriteBank` texture map. |
+| `CBSurface::SetSize` | replaced | `Texture::width`, `height`. |
 
 ## `wme_base/BSurfaceD3D.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSurfaceD3D::CBSurfaceD3D` | unreviewed |  |
-| `CBSurfaceD3D::~CBSurfaceD3D` | unreviewed |  |
-| `CBSurfaceD3D::Create` | unreviewed |  |
-| `CBSurfaceD3D::Display` | unreviewed |  |
-| `CBSurfaceD3D::DisplayTrans` | unreviewed |  |
-| `CBSurfaceD3D::DisplayTransZoom` | unreviewed |  |
-| `CBSurfaceD3D::DisplayZoom` | unreviewed |  |
-| `CBSurfaceD3D::DisplayTransform` | unreviewed |  |
-| `CBSurfaceD3D::IsTransparentAt` | unreviewed |  |
-| `CBSurfaceD3D::Create #2` | unreviewed |  |
-| `CBSurfaceD3D::CreateEmptyTexture` | unreviewed |  |
-| `CBSurfaceD3D::GetTextureFormat` | unreviewed |  |
-| `CBSurfaceD3D::StartPixelOp` | unreviewed |  |
-| `CBSurfaceD3D::EndPixelOp` | unreviewed |  |
-| `CBSurfaceD3D::GetPixel` | unreviewed |  |
-| `CBSurfaceD3D::PutPixel` | unreviewed |  |
-| `CBSurfaceD3D::ComparePixel` | unreviewed |  |
-| `CBSurfaceD3D::IsTransparentAtLite` | unreviewed |  |
-| `CBSurfaceD3D::Invalidate` | unreviewed |  |
-| `CBSurfaceD3D::ReleaseTiles` | unreviewed |  |
-| `CBSurfaceD3D::PrepareToDraw` | unreviewed |  |
+| `CBSurfaceD3D::CBSurfaceD3D` | replaced | `luma-render/src/texture.rs` `Texture`; no tiles (see `CBImage::LoadFile`). |
+| `CBSurfaceD3D::~CBSurfaceD3D` | replaced | Rust ownership; `Renderer::forget` drops the bind group. |
+| `CBSurfaceD3D::Create` | partial | `luma-adventure/src/scene_view.rs` `SpriteBank::upload` with `luma-formats/src/image.rs` `decode` and `Texture::from_image`. Differences: (1) the colour key: the original replaces every pixel equal to the key with transparent black whatever the file (D3DX compares the 32-bit value with alpha `FF`, `CBImage::FillTexture` compares RGB), so a fully opaque key-coloured pixel of a PNG or TGA with an alpha channel is cut out too; Luma applies the key only to images without an alpha channel (rule taken from WME Lite); (2) keyed pixels are transparent black in the original, Luma gives them the average colour of their opaque neighbours (`clear_keyed_color`) so that a scaled edge does not darken (deliberate); (3) `savegame:<slot>` names (optionally `,g` for grey) load the thumbnail of a saved game as an image: not supported; (4) the format is taken from the file's content, the original's D3DX loader also reads DDS, DIB, PPM, HDR and PFM, which the `image` features (png, bmp, jpeg, tga) do not; (5) lifetime, `KeepLoaded` and the lazy load when `LifeTime != -1` are not reproduced (no visible effect). |
+| `CBSurfaceD3D::Display` | done | Opaque draw at 100 % (`AlphaDisable`), used for video frames: Luma's video quad (`luma-adventure/src/video.rs`) draws an opaque texture with normal blending, the same result. Tiles: see `CBImage::LoadFile`. |
+| `CBSurfaceD3D::DisplayTrans` | done | `scene_view.rs` `place_transformed` (unscaled branch) and `DrawList::push_with`: source rectangle, tint, blend mode, mirror. |
+| `CBSurfaceD3D::DisplayTransZoom` | partial | `scene_view.rs` `place_transformed` (scaled branch). The destination size is truncated to whole pixels where the original keeps `width * zoom` as a float (see `CBRenderD3D::DrawSpriteEx`). |
+| `CBSurfaceD3D::DisplayZoom` | partial | Zoomed draw with or without transparency; called for scaled video frames (`CVidRenderer::Display`, opaque). Luma's video quad (`luma-adventure/src/video.rs`) truncates the zoomed size to whole pixels (`(texture.width as f32 * zoom).trunc()`), the original keeps the float size. |
+| `CBSurfaceD3D::DisplayTransform` | partial | `scene_view.rs` `place_transformed` and `renderer.rs` `rotated_corners`: pivot at `X + HotX * zoom`, `Y + HotY * zoom` from the truncated corner, angle in degrees, same sense. Same size truncation as `DisplayTransZoom`. |
+| `CBSurfaceD3D::IsTransparentAt` | partial | `scene_view.rs` `Mask::of`, `is_opaque`. The original calls a pixel transparent when alpha `< 128` (32-bit textures); Luma when alpha `<= 128` (`p[3] > 128` is opaque): a pixel of alpha exactly 128 differs. Outside the image the original reads out of bounds, Luma says transparent. |
+| `CBSurfaceD3D::Create #2` | replaced | Empty texture for video frames: `Renderer::texture_from_rgba` and `write_texture` (`luma-adventure/src/video.rs`). |
+| `CBSurfaceD3D::CreateEmptyTexture` | n/a | Tile textures for images larger than the device limit and the 16-bit fallback; no meaning with wgpu. |
+| `CBSurfaceD3D::GetTextureFormat` | n/a | Direct3D texture format query; Luma textures are always `Rgba8Unorm`. |
+| `CBSurfaceD3D::StartPixelOp` | replaced | Locks the texture for CPU access; Luma reads the decoded `Image` or `Mask` kept on the CPU side. See `GetPixel` and `PutPixel` for what is missing. |
+| `CBSurfaceD3D::EndPixelOp` | replaced | See `StartPixelOp`. |
+| `CBSurfaceD3D::GetPixel` | todo | Reads a pixel of a surface as A, R, G, B. Reached from scripts through `CBSubFrame::GetPixel` (the sub-frame object's pixel methods, to be confirmed in the game table) and from the tile loader. Luma has no pixel read on a sprite image. |
+| `CBSurfaceD3D::PutPixel` | todo | Writes a pixel (alpha kept when the `A` argument is not above 0). Reached from scripts through `CBSubFrame::PutPixel` and used by the video renderers (replaced there by `write_texture`). Luma cannot modify a sprite image. |
+| `CBSurfaceD3D::ComparePixel` | n/a | Never called by the engine. |
+| `CBSurfaceD3D::IsTransparentAtLite` | partial | Used by `CBFontBitmap::GetWidths` (`AUTO_WIDTH`): a pixel is transparent only when its alpha is 0. `luma-formats/src/font.rs` `measure_tile` counts a pixel only when alpha `> 128`, so the antialiased right edge of a glyph in a font image with an alpha channel is not measured and the automatic widths come out narrower than in the original. |
+| `CBSurfaceD3D::Invalidate` | replaced | Frees the texture of a surface not used for its lifetime; Luma frees textures with their bank (scene change, object removal). Memory only. |
+| `CBSurfaceD3D::ReleaseTiles` | n/a | Tiles of oversized images; no texture-size subdivision in Luma. |
+| `CBSurfaceD3D::PrepareToDraw` | replaced | See `CBSurface::PrepareToDraw`. |
 
 ## `wme_base/BSurfaceDD.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSurfaceDD::CBSurfaceDD` | unreviewed |  |
-| `CBSurfaceDD::~CBSurfaceDD` | unreviewed |  |
-| `CBSurfaceDD::Create` | unreviewed |  |
-| `CBSurfaceDD::LoadFile` | unreviewed |  |
-| `CBSurfaceDD::Lock` | unreviewed |  |
-| `CBSurfaceDD::Unlock` | unreviewed |  |
-| `CBSurfaceDD::GetSurfaceDesc` | unreviewed |  |
-| `CBSurfaceDD::SetTrans` | unreviewed |  |
-| `CBSurfaceDD::SetTransDefault` | unreviewed |  |
-| `CBSurfaceDD::Restore` | unreviewed |  |
-| `CBSurfaceDD::IsTransparentAt` | unreviewed |  |
-| `CBSurfaceDD::Display` | unreviewed |  |
-| `CBSurfaceDD::DisplayTrans` | unreviewed |  |
-| `CBSurfaceDD::DisplayTransZoom` | unreviewed |  |
-| `CBSurfaceDD::DisplayZoom` | unreviewed |  |
-| `CBSurfaceDD::DisplayHalfTrans` | unreviewed |  |
-| `CBSurfaceDD::Create #2` | unreviewed |  |
-| `CBSurfaceDD::CreateEmptySurface` | unreviewed |  |
-| `CBSurfaceDD::StartPixelOp` | unreviewed |  |
-| `CBSurfaceDD::EndPixelOp` | unreviewed |  |
-| `CBSurfaceDD::GetPixel` | unreviewed |  |
-| `CBSurfaceDD::PutPixel` | unreviewed |  |
-| `CBSurfaceDD::ComparePixel` | unreviewed |  |
-| `CBSurfaceDD::IsTransparentAtLite` | unreviewed |  |
-| `CBSurfaceDD::GetBitMaskInfo` | unreviewed |  |
-| `CBSurfaceDD::Invalidate` | unreviewed |  |
-| `CBSurfaceDD::ReleaseTiles` | unreviewed |  |
-| `CBSurfaceDD::PrepareToDraw` | unreviewed |  |
+| `CBSurfaceDD::CBSurfaceDD` | n/a | DirectDraw surface; Luma follows the Direct3D surface (`CBSurfaceD3D` rows). |
+| `CBSurfaceDD::~CBSurfaceDD` | n/a | DirectDraw surface management. |
+| `CBSurfaceDD::Create` | n/a | DirectDraw path of `CBSurfaceD3D::Create` (colour key as a surface key, tiles when wider than the screen); see that row. |
+| `CBSurfaceDD::LoadFile` | n/a | DirectDraw surface load; see `CBSurfaceD3D::Create`. |
+| `CBSurfaceDD::Lock` | n/a | DirectDraw surface lock. |
+| `CBSurfaceDD::Unlock` | n/a | DirectDraw surface lock. |
+| `CBSurfaceDD::GetSurfaceDesc` | n/a | DirectDraw surface description. |
+| `CBSurfaceDD::SetTrans` | n/a | DirectDraw colour key in the display's pixel format or palette; the key rule itself is in `CBSurfaceD3D::Create`. |
+| `CBSurfaceDD::SetTransDefault` | n/a | Magenta key for DirectDraw; `luma_formats::image::DEFAULT_COLOR_KEY` is the same colour. |
+| `CBSurfaceDD::Restore` | n/a | DirectDraw surface loss. |
+| `CBSurfaceDD::IsTransparentAt` | n/a | DirectDraw variant (pixel equal to the key); see `CBSurfaceD3D::IsTransparentAt`. |
+| `CBSurfaceDD::Display` | n/a | DirectDraw blit clipped to the viewport rectangle; see `CBSurfaceD3D::Display` and `CBRenderD3D::SetViewport` for the clipping gap. |
+| `CBSurfaceDD::DisplayTrans` | n/a | DirectDraw keyed blit (alpha, blend mode and mirror ignored); see `CBSurfaceD3D::DisplayTrans`. |
+| `CBSurfaceDD::DisplayTransZoom` | n/a | DirectDraw stretch blit; see `CBSurfaceD3D::DisplayTransZoom`. |
+| `CBSurfaceDD::DisplayZoom` | n/a | DirectDraw stretch blit; see `CBSurfaceD3D::DisplayZoom`. |
+| `CBSurfaceDD::DisplayHalfTrans` | n/a | Checkerboard (every other pixel) draw of the software renderer; no caller in the engine. |
+| `CBSurfaceDD::Create #2` | n/a | DirectDraw empty surface; see `CBSurfaceD3D::Create #2`. |
+| `CBSurfaceDD::CreateEmptySurface` | n/a | DirectDraw tile surface. |
+| `CBSurfaceDD::StartPixelOp` | n/a | DirectDraw lock and bit masks. |
+| `CBSurfaceDD::EndPixelOp` | n/a | DirectDraw unlock. |
+| `CBSurfaceDD::GetPixel` | n/a | DirectDraw variant (alpha always 255); see `CBSurfaceD3D::GetPixel`. |
+| `CBSurfaceDD::PutPixel` | n/a | DirectDraw variant (alpha below 128 becomes magenta); see `CBSurfaceD3D::PutPixel`. |
+| `CBSurfaceDD::ComparePixel` | n/a | Never called by the engine. |
+| `CBSurfaceDD::IsTransparentAtLite` | n/a | DirectDraw variant; see `CBSurfaceD3D::IsTransparentAtLite`. |
+| `CBSurfaceDD::GetBitMaskInfo` | n/a | Shift and width of a DirectDraw colour mask. |
+| `CBSurfaceDD::Invalidate` | n/a | DirectDraw surface release; see `CBSurfaceD3D::Invalidate`. |
+| `CBSurfaceDD::ReleaseTiles` | n/a | DirectDraw tiles. |
+| `CBSurfaceDD::PrepareToDraw` | n/a | See `CBSurface::PrepareToDraw`. |
 
 ## `wme_base/BSurfaceStorage.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSurfaceStorage::CBSurfaceStorage` | unreviewed |  |
-| `CBSurfaceStorage::~CBSurfaceStorage` | unreviewed |  |
-| `CBSurfaceStorage::Cleanup` | unreviewed |  |
-| `CBSurfaceStorage::InitLoop` | unreviewed |  |
-| `CBSurfaceStorage::RemoveSurface` | unreviewed |  |
-| `CBSurfaceStorage::AddSurface` | unreviewed |  |
-| `CBSurfaceStorage::RestoreAll` | unreviewed |  |
-| `CBSurfaceStorage::SortSurfaces` | unreviewed |  |
-| `CBSurfaceStorage::SurfaceSortCB` | unreviewed |  |
+| `CBSurfaceStorage::CBSurfaceStorage` | replaced | `luma-adventure/src/scene_view.rs` `SpriteBank` (one per scene, actor, UI, cursors, emitter) holds the textures. |
+| `CBSurfaceStorage::~CBSurfaceStorage` | replaced | Rust ownership. |
+| `CBSurfaceStorage::Cleanup` | replaced | Dropping a `SpriteBank` frees its textures. |
+| `CBSurfaceStorage::InitLoop` | replaced | Timed eviction of unused surfaces (`SmartCache`, every `m_SurfaceGCCycleTime` = 10 s, surfaces with a positive lifetime); Luma keeps a bank's textures until the bank is dropped. Memory only. |
+| `CBSurfaceStorage::RemoveSurface` | replaced | Reference counting; textures go with their bank. |
+| `CBSurfaceStorage::AddSurface` | partial | `scene_view.rs` `SpriteBank::upload`, `texture`. Differences: (1) a missing image is replaced by `invalid.bmp` (`invalid_debug.bmp` in debug mode) and logged `Missing image: '...'`; Luma records it in `SpriteBank::missing` and draws nothing; (2) the original shares one surface per file name, whatever colour key the later users ask for (the first load's key wins), Luma keys textures by path and colour key; (3) the original shares surfaces game-wide, Luma per bank (memory only). |
+| `CBSurfaceStorage::RestoreAll` | n/a | Reloads every surface after a DirectDraw surface loss. |
+| `CBSurfaceStorage::SortSurfaces` | replaced | Orders the surfaces for the timed eviction; see `InitLoop`. |
+| `CBSurfaceStorage::SurfaceSortCB` | replaced | See `SortSurfaces`. |
 
 ## `wme_base/SkinMeshHelper.cpp`
 
