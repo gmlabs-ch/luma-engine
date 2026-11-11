@@ -17,46 +17,46 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DEffect::C3DEffect` | todo | Direct3D 9 build only: a D3DX effect (HLSL `.fx` file) attached to a model material, with its render targets, textures, pass scripts and semantic table. Luma has no effects: `Actor3D.SetEffect` and the other effect calls log a stub and return false (`luma-adventure/src/natives_actor3d.rs`), the `EFFECT` blocks of actor files are parsed (`luma-3d/src/actor3d.rs` `EffectDef`) and not used. Needs a decision on how HLSL effects are to be run (a translation to WGSL or a fixed set). |
-| `C3DEffect::~C3DEffect` | todo | Frees the effect, its render targets, textures and scripts; comes with `C3DEffect::CreateFromFile`. |
+| `C3DEffect::C3DEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::~C3DEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 | `C3DEffect::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
 | `C3DEffect::RestoreDeviceObjects` | n/a | Direct3D device loss. |
-| `C3DEffect::CreateFromFile` | todo | Reads the `.fx` file, compiles it with `D3DXCreateEffect` (includes resolved through the game's file manager, compile errors logged), picks the first valid technique (fails with `No valid technique found` otherwise), then `InitializeParams` and `InitializeScripts`. Not in Luma. |
-| `C3DEffect::InitializeParams` | todo | Walks the effect's parameters: creates a render target for the `RENDERCOLORTARGET` and `RENDERDEPTHSTENCILTARGET` semantics, loads a texture for parameters with a `ResourceName` annotation, and records the handles of the known semantics. Not in Luma. |
-| `C3DEffect::AddRenderTarget` | todo | Creates a render target from a parameter's annotations (`Dimensions` or `RenderTargetDimensions` or `Width`/`Height` default 512, `Format` default `D3DFMT_A8R8G8B8`, `ClearColor`, `ClearDepth`, `MipLevels` default 1) and binds it to the parameter. Not in Luma. |
-| `C3DEffect::AddTexture` | todo | Loads the texture named by a parameter's `ResourceName` annotation and binds it. Not in Luma. |
-| `C3DEffect::UpdateMatrices` | todo | Sets the matrix semantics (`World`, `View`, `Projection`, their products, inverses and transposes) before a material is drawn. Not in Luma. |
-| `C3DEffect::UpdateCamera` | todo | Sets `ViewPosition` and `ViewDirection` from the camera. Not in Luma. |
-| `C3DEffect::UpdateMaterial` | todo | Sets `DiffuseMap` (the material's surface), `Ambient`, `Diffuse`, `Specular`, `Emissive` and `Power`. Not in Luma. |
-| `C3DEffect::UpdateGlobals` | todo | Sets `Time` (`m_CurrentTime / 1000`) and `ElapsedTime` (`m_DeltaTime / 1000`). Not in Luma. |
-| `C3DEffect::UpdateLights` | todo | Sets `ActorLightPos` (the owner's shadow light position) and the per-light semantics from the device's enabled lights. Not in Luma. |
-| `C3DEffect::SetLightPos` | todo | Sets a light's position parameter from device light `index`. Not in Luma. |
-| `C3DEffect::SetLightDir` | todo | Sets a light's direction parameter from device light `index`. Not in Luma. |
-| `C3DEffect::SetLightAmbient` | todo | Sets a light's ambient colour parameter. Not in Luma. |
-| `C3DEffect::SetLightDiffuse` | todo | Sets a light's diffuse colour parameter. Not in Luma. |
-| `C3DEffect::SetLightSpecular` | todo | Sets a light's specular colour parameter. Not in Luma. |
-| `C3DEffect::SetRenderColorTarget` | todo | Activates a named colour render target of the effect (the default one for an empty name). Not in Luma. |
-| `C3DEffect::SetRenderDepthTarget` | todo | Activates a named depth render target of the effect. Not in Luma. |
-| `C3DEffect::InitializeScripts` | todo | Reads the `Script` annotation of every pass of the technique into a `C3DEffectScript`. Not in Luma. |
-| `C3DEffect::GetScriptForPass` | todo | The script of a pass. Not in Luma. |
-| `C3DEffect::GetAnnotationValue` | todo | Reads a string annotation of an effect parameter. Not in Luma. |
-| `C3DEffect::GetAnnotationValue #2` | todo | Reads a float annotation. Not in Luma. |
-| `C3DEffect::GetAnnotationValue #3` | todo | Reads an integer annotation. Not in Luma. |
-| `C3DEffect::GetAnnotationValue #4` | todo | Reads a two-component vector annotation. Not in Luma. |
-| `C3DEffect::GetAnnotationValue #5` | todo | Reads a three-component vector annotation. Not in Luma. |
-| `C3DEffect::GetAnnotationValue #6` | todo | Reads a four-component vector annotation. Not in Luma. |
-| `C3DEffect::ParseTextureFormat` | todo | Maps a `D3DFMT_...` name of a render target annotation to a texture format. Not in Luma. |
-| `C3DEffect::BuildSemanticStringMap` | todo | The table of semantic names the engine feeds (matrices, `ViewPosition`, `ViewDirection`, `DiffuseMap`, material colours, `Time`, `ElapsedTime`, `ActorLightPos`, light semantics). Not in Luma. |
-| `C3DEffect::AddSemanticString` | todo | Adds a name to the semantic table (lower-cased). Not in Luma. |
-| `C3DEffect::GetSemanticType` | todo | Looks a semantic name up in the table. Not in Luma. |
-| `C3DEffect::ColorToVector` | todo | A colour value as a four-component vector for an effect parameter. Not in Luma. |
-| `C3DEffect::StoreDefaultBuffers` | todo | Remembers the device's colour and depth targets before a pass script redirects rendering. Not in Luma. |
-| `C3DEffect::RestoreDefaultBuffers` | todo | Puts both remembered targets back. Not in Luma. |
-| `C3DEffect::RestoreColorBuffer` | todo | Puts the remembered colour target back. Not in Luma. |
-| `C3DEffect::RestoreDepthBuffer` | todo | Puts the remembered depth target back. Not in Luma. |
-| `CShaderIncludeHelper::CShaderIncludeHelper` | todo | Include handler of the effect compiler; comes with `C3DEffect::CreateFromFile`. |
-| `CShaderIncludeHelper::Open` | todo | Reads an `#include`d shader file through the game's file manager (packages). Not in Luma. |
-| `CShaderIncludeHelper::Close` | todo | Frees an included file's buffer. Not in Luma. |
+| `C3DEffect::CreateFromFile` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::InitializeParams` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::AddRenderTarget` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::AddTexture` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::UpdateMatrices` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::UpdateCamera` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::UpdateMaterial` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::UpdateGlobals` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::UpdateLights` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::SetLightPos` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::SetLightDir` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::SetLightAmbient` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::SetLightDiffuse` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::SetLightSpecular` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::SetRenderColorTarget` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::SetRenderDepthTarget` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::InitializeScripts` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::GetScriptForPass` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::GetAnnotationValue` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::GetAnnotationValue #2` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::GetAnnotationValue #3` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::GetAnnotationValue #4` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::GetAnnotationValue #5` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::GetAnnotationValue #6` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::ParseTextureFormat` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::BuildSemanticStringMap` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::AddSemanticString` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::GetSemanticType` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::ColorToVector` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::StoreDefaultBuffers` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::RestoreDefaultBuffers` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::RestoreColorBuffer` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffect::RestoreDepthBuffer` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CShaderIncludeHelper::CShaderIncludeHelper` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CShaderIncludeHelper::Open` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CShaderIncludeHelper::Close` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 
 ## `wme_base/3DEffect_D3D8.cpp`
 
@@ -64,51 +64,51 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `C3DEffect::C3DEffect` | n/a | Empty stub of the Direct3D 8 build. |
 | `C3DEffect::~C3DEffect` | n/a | Empty stub of the Direct3D 8 build. |
-| `C3DEffect::CreateFromFile` | partial | The Direct3D 8 build refuses effects: it logs `Error: Effect files are not supported by Direct3D 8 version of the engine.` and fails. Luma behaves like this build (the effect calls return false) but logs its own stub line instead of that message. |
+| `C3DEffect::CreateFromFile` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting. Was: The Direct3D 8 build refuses effects: it logs `Error: Effect files are not supported by Direct3D 8 version of the engine.` and fails. Luma behaves like this build (the effect calls return false) but logs its own stub line instead of that message. |
 
 ## `wme_base/3DEffectParams.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DEffectParams::C3DEffectParam::C3DEffectParam` | todo | One script-set effect parameter of a material (Direct3D 9 build only): built with the defaults of `SetDefaultValues`. Not in Luma (`Actor3D.SetEffectParam...` are stubs that return false, `luma-adventure/src/natives_actor3d.rs`). |
-| `C3DEffectParams::C3DEffectParam::C3DEffectParam #2` | todo | The same with the parameter name copied. Not in Luma. |
-| `C3DEffectParams::C3DEffectParam::~C3DEffectParam` | todo | Frees the name and the string value; would be Rust ownership once the parameter exists. Not in Luma. |
-| `C3DEffectParams::C3DEffectParam::SetValue` | todo | Stores a string value and sets the type to string. Not in Luma. |
-| `C3DEffectParams::C3DEffectParam::SetValue #2` | todo | Stores an int value and sets the type to int. Not in Luma. |
-| `C3DEffectParams::C3DEffectParam::SetValue #3` | todo | Stores a float value and sets the type to float. Not in Luma. |
-| `C3DEffectParams::C3DEffectParam::SetValue #4` | todo | Stores a bool value and sets the type to bool. Not in Luma. |
-| `C3DEffectParams::C3DEffectParam::SetValue #5` | todo | Stores a four-component vector and sets the type to vector. Not in Luma. |
-| `C3DEffectParams::C3DEffectParam::SetDefaultValues` | todo | Defaults of a parameter: no name, no string, int 0, float 0, bool false, vector (0, 0, 0, 0), type unknown, no effect handle. Not in Luma. |
-| `C3DEffectParams::C3DEffectParam::Persist` | todo | Saves one parameter: name, type, string, int, float, vector and bool values, in that order; the effect handle is looked up again after a load. Not in Luma: nothing of the effects is saved. |
-| `C3DEffectParams::C3DEffectParam::SetEffectParam` | todo | Applies the parameter to the effect: finds it by name (looked up at every call, the initialised flag is never set), does nothing when the effect has no such parameter or the type is unknown, else sets the string, float, int, bool or vector by the stored type. Not in Luma. |
-| `C3DEffectParams::C3DEffectParams` | todo | The list of script-set effect parameters of a material (`Actor3D.SetEffectParam...`). Not in Luma. |
-| `C3DEffectParams::~C3DEffectParams` | todo | Frees the parameter list. Not in Luma. |
-| `C3DEffectParams::Clear` | todo | Empties the parameter list. Not in Luma. |
-| `C3DEffectParams::Persist` | todo | Saves the parameters (name, type, string, int, float, vector and bool values). Not in Luma: nothing of the effects is saved. |
-| `C3DEffectParams::SetEffectParams` | todo | Applies every stored parameter to the effect by name before drawing. Not in Luma. |
-| `C3DEffectParams::SetParam` | todo | Stores a parameter from a script value (bool, int, float or string by the value's type). Not in Luma. |
-| `C3DEffectParams::SetParam #2` | todo | Stores a parameter as a four-component vector. Not in Luma. |
-| `C3DEffectParams::GetParamByName` | todo | Finds or creates the parameter of a name. Not in Luma. |
+| `C3DEffectParams::C3DEffectParam::C3DEffectParam` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParam::C3DEffectParam #2` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParam::~C3DEffectParam` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParam::SetValue` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParam::SetValue #2` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParam::SetValue #3` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParam::SetValue #4` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParam::SetValue #5` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParam::SetDefaultValues` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParam::Persist` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParam::SetEffectParam` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::C3DEffectParams` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::~C3DEffectParams` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::Clear` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::Persist` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::SetEffectParams` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::SetParam` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::SetParam #2` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectParams::GetParamByName` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 
 ## `wme_base/3DEffectScript.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DEffectScript::C3DEffectScript` | todo | The command list of an effect pass (the `Script` annotation). Not in Luma. |
-| `C3DEffectScript::~C3DEffectScript` | todo | Frees the commands. Not in Luma. |
-| `C3DEffectScript::InitFrame` | todo | Restarts the command list and stores the default targets when the script changes render targets. Not in Luma. |
-| `C3DEffectScript::Execute` | todo | Runs the commands up to the next geometry draw (returns true so that the mesh is drawn), drawing the full-screen quad or switching render targets on the way; restores the targets at the end. Not in Luma. |
-| `C3DEffectScript::ParseString` | todo | Parses `RenderColorTarget0=`, `RenderDepthStencilTarget=` and `Draw=` (`Buffer` for the quad, anything else for the geometry) separated by `;`; adds a geometry draw when there is none and restores the targets it changed. Not in Luma. |
-| `C3DEffectScript::ClearCommands` | todo | Empties the command list. Not in Luma. |
+| `C3DEffectScript::C3DEffectScript` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectScript::~C3DEffectScript` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectScript::InitFrame` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectScript::Execute` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectScript::ParseString` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectScript::ClearCommands` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 
 ## `wme_base/3DEffectTexture.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DEffectTexture::C3DEffectTexture` | todo | A texture an effect names in a `ResourceName` annotation. Not in Luma. |
-| `C3DEffectTexture::~C3DEffectTexture` | todo | Frees the surface. Not in Luma. |
-| `C3DEffectTexture::LoadFromFile` | todo | Loads the file as a surface with the default colour key. Not in Luma. |
-| `C3DEffectTexture::GetTexture` | todo | The Direct3D texture of the surface. Not in Luma. |
+| `C3DEffectTexture::C3DEffectTexture` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectTexture::~C3DEffectTexture` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectTexture::LoadFromFile` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DEffectTexture::GetTexture` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 
 ## `wme_base/3DFace.cpp`
 
@@ -260,15 +260,15 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DRenderTarget::C3DRenderTarget` | todo | A colour or depth render target of an effect; comes with `C3DEffect::AddRenderTarget`. |
-| `C3DRenderTarget::~C3DRenderTarget` | todo | Frees the target; comes with the effects. |
+| `C3DRenderTarget::C3DRenderTarget` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DRenderTarget::~C3DRenderTarget` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 | `C3DRenderTarget::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
 | `C3DRenderTarget::RestoreDeviceObjects` | n/a | Direct3D device loss. |
-| `C3DRenderTarget::CreateRenderColorTarget` | todo | Creates a render-target texture of a format, size and mip count. Not in Luma (effects). |
-| `C3DRenderTarget::CreateRenderDepthTarget` | todo | Creates a depth-stencil surface of a format and size. Not in Luma (effects). |
-| `C3DRenderTarget::SetClearColor` | todo | The colour the target is cleared to when activated. Not in Luma (effects). |
-| `C3DRenderTarget::SetClearDepth` | todo | The depth the target is cleared to when activated. Not in Luma (effects). |
-| `C3DRenderTarget::Activate` | todo | Makes the target current and clears it when a clear value was set. Not in Luma (effects). |
+| `C3DRenderTarget::CreateRenderColorTarget` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DRenderTarget::CreateRenderDepthTarget` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DRenderTarget::SetClearColor` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DRenderTarget::SetClearDepth` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `C3DRenderTarget::Activate` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 
 ## `wme_base/3DShadowGen.cpp`
 
