@@ -33,13 +33,13 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSoundAVI::CBSoundAVI` | unreviewed |  |
-| `CBSoundAVI::~CBSoundAVI` | unreviewed |  |
-| `CBSoundAVI::InitializeBuffer` | unreviewed |  |
-| `CBSoundAVI::ResetStream` | unreviewed |  |
-| `CBSoundAVI::FillBuffer` | unreviewed |  |
-| `CBSoundAVI::LoadSegment` | unreviewed |  |
-| `CBSoundAVI::GetPosition` | unreviewed |  |
+| `CBSoundAVI::CBSoundAVI` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): the sound of an AVI file. |
+| `CBSoundAVI::~CBSoundAVI` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): nothing observable. |
+| `CBSoundAVI::InitializeBuffer` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): the AVI's audio stream as a streamed, non-looping sound of type SFX (so it follows the sound effects' global volume). |
+| `CBSoundAVI::ResetStream` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): rewinds the audio read position. |
+| `CBSoundAVI::FillBuffer` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): not implemented in the original either (`E_NOTIMPL`). |
+| `CBSoundAVI::LoadSegment` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): reads the next block of PCM from the AVI stream, silence after the end. |
+| `CBSoundAVI::GetPosition` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): the position in samples (not used: the AVI player times itself on the wall clock). |
 
 ## `wme_base/BSoundBuffer.cpp`
 
@@ -93,49 +93,49 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSoundOGG::CBSoundOGG` | unreviewed |  |
-| `CBSoundOGG::~CBSoundOGG` | unreviewed |  |
-| `CBSoundOGG::InitializeBuffer` | unreviewed |  |
-| `CBSoundOGG::FillBuffer` | unreviewed |  |
-| `CBSoundOGG::FillRawBuffer` | unreviewed |  |
-| `CBSoundOGG::ResetStream` | unreviewed |  |
-| `CBSoundOGG::LoadSegment` | unreviewed |  |
-| `CBSoundOGG::OGGOpen` | unreviewed |  |
-| `CBSoundOGG::OGGClose` | unreviewed |  |
-| `CBSoundOGG::OGGReadBlock` | unreviewed |  |
-| `CBSoundOGG::GetPosition` | unreviewed |  |
-| `CBSoundOGG::SetPosition` | unreviewed |  |
-| `CBSoundOGG::FileRead` | unreviewed |  |
-| `CBSoundOGG::FileSeek` | unreviewed |  |
-| `CBSoundOGG::FileClose` | unreviewed |  |
-| `CBSoundOGG::FileTell` | unreviewed |  |
+| `CBSoundOGG::CBSoundOGG` | replaced | Ogg Vorbis is decoded by Symphonia through Kira (`luma_audio::decode` in `crates/luma-audio/src/clip.rs`); no decoder state to keep. |
+| `CBSoundOGG::~CBSoundOGG` | replaced | Ownership. |
+| `CBSoundOGG::InitializeBuffer` | replaced | `luma_audio::decode`: the whole file decoded to frames at its own rate and channel count. |
+| `CBSoundOGG::FillBuffer` | replaced | `luma_audio::decode`. |
+| `CBSoundOGG::FillRawBuffer` | n/a | Raw PCM for `CBSound::GetRawData`, used by the tools only. |
+| `CBSoundOGG::ResetStream` | replaced | No stream to rewind: Kira replays the decoded data. |
+| `CBSoundOGG::LoadSegment` | replaced | Kira's loop region (`loop_region` in `crates/luma-audio/src/audio.rs`): at the end a looping sound goes back to the loop start, else to 0; a non-looping one ends. The original does this only for streamed sounds: see `CBSound::SetLoopStart`. |
+| `CBSoundOGG::OGGOpen` | replaced | Symphonia's Ogg reader and Vorbis decoder; 16-bit output and the length from the stream's sample count have their equivalent in `Clip::frames` / `duration_ms`. |
+| `CBSoundOGG::OGGClose` | replaced | Ownership. |
+| `CBSoundOGG::OGGReadBlock` | replaced | Symphonia. |
+| `CBSoundOGG::GetPosition` | replaced | `Audio::position_ms` in `crates/luma-audio/src/audio.rs`: the position heard. For a streamed Ogg the original returns the decoder's position, ahead of the sound by what is buffered (up to `SoundBufferSize` seconds, 3 by default), so `GetMusicPosition()` and the position written in a saved game run ahead there; Luma is exact. |
+| `CBSoundOGG::SetPosition` | done | `Audio::set_position_ms` in `crates/luma-audio/src/audio.rs` (Kira `seek_to`, or the start position of the next play). |
+| `CBSoundOGG::FileRead` | replaced | The file is read whole from the packages into memory (`World::load_clip`). |
+| `CBSoundOGG::FileSeek` | replaced | As `FileRead`. |
+| `CBSoundOGG::FileClose` | replaced | As `FileRead`. |
+| `CBSoundOGG::FileTell` | replaced | As `FileRead`. |
 
 ## `wme_base/BSoundTheora.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSoundTheora::CBSoundTheora` | unreviewed |  |
-| `CBSoundTheora::~CBSoundTheora` | unreviewed |  |
-| `CBSoundTheora::InitializeBuffer` | unreviewed |  |
-| `CBSoundTheora::ResetStream` | unreviewed |  |
-| `CBSoundTheora::FillBuffer` | unreviewed |  |
-| `CBSoundTheora::LoadSegment` | unreviewed |  |
-| `CBSoundTheora::GetPosition` | unreviewed |  |
-| `CBSoundTheora::WriteBlock` | unreviewed |  |
+| `CBSoundTheora::CBSoundTheora` | replaced | A video's sound is not streamed block by block: `luma_video::sound_track` (`crates/luma-video/src/lib.rs`) copies the Vorbis stream into an Ogg file of its own, `luma_audio::decode` decodes it whole and it plays as an ordinary voice (`World::open_video` in `crates/luma-adventure/src/video.rs`). |
+| `CBSoundTheora::~CBSoundTheora` | replaced | Ownership. |
+| `CBSoundTheora::InitializeBuffer` | replaced | `World::open_video` in `crates/luma-adventure/src/video.rs`: type SFX, not looping, as here. |
+| `CBSoundTheora::ResetStream` | replaced | `Audio::stop` on the track when a looping video restarts (`update_entity_video` in `crates/luma-adventure/src/video.rs`). |
+| `CBSoundTheora::FillBuffer` | n/a | Not implemented in the original (`E_NOTIMPL`). |
+| `CBSoundTheora::LoadSegment` | n/a | Not implemented in the original (`E_NOTIMPL`). |
+| `CBSoundTheora::GetPosition` | replaced | `Audio::position_ms` of the track, read by `step_player` in `crates/luma-adventure/src/video.rs` as the movie time. |
+| `CBSoundTheora::WriteBlock` | replaced | No block writing: the whole track is decoded before playback. The original never plays a last block that is not full (under about 190 ms of sound at the end is lost); Luma plays it. |
 
 ## `wme_base/BSoundWAV.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSoundWAV::CBSoundWAV` | unreviewed |  |
-| `CBSoundWAV::~CBSoundWAV` | unreviewed |  |
-| `CBSoundWAV::InitializeBuffer` | unreviewed |  |
-| `CBSoundWAV::FillBuffer` | unreviewed |  |
-| `CBSoundWAV::FillRawBuffer` | unreviewed |  |
-| `CBSoundWAV::ResetStream` | unreviewed |  |
-| `CBSoundWAV::LoadSegment` | unreviewed |  |
-| `CBSoundWAV::GetPosition` | unreviewed |  |
-| `CBSoundWAV::SetPosition` | unreviewed |  |
+| `CBSoundWAV::CBSoundWAV` | replaced | WAV is decoded by Symphonia through Kira (`luma_audio::decode`). |
+| `CBSoundWAV::~CBSoundWAV` | replaced | Ownership. |
+| `CBSoundWAV::InitializeBuffer` | replaced | `luma_audio::decode`. The original accepts only PCM with the `fmt ` chunk first and refuses the rest (the sound does not load); Luma also plays float and other layouts Symphonia reads, a superset. |
+| `CBSoundWAV::FillBuffer` | replaced | `luma_audio::decode`. |
+| `CBSoundWAV::FillRawBuffer` | n/a | Raw PCM for `CBSound::GetRawData`, used by the tools only. |
+| `CBSoundWAV::ResetStream` | replaced | No stream to rewind. |
+| `CBSoundWAV::LoadSegment` | replaced | Kira's loop region (`loop_region` in `crates/luma-audio/src/audio.rs`); same remark as `CBSoundOGG::LoadSegment`. |
+| `CBSoundWAV::GetPosition` | replaced | `Audio::position_ms` in `crates/luma-audio/src/audio.rs`: the position heard. For a streamed WAV the original returns how much it has read from the file, ahead of the sound by the buffered part (up to `SoundBufferSize` seconds); Luma is exact. |
+| `CBSoundWAV::SetPosition` | done | `Audio::set_position_ms` in `crates/luma-audio/src/audio.rs`. |
 
 ## `wme_base/VidPlayer.cpp`
 
