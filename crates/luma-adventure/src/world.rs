@@ -1153,7 +1153,13 @@ impl World {
             }
         }
         let scripts = actor.def.scripts.clone();
+        // `SOUND_VOLUME` is the volume of the actor's sounds
+        // (`m_SFXVolume`).
+        let sound_volume = actor.def.sound_volume;
         self.actors.push((id, actor));
+        if sound_volume != 100 {
+            self.set_sfx_volume(id, sound_volume);
+        }
         for script in scripts {
             self.attach(engine, id, &script);
         }
@@ -3172,6 +3178,7 @@ impl Runtime {
     /// is scheduled first.
     pub fn start(&mut self) {
         self.world.init_accessibility();
+        self.world.init_volumes();
         if let Some(scene) = self.world.startup_scene.clone() {
             self.world.schedule_scene(&scene, true);
         }

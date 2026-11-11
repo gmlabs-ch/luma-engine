@@ -32,7 +32,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdActor::LoadBuffer FONT` | partial | Read (`luma-formats/src/actor.rs` `Actor::apply`) and used for the actor's speech, but loaded at the first `Talk` (`world.rs` `load_own_font`), not with the file; `GetFont` returns the file name even when the font cannot be loaded (the original has no font then and returns null). |
 | `CAdActor::LoadBuffer CURSOR` | done | `luma-formats/src/actor.rs` `Actor::apply`, `natives_object.rs` `object_cursor`, shown by `input.rs` `cursor_to_show` (a failure to load: see `LoadBuffer`). |
 | `CAdActor::LoadBuffer SCRIPT` | done | `luma-formats/src/actor.rs` `Actor::apply`; attached by `world.rs` `load_actor`. |
-| `CAdActor::LoadBuffer SOUND_VOLUME` | partial | Parsed into `Actor::sound_volume`, which nothing reads: the actor's sounds start at volume 100 whatever the file says. The original sets `m_SFXVolume`, used by `PlaySound` and returned by `GetSoundVolume`. |
+| `CAdActor::LoadBuffer SOUND_VOLUME` | done | `luma-formats/src/actor.rs` (`sound_volume`), applied by `World::load_actor` (`world.rs`) through `set_sfx_volume`: the volume of the actor's sounds and what `GetSoundVolume` reads. |
 | `CAdActor::LoadBuffer SOUND_PANNING` | done | `luma-formats/src/actor.rs` `Actor::apply`; `sound.rs` `sound_pan_of`. |
 | `CAdActor::LoadBuffer CAPTION` | done | `luma-formats/src/actor.rs` `Actor::apply`, expanded through the string table by `world.rs` `load_actor`. |
 | `CAdActor::LoadBuffer PROPERTY` | done | `luma-formats/src/actor.rs` `Actor::apply`; set as script properties by `world.rs` `load_actor`. |
@@ -596,7 +596,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdObject3D::CAdObject3D` | partial | `luma-3d/src/actor3d.rs` `Actor3dDef::default` and `luma-adventure/src/actor3d.rs` `Actor3d::from_definition`: velocity and angular velocity 1, drop to floor on, shadow type stencil, state and next state `Ready`, no stance animation, no ambient override agree. Different, among the defaults a 3D actor inherits from `CBObject`: `sound_panning` starts false where `m_AutoSoundPanning` is true, so the sounds of a 3D actor are not panned with its position until a script sets `SoundPanning`. `last_position` starts as NaN to force the first 2D position (the original starts at the origin and so leaves `X`/`Y` at 0 for an actor placed exactly there). |
+| `CAdObject3D::CAdObject3D` | partial | `luma-3d/src/actor3d.rs` `Actor3dDef::default` and `luma-adventure/src/actor3d.rs` `Actor3d::from_definition`: velocity and angular velocity 1, drop to floor on, shadow type stencil, state and next state `Ready`, no stance animation, no ambient override agree. `sound_panning` starts true (`m_AutoSoundPanning`). Different: `last_position` starts as NaN to force the first 2D position (the original starts at the origin and so leaves `X`/`Y` at 0 for an actor placed exactly there). |
 | `CAdObject3D::~CAdObject3D` | replaced | Rust ownership; the shadow volume is not an object that outlives a frame (see `GetShadowVolume`). |
 | `CAdObject3D::ClearIgnoredLights` | replaced | Rust ownership: `Actor3d::ignored_lights` is a `Vec<String>` dropped with the actor; the old-saved-game branch of `Persist` that calls it has no counterpart. |
 | `CAdObject3D::AddIgnoredLight` | done | `natives_actor3d.rs` `actor3d_call` `AddIgnoredLight`: added once (names compared without case), always true. |

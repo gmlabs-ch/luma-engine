@@ -269,6 +269,10 @@ KeyboardEnabled=1
 The `AccCaption` scripts set on objects is saved with the game, like
 the original's `m_AccessCaption`; the switches are not.
 
+The same file keeps the four sound volumes between runs, in an `[Audio]`
+section the engine itself reads when the game starts and writes when it
+ends (see [audio.md](audio.md#volumes)).
+
 ## File format
 
 The format is Luma's own: the original engine's `.dsv` files serialize

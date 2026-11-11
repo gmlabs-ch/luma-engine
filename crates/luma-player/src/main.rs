@@ -1117,6 +1117,19 @@ impl GamePlayer {
     }
 }
 
+impl Drop for GamePlayer {
+    /// The game ends: the four volumes go to the settings file for the
+    /// next run (`CBSoundMgr::~CBSoundMgr`).
+    fn drop(&mut self) {
+        if self.started {
+            self.runtime.world.save_volume_settings();
+            for line in self.runtime.world.take_log() {
+                eprintln!("{line}");
+            }
+        }
+    }
+}
+
 impl App for GamePlayer {
     fn init(&mut self, renderer: &Renderer) -> luma::render::Result<()> {
         eprintln!("adapter: {}", renderer.gpu().describe());

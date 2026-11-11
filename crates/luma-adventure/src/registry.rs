@@ -6,12 +6,18 @@
 //! directory, in the same section, so that a game's own values can be
 //! carried over by hand. See `docs/saving.md`.
 //!
-//! Written with reference to `BRegistry.cpp` and `BGame.cpp`
-//! (`RegReadNumber`, `RegReadString`, `RegWriteNumber`,
+//! The same file keeps the four sound volumes between runs, in its
+//! `Audio` section, as the original's sound manager does
+//! (`CBSoundMgr::Initialize`, `~CBSoundMgr`).
+//!
+//! Written with reference to `BRegistry.cpp`, `BSoundMgr.cpp` and
+//! `BGame.cpp` (`RegReadNumber`, `RegReadString`, `RegWriteNumber`,
 //! `RegWriteString`) of Wintermute Engine 1.x (MIT License, Copyright
 //! (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
 use std::path::PathBuf;
+
+use luma_audio::SoundType;
 
 use crate::world::World;
 
@@ -20,6 +26,42 @@ pub const SETTINGS_INI: &str = "settings.ini";
 
 /// The section the script-visible settings live in.
 pub const PRIVATE_SECTION: &str = "PrivateSettings";
+
+/// The section the sound volumes live in.
+pub const AUDIO_SECTION: &str = "Audio";
+
+/// The keys of the three type volumes, in the original's unit (200 is
+/// 100 %).
+const VOLUME_KEYS: [(SoundType, &str); 3] = [
+    (SoundType::Sfx, "SFXVolume"),
+    (SoundType::Speech, "SpeechVolume"),
+    (SoundType::Music, "MusicVolume"),
+];
+
+/// The key of the master volume: a wave device volume, its two 16-bit
+/// halves the left and right channels, written as a signed integer.
+const MASTER_VOLUME_KEY: &str = "MasterVolume";
+
+/// The integer a setting starts with, as the original reads numbers
+/// (`ReadInt`): an optional sign and digits, anything after ignored;
+/// `None` without a digit.
+fn leading_int(text: &str) -> Option<i64> {
+    let text = text.trim_start();
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    let end = digits
+        .bytes()
+        .position(|b| !b.is_ascii_digit())
+        .unwrap_or(digits.len());
+    if end == 0 {
+        return None;
+    }
+    // Longer than any 32-bit value: saturate instead of failing.
+    let value = digits[..end.min(18)].parse::<i64>().ok()?;
+    Some(if negative { -value } else { value })
+}
 
 /// A small INI file: sections of `key=value` lines. Names compare
 /// without case, as Windows reads them; the file keeps its order and
@@ -139,11 +181,54 @@ impl World {
             .map(str::to_string)
     }
 
+    /// Reads the four volumes the last run left in the settings file
+    /// (`CBSoundMgr::Initialize`): `SFXVolume`, `SpeechVolume`,
+    /// `MusicVolume` and `MasterVolume` of the `Audio` section, each
+    /// keeping its current value when absent. Called when the game
+    /// starts.
+    pub(crate) fn init_volumes(&mut self) {
+        let path = self.save_directory().join(SETTINGS_INI);
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let ini = Ini::parse(&text);
+        let read = |key: &str| ini.get(AUDIO_SECTION, key).and_then(leading_int);
+        for (kind, key) in VOLUME_KEYS {
+            if let Some(volume) = read(key) {
+                self.sounds.audio.set_raw_volume(kind, volume as i32);
+            }
+        }
+        if let Some(volume) = read(MASTER_VOLUME_KEY) {
+            // The high half, which the engine reads the percentage from.
+            let wave = volume as u32;
+            self.sounds.audio.set_raw_master_volume((wave >> 16) as u16);
+        }
+    }
+
+    /// Writes the four volumes to the settings file, for the next run
+    /// (`CBSoundMgr::~CBSoundMgr`); whether the file could be written.
+    /// The front-end calls it when the game ends.
+    pub fn save_volume_settings(&mut self) -> bool {
+        let mut ini = self.read_ini();
+        let master = u32::from(self.sounds.audio.raw_master_volume());
+        let wave = (master << 16 | master) as i32;
+        ini.set(AUDIO_SECTION, MASTER_VOLUME_KEY, &wave.to_string());
+        for (kind, key) in VOLUME_KEYS {
+            let volume = self.sounds.audio.raw_volume(kind);
+            ini.set(AUDIO_SECTION, key, &volume.to_string());
+        }
+        self.write_ini(&ini)
+    }
+
     /// Stores a private setting (`RegWriteString`, `RegWriteNumber`);
     /// whether the file could be written.
     pub fn write_setting(&mut self, key: &str, value: &str) -> bool {
         let mut ini = self.read_ini();
         ini.set(PRIVATE_SECTION, key, value);
+        self.write_ini(&ini)
+    }
+
+    fn write_ini(&mut self, ini: &Ini) -> bool {
         let path = self.settings_ini_path();
         let written = path
             .parent()
@@ -162,6 +247,18 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numbers_are_read_as_the_original_reads_them() {
+        assert_eq!(leading_int("200"), Some(200));
+        assert_eq!(leading_int(" -1"), Some(-1));
+        assert_eq!(leading_int("+7"), Some(7));
+        assert_eq!(leading_int("12abc"), Some(12));
+        assert_eq!(leading_int("abc"), None);
+        assert_eq!(leading_int(""), None);
+        assert_eq!(leading_int("-"), None);
+        assert!(leading_int("99999999999999999999999999").is_some());
+    }
 
     #[test]
     fn ini_round_trips_and_compares_names_without_case() {

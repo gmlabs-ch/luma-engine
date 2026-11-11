@@ -6552,3 +6552,97 @@ fn a_frozen_game_holds_sounds_the_original_way() {
     assert!(runtime.world.music_volume(0) < fading);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// The four volumes are the player's settings: written when the game
+/// ends and read back when it starts (`CBSoundMgr::~CBSoundMgr`,
+/// `Initialize`), with the original's keys and units.
+#[test]
+fn volumes_are_kept_between_runs() {
+    use luma_audio::SoundType;
+    let dir = game();
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let audio = runtime.world.audio();
+    assert_eq!(audio.volume(SoundType::Sfx), 100);
+    assert_eq!(audio.master_volume(), 100);
+    let game_id = runtime.world.game_id();
+    for (name, percent) in [
+        ("SetGlobalSFXVolume", 30),
+        ("SetGlobalSpeechVolume", 55),
+        ("SetGlobalMusicVolume", 0),
+        ("SetGlobalMasterVolume", 80),
+    ] {
+        call_native(&mut runtime, game_id, name, &[Value::Int(percent)]);
+    }
+    assert!(runtime.world.write_setting("Lang", "fr"));
+    assert!(runtime.world.save_volume_settings());
+    let path = runtime.world.settings_ini_path();
+    let text = std::fs::read_to_string(&path).unwrap();
+    for line in [
+        "[Audio]",
+        "SFXVolume=60",
+        "SpeechVolume=110",
+        "MusicVolume=0",
+        // 655 x 80 in both halves of the wave volume, as a signed number.
+        "MasterVolume=-860828496",
+        "Lang=fr",
+    ] {
+        assert!(text.lines().any(|l| l == line), "{line} in {text}");
+    }
+    drop(runtime);
+    // The next run starts with them.
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    runtime.start();
+    let audio = runtime.world.audio();
+    assert_eq!(audio.volume(SoundType::Sfx), 30);
+    assert_eq!(audio.volume(SoundType::Speech), 55);
+    assert_eq!(audio.volume(SoundType::Music), 0);
+    assert_eq!(audio.master_volume(), 80);
+    // A key that is absent or not a number keeps the default.
+    std::fs::write(&path, "[Audio]\nSFXVolume=abc\nMusicVolume=150 \n").unwrap();
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    runtime.start();
+    let audio = runtime.world.audio();
+    assert_eq!(audio.volume(SoundType::Sfx), 100);
+    assert_eq!(audio.volume(SoundType::Speech), 100);
+    assert_eq!(audio.volume(SoundType::Music), 75);
+    assert_eq!(audio.master_volume(), 100);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `SOUND_VOLUME` in an actor file is the volume of the actor's sounds
+/// (`CAdActor::LoadBuffer`, `m_SFXVolume`).
+#[test]
+fn an_actor_file_sets_the_volume_of_its_sounds() {
+    let dir = game();
+    std::fs::create_dir_all(dir.join("actors")).unwrap();
+    std::fs::write(
+        dir.join("actors").join("quiet.actor"),
+        b"ACTOR { NAME=\"quiet\" SOUND_VOLUME=40 }",
+    )
+    .unwrap();
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let quiet = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\quiet.actor", false)
+        .expect("the actor");
+    assert_eq!(
+        call_native(&mut runtime, quiet, "GetSoundVolume", &[]),
+        Value::Int(40)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            quiet,
+            "PlaySound",
+            &[Value::from("audio\\beep.wav")]
+        ),
+        Value::Bool(true)
+    );
+    let sound = runtime.world.sfx_of(quiet).unwrap().id;
+    assert_eq!(runtime.world.audio().private_volume(sound), 40);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

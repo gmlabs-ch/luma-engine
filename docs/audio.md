@@ -64,6 +64,19 @@ scripts read the values back:
   volume. It multiplies the mix linearly, on the main mixer track (the
   original set the system's wave volume and put it back at exit).
 
+The four volumes are the player's settings: they are written to the
+game's settings file when the game ends and read back when it starts
+(`CBSoundMgr::~CBSoundMgr`, `Initialize`), in the `[Audio]` section of
+`settings.ini` (see [saving.md](saving.md#private-settings)), with the
+original's key names and units: `SFXVolume`, `SpeechVolume`,
+`MusicVolume` (200 is 100 %) and `MasterVolume` (a wave device volume:
+the same 16-bit value in both halves of a 32-bit number, written signed,
+so full volume is -1). A key that is absent keeps the default. The
+player writes them when its window closes; a headless run does not. The
+original only reads and writes them when it has a sound device; Luma
+does it with or without one, as its silent backend stands for a device
+(see [Output](#output)).
+
 ## Panning
 
 An object's sound follows the object across the screen when its
