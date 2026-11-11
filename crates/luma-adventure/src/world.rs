@@ -2832,36 +2832,68 @@ impl Natives for World {
         }
     }
 
+    /// `ScToString` of the object's class: the text of the most derived
+    /// class that overrides it in the original.
     fn to_string(&self, id: NativeId) -> String {
-        match self.objects.get(id).map(|n| &n.kind) {
-            Some(Kind::Game) => "[game]".to_string(),
-            Some(Kind::Class(object)) => object.to_string(self),
-            Some(Kind::Entity(_) | Kind::Region { .. } | Kind::Layer(_) | Kind::Scene) => {
-                format!("[{}]", self.describe(id))
-            }
-            Some(Kind::Actor) => "[actor object]".to_string(),
-            Some(Kind::Actor3D) => "[actor3dx object]".to_string(),
-            Some(Kind::Attachment3D(_)) => "[attachment object]".to_string(),
-            Some(Kind::Control | Kind::Item) => format!("[{}]", self.describe(id)),
-            Some(Kind::Sprite(_) | Kind::HoverSprite(_) | Kind::ControlImage { .. }) => {
-                "[sprite]".to_string()
-            }
-            Some(Kind::Frame { .. }) => "[frame]".to_string(),
-            Some(Kind::SubFrame { .. }) => "[subframe]".to_string(),
-            Some(Kind::Object) => "[object]".to_string(),
-            Some(Kind::Emitter(_)) => "[particle emitter]".to_string(),
-            Some(_) => "[native object]".to_string(),
-            None => "[invalid object]".to_string(),
-        }
+        let text = match self.objects.get(id).map(|n| &n.kind) {
+            Some(Kind::Class(object)) => return object.to_string(self),
+            // `CBGame`.
+            Some(Kind::Game) => "[game object]",
+            // `CBKeyboardState`.
+            Some(Kind::Keyboard) => "[keyboard state]",
+            // `CAdScene`, `CAdLayer`.
+            Some(Kind::Scene) => "[scene object]",
+            Some(Kind::Layer(_)) => "[layer]",
+            // `CAdEntity`, also the entity inside an entity container.
+            Some(Kind::Entity(_)) => "[entity object]",
+            // A region of a layer is a `CAdRegion`, the clickable region
+            // of an entity a plain `CBRegion`.
+            Some(Kind::Region { .. }) => "[ad region]",
+            Some(Kind::EntityRegion(_)) => "[region]",
+            Some(Kind::Actor) => "[actor object]",
+            Some(Kind::Actor3D) => "[actor3dx object]",
+            Some(Kind::Attachment3D(_)) => "[attachment object]",
+            // `CUIWindow`, `CUIButton`, `CUIEdit`, `CUIText`, `CUIEntity`.
+            Some(Kind::Control) => match self.control(id).map(|c| &c.kind) {
+                Some(crate::ui::ControlKind::Window(_)) => "[window]",
+                Some(crate::ui::ControlKind::Button(_)) => "[button]",
+                Some(crate::ui::ControlKind::Edit(_)) => "[edit]",
+                Some(crate::ui::ControlKind::Static(_)) => "[static]",
+                Some(crate::ui::ControlKind::EntityContainer(_)) => "[entity container]",
+                None => "[ui_object]",
+            },
+            Some(Kind::Item) => "[item]",
+            Some(
+                Kind::Sprite(_)
+                | Kind::HoverSprite(_)
+                | Kind::CursorSprite { .. }
+                | Kind::ControlImage { .. },
+            ) => "[sprite]",
+            Some(Kind::Frame { .. }) => "[frame]",
+            Some(Kind::SubFrame { .. }) => "[subframe]",
+            Some(Kind::Emitter(_)) => "[particle emitter]",
+            // Classes that keep `CBObject`'s text: `new Object()`, the
+            // response box, the faders and the waypoint groups.
+            Some(
+                Kind::Object
+                | Kind::ResponseBox
+                | Kind::Fader
+                | Kind::SceneFader
+                | Kind::WaypointGroup(_),
+            ) => "[object]",
+            // `CSXMath` keeps the base class's text.
+            Some(Kind::Math | Kind::Inert(_)) => "[native object]",
+            None => "[invalid object]",
+        };
+        text.to_string()
     }
 
-    fn to_bool(&self, id: NativeId) -> bool {
-        match self.objects.get(id).map(|n| &n.kind) {
-            // The library classes keep the base class's `false`.
-            Some(Kind::Class(_)) => false,
-            Some(_) => true,
-            None => false,
-        }
+    /// `CBScriptable::ScToBool`, which no class of the original
+    /// overrides: every native object is false in a condition, so
+    /// `if(obj)` does not run and `!obj` is true for a live object
+    /// (scripts test `obj != null`).
+    fn to_bool(&self, _id: NativeId) -> bool {
+        false
     }
 
     fn compare(&self, a: NativeId, b: NativeId) -> Ordering {

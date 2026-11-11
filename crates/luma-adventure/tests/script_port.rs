@@ -150,3 +150,107 @@ result.floor = Math.Floor(2.5);
     assert_eq!(float(&runtime, "floor"), 2.0);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+const ROOM: &[u8] = b"SCENE {
+  NAME=\"Room\"
+  WAYPOINTS { NAME=\"wp\" POINT {1,1} }
+  LAYER {
+    NAME=\"main\" MAIN=TRUE WIDTH=200 HEIGHT=100
+    REGION { NAME=\"reg\" POINT {0,0} POINT {10,0} POINT {10,10} }
+    ENTITY { NAME=\"prop\" X=8 Y=12 }
+  }
+}";
+
+const WINDOW: &[u8] = b"WINDOW { NAME=\"w\" X=0 Y=0 WIDTH=60 HEIGHT=40
+  BUTTON { NAME=\"b\" X=1 Y=1 WIDTH=10 HEIGHT=10 }
+  EDIT { NAME=\"e\" X=1 Y=12 WIDTH=50 HEIGHT=10 }
+  STATIC { NAME=\"s\" X=1 Y=24 WIDTH=50 HEIGHT=10 }
+  ENTITY_CONTAINER { NAME=\"c\" X=1 Y=30 WIDTH=5 HEIGHT=5 }
+}";
+
+#[test]
+fn natives_are_false_and_print_their_class_text() {
+    let (dir, mut runtime, mut log) = start_with(
+        b"GAME { NAME=\"Port\" SCRIPT=\"game.script\" } AD_GAME { ITEMS=\"items.items\" }",
+        r#"
+global result = new Object();
+var o = new Object();
+result.ifObject = false;
+if (o) result.ifObject = true;
+result.notObject = !o;
+result.toBool = ToBool(Game);
+result.notNull = (o != null);
+result.andObject = (o && true);
+result.game = "" + Game;
+result.keyboard = "" + Game.Keyboard;
+result.math = ToString(Math);
+result.directory = ToString(Directory);
+result.object = "" + o;
+var w = Game.LoadWindow("w.window");
+result.window = "" + w;
+result.button = "" + w.GetControl("b");
+result.edit = "" + w.GetControl("e");
+result.static = "" + w.GetControl("s");
+result.container = "" + w.GetControl("c");
+result.item = "" + Game.QueryItem("key");
+Game.ChangeScene("scenes/room.scene");
+
+on "Check"
+{
+  var scene = Game.Scene;
+  result.scene = "" + scene;
+  var layer = scene.GetLayer("main");
+  result.layer = "" + layer;
+  result.region = "" + layer.GetNode("reg");
+  var e = layer.GetNode("prop");
+  result.entity = "" + e;
+  e.CreateRegion();
+  result.entityRegion = "" + e.Region;
+  result.waypoints = "" + scene.GetWaypointGroup("wp");
+  var a = new Actor();
+  result.actor = "" + a;
+}
+"#,
+        &[
+            File::Raw("scenes\\room.scene", ROOM),
+            File::Raw("w.window", WINDOW),
+            File::Raw("items.items", b"ITEM { NAME=\"key\" }"),
+        ],
+    );
+    log.extend(runtime.tick(16));
+    let game = runtime.world.game_id();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Check", false);
+    log.extend(runtime.tick(16));
+    no_errors(&log);
+    // `CBScriptable::ScToBool` is false for every class.
+    assert_eq!(result(&runtime, "ifObject"), Value::Bool(false));
+    assert_eq!(result(&runtime, "notObject"), Value::Bool(true));
+    assert_eq!(result(&runtime, "toBool"), Value::Bool(false));
+    assert_eq!(result(&runtime, "andObject"), Value::Bool(false));
+    assert_eq!(result(&runtime, "notNull"), Value::Bool(true));
+    for (key, text) in [
+        ("game", "[game object]"),
+        ("keyboard", "[keyboard state]"),
+        ("math", "[native object]"),
+        ("directory", "[native object]"),
+        ("object", "[object]"),
+        ("window", "[window]"),
+        ("button", "[button]"),
+        ("edit", "[edit]"),
+        ("static", "[static]"),
+        ("container", "[entity container]"),
+        ("item", "[item]"),
+        ("scene", "[scene object]"),
+        ("layer", "[layer]"),
+        ("region", "[ad region]"),
+        ("entity", "[entity object]"),
+        ("entityRegion", "[region]"),
+        ("waypoints", "[object]"),
+        ("actor", "[actor object]"),
+    ] {
+        assert_eq!(result(&runtime, key), Value::from(text), "{key}: {log:?}");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -157,6 +157,31 @@ property reads, writes and method calls for them. Scripts hold these
 objects by handle; a handle to an object of a previous scene is simply
 invalid, so `Game.ValidObject` says no and its properties read as `null`.
 
+Every native object converts to `false`, `0` and `0.0`
+(`CBScriptable::ScToBool`, `ScToInt`, `ScToFloat`, which no class of the
+original overrides): `if (obj)` does not run and `!obj` is true for a
+live object, so scripts test `obj != null`, and `ToBool(obj)` is false.
+Its string form (`"" + obj`, `ToString(obj)`) is the text of its class
+in the original (`ScToString`):
+
+| Object | Text |
+|--------|------|
+| `Game` | `[game object]` |
+| `Game.Keyboard` | `[keyboard state]` |
+| `Scene` | `[scene object]` |
+| a layer | `[layer]` |
+| an entity (also the one inside an entity container) | `[entity object]` |
+| a region of a layer | `[ad region]` |
+| the region of an entity | `[region]` |
+| an actor, a 3D actor, an attachment of a 3D actor | `[actor object]`, `[actor3dx object]`, `[attachment object]` |
+| an inventory item | `[item]` |
+| a window, a button, an editor, a static, an entity container | `[window]`, `[button]`, `[edit]`, `[static]`, `[entity container]` |
+| a sprite, a frame, a sub-frame | `[sprite]`, `[frame]`, `[subframe]` |
+| a particle emitter | `[particle emitter]` |
+| `new Object()`, a waypoint group, a fader, the response box | `[object]` (`CBObject`) |
+| `Math`, `Directory` | `[native object]` (the base class) |
+| a handle whose object is gone and that no variable was told about | `[invalid object]` (Luma only; the original would read freed memory) |
+
 | Object | Properties | Methods |
 |--------|------------|---------|
 | `Game` (the engine global) | `Name`, `Caption`, `ScreenWidth`, `ScreenHeight`, `Interactive`, `MainObject`, `ActiveObject`, `MouseX`, `MouseY`, `Scene`, `Keyboard`, `PrevScene`, `PrevSceneFilename`, `ChangingScene`, `CurrentTime`, `Subtitles`, `SubtitlesSpeed`, `TalkSkipButton`... | `ChangeScene`, `ExpandString`, `LoadStringTable`, `LoadItems`, `CreateItem`, `DeleteItem`, `LoadActor`, `CreateEntity`, `LoadEntity` (entities of the game, kept across scenes; see [formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments)), `ValidObject`, `UnloadObject`, `QuitGame`, `FileExists`, `Msg`, `LOG` |

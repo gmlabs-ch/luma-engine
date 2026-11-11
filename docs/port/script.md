@@ -79,7 +79,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBScriptable::ScToMemBuffer` | n/a | raw memory address, only used to pass a buffer to a DLL function |
 | `CBScriptable::ScToInt` | done | `value.rs` `Natives::to_int` default 0; `World` does not override it |
 | `CBScriptable::ScToFloat` | done | `value.rs` `Natives::to_float` default 0.0; `World` does not override it |
-| `CBScriptable::ScToBool` | partial | in the original no class overrides it: every native converts to false, so `if(obj)` is false and `!obj` is true for a live object (scripts must write `obj != null`), and `ToBool(obj)` is false. `world.rs` `Natives::to_bool` returns true for every native except the library classes (`String`, `Array`...), so those tests take the other branch in Luma |
+| `CBScriptable::ScToBool` | done | `luma-adventure/src/world.rs` `Natives::to_bool`: false for every native, as no class of the original overrides it; `if(obj)` does not run, `!obj` is true for a live object and `ToBool(obj)` is false |
 | `CBScriptable::ScSetString` | done | `value.rs` `Natives::assign_scalar` default: ignored |
 | `CBScriptable::ScSetInt` | done | `value.rs` `Natives::assign_scalar` default: ignored |
 | `CBScriptable::ScSetFloat` | done | `value.rs` `Natives::assign_scalar` default: ignored |
