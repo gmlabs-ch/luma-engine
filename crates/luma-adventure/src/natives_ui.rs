@@ -534,7 +534,8 @@ impl World {
         };
         let target = match how {
             "MoveToBottom" => Some(0),
-            "MoveToTop" => Some(siblings.len() - 1),
+            // After the last one: the control ends on top.
+            "MoveToTop" => Some(siblings.len()),
             _ => {
                 let found = match other {
                     Value::Native(n) => siblings.iter().position(|s| s == n),

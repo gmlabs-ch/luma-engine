@@ -148,6 +148,9 @@ pub struct World {
     /// each is tried and reported once.
     failed_fonts: std::collections::HashSet<String>,
     pub(crate) mouse: Mouse,
+    /// Where the front-end last reported the pointer, in game pixels,
+    /// before the mouse lock; it may lie outside the screen.
+    pub(crate) pointer: (i32, i32),
     pub(crate) keyboard: Keyboard,
     pub(crate) active_object: Option<NativeId>,
     pub(crate) selected_item: Option<NativeId>,
@@ -321,6 +324,7 @@ impl World {
             sentences: Vec::new(),
             failed_fonts: std::collections::HashSet::new(),
             mouse: Mouse::default(),
+            pointer: (0, 0),
             keyboard: Keyboard::default(),
             active_object: None,
             selected_item: None,
@@ -504,6 +508,24 @@ impl World {
                 c.window()
                     .is_some_and(|w| w.mode != crate::ui::WindowMode::Normal)
             })
+    }
+
+    /// Whether the game runs (`m_State == GAME_RUNNING`): it is not
+    /// frozen by a system-exclusive window or a video (`GAME_FROZEN`)
+    /// and the response box does not wait for a pick
+    /// (`GAME_SEMI_FROZEN`).
+    pub fn is_running(&self) -> bool {
+        !self.is_frozen() && !self.responses_visible()
+    }
+
+    /// Whether the pointer is inside the game's frame
+    /// (`CAdGame::ValidMouse`, `CBRenderer::PointInViewport`): the
+    /// position the front-end last reported, before the mouse lock, is
+    /// within the screen, edges included. A button pressed outside (in
+    /// the bars around a letterboxed frame) is ignored.
+    pub fn valid_mouse(&self) -> bool {
+        let (x, y) = self.pointer;
+        x >= 0 && y >= 0 && x <= self.settings.width as i32 && y <= self.settings.height as i32
     }
 
     /// Whether an object takes mouse events while the game is not
@@ -3227,6 +3249,7 @@ impl Runtime {
             }
         }
         self.world.advance_time(dt);
+        self.world.reset_focused_window();
         if let Some((path, fade_in)) = self.world.scheduled_scene.take() {
             match self.world.load_scene(&mut self.engine, &path) {
                 Ok(()) => {
@@ -3323,13 +3346,14 @@ impl Runtime {
     }
 
     /// Raises a mouse event (`CAdGame::OnMouseLeftDown` and the like):
-    /// on the game first; when its scripts do not handle it, on the
-    /// active object, else, for the events the adventure game dispatches
-    /// itself (`scene_too`), on the scene when the mouse is over it.
-    /// While the game is frozen, only the active object gets it.
+    /// on the game first, while the game runs (`GAME_RUNNING`: not
+    /// frozen, no response box waiting); when its scripts do not handle
+    /// it, on the active object, else, for the events the adventure
+    /// game dispatches itself (`scene_too`) and while the game runs, on
+    /// the scene when the mouse is over it.
     fn mouse_event(&mut self, event: &str, scene_too: bool) {
         let game = self.world.game_id;
-        let running = !self.world.is_frozen();
+        let running = self.world.is_running();
         if running && self.engine.apply_event(&mut self.world, game, event, false) {
             return;
         }
@@ -3361,46 +3385,77 @@ impl Runtime {
         double
     }
 
-    /// The left button goes down: a click, or a double click when it
-    /// follows another within 400 ms and 4 pixels. While the game is not
-    /// interactive, the click only skips the sentences.
+    /// The mouse moved since the last frame: a click goes to what is
+    /// under it now, not to what was under it then.
+    fn refresh_active_object(&mut self) {
+        if std::mem::take(&mut self.input.moved) {
+            self.world.collect_hits();
+            self.world.update_active_object();
+        }
+    }
+
+    /// The left button goes down (`CAdGame::OnMouseLeftDown`), or, when
+    /// the press follows another within 400 ms and 4 pixels, is the
+    /// second of a double click ([`Runtime::mouse_left_double_click`],
+    /// which replaces the click as the system's message does).
+    ///
+    /// Nothing happens when the pointer is outside the game's frame
+    /// (`ValidMouse`). While the game runs and is not interactive, the
+    /// click only skips the sentences (`TALK_SKIP_BUTTON`). A playing
+    /// video the left button skips is stopped. Otherwise the active
+    /// object gets the click (`HandleMouse`: a control takes the focus,
+    /// a window starts dragging), `LeftClick` is raised, and the active
+    /// object is captured with the button held.
     pub fn mouse_left_down(&mut self) {
+        self.world.key_held(crate::input::VK_LBUTTON);
+        if self.note_click(false) {
+            // The first click's release may still wait for a frame to
+            // see the button held: it stays due.
+            self.mouse_left_double_click();
+            return;
+        }
         if std::mem::take(&mut self.input.left_release_due) {
             // A second press before the frame: the first click ends.
             self.release_left();
         }
-        self.world.key_held(crate::input::VK_LBUTTON);
-        let double = self.note_click(false);
-        self.world.mouse.left_down = true;
-        if self.world.is_video_playing() {
-            if matches!(
-                self.world.video_skip_button,
-                TalkSkipButton::Left | TalkSkipButton::Both
-            ) {
-                self.world.stop_video(&mut self.engine);
-            }
+        if !self.world.valid_mouse() {
             return;
         }
-        // A click while the game is not interactive only skips a
-        // sentence, unless a window or the response box holds the game
-        // (`GAME_SEMI_FROZEN`), where the windows still take clicks.
-        if !self.world.interactive && !self.world.semi_frozen() {
+        if self.world.is_running() && !self.world.interactive {
             self.world.click_while_busy(false);
             return;
         }
-        if std::mem::take(&mut self.input.moved) {
-            // The mouse moved since the last frame: the click goes to
-            // what is under it now, not to what was under it then.
-            self.world.collect_hits();
-            self.world.update_active_object();
+        if self.world.is_video_playing()
+            && matches!(
+                self.world.video_skip_button,
+                TalkSkipButton::Left | TalkSkipButton::Both
+            )
+        {
+            self.world.stop_video(&mut self.engine);
+            return;
         }
+        self.refresh_active_object();
         self.input.left_pressed = true;
         self.world.ui_mouse_down();
-        if double {
-            self.mouse_event("LeftDoubleClick", true);
-        } else {
-            self.mouse_event("LeftClick", true);
+        self.mouse_event("LeftClick", true);
+        self.world.mouse.left_down = true;
+    }
+
+    /// The second press of a left double click (`CAdGame::
+    /// OnMouseLeftDblClick`): `LeftDoubleClick` on the game, else the
+    /// active object, else the scene. It is not a click: the button is
+    /// not held for the windows' buttons, nothing is captured or
+    /// focused, no `LeftClick` is raised; a video goes on and, while
+    /// the game runs and is not interactive, nothing happens.
+    fn mouse_left_double_click(&mut self) {
+        if !self.world.valid_mouse()
+            || self.world.is_video_playing()
+            || (self.world.is_running() && !self.world.interactive)
+        {
+            return;
         }
+        self.refresh_active_object();
+        self.mouse_event("LeftDoubleClick", true);
     }
 
     /// The left button goes up (`LeftRelease`). When no frame has seen
@@ -3416,57 +3471,83 @@ impl Runtime {
         self.release_left();
     }
 
+    /// `CAdGame::OnMouseLeftUp`: nothing while a video plays; else the
+    /// windows see the release, the capture is dropped and
+    /// `LeftRelease` is raised.
     fn release_left(&mut self) {
-        self.world.mouse.left_down = false;
+        if self.world.is_video_playing() {
+            return;
+        }
         self.world.ui_mouse_up();
+        self.world.mouse.left_down = false;
         self.mouse_event("LeftRelease", true);
     }
 
-    /// The right button goes down: `RightClick`, or `RightDoubleClick`
-    /// when it follows another right click within 400 ms and 4 pixels
-    /// (`CBGame::OnMouseRightDblClick`, which goes to the game then the
-    /// active object, not to the scene). While the game is not
-    /// interactive, a click only skips the sentences and a double click
-    /// does nothing.
+    /// The right button goes down (`CAdGame::OnMouseRightDown`):
+    /// `RightClick` on the game, else the active object, else the
+    /// scene; or `RightDoubleClick` when it follows another right click
+    /// within 400 ms and 4 pixels (`CBGame::OnMouseRightDblClick`,
+    /// which goes to the game then the active object, not to the scene,
+    /// and does nothing during a video or while the game runs and is
+    /// not interactive).
+    ///
+    /// A click does nothing when the pointer is outside the game's
+    /// frame; while the game runs and is not interactive it only skips
+    /// the sentences; a playing video the right button skips is
+    /// stopped; and nothing is raised while the response box waits.
     pub fn mouse_right_down(&mut self) {
         self.world.key_held(crate::input::VK_RBUTTON);
-        let double = self.note_click(true);
-        if self.world.is_video_playing() {
-            if matches!(
+        let running_busy = self.world.is_running() && !self.world.interactive;
+        if self.note_click(true) {
+            if !self.world.is_video_playing() && !running_busy {
+                self.refresh_active_object();
+                self.mouse_event("RightDoubleClick", false);
+            }
+            return;
+        }
+        if !self.world.valid_mouse() {
+            return;
+        }
+        if running_busy {
+            self.world.click_while_busy(true);
+            return;
+        }
+        if self.world.is_video_playing()
+            && matches!(
                 self.world.video_skip_button,
                 TalkSkipButton::Right | TalkSkipButton::Both
-            ) {
-                self.world.stop_video(&mut self.engine);
-            }
+            )
+        {
+            self.world.stop_video(&mut self.engine);
             return;
         }
-        if !self.world.interactive {
-            if !double {
-                self.world.click_while_busy(true);
-            }
+        if self.world.responses_visible() {
             return;
         }
-        if double {
-            self.mouse_event("RightDoubleClick", false);
-        } else {
-            self.mouse_event("RightClick", true);
-        }
+        self.refresh_active_object();
+        self.mouse_event("RightClick", true);
     }
 
-    /// The right button goes up (`RightRelease`).
+    /// The right button goes up (`CAdGame::OnMouseRightUp`):
+    /// `RightRelease`, unless a video plays.
     pub fn mouse_right_up(&mut self) {
         self.world.key_up(crate::input::VK_RBUTTON);
+        if self.world.is_video_playing() {
+            return;
+        }
         self.mouse_event("RightRelease", true);
     }
 
     /// The middle button goes down (`MiddleClick`, `CBGame::
     /// OnMouseMiddleDown`): to the game, else to the active object;
-    /// nothing while a video plays or the game is not interactive.
+    /// nothing while a video plays or while the game runs and is not
+    /// interactive.
     pub fn mouse_middle_down(&mut self) {
         self.world.key_held(crate::input::VK_MBUTTON);
-        if self.world.is_video_playing() || !self.world.interactive {
+        if self.world.is_video_playing() || (self.world.is_running() && !self.world.interactive) {
             return;
         }
+        self.refresh_active_object();
         self.mouse_event("MiddleClick", false);
     }
 
@@ -3482,23 +3563,34 @@ impl Runtime {
     /// The wheel turns (`CBGame::HandleMouseWheel`): `MouseWheelUp` for a
     /// positive `delta`, `MouseWheelDown` for a negative one, raised on
     /// the focused window when its scripts handle that event, else on
-    /// the game.
+    /// the game. As in the original, a focused window that handles
+    /// `MouseWheelUp` but not `MouseWheelDown` gets `MouseWheelUp` for
+    /// either direction.
     pub fn mouse_wheel(&mut self, delta: i32) {
         if delta == 0 {
             return;
+        }
+        if let Some(window) = self.world.focused_window() {
+            // The window's focused control comes first in the original
+            // (`CUIWindow::HandleMouseWheel`); no control uses the wheel.
+            let event = if delta < 0 && self.engine.can_handle_event(window, "MouseWheelDown") {
+                Some("MouseWheelDown")
+            } else if self.engine.can_handle_event(window, "MouseWheelUp") {
+                Some("MouseWheelUp")
+            } else {
+                None
+            };
+            if let Some(event) = event {
+                self.engine
+                    .apply_event(&mut self.world, window, event, false);
+                return;
+            }
         }
         let event = if delta < 0 {
             "MouseWheelDown"
         } else {
             "MouseWheelUp"
         };
-        if let Some(window) = self.world.focused_window() {
-            if self.engine.can_handle_event(window, event) {
-                self.engine
-                    .apply_event(&mut self.world, window, event, false);
-                return;
-            }
-        }
         let game = self.world.game_id;
         self.engine.apply_event(&mut self.world, game, event, false);
     }

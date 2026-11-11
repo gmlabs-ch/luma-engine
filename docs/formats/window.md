@@ -251,7 +251,9 @@ window closes (`Close`, or the `close` button of a menu).
 Keys go to the focused window first: `Tab` moves the focus among its
 focusable controls, else the focused control takes the key (an editor),
 else the window's `Keypress` handler, else the game's. The mouse wheel
-goes to the focused window too.
+goes to the focused window too. The focused window is the topmost
+visible one; a left click on a control focuses it and raises its
+window (see [game-loop.md](../game-loop.md#the-focused-window)).
 
 A window can be dragged by its `DRAG_RECT` while the left button is held
 there.

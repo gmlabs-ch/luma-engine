@@ -34,6 +34,12 @@ const GAME_SCRIPT: &str = r#"
 global result = new Object();
 result.presses = 0;
 result.edits = 0;
+result.clicks = 0;
+result.doubles = 0;
+result.releases = 0;
+result.rights = 0;
+result.middles = 0;
+result.fired = 0;
 global win = Game.LoadWindow("w.window");
 win.AttachScript("w.script");
 win.Visible = true;
@@ -50,6 +56,48 @@ on "Keypress"
   result.shift = kb.IsShift;
   result.text = ToString(kb);
 }
+
+on "OpenNote"
+{
+  global note = Game.LoadWindow("note.window");
+  note.Visible = true;
+}
+
+on "LeftClick"
+{
+  result.clicks = result.clicks + 1;
+}
+
+on "LeftDoubleClick"
+{
+  result.doubles = result.doubles + 1;
+}
+
+on "LeftRelease"
+{
+  result.releases = result.releases + 1;
+}
+
+on "RightClick"
+{
+  result.rights = result.rights + 1;
+}
+
+on "MiddleClick"
+{
+  result.middles = result.middles + 1;
+}
+
+on "MouseWheelDown"
+{
+  result.wheel = "game down";
+}
+
+on "Reorder"
+{
+  var name = win.GetWidget("name");
+  result.moved = name.MoveToTop();
+}
 "#;
 
 /// Counts the editor's notifications.
@@ -60,11 +108,27 @@ on "name"
 {
   result.edits = result.edits + 1;
 }
+
+on "ok"
+{
+  result.fired = result.fired + 1;
+}
+
+on "MouseWheelUp"
+{
+  result.wheel = "window up";
+}
 "#;
 
-const WINDOW: &[u8] = b"WINDOW { NAME=\"w\" X=0 Y=0 WIDTH=60 HEIGHT=30
-  EDIT { NAME=\"name\" X=1 Y=1 WIDTH=50 HEIGHT=10 PARENT_NOTIFY=TRUE }
-  EDIT { NAME=\"code\" X=1 Y=12 WIDTH=50 HEIGHT=10 MAX_LENGTH=4 }
+const WINDOW: &[u8] = b"WINDOW { NAME=\"w\" X=0 Y=0 WIDTH=40 HEIGHT=30
+  EDIT { NAME=\"name\" X=1 Y=1 WIDTH=30 HEIGHT=8 PARENT_NOTIFY=TRUE }
+  EDIT { NAME=\"code\" X=1 Y=10 WIDTH=30 HEIGHT=8 MAX_LENGTH=4 }
+  BUTTON { NAME=\"ok\" X=1 Y=20 WIDTH=10 HEIGHT=8 PARENT_NOTIFY=TRUE }
+}";
+
+/// A second window, right of the first.
+const NOTE_WINDOW: &[u8] = b"WINDOW { NAME=\"note\" X=44 Y=0 WIDTH=20 HEIGHT=16
+  EDIT { NAME=\"text\" X=1 Y=1 WIDTH=18 HEIGHT=8 }
 }";
 
 fn compile(source: &str, name: &str) -> Vec<u8> {
@@ -87,6 +151,7 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("game.script", compile(GAME_SCRIPT, "game.script"));
     pkg.add_file("w.script", compile(WINDOW_SCRIPT, "w.script"));
     pkg.add_file("w.window", WINDOW.to_vec());
+    pkg.add_file("note.window", NOTE_WINDOW.to_vec());
     std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
     dir
 }
@@ -332,5 +397,204 @@ fn is_key_down_answers_for_the_mouse_buttons() {
     runtime.mouse_right_up();
     runtime.mouse_middle_up();
     assert!(!down(&runtime, 1) && !down(&runtime, 2) && !down(&runtime, 4));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Moves the mouse, lets a frame find what is under it, then presses
+/// and releases the left button a frame apart.
+fn click(runtime: &mut Runtime, x: i32, y: i32) {
+    runtime.mouse_move(x, y);
+    runtime.tick(16);
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+}
+
+/// Lets the double-click delay pass.
+fn wait(runtime: &mut Runtime) {
+    for _ in 0..30 {
+        runtime.tick(16);
+    }
+}
+
+#[test]
+fn a_click_gives_the_focus_and_the_topmost_window_takes_the_keys() {
+    let (mut runtime, dir, name, code) = start();
+    let window = runtime.world.window_ids()[0];
+    // Clicking the second editor lets the player type in it.
+    click(&mut runtime, 5, 12);
+    assert!(runtime.world.is_focused(code));
+    assert!(!runtime.world.is_focused(name));
+    type_text(&mut runtime, "42");
+    assert_eq!(text(&runtime, code), "42");
+    assert_eq!(text(&runtime, name), "");
+    // A window shown above the others takes the keys from the next
+    // frame, without a click: each frame focuses the topmost visible
+    // window.
+    let game = runtime.world.game_id();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "OpenNote", false);
+    runtime.tick(16);
+    runtime.tick(16);
+    let note = runtime.world.window_ids()[1];
+    assert_eq!(runtime.world.focused_window(), Some(note));
+    // Clicking the first window raises it: it is now the last of the
+    // list, so it keeps the keys on the following frames.
+    wait(&mut runtime);
+    click(&mut runtime, 20, 25);
+    assert_eq!(runtime.world.window_ids(), [note, window]);
+    runtime.tick(16);
+    assert_eq!(runtime.world.focused_window(), Some(window));
+    type_text(&mut runtime, "7");
+    assert_eq!(text(&runtime, code), "427");
+    // And clicking the other window's editor raises that one.
+    wait(&mut runtime);
+    click(&mut runtime, 50, 4);
+    assert_eq!(runtime.world.window_ids(), [window, note]);
+    let note_text = runtime.world.widget(note, "text").unwrap();
+    assert!(runtime.world.is_focused(note_text));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_double_click_is_not_a_click() {
+    let (mut runtime, dir, _, _) = start();
+    let window = runtime.world.window_ids()[0];
+    let ok = runtime.world.widget(window, "ok").unwrap();
+    click(&mut runtime, 5, 24);
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "clicks"), Value::Int(1));
+    assert_eq!(result(&runtime, "releases"), Value::Int(1));
+    assert_eq!(result(&runtime, "fired"), Value::Int(1));
+    // A second press within 400 ms at the same point: the system's
+    // double-click message replaces the click. The button is not held,
+    // nothing is captured, the button under the mouse does not fire.
+    runtime.mouse_left_down();
+    assert!(!runtime.world.mouse().left_down);
+    runtime.tick(16);
+    assert!(!runtime.world.control(ok).unwrap().button().unwrap().press);
+    runtime.mouse_left_up();
+    for _ in 0..3 {
+        runtime.tick(16);
+    }
+    assert_eq!(result(&runtime, "clicks"), Value::Int(1));
+    assert_eq!(result(&runtime, "doubles"), Value::Int(1));
+    assert_eq!(result(&runtime, "releases"), Value::Int(2));
+    assert_eq!(result(&runtime, "fired"), Value::Int(1));
+    // A third press starts over.
+    click(&mut runtime, 5, 24);
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "clicks"), Value::Int(2));
+    assert_eq!(result(&runtime, "fired"), Value::Int(2));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn buttons_pressed_outside_the_frame_are_ignored() {
+    let (mut runtime, dir, _, _) = start();
+    // In the bars around a letterboxed frame the pointer is outside the
+    // screen (64x32 here; the edges count as inside).
+    for (x, y) in [(-1, 10), (70, 10), (10, -3), (10, 33)] {
+        runtime.mouse_move(x, y);
+        runtime.tick(16);
+        runtime.mouse_left_down();
+        runtime.mouse_left_up();
+        runtime.mouse_right_down();
+        runtime.mouse_right_up();
+        wait(&mut runtime);
+    }
+    assert_eq!(result(&runtime, "clicks"), Value::Int(0));
+    assert_eq!(result(&runtime, "rights"), Value::Int(0));
+    runtime.mouse_move(64, 32);
+    runtime.tick(16);
+    runtime.mouse_left_down();
+    runtime.mouse_left_up();
+    runtime.mouse_right_down();
+    runtime.mouse_right_up();
+    wait(&mut runtime);
+    assert_eq!(result(&runtime, "clicks"), Value::Int(1));
+    assert_eq!(result(&runtime, "rights"), Value::Int(1));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_game_that_is_not_interactive_gets_no_click() {
+    let (mut runtime, dir, _, _) = start();
+    let game = runtime.world.game_id();
+    {
+        use luma_script::Natives;
+        runtime
+            .world
+            .set_property(game, "Interactive", &Value::Bool(false));
+    }
+    // Over the scene (right of the window): nothing is under the mouse.
+    runtime.mouse_move(50, 20);
+    runtime.tick(16);
+    runtime.mouse_left_down();
+    runtime.mouse_left_up();
+    runtime.mouse_right_down();
+    runtime.mouse_right_up();
+    runtime.mouse_middle_down();
+    runtime.mouse_middle_up();
+    wait(&mut runtime);
+    assert_eq!(result(&runtime, "clicks"), Value::Int(0));
+    assert_eq!(result(&runtime, "rights"), Value::Int(0));
+    assert_eq!(result(&runtime, "middles"), Value::Int(0));
+    // The button was never held for the game.
+    assert!(!runtime.world.mouse().left_down);
+    {
+        use luma_script::Natives;
+        runtime
+            .world
+            .set_property(game, "Interactive", &Value::Bool(true));
+    }
+    runtime.mouse_middle_down();
+    runtime.mouse_middle_up();
+    wait(&mut runtime);
+    assert_eq!(result(&runtime, "middles"), Value::Int(1));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_wheel_goes_up_on_a_window_that_only_handles_up() {
+    let (mut runtime, dir, _, _) = start();
+    // The focused window handles `MouseWheelUp` only: as in the
+    // original, a wheel turned down raises `MouseWheelUp` on it, and
+    // the game's `MouseWheelDown` handler is not reached.
+    runtime.mouse_wheel(-1);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "wheel"), Value::from("window up"));
+    // Without a focused window the game gets the direction turned.
+    let window = runtime.world.window_ids()[0];
+    {
+        use luma_script::Natives;
+        runtime
+            .world
+            .set_property(window, "Visible", &Value::Bool(false));
+    }
+    runtime.tick(16);
+    runtime.mouse_wheel(-1);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "wheel"), Value::from("game down"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn move_to_top_puts_a_control_last() {
+    let (mut runtime, dir, name, code) = start();
+    let window = runtime.world.window_ids()[0];
+    let ok = runtime.world.widget(window, "ok").unwrap();
+    assert_eq!(runtime.world.widgets_of(window), [name, code, ok]);
+    let game = runtime.world.game_id();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Reorder", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "moved"), Value::Bool(true));
+    assert_eq!(runtime.world.widgets_of(window), [code, ok, name]);
     std::fs::remove_dir_all(&dir).ok();
 }

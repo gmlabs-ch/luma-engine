@@ -2846,6 +2846,9 @@ fn windows_buttons_keys_and_menus() {
         runtime.world.get_property(menu, "SystemExclusive"),
         Some(Value::Bool(true))
     );
+    // The menu, just loaded, is already the last window: it is focused
+    // from the next frame on, when the topmost visible window is.
+    runtime.tick(16);
     assert_eq!(runtime.world.focused_window(), Some(menu));
     let frozen_at = runtime.world.timer();
     runtime.tick(16);
@@ -3724,7 +3727,11 @@ fn a_window_shown_during_a_dialogue_takes_the_clicks_over_the_responses() {
     runtime
         .world
         .set_property(win, "Visible", &Value::Bool(false));
-    runtime.tick(16);
+    // Not at once: a second press at the same point within 400 ms is a
+    // double click, which presses nothing.
+    for _ in 0..30 {
+        runtime.tick(16);
+    }
     click_at(&mut runtime, x, y, Click::Slow);
     assert_ne!(result(&runtime, "chosen"), Value::Null);
     assert!(!runtime.world.control(responses).unwrap().visible);

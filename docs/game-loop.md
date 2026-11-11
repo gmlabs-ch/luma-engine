@@ -151,26 +151,68 @@ while the actors talk; any object may have it set by a script.
 ## Mouse events
 
 A button raises its event (`LeftClick`, `LeftRelease`, `RightClick`,
-`RightRelease`, `LeftDoubleClick`, a double click being a second click
-within 400 ms and 4 pixels) **on the game first**. When no game script
-handles it, it goes to the active object, else to the scene when the
-mouse is over it. A game script that handles `LeftClick` is therefore in
-charge of forwarding it (The White Chamber's dispatches to the active
-object or the scene itself, and its scenes walk the actor to
-`Scene.MouseX`, `Scene.MouseY`).
+`RightRelease`) **on the game first**. When no game script handles it,
+it goes to the active object, else to the scene when the mouse is over
+it. A game script that handles `LeftClick` is therefore in charge of
+forwarding it (The White Chamber's dispatches to the active object or
+the scene itself, and its scenes walk the actor to `Scene.MouseX`,
+`Scene.MouseY`).
 
-`RightDoubleClick`, `MiddleClick` and `MiddleRelease` follow the same
-path but stop at the active object: the engine's adventure layer only
-forwards the left-button events and the right click to the scene
-(`CAdGame` against `CBGame`). A right double click replaces the second
-`RightClick`, as the system's double-click message did; a middle click
-or a right double click does nothing while the game is not interactive
-(a right click then skips the sentence, as before).
+The game and the scene only get the event **while the game runs**
+(`GAME_RUNNING`): not while it is frozen by a system-exclusive window or
+a video, nor while the response box waits for a pick. The active object
+then gets it alone: a control of the window, a response.
+
+A left or right press follows these rules, in this order
+(`CAdGame::OnMouseLeftDown`, `OnMouseRightDown`):
+
+1. a press with the pointer outside the game's frame (in the bars
+   around a letterboxed frame) is ignored (`ValidMouse`);
+2. while the game runs and is not interactive, the press only skips the
+   sentences, when `TALK_SKIP_BUTTON` names that button;
+3. a playing video is stopped when `VIDEO_SKIP_BUTTON` names that
+   button;
+4. a right press does nothing while the response box waits;
+5. for the left button, the active object is told (`HandleMouse`): a
+   **control takes the focus**, so that clicking an editor lets the
+   player type in it and clicking a window brings it to the front (see
+   [the focused window](#the-focused-window)); a window starts dragging
+   when the press is in its `DRAG_RECT`;
+6. the event is raised as above;
+7. for the left button, the active object is captured and the button
+   counts as held, which is what presses a window's button.
+
+A release (`OnMouseLeftUp`, `OnMouseRightUp`) does nothing while a video
+plays; else the drag and the capture end and the event is raised.
+
+**Double clicks.** A second press within 400 ms and 4 pixels of the
+last one is a double click (the original takes the system's settings,
+500 ms by default), and, as the system's message does, it **replaces**
+the click: `LeftDoubleClick` (game, active object, scene) or
+`RightDoubleClick` (game, active object) is raised and nothing else
+happens. A left double click is not a click: no `LeftClick`, the button
+does not count as held, nothing is captured or focused, so a window's
+button under the mouse does not fire on the second press of two quick
+ones. A double click does nothing during a video or while the game runs
+and is not interactive; a third press starts over as a click.
+
+`MiddleClick` and `MiddleRelease` go to the game, then to the active
+object (`CBGame::OnMouseMiddleDown`, not to the scene); a middle press
+does nothing during a video or while the game runs and is not
+interactive.
+
+A click can be shorter than a frame (a tap on a trackpad, a slow
+frame). The windows' buttons work frame by frame, so `Runtime` keeps a
+release that no frame has seen held until the end of the next frame:
+the button still presses and fires (Luma's own addition; the original
+loses such a click).
 
 The wheel raises `MouseWheelUp` or `MouseWheelDown` on the **focused
 window** when its scripts handle that event, else on the game
 (`CBGame::HandleMouseWheel`); a notch of the wheel is one event, in
-either direction. The headless player turns it with `--wheel up` or
+either direction. As in the original, a focused window that handles
+`MouseWheelUp` but not `MouseWheelDown` gets `MouseWheelUp` when the
+wheel turns down. The headless player turns it with `--wheel up` or
 `--wheel down`.
 
 Closing the game's window raises `QuitGame` on the game when a game
@@ -179,9 +221,23 @@ calls `Game.QuitGame()` itself (nothing is raised while the game is
 frozen). Without a handler, the window closes and the game ends
 (`CBGame::OnWindowClose`).
 
-While the game is frozen by a system-exclusive window, the game and the
-scene get no mouse event: only the active object does, a control of the
-window or its shield.
+### The focused window
+
+The focused window is the one the keys and the wheel go to. At the
+start of every frame it is the **topmost visible window**, the last of
+the game's window list (`CBGame::InitLoop`); when that one is disabled,
+the topmost visible and enabled one (`CBGame::DisplayWindows`). So a
+window loaded or shown above the others takes the keys from the next
+frame, without a click.
+
+What changes for good is the order of the list: `Focus()` on a control
+or a window, `GoExclusive`, `GoSystemExclusive` and a left click on a
+control bring the control's top window to the end of the list
+(`CBGame::FocusWindow`) and make the control the focused one of its
+window, unless a window above it is disabled. A normal window focused
+while an exclusive one had the focus gives it back. A window that is
+already the last of the list is left alone: it has the focus from the
+next frame.
 
 `Game.MouseX` and `Game.MouseY` are the mouse in game pixels
 (writable, as is `Game.SetMousePos`). `Game.LockMouseRect(left, top,

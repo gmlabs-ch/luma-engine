@@ -1276,7 +1276,11 @@ impl World {
 
     /// Brings a top-level window to the top and gives it the keys
     /// (`CBGame::FocusWindow`); focusing a normal window while an
-    /// exclusive one was focused keeps the exclusive one on top.
+    /// exclusive one was focused keeps the exclusive one on top. A
+    /// window that is already the last of the list is left alone, as in
+    /// the original: it gets the keys from the next frame, when the
+    /// topmost visible window is focused again
+    /// ([`World::reset_focused_window`]).
     pub fn focus_window(&mut self, id: NativeId) -> bool {
         let previous = self.ui.focused_window;
         let Some(index) = self.ui.windows.iter().position(|w| *w == id) else {
@@ -1285,8 +1289,8 @@ impl World {
         if index + 1 < self.ui.windows.len() {
             self.ui.windows.remove(index);
             self.ui.windows.push(id);
+            self.ui.focused_window = Some(id);
         }
-        self.ui.focused_window = Some(id);
         let mode = self.control(id).and_then(Control::window).map(|w| w.mode);
         if mode == Some(WindowMode::Normal) {
             if let Some(prev) = previous.filter(|p| *p != id) {
@@ -1300,6 +1304,23 @@ impl World {
             }
         }
         true
+    }
+
+    /// The start of a frame (`CBGame::InitLoop`): the focused window is
+    /// the topmost visible one, the last of the list, whatever was
+    /// focused before. So a window loaded or shown above the others
+    /// takes the keys, and what a click or `Focus` changes for good is
+    /// the order of the windows. A disabled window found here gives way
+    /// to the topmost enabled one when the windows update
+    /// ([`World::update_ui`], `CBGame::DisplayWindows`).
+    pub(crate) fn reset_focused_window(&mut self) {
+        self.ui.focused_window = self
+            .ui
+            .windows
+            .iter()
+            .rev()
+            .copied()
+            .find(|w| self.control(*w).is_some_and(|c| c.visible));
     }
 
     /// Gives a control the focus: its window chain gets focused and it
@@ -2301,13 +2322,20 @@ impl World {
         }
     }
 
-    /// The left button went down on the active object: a window starts
+    /// The left button went down on the active object, which is then
+    /// captured. A control takes the focus (`CUIObject::HandleMouse`):
+    /// it becomes the focused control of its window and its top window
+    /// comes to the front, so clicking an editor lets the player type
+    /// in it and clicking a window raises it. A window also starts
     /// dragging when the point is in its drag rectangle
     /// (`CUIWindow::HandleMouse`).
     pub(crate) fn ui_mouse_down(&mut self) {
         let active = self.active_object();
         self.ui.captured = active;
         let Some(id) = active else { return };
+        if self.control(id).is_some() {
+            self.focus_control(id);
+        }
         let (sx, sy) = self.control_screen_position(id);
         let (mx, my) = (self.mouse.x, self.mouse.y);
         let Some(window) = self.control_mut(id).and_then(Control::window_mut) else {
