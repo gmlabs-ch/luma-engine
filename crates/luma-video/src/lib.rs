@@ -5,8 +5,8 @@
 //!
 //! The Ogg container is read with the `ogg` crate and the Theora stream
 //! decoded with `oxideav-theora`, both pure Rust. The sound track (Vorbis)
-//! is not decoded here: `luma_audio::decode` reads it from the same
-//! bytes. The YUV to RGB conversion uses the fixed-point tables of the
+//! is not decoded here: [`sound_track`] hands it out as an Ogg file of
+//! its own for `luma_audio::decode`. The YUV to RGB conversion uses the fixed-point tables of the
 //! original engine (`VidTheoraPlayer.cpp` of Wintermute Engine 1.x, MIT
 //! License, Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`. How the
 //! engine plays videos is documented in `docs/video.md`.
@@ -53,12 +53,14 @@ pub struct VideoInfo {
 }
 
 impl VideoInfo {
-    /// When a frame is shown, in milliseconds from the start.
+    /// When the frame numbered `index` is shown, in milliseconds from
+    /// the start.
     pub fn frame_time_ms(&self, index: u64) -> u64 {
         if self.fps_num == 0 {
             return 0;
         }
-        index * 1000 * u64::from(self.fps_den) / u64::from(self.fps_num)
+        let ms = u128::from(index) * 1000 * u128::from(self.fps_den) / u128::from(self.fps_num);
+        u64::try_from(ms).unwrap_or(u64::MAX)
     }
 
     /// The frame shown at a time, in milliseconds from the start.
@@ -73,9 +75,11 @@ impl VideoInfo {
 /// One decoded frame, as RGBA pixels of the picture.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
-    /// Index of the frame in the stream, from 0.
+    /// Index of the frame among the packets of the stream, from 0.
     pub index: u64,
-    /// When the frame is shown, in milliseconds from the start.
+    /// When the frame is shown, in milliseconds from the start: the time
+    /// of the frame number the stream's granule positions give it, which
+    /// runs ahead of `index` in a stream that leaves frames out.
     pub time_ms: u64,
     /// Whether the frame is a key frame.
     pub keyframe: bool,
@@ -97,6 +101,8 @@ pub struct Video {
     ident: TheoraIdentHeader,
     info: VideoInfo,
     next_index: u64,
+    /// The frame number of the last data packet, on the stream's clock.
+    frame_number: Option<u64>,
     last: Option<Frame>,
     finished: bool,
 }
@@ -151,6 +157,79 @@ fn decoder_comment_header(packet: &[u8]) -> Vec<u8> {
     out.extend_from_slice(&0u32.to_le_bytes()); // vendor string length
     out.extend_from_slice(&0u32.to_le_bytes()); // number of user comments
     out
+}
+
+/// The frame number of a data packet on the stream's clock, from 0:
+/// what times the frame, at `number * fps_den / fps_num` seconds.
+///
+/// `previous` is the number of the packet before, `page_granule` the
+/// granule position of the page when the packet is the last one ending
+/// on it (the only packet of a page whose position the container
+/// states). Such a packet takes the frame number of that position; any
+/// other packet comes one frame after the one before. This is what the
+/// original engine's decoder library did, and it keeps a stream that
+/// leaves frames out (its granule positions skip the missing frames,
+/// with no zero-length packet in their place) on its real clock.
+///
+/// A position that marks no frame, or one that would go back in time,
+/// is ignored.
+fn next_frame_number(
+    ident: &TheoraIdentHeader,
+    previous: Option<u64>,
+    page_granule: Option<u64>,
+) -> u64 {
+    let following = previous.map_or(0, |n| n.saturating_add(1));
+    let stated = page_granule
+        // All ones: no packet ends on the page.
+        .filter(|granule| *granule != u64::MAX)
+        .and_then(|granule| ident.frame_index_from_granule_position(granule).ok());
+    match stated {
+        Some(number) if previous.is_none_or(|p| number >= p) => number,
+        _ => following,
+    }
+}
+
+/// The sound track of a video file as an Ogg file of its own: the
+/// packets of the first Vorbis stream, on the same pages and with the
+/// same granule positions, closed by an end-of-stream page. `None` when
+/// the file has no Vorbis stream.
+///
+/// Audio decoders that read the whole container refuse a file whose
+/// streams are not closed (a video cut short, or written by a muxer that
+/// never marked the last pages), and would lose the whole track for it.
+/// A damaged or truncated tail ends the track where it stops.
+pub fn sound_track(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut reader = PacketReader::new(Cursor::new(bytes));
+    let mut writer = PacketWriter::new(Cursor::new(Vec::new()));
+    let mut serial = None;
+    let mut held: Option<ogg::Packet> = None;
+    let mut write = |packet: ogg::Packet, last: bool| {
+        let end = if last {
+            PacketWriteEndInfo::EndStream
+        } else if packet.last_in_page() {
+            PacketWriteEndInfo::EndPage
+        } else {
+            PacketWriteEndInfo::NormalPacket
+        };
+        let (serial, granule) = (packet.stream_serial(), packet.absgp_page());
+        writer.write_packet(packet.data, serial, end, granule).ok()
+    };
+    while let Ok(Some(packet)) = reader.read_packet() {
+        match serial {
+            None if is_vorbis_header(&packet.data) => serial = Some(packet.stream_serial()),
+            Some(s) if s == packet.stream_serial() => {}
+            _ => continue,
+        }
+        let ends = packet.last_in_stream();
+        if let Some(previous) = held.replace(packet) {
+            write(previous, false)?;
+        }
+        if ends {
+            break;
+        }
+    }
+    write(held?, true)?;
+    Some(writer.into_inner().into_inner())
 }
 
 impl Video {
@@ -212,6 +291,7 @@ impl Video {
             ident,
             info,
             next_index: 0,
+            frame_number: None,
             last: None,
             finished: false,
         })
@@ -243,7 +323,9 @@ impl Video {
     }
 
     /// Decodes the next frame; `None` once the stream ends. A zero-length
-    /// packet repeats the previous frame, as the format specifies.
+    /// packet repeats the previous frame, as the format specifies. The
+    /// frame's time follows the granule positions of the stream's pages
+    /// (see "Frame times" in `docs/video.md`).
     pub fn next_frame(&mut self) -> Result<Option<Frame>> {
         if self.finished {
             return Ok(None);
@@ -265,12 +347,16 @@ impl Video {
             }
             let index = self.next_index;
             self.next_index += 1;
+            let granule = packet.last_in_page().then(|| packet.absgp_page());
+            let number = next_frame_number(&self.ident, self.frame_number, granule);
+            self.frame_number = Some(number);
+            let time_ms = self.info.frame_time_ms(number);
             let keyframe = packet.data.first().is_some_and(|b| b & 0x40 == 0);
             let frame = if packet.data.is_empty() {
                 match &self.last {
                     Some(last) => Frame {
                         index,
-                        time_ms: self.info.frame_time_ms(index),
+                        time_ms,
                         keyframe: false,
                         ..last.clone()
                     },
@@ -313,7 +399,7 @@ impl Video {
                 );
                 Frame {
                     index,
-                    time_ms: self.info.frame_time_ms(index),
+                    time_ms,
                     keyframe,
                     width: self.info.width,
                     height: self.info.height,
@@ -410,6 +496,17 @@ pub fn yuv_to_rgba(
 /// second, showing a bright square moving over a gradient, with a key
 /// frame every eight frames.
 pub fn synthetic_clip(width: u32, height: u32, frames: u32, fps: u32) -> Vec<u8> {
+    let numbers: Vec<u64> = (0..u64::from(frames)).collect();
+    synthetic_clip_at(width, height, fps, &numbers)
+}
+
+/// A clip like [`synthetic_clip`]'s whose frames carry the frame numbers
+/// given, one picture per number: numbers that skip some make a stream
+/// that leaves frames out, as encoders fed an irregular source write.
+/// The numbers must not go back, nor run more than 63 past the last key
+/// frame (every eighth picture).
+pub fn synthetic_clip_at(width: u32, height: u32, fps: u32, numbers: &[u64]) -> Vec<u8> {
+    let frames = numbers.len();
     let ident = TheoraIdentHeader {
         vmaj: 3,
         vmin: 2,
@@ -439,7 +536,7 @@ pub fn synthetic_clip(width: u32, height: u32, frames: u32, fps: u32) -> Vec<u8>
     .expect("a valid synthetic clip header");
     let (w, h) = (width as usize, height as usize);
     let mut packets = Vec::new();
-    for i in 0..frames as usize {
+    for i in 0..frames {
         let mut y = vec![0u8; w * h];
         for (row, line) in y.chunks_mut(w).enumerate() {
             for (col, px) in line.iter_mut().enumerate() {
@@ -500,11 +597,12 @@ pub fn synthetic_clip(width: u32, height: u32, frames: u32, fps: u32) -> Vec<u8>
     }
     let mut last_key = 0u64;
     for (i, packet) in data.iter().enumerate() {
+        let number = numbers.get(i).copied().unwrap_or(i as u64);
         if packet.flags.keyframe {
-            last_key = i as u64;
+            last_key = number;
         }
         let granule = ident
-            .granule_position_for_frame(i as u64, last_key)
+            .granule_position_for_frame(number, last_key)
             .expect("a representable granule position");
         let end = if i + 1 == data.len() {
             PacketWriteEndInfo::EndStream
@@ -581,6 +679,249 @@ mod tests {
             number += 1;
         }
         writer.into_inner().into_inner()
+    }
+
+    /// A packet of an Ogg file and how it sits in it.
+    #[derive(Clone)]
+    struct Piece {
+        serial: u32,
+        data: Vec<u8>,
+        granule: u64,
+        end: PacketWriteEndInfo,
+    }
+
+    /// The packets of an Ogg file, in file order.
+    fn pieces(bytes: &[u8]) -> Vec<Piece> {
+        let mut reader = PacketReader::new(Cursor::new(bytes));
+        let mut out = Vec::new();
+        while let Some(packet) = reader.read_packet().unwrap() {
+            let end = if packet.last_in_stream() {
+                PacketWriteEndInfo::EndStream
+            } else if packet.last_in_page() {
+                PacketWriteEndInfo::EndPage
+            } else {
+                PacketWriteEndInfo::NormalPacket
+            };
+            out.push(Piece {
+                serial: packet.stream_serial(),
+                granule: packet.absgp_page(),
+                data: packet.data,
+                end,
+            });
+        }
+        out
+    }
+
+    /// An Ogg file of these packets.
+    fn mux(pieces: &[Piece]) -> Vec<u8> {
+        let mut writer = PacketWriter::new(Cursor::new(Vec::new()));
+        for piece in pieces {
+            writer
+                .write_packet(piece.data.clone(), piece.serial, piece.end, piece.granule)
+                .unwrap();
+        }
+        writer.into_inner().into_inner()
+    }
+
+    #[test]
+    fn numbers_frames_by_the_granule_positions() {
+        let clip = pieces(&synthetic_clip(32, 32, 1, 10));
+        let ident = decode_identification_header(&clip[0].data).unwrap();
+        let at = |frame: u64, key: u64| ident.granule_position_for_frame(frame, key).unwrap();
+        // Without a position, a packet follows the one before.
+        assert_eq!(next_frame_number(&ident, None, None), 0);
+        assert_eq!(next_frame_number(&ident, Some(4), None), 5);
+        // The position of the page says which frame its last packet is.
+        assert_eq!(next_frame_number(&ident, None, Some(at(0, 0))), 0);
+        assert_eq!(next_frame_number(&ident, Some(4), Some(at(5, 0))), 5);
+        assert_eq!(next_frame_number(&ident, Some(4), Some(at(9, 0))), 9);
+        assert_eq!(next_frame_number(&ident, Some(70), Some(at(75, 64))), 75);
+        assert_eq!(next_frame_number(&ident, None, Some(at(30, 0))), 30);
+        // Two packets may claim the same frame; none goes back.
+        assert_eq!(next_frame_number(&ident, Some(9), Some(at(9, 0))), 9);
+        assert_eq!(next_frame_number(&ident, Some(9), Some(at(3, 0))), 10);
+        // Positions that mark no frame: no packet ends on the page, or a
+        // header's zero.
+        assert_eq!(next_frame_number(&ident, Some(4), Some(u64::MAX)), 5);
+        assert_eq!(next_frame_number(&ident, Some(4), Some(0)), 5);
+        assert_eq!(next_frame_number(&ident, Some(u64::MAX), None), u64::MAX);
+        // Before bitstream 3.2.1 the position held the frame's index, not
+        // the count of frames.
+        let legacy = TheoraIdentHeader {
+            vrev: 0,
+            ..ident.clone()
+        };
+        let shift = ident.kfgshift;
+        assert_eq!(next_frame_number(&ident, None, Some(4 << shift)), 3);
+        assert_eq!(next_frame_number(&legacy, None, Some(4 << shift)), 4);
+        assert_eq!(next_frame_number(&legacy, Some(0), Some(0)), 0);
+        // Times do not overflow on absurd numbers.
+        let info = VideoInfo {
+            width: 32,
+            height: 32,
+            fps_num: 30000,
+            fps_den: 1001,
+            has_audio: false,
+        };
+        assert_eq!(info.frame_time_ms(115), 3837);
+        assert_eq!(info.frame_time_ms(u64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn times_frames_of_a_stream_that_leaves_frames_out() {
+        let clean = synthetic_clip(32, 32, 8, 10);
+        let mut clip = pieces(&clean);
+        assert_eq!(clip.len(), 3 + 8);
+        let ident = decode_identification_header(&clip[0].data).unwrap();
+        // Frames 1, 3, 4, 8, 10 and 11 are missing: the positions skip
+        // them. The fifth to seventh packets share a page, whose position
+        // is the seventh's; the sixth is a zero-length packet.
+        let numbers = [0, 2, 2, 5, 0, 0, 9, 12];
+        for (piece, number) in clip[3..].iter_mut().zip(numbers) {
+            piece.granule = ident.granule_position_for_frame(number, 0).unwrap();
+        }
+        clip[3 + 4].end = PacketWriteEndInfo::NormalPacket;
+        clip[3 + 5].end = PacketWriteEndInfo::NormalPacket;
+        clip[3 + 5].data.clear();
+        let granule = clip[3 + 6].granule;
+        clip[3 + 4].granule = granule;
+        clip[3 + 5].granule = granule;
+        // The stream is not closed either.
+        clip[3 + 7].end = PacketWriteEndInfo::EndPage;
+        let mut video = Video::open(mux(&clip)).unwrap();
+        let mut reference = Video::open(clean).unwrap();
+        let mut frames = Vec::new();
+        while let Some(frame) = video.next_frame().unwrap() {
+            frames.push(frame);
+        }
+        let times: Vec<u64> = frames.iter().map(|f| f.time_ms).collect();
+        assert_eq!(times, [0, 200, 200, 500, 600, 700, 900, 1200]);
+        let indices: Vec<u64> = frames.iter().map(|f| f.index).collect();
+        assert_eq!(indices, [0, 1, 2, 3, 4, 5, 6, 7]);
+        // The pictures are the stream's, in order; the zero-length
+        // packet repeats the one before it.
+        for frame in &frames[..5] {
+            let expected = reference.next_frame().unwrap().unwrap();
+            assert_eq!(frame.rgba, expected.rgba);
+            assert_eq!(expected.time_ms, expected.index * 100);
+        }
+        assert_eq!(frames[5].rgba, frames[4].rgba);
+        assert!(!frames[5].keyframe);
+        // Rewinding starts the clock again.
+        video.rewind().unwrap();
+        assert_eq!(video.next_frame().unwrap().unwrap().time_ms, 0);
+        assert_eq!(video.next_frame().unwrap().unwrap().time_ms, 200);
+    }
+
+    /// A video file whose first stream is a (made up) Vorbis stream of
+    /// `sound` data packets, three to a page, its pages between the
+    /// video's; no stream is closed.
+    fn clip_with_sound_first(video: &[u8], sound: usize) -> (Vec<u8>, Vec<Piece>) {
+        let serial = 0x536f_756e;
+        let page = |data: Vec<u8>, granule: u64, end| Piece {
+            serial,
+            data,
+            granule,
+            end,
+        };
+        let mut audio = vec![
+            page(b"\x01vorbis-ident".to_vec(), 0, PacketWriteEndInfo::EndPage),
+            page(
+                b"\x03vorbis-comment".to_vec(),
+                0,
+                PacketWriteEndInfo::NormalPacket,
+            ),
+            page(b"\x05vorbis-setup".to_vec(), 0, PacketWriteEndInfo::EndPage),
+        ];
+        for i in 0..sound {
+            let last_of_page = i % 3 == 2 || i + 1 == sound;
+            audio.push(page(
+                vec![0, i as u8],
+                ((i / 3 + 1) * 3 * 1024).min(sound * 1024) as u64,
+                if last_of_page {
+                    PacketWriteEndInfo::EndPage
+                } else {
+                    PacketWriteEndInfo::NormalPacket
+                },
+            ));
+        }
+        let mut picture = pieces(video);
+        if let Some(last) = picture.last_mut() {
+            last.end = PacketWriteEndInfo::EndPage;
+        }
+        // The first pages of both streams, the sound's first; then the
+        // other headers; then the data, three sound packets a frame.
+        let mut all = vec![audio[0].clone(), picture[0].clone()];
+        all.extend_from_slice(&audio[1..3]);
+        all.extend_from_slice(&picture[1..3]);
+        let mut sound_pages = audio[3..].chunks(3);
+        for frame in &picture[3..] {
+            all.extend_from_slice(sound_pages.next().unwrap_or_default());
+            all.push(frame.clone());
+        }
+        for rest in sound_pages {
+            all.extend_from_slice(rest);
+        }
+        (mux(&all), audio)
+    }
+
+    #[test]
+    fn plays_a_file_whose_first_stream_is_the_sound() {
+        let clean = synthetic_clip(32, 32, 5, 10);
+        let (bytes, _) = clip_with_sound_first(&clean, 20);
+        let mut video = Video::open(bytes).unwrap();
+        assert!(video.info().has_audio);
+        let mut reference = Video::open(clean).unwrap();
+        assert!(!reference.info().has_audio);
+        for _ in 0..5 {
+            assert_eq!(video.next_frame().unwrap(), reference.next_frame().unwrap());
+        }
+        assert!(video.next_frame().unwrap().is_none());
+        video.rewind().unwrap();
+        assert!(video.info().has_audio);
+        assert_eq!(video.next_frame().unwrap().unwrap().index, 0);
+    }
+
+    #[test]
+    fn extracts_the_sound_track_and_closes_it() {
+        let clean = synthetic_clip(32, 32, 5, 10);
+        let (bytes, audio) = clip_with_sound_first(&clean, 20);
+        // Nothing closes the streams of the file.
+        assert!(
+            pieces(&bytes)
+                .iter()
+                .all(|p| p.end != PacketWriteEndInfo::EndStream)
+        );
+        let track = pieces(&sound_track(&bytes).unwrap());
+        assert_eq!(track.len(), audio.len());
+        for (i, (got, expected)) in track.iter().zip(&audio).enumerate() {
+            assert_eq!(got.serial, expected.serial);
+            assert_eq!(got.data, expected.data);
+            assert_eq!(got.granule, expected.granule, "packet {i}");
+            if i + 1 == track.len() {
+                assert!(got.end == PacketWriteEndInfo::EndStream);
+            } else {
+                assert!(got.end == expected.end, "packet {i}");
+            }
+        }
+        // A file cut in the middle of a page keeps the sound before the
+        // cut, closed too.
+        let cut = sound_track(&bytes[..bytes.len() - 5]).unwrap();
+        let cut = pieces(&cut);
+        assert_eq!(cut.len(), audio.len() - 2, "the last page is lost");
+        assert!(cut.last().unwrap().end == PacketWriteEndInfo::EndStream);
+        assert!(
+            cut.iter()
+                .zip(&audio)
+                .all(|(got, expected)| got.data == expected.data)
+        );
+        // A stream already closed stays as it is.
+        let again = pieces(&sound_track(&mux(&track)).unwrap());
+        assert_eq!(again.len(), track.len());
+        // No sound: no track.
+        assert!(sound_track(&clean).is_none());
+        assert!(sound_track(b"").is_none());
+        assert!(sound_track(b"OggS, or so it says").is_none());
     }
 
     /// A Theora comment header with a vendor string and user comments.

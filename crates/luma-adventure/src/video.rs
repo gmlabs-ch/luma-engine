@@ -200,6 +200,9 @@ pub struct VideoPlayer {
     start_clock: u64,
     /// When the pause started, on the clock timing the video.
     pause_started: Option<u64>,
+    /// The clock and the sound's position when the sound was last found
+    /// playing: where the movie time goes on from once the sound ends.
+    sound_heard: Option<(u64, u64)>,
     /// The sound track.
     pub sound: Option<SoundId>,
     pending: Option<Frame>,
@@ -253,6 +256,7 @@ impl VideoPlayer {
             started: false,
             start_clock: 0,
             pause_started: None,
+            sound_heard: None,
             sound: None,
             pending: None,
             frame: None,
@@ -269,6 +273,7 @@ impl VideoPlayer {
     pub(crate) fn restart(&mut self) -> Result<(), String> {
         self.video.rewind().map_err(|e| e.to_string())?;
         self.started = false;
+        self.sound_heard = None;
         self.time_offset_ms = 0;
         self.pending = None;
         Ok(())
@@ -337,10 +342,21 @@ pub(crate) fn step_player(
     now: u64,
     log: &mut Vec<String>,
 ) -> bool {
-    let sound_position = player
-        .sound
-        .filter(|_| player.started)
-        .and_then(|s| audio.as_deref().map(|a| a.position_ms(s)));
+    // The sound's position while it plays. A sound track shorter than
+    // the pictures ends first: the movie then goes on on the clock, from
+    // where the sound was last heard.
+    let sound_position = match (player.sound.filter(|_| player.started), audio.as_deref()) {
+        (Some(sound), Some(audio)) if audio.is_playing(sound) => {
+            let position = audio.position_ms(sound);
+            player.sound_heard = Some((now, position));
+            Some(position)
+        }
+        (Some(_), Some(_)) => Some(match player.sound_heard {
+            Some((clock, position)) => position + now.saturating_sub(clock),
+            None => now.saturating_sub(player.start_clock) + player.time_offset_ms,
+        }),
+        _ => None,
+    };
     let movie_time = player.movie_time_ms(now, sound_position);
     let mut ended = false;
     // The frame ready to show (`DecodeTheora`): the first decoded whose
@@ -476,36 +492,30 @@ impl World {
                 return None;
             }
         };
-        let sound = if luma_video::Video::open(bytes.clone())
-            .as_ref()
-            .is_ok_and(|v| v.info().has_audio)
-        {
-            match luma_audio::decode(&bytes) {
-                Ok(clip) => Some(
-                    self.sounds
-                        .audio
-                        .add(Arc::new(clip), SoundType::Sfx, volume),
-                ),
-                Err(err) => {
-                    self.log(format!(
-                        "Error decoding the sound of video '{filename}': {err}"
-                    ));
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        match Video::open(bytes) {
-            Ok(video) => Some((video, sound)),
+        // The sound track on its own, closed: the sound decoder reads the
+        // whole container and refuses a file whose streams never end.
+        let track = luma_video::sound_track(&bytes);
+        let video = match Video::open(bytes) {
+            Ok(video) => video,
             Err(err) => {
                 self.log(format!("Error loading video '{filename}': {err}"));
-                if let Some(sound) = sound {
-                    self.sounds.audio.remove(sound);
-                }
+                return None;
+            }
+        };
+        let sound = track.and_then(|track| match luma_audio::decode(&track) {
+            Ok(clip) => Some(
+                self.sounds
+                    .audio
+                    .add(Arc::new(clip), SoundType::Sfx, volume),
+            ),
+            Err(err) => {
+                self.log(format!(
+                    "Error decoding the sound of video '{filename}': {err}"
+                ));
                 None
             }
-        }
+        });
+        Some((video, sound))
     }
 
     /// Opens and starts a video (`Game.PlayTheora`): the game freezes,
@@ -570,6 +580,7 @@ impl World {
             started: false,
             start_clock: 0,
             pause_started: None,
+            sound_heard: None,
             sound,
             pending: None,
             frame: None,
@@ -692,6 +703,7 @@ impl World {
             started: false,
             start_clock: 0,
             pause_started: None,
+            sound_heard: None,
             sound,
             pending: None,
             frame: None,
@@ -758,7 +770,11 @@ impl World {
         }
         video.player.paused = false;
         if let Some(since) = video.player.pause_started.take() {
-            video.player.start_clock += timer.saturating_sub(since);
+            let paused_for = timer.saturating_sub(since);
+            video.player.start_clock += paused_for;
+            if let Some((clock, _)) = video.player.sound_heard.as_mut() {
+                *clock += paused_for;
+            }
         }
         if let Some(sound) = video.player.sound {
             self.sounds.audio.resume(sound);
@@ -810,6 +826,7 @@ impl World {
         match video.player.video.rewind() {
             Ok(()) => {
                 video.player.started = false;
+                video.player.sound_heard = None;
                 video.player.time_offset_ms = 0;
                 video.player.pending = None;
                 if let Some(sound) = video.player.sound {
@@ -1022,6 +1039,104 @@ mod tests {
         assert_eq!(s.shown(), Some("Last"));
         s.update(200);
         assert_eq!(s.shown(), None);
+    }
+
+    fn player_of(bytes: Vec<u8>, sound: Option<SoundId>) -> VideoPlayer {
+        let video = Video::open(bytes).unwrap();
+        let info = video.info().clone();
+        VideoPlayer {
+            filename: "clip.ogv".into(),
+            video,
+            info,
+            playback: VideoPlayback::Pos,
+            x: 0,
+            y: 0,
+            zoom: 100.0,
+            freeze_game: false,
+            dont_drop_frames: false,
+            looping: false,
+            paused: false,
+            time_offset_ms: 0,
+            alpha: None,
+            started: false,
+            start_clock: 0,
+            pause_started: None,
+            sound_heard: None,
+            sound,
+            pending: None,
+            frame: None,
+            frame_serial: 0,
+            finished: false,
+            subtitler: None,
+            subtitle_height: 0,
+        }
+    }
+
+    #[test]
+    fn frames_show_at_the_times_of_their_frame_numbers() {
+        // Four pictures at 10 frames per second, numbered 0, 1, 5 and 9:
+        // shown at 0, 100, 500 and 900 ms, not at 0, 100, 200 and 300.
+        let bytes = luma_video::synthetic_clip_at(32, 32, 10, &[0, 1, 5, 9]);
+        let mut player = player_of(bytes, None);
+        let mut log = Vec::new();
+        let mut shown = Vec::new();
+        let mut ended_at = None;
+        // The clock starts anywhere; a step every 20 ms.
+        for step in 0..100u64 {
+            if step_player(&mut player, None, 5000 + step * 20, &mut log) {
+                ended_at = Some(step * 20);
+                break;
+            }
+            let index = player.frame_index().unwrap();
+            if shown.last().is_none_or(|(_, last)| *last != index) {
+                shown.push((step * 20, index));
+            }
+        }
+        assert_eq!(shown, [(0, 0), (100, 1), (500, 2), (900, 3)]);
+        assert_eq!(ended_at, Some(920), "the step after the last frame");
+        assert!(log.is_empty(), "{log:?}");
+    }
+
+    #[test]
+    fn the_movie_goes_on_after_a_shorter_sound_track() {
+        // Eight frames at 10 frames per second, the last at 700 ms, with
+        // 300 ms of sound.
+        let bytes = luma_video::synthetic_clip(32, 32, 8, 10);
+        let mut audio = Audio::null();
+        let sound = audio.add(
+            Arc::new(luma_audio::Clip::silence(8000, 300)),
+            SoundType::Sfx,
+            100,
+        );
+        let mut player = player_of(bytes, Some(sound));
+        let mut log = Vec::new();
+        let mut shown = Vec::new();
+        let mut ended_at = None;
+        for step in 0..100u64 {
+            if step_player(&mut player, Some(&mut audio), step * 20, &mut log) {
+                ended_at = Some(step * 20);
+                break;
+            }
+            let index = player.frame_index().unwrap();
+            if shown.last().is_none_or(|(_, last)| *last != index) {
+                shown.push((step * 20, index));
+            }
+            audio.tick(20);
+        }
+        assert!(!audio.is_playing(sound), "the sound ended first");
+        let indices: Vec<u64> = shown.iter().map(|(_, index)| *index).collect();
+        assert_eq!(indices, [0, 1, 2, 3, 4, 5, 6, 7], "{shown:?}");
+        // Each frame within a step or two of its time, before and after
+        // the end of the sound.
+        for (at, index) in &shown {
+            assert!(
+                (index * 100..=index * 100 + 40).contains(at),
+                "frame {index} at {at} ms"
+            );
+        }
+        let ended_at = ended_at.expect("the video ends");
+        assert!((720..=760).contains(&ended_at), "{ended_at}");
+        assert!(log.is_empty(), "{log:?}");
     }
 
     #[test]

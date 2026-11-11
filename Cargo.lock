@@ -1100,6 +1100,7 @@ dependencies = [
 name = "luma-video"
 version = "0.0.1"
 dependencies = [
+ "luma-audio",
  "ogg",
  "oxideav-core",
  "oxideav-theora",

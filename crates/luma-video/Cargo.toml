@@ -14,5 +14,8 @@ ogg.workspace = true
 oxideav-theora.workspace = true
 oxideav-core.workspace = true
 
+[dev-dependencies]
+luma-audio.workspace = true
+
 [lints]
 workspace = true

@@ -8,7 +8,8 @@
 //! reads every `.ogg` and `.ogv` file of the directory named by
 //! `LUMA_TEST_VIDEOS`, or of the White Chamber source pack under
 //! `testdata/local/`, and prints a line per file to compare with what
-//! `ffprobe` says of it.
+//! `ffprobe` says of it: the number of frames, when the last one shows
+//! and how long the sound track is once decoded.
 
 use std::path::PathBuf;
 
@@ -41,6 +42,11 @@ fn decodes_the_local_videos() {
     for path in files {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let bytes = std::fs::read(&path).unwrap();
+        let sound = luma_video::sound_track(&bytes).map(|track| {
+            luma_audio::decode(&track)
+                .unwrap_or_else(|e| panic!("{name}: sound: {e}"))
+                .duration_ms()
+        });
         let mut video = match luma_video::Video::open(bytes) {
             Ok(video) => video,
             // A sound file with the same extension.
@@ -48,6 +54,7 @@ fn decodes_the_local_videos() {
             Err(err) => panic!("{name}: {err}"),
         };
         let info = video.info().clone();
+        assert_eq!(info.has_audio, sound.is_some(), "{name}");
         let mut frames = 0u64;
         let mut last_ms = 0;
         while let Some(frame) = video.next_frame().unwrap_or_else(|e| panic!("{name}: {e}")) {
@@ -62,9 +69,20 @@ fn decodes_the_local_videos() {
             frames += 1;
         }
         assert!(frames > 0, "{name}: no frame");
+        // The last frame shows within a second of the end of the sound.
+        if let Some(sound_ms) = sound {
+            assert!(
+                last_ms.abs_diff(sound_ms) < 1000,
+                "{name}: last frame at {last_ms} ms, {sound_ms} ms of sound"
+            );
+        }
         println!(
             "{name}: {}x{} {}/{} fps, {frames} frames, last at {last_ms} ms, sound: {}",
-            info.width, info.height, info.fps_num, info.fps_den, info.has_audio
+            info.width,
+            info.height,
+            info.fps_num,
+            info.fps_den,
+            sound.map_or("none".to_string(), |ms| format!("{ms} ms"))
         );
     }
 }

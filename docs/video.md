@@ -18,7 +18,50 @@ packets of each logical stream say what they carry (`\x80theora`,
 `\x01vorbis`); the three Theora header packets set up the decoder and
 give the picture size (`picw` × `pich`) and the frame rate. Every data
 packet of the Theora stream then yields one frame (`next_frame`); a
-zero-length packet repeats the previous frame, as the format says.
+zero-length packet repeats the previous frame, as the format says. The
+streams may come in any order: in some files the sound's first page is
+ahead of the picture's.
+
+### Frame times
+
+A frame is shown at the time of its **frame number**,
+`number × fps_den / fps_num` seconds, and the number comes from the
+granule positions of the Ogg pages, not from counting packets:
+
+- the last packet that ends on a page takes the frame number of the
+  page's granule position (Theora specification, appendix A.2.3: the
+  count of frames up to that packet, key frame count in the high bits
+  and frames since the key frame in the low `KFGSHIFT` bits; one less
+  is the frame's number, except before bitstream 3.2.1 where the
+  position already held the number);
+- any other packet comes one frame after the packet before it, the
+  first one being frame 0;
+- a position that marks no frame (all ones: no packet ends on the page;
+  or a header's zero) or that would go back in time is ignored.
+
+In a regular stream the two agree and frame `n` is the `n`th packet.
+They differ in streams whose encoder was fed an irregular source and
+left frames out without writing zero-length packets in their place:
+the positions then skip the missing frames. Such a video played by
+counting packets runs too fast (one of The White Chamber's has 57
+packets spread over some 115 frame periods and played in half its
+time). Two packets may also carry the same number: both are then due at
+the same instant, and the later one takes the earlier one's place at
+once.
+
+This is the timing of the original engine, which asks its decoder
+library for the time of the decoder's granule position after each
+packet (`theora_granule_time` in `CVidTheoraPlayer::DecodeTheora`). How
+that library sets the position of packets that do not end a page (one
+more than the packet before) is its documented behaviour, not read from
+the engine's sources. Luma shows a frame at the start of its interval;
+whether the library's time is the start or the end of the interval (one
+frame period later) depends on its version and was not checked.
+
+`Frame::index` still counts the packets; `Frame::time_ms` is the time
+above.
+
+### The comment header
 
 The second header packet, the comment header (Theora specification,
 section 6.3: a vendor string and `NAME=value` user comments, each with a
@@ -31,6 +74,8 @@ comment), whatever the stream's own holds, malformed lengths included;
 `Video::headers` still returns the packet as the file has it. The
 original engine's decoder library did not validate the text either
 (inferred from such files playing there, not read from its sources).
+
+### Pictures
 
 The container is read with the [`ogg`](https://crates.io/crates/ogg)
 crate (BSD-3-Clause) and the pictures decoded with
@@ -47,13 +92,39 @@ with `U' = U − 128`, `V' = V − 128`), the chroma of a 4:2:0 frame shared
 by each 2×2 block. Studio white comes out as 254 with these tables, as in
 the engine.
 
-The sound track is not decoded here: `luma_audio::decode` reads the
-Vorbis stream from the same bytes (Symphonia skips the Theora stream),
-and the player plays it as a sound effect.
+### The sound track
+
+The sound is not decoded here. `luma_video::sound_track` copies the
+packets of the file's first Vorbis stream into an Ogg file of its own,
+on the same pages and with the same granule positions, and closes it
+with an end-of-stream page; `luma_audio::decode` decodes that, and the
+player plays it as a sound effect.
+
+The copy is there because the sound decoder (Symphonia) reads the whole
+container and reports an error at the end of a file whose streams were
+never closed, which loses the whole track although every packet
+decoded. Some game videos are like that (cut short, or written by a
+muxer that never marked the last pages). The original engine feeds the
+Vorbis packets to its decoder one by one and never looks for the mark
+(`CVidTheoraPlayer::DecodeVorbis`). A file damaged or cut in the middle
+of a page keeps the sound up to the damage.
+
+The Vorbis comment header needs no such care as the Theora one:
+Symphonia reads its text leniently.
+
+### Test clips
 
 `luma_video::synthetic_clip` encodes a short clip in code (the same
 crate's encoder, muxed with `ogg`) for tests and demos: no video file is
-needed in the repository.
+needed in the repository. `synthetic_clip_at` gives the frames chosen
+frame numbers, for a stream that leaves frames out.
+
+`cargo test -p luma-video --test local_videos -- --ignored --nocapture`
+decodes every video of a local test game (the directory named by
+`LUMA_TEST_VIDEOS`, or the White Chamber source pack under
+`testdata/local/`) and prints the number of frames, the time of the last
+one and the length of the sound, to compare with `ffprobe`; it passes
+when the files are absent.
 
 ## `Game.PlayTheora`
 
@@ -107,9 +178,18 @@ after shows the scene again.
 Playback starts on the first frame decoded (and, with a sound track,
 when its first block is ready). The **movie time** is the sound's
 position when there is one, else the wall clock since the start. Each
-frame is shown when its time (`index × fps_den / fps_num`) is reached;
-frames whose time has already passed are decoded but not shown, unless
-`dropFrames` is `false`, in which case every frame is shown in turn.
+frame is shown when its time is reached (the time of its frame number,
+see [Frame times](#frame-times)); frames whose time has already passed
+are decoded but not shown, unless `dropFrames` is `false`, in which case
+every frame is shown in turn. The video ends on the step after its last
+frame was shown.
+
+A sound track is often a little shorter than the pictures (by half a
+second in some videos). Once the sound has ended, the movie time goes on
+on the clock from the sound's last position, so that the remaining
+frames show at their times and the video ends. This is Luma's own rule:
+the original engine plays the sound through a streaming buffer whose
+behaviour at the end of the data was not read from its sources.
 
 ## `Entity.PlayTheora`
 
