@@ -1720,7 +1720,7 @@ impl World {
                 let ok =
                     self.play_entity_theora(id, &filename, looping, alpha.as_deref(), start_ms);
                 if !ok {
-                    self.log(format!(
+                    self.report_script_error(&format!(
                         "Runtime error. Entity.PlayTheora - error playing video '{filename}'"
                     ));
                 }

@@ -173,9 +173,8 @@ impl World {
                 let length = u64::try_from(arg(2).get_int(self)).unwrap_or(0);
                 let swap = arg(3).is_null() || arg(3).get_bool(self);
                 if self.is_crossfading() {
-                    self.log(
-                        "Runtime error. Game.MusicCrossfade: Music crossfade is already in progress."
-                            .to_string(),
+                    self.report_script_error(
+                        "Runtime error. Game.MusicCrossfade: Music crossfade is already in progress.",
                     );
                     return Some(Return::value(false));
                 }

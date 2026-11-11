@@ -307,7 +307,7 @@ impl World {
         y: i32,
     ) -> bool {
         let Some(mut def) = self.read_entity_def(path) else {
-            self.log(format!(
+            self.report_script_error(&format!(
                 "Runtime error: AddAttachment() failed loading entity '{path}'"
             ));
             return false;
@@ -587,7 +587,9 @@ impl World {
             return false;
         };
         if layer.main {
-            self.log("Runtime error: Scene.DeleteLayer - cannot delete main scene layer");
+            self.report_script_error(
+                "Runtime error: Scene.DeleteLayer - cannot delete main scene layer",
+            );
             return false;
         }
         let nodes = layer.nodes.len();
