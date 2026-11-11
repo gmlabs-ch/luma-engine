@@ -6,329 +6,329 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DCamera::C3DCamera` | unreviewed |  |
-| `C3DCamera::~C3DCamera` | unreviewed |  |
-| `C3DCamera::GetViewMatrix` | unreviewed |  |
-| `C3DCamera::SetupPos` | unreviewed |  |
-| `C3DCamera::RotateView` | unreviewed |  |
-| `C3DCamera::Move` | unreviewed |  |
+| `C3DCamera::C3DCamera` | done | `luma-3d/src/scene_geometry.rs` `Camera`: a camera always comes from the `.3ds` file with its position, target, bank and field of view (45 degrees without a lens); near and far planes are `-1` (default) and come from the scene keys (`camera.rs` `CameraSettings`). |
+| `C3DCamera::~C3DCamera` | replaced | Rust ownership. |
+| `C3DCamera::GetViewMatrix` | done | `scene_geometry.rs` `Camera::view_matrix`: `LookAtLH` with the up vector turned about Z by the bank in degrees. |
+| `C3DCamera::SetupPos` | done | `scene_geometry.rs` `Camera::from_3ds` sets position, target and bank. |
+| `C3DCamera::RotateView` | n/a | Never called by the engine. |
+| `C3DCamera::Move` | n/a | Never called by the engine. |
 
 ## `wme_base/3DEffect.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DEffect::C3DEffect` | unreviewed |  |
-| `C3DEffect::~C3DEffect` | unreviewed |  |
-| `C3DEffect::InvalidateDeviceObjects` | unreviewed |  |
-| `C3DEffect::RestoreDeviceObjects` | unreviewed |  |
-| `C3DEffect::CreateFromFile` | unreviewed |  |
-| `C3DEffect::InitializeParams` | unreviewed |  |
-| `C3DEffect::AddRenderTarget` | unreviewed |  |
-| `C3DEffect::AddTexture` | unreviewed |  |
-| `C3DEffect::UpdateMatrices` | unreviewed |  |
-| `C3DEffect::UpdateCamera` | unreviewed |  |
-| `C3DEffect::UpdateMaterial` | unreviewed |  |
-| `C3DEffect::UpdateGlobals` | unreviewed |  |
-| `C3DEffect::UpdateLights` | unreviewed |  |
-| `C3DEffect::SetLightPos` | unreviewed |  |
-| `C3DEffect::SetLightDir` | unreviewed |  |
-| `C3DEffect::SetLightAmbient` | unreviewed |  |
-| `C3DEffect::SetLightDiffuse` | unreviewed |  |
-| `C3DEffect::SetLightSpecular` | unreviewed |  |
-| `C3DEffect::SetRenderColorTarget` | unreviewed |  |
-| `C3DEffect::SetRenderDepthTarget` | unreviewed |  |
-| `C3DEffect::InitializeScripts` | unreviewed |  |
-| `C3DEffect::GetScriptForPass` | unreviewed |  |
-| `C3DEffect::GetAnnotationValue` | unreviewed |  |
-| `C3DEffect::GetAnnotationValue #2` | unreviewed |  |
-| `C3DEffect::GetAnnotationValue #3` | unreviewed |  |
-| `C3DEffect::GetAnnotationValue #4` | unreviewed |  |
-| `C3DEffect::GetAnnotationValue #5` | unreviewed |  |
-| `C3DEffect::GetAnnotationValue #6` | unreviewed |  |
-| `C3DEffect::ParseTextureFormat` | unreviewed |  |
-| `C3DEffect::BuildSemanticStringMap` | unreviewed |  |
-| `C3DEffect::AddSemanticString` | unreviewed |  |
-| `C3DEffect::GetSemanticType` | unreviewed |  |
-| `C3DEffect::ColorToVector` | unreviewed |  |
-| `C3DEffect::StoreDefaultBuffers` | unreviewed |  |
-| `C3DEffect::RestoreDefaultBuffers` | unreviewed |  |
-| `C3DEffect::RestoreColorBuffer` | unreviewed |  |
-| `C3DEffect::RestoreDepthBuffer` | unreviewed |  |
-| `CShaderIncludeHelper::CShaderIncludeHelper` | unreviewed |  |
-| `CShaderIncludeHelper::Open` | unreviewed |  |
-| `CShaderIncludeHelper::Close` | unreviewed |  |
+| `C3DEffect::C3DEffect` | todo | Direct3D 9 build only: a D3DX effect (HLSL `.fx` file) attached to a model material, with its render targets, textures, pass scripts and semantic table. Luma has no effects: `Actor3D.SetEffect` and the other effect calls log a stub and return false (`luma-adventure/src/natives_actor3d.rs`), the `EFFECT` blocks of actor files are parsed (`luma-3d/src/actor3d.rs` `EffectDef`) and not used. Needs a decision on how HLSL effects are to be run (a translation to WGSL or a fixed set). |
+| `C3DEffect::~C3DEffect` | todo | Frees the effect, its render targets, textures and scripts; comes with `C3DEffect::CreateFromFile`. |
+| `C3DEffect::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
+| `C3DEffect::RestoreDeviceObjects` | n/a | Direct3D device loss. |
+| `C3DEffect::CreateFromFile` | todo | Reads the `.fx` file, compiles it with `D3DXCreateEffect` (includes resolved through the game's file manager, compile errors logged), picks the first valid technique (fails with `No valid technique found` otherwise), then `InitializeParams` and `InitializeScripts`. Not in Luma. |
+| `C3DEffect::InitializeParams` | todo | Walks the effect's parameters: creates a render target for the `RENDERCOLORTARGET` and `RENDERDEPTHSTENCILTARGET` semantics, loads a texture for parameters with a `ResourceName` annotation, and records the handles of the known semantics. Not in Luma. |
+| `C3DEffect::AddRenderTarget` | todo | Creates a render target from a parameter's annotations (`Dimensions` or `RenderTargetDimensions` or `Width`/`Height` default 512, `Format` default `D3DFMT_A8R8G8B8`, `ClearColor`, `ClearDepth`, `MipLevels` default 1) and binds it to the parameter. Not in Luma. |
+| `C3DEffect::AddTexture` | todo | Loads the texture named by a parameter's `ResourceName` annotation and binds it. Not in Luma. |
+| `C3DEffect::UpdateMatrices` | todo | Sets the matrix semantics (`World`, `View`, `Projection`, their products, inverses and transposes) before a material is drawn. Not in Luma. |
+| `C3DEffect::UpdateCamera` | todo | Sets `ViewPosition` and `ViewDirection` from the camera. Not in Luma. |
+| `C3DEffect::UpdateMaterial` | todo | Sets `DiffuseMap` (the material's surface), `Ambient`, `Diffuse`, `Specular`, `Emissive` and `Power`. Not in Luma. |
+| `C3DEffect::UpdateGlobals` | todo | Sets `Time` (`m_CurrentTime / 1000`) and `ElapsedTime` (`m_DeltaTime / 1000`). Not in Luma. |
+| `C3DEffect::UpdateLights` | todo | Sets `ActorLightPos` (the owner's shadow light position) and the per-light semantics from the device's enabled lights. Not in Luma. |
+| `C3DEffect::SetLightPos` | todo | Sets a light's position parameter from device light `index`. Not in Luma. |
+| `C3DEffect::SetLightDir` | todo | Sets a light's direction parameter from device light `index`. Not in Luma. |
+| `C3DEffect::SetLightAmbient` | todo | Sets a light's ambient colour parameter. Not in Luma. |
+| `C3DEffect::SetLightDiffuse` | todo | Sets a light's diffuse colour parameter. Not in Luma. |
+| `C3DEffect::SetLightSpecular` | todo | Sets a light's specular colour parameter. Not in Luma. |
+| `C3DEffect::SetRenderColorTarget` | todo | Activates a named colour render target of the effect (the default one for an empty name). Not in Luma. |
+| `C3DEffect::SetRenderDepthTarget` | todo | Activates a named depth render target of the effect. Not in Luma. |
+| `C3DEffect::InitializeScripts` | todo | Reads the `Script` annotation of every pass of the technique into a `C3DEffectScript`. Not in Luma. |
+| `C3DEffect::GetScriptForPass` | todo | The script of a pass. Not in Luma. |
+| `C3DEffect::GetAnnotationValue` | todo | Reads a string annotation of an effect parameter. Not in Luma. |
+| `C3DEffect::GetAnnotationValue #2` | todo | Reads a float annotation. Not in Luma. |
+| `C3DEffect::GetAnnotationValue #3` | todo | Reads an integer annotation. Not in Luma. |
+| `C3DEffect::GetAnnotationValue #4` | todo | Reads a two-component vector annotation. Not in Luma. |
+| `C3DEffect::GetAnnotationValue #5` | todo | Reads a three-component vector annotation. Not in Luma. |
+| `C3DEffect::GetAnnotationValue #6` | todo | Reads a four-component vector annotation. Not in Luma. |
+| `C3DEffect::ParseTextureFormat` | todo | Maps a `D3DFMT_...` name of a render target annotation to a texture format. Not in Luma. |
+| `C3DEffect::BuildSemanticStringMap` | todo | The table of semantic names the engine feeds (matrices, `ViewPosition`, `ViewDirection`, `DiffuseMap`, material colours, `Time`, `ElapsedTime`, `ActorLightPos`, light semantics). Not in Luma. |
+| `C3DEffect::AddSemanticString` | todo | Adds a name to the semantic table (lower-cased). Not in Luma. |
+| `C3DEffect::GetSemanticType` | todo | Looks a semantic name up in the table. Not in Luma. |
+| `C3DEffect::ColorToVector` | todo | A colour value as a four-component vector for an effect parameter. Not in Luma. |
+| `C3DEffect::StoreDefaultBuffers` | todo | Remembers the device's colour and depth targets before a pass script redirects rendering. Not in Luma. |
+| `C3DEffect::RestoreDefaultBuffers` | todo | Puts both remembered targets back. Not in Luma. |
+| `C3DEffect::RestoreColorBuffer` | todo | Puts the remembered colour target back. Not in Luma. |
+| `C3DEffect::RestoreDepthBuffer` | todo | Puts the remembered depth target back. Not in Luma. |
+| `CShaderIncludeHelper::CShaderIncludeHelper` | todo | Include handler of the effect compiler; comes with `C3DEffect::CreateFromFile`. |
+| `CShaderIncludeHelper::Open` | todo | Reads an `#include`d shader file through the game's file manager (packages). Not in Luma. |
+| `CShaderIncludeHelper::Close` | todo | Frees an included file's buffer. Not in Luma. |
 
 ## `wme_base/3DEffect_D3D8.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DEffect::C3DEffect` | unreviewed |  |
-| `C3DEffect::~C3DEffect` | unreviewed |  |
-| `C3DEffect::CreateFromFile` | unreviewed |  |
+| `C3DEffect::C3DEffect` | n/a | Empty stub of the Direct3D 8 build. |
+| `C3DEffect::~C3DEffect` | n/a | Empty stub of the Direct3D 8 build. |
+| `C3DEffect::CreateFromFile` | partial | The Direct3D 8 build refuses effects: it logs `Error: Effect files are not supported by Direct3D 8 version of the engine.` and fails. Luma behaves like this build (the effect calls return false) but logs its own stub line instead of that message. |
 
 ## `wme_base/3DEffectParams.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DEffectParams::C3DEffectParams` | unreviewed |  |
-| `C3DEffectParams::~C3DEffectParams` | unreviewed |  |
-| `C3DEffectParams::Clear` | unreviewed |  |
-| `C3DEffectParams::Persist` | unreviewed |  |
-| `C3DEffectParams::SetEffectParams` | unreviewed |  |
-| `C3DEffectParams::SetParam` | unreviewed |  |
-| `C3DEffectParams::SetParam #2` | unreviewed |  |
-| `C3DEffectParams::GetParamByName` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParams` | todo | The list of script-set effect parameters of a material (`Actor3D.SetEffectParam...`). Not in Luma. |
+| `C3DEffectParams::~C3DEffectParams` | todo | Frees the parameter list. Not in Luma. |
+| `C3DEffectParams::Clear` | todo | Empties the parameter list. Not in Luma. |
+| `C3DEffectParams::Persist` | todo | Saves the parameters (name, type, string, int, float, vector and bool values). Not in Luma: nothing of the effects is saved. |
+| `C3DEffectParams::SetEffectParams` | todo | Applies every stored parameter to the effect by name before drawing. Not in Luma. |
+| `C3DEffectParams::SetParam` | todo | Stores a parameter from a script value (bool, int, float or string by the value's type). Not in Luma. |
+| `C3DEffectParams::SetParam #2` | todo | Stores a parameter as a four-component vector. Not in Luma. |
+| `C3DEffectParams::GetParamByName` | todo | Finds or creates the parameter of a name. Not in Luma. |
 
 ## `wme_base/3DEffectScript.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DEffectScript::C3DEffectScript` | unreviewed |  |
-| `C3DEffectScript::~C3DEffectScript` | unreviewed |  |
-| `C3DEffectScript::InitFrame` | unreviewed |  |
-| `C3DEffectScript::Execute` | unreviewed |  |
-| `C3DEffectScript::ParseString` | unreviewed |  |
-| `C3DEffectScript::ClearCommands` | unreviewed |  |
+| `C3DEffectScript::C3DEffectScript` | todo | The command list of an effect pass (the `Script` annotation). Not in Luma. |
+| `C3DEffectScript::~C3DEffectScript` | todo | Frees the commands. Not in Luma. |
+| `C3DEffectScript::InitFrame` | todo | Restarts the command list and stores the default targets when the script changes render targets. Not in Luma. |
+| `C3DEffectScript::Execute` | todo | Runs the commands up to the next geometry draw (returns true so that the mesh is drawn), drawing the full-screen quad or switching render targets on the way; restores the targets at the end. Not in Luma. |
+| `C3DEffectScript::ParseString` | todo | Parses `RenderColorTarget0=`, `RenderDepthStencilTarget=` and `Draw=` (`Buffer` for the quad, anything else for the geometry) separated by `;`; adds a geometry draw when there is none and restores the targets it changed. Not in Luma. |
+| `C3DEffectScript::ClearCommands` | todo | Empties the command list. Not in Luma. |
 
 ## `wme_base/3DEffectTexture.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DEffectTexture::C3DEffectTexture` | unreviewed |  |
-| `C3DEffectTexture::~C3DEffectTexture` | unreviewed |  |
-| `C3DEffectTexture::LoadFromFile` | unreviewed |  |
-| `C3DEffectTexture::GetTexture` | unreviewed |  |
+| `C3DEffectTexture::C3DEffectTexture` | todo | A texture an effect names in a `ResourceName` annotation. Not in Luma. |
+| `C3DEffectTexture::~C3DEffectTexture` | todo | Frees the surface. Not in Luma. |
+| `C3DEffectTexture::LoadFromFile` | todo | Loads the file as a surface with the default colour key. Not in Luma. |
+| `C3DEffectTexture::GetTexture` | todo | The Direct3D texture of the surface. Not in Luma. |
 
 ## `wme_base/3DFace.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DFace::C3DFace` | unreviewed |  |
-| `C3DFace::~C3DFace` | unreviewed |  |
+| `C3DFace::C3DFace` | replaced | A triangle of a `C3DMesh` (three vertex indices, normals and texture coordinates). For the scene geometry Luma keeps `[u16; 3]` faces (`luma-3d/src/three_ds.rs` `Mesh::faces`); the per-corner normals and coordinates only serve the Milkshape models, which Luma does not load (see `C3DModel::LoadFile`). |
+| `C3DFace::~C3DFace` | replaced | Rust ownership. |
 
 ## `wme_base/3DFrustum.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DFrustum::C3DFrustum` | unreviewed |  |
-| `C3DFrustum::~C3DFrustum` | unreviewed |  |
-| `C3DFrustum::CalcualteFrustum` | unreviewed |  |
-| `C3DFrustum::PointInFrustum` | unreviewed |  |
-| `C3DFrustum::SphereInFrustum` | unreviewed |  |
-| `C3DFrustum::CubeInFrustum` | unreviewed |  |
+| `C3DFrustum::C3DFrustum` | n/a | The class is never instantiated by the engine. |
+| `C3DFrustum::~C3DFrustum` | n/a | The class is never instantiated by the engine. |
+| `C3DFrustum::CalcualteFrustum` | n/a | Never called by the engine. |
+| `C3DFrustum::PointInFrustum` | n/a | Never called by the engine. |
+| `C3DFrustum::SphereInFrustum` | n/a | Never called by the engine. |
+| `C3DFrustum::CubeInFrustum` | n/a | Never called by the engine. |
 
 ## `wme_base/3DJoint.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DJoint::C3DJoint` | unreviewed |  |
-| `C3DJoint::~C3DJoint` | unreviewed |  |
-| `C3DJoint::Persist` | unreviewed |  |
+| `C3DJoint::C3DJoint` | todo | A bone of a Milkshape model (local rotation and translation, parent, absolute, relative and final matrices, current key index per channel). Luma has no Milkshape models (see `C3DModel::LoadFile`). |
+| `C3DJoint::~C3DJoint` | todo | Frees the joint's name; comes with the Milkshape models. |
+| `C3DJoint::Persist` | todo | Saves a joint's rotation, translation, three matrices, current key indices per channel and parent. Not in Luma. |
 
 ## `wme_base/3DKeyframe.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DKeyframe::C3DKeyframe` | unreviewed |  |
-| `C3DKeyframe::~C3DKeyframe` | unreviewed |  |
+| `C3DKeyframe::C3DKeyframe` | todo | A rotation or translation key of a Milkshape joint animation (joint index, time, three values). Not in Luma. |
+| `C3DKeyframe::~C3DKeyframe` | todo | Comes with the Milkshape models. |
 
 ## `wme_base/3DLight.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DLight::C3DLight` | unreviewed |  |
-| `C3DLight::~C3DLight` | unreviewed |  |
-| `C3DLight::SetLight` | unreviewed |  |
-| `C3DLight::GetViewMatrix` | unreviewed |  |
-| `C3DLight::Persist` | unreviewed |  |
+| `C3DLight::C3DLight` | done | `luma-3d/src/scene_geometry.rs` `Light`: white, position and target at the origin, not a spot, active; set from the `.3ds` object by `Light::from_3ds`. |
+| `C3DLight::~C3DLight` | replaced | Rust ownership. |
+| `C3DLight::SetLight` | done | `luma-adventure/src/draw3d.rs` `convert_light` and `luma-render/src/mesh.wgsl` `light_term`: colour channels divided by 256, a spot with direction and range `target - position`, inner angle 0.5, outer 1.0, falloff 1, a point light with range 100000, no distance attenuation, no ambient or specular part. The original enables the light only when it is active; which lights reach a draw is decided by the scene (`EnableLights`, adventure table). |
+| `C3DLight::GetViewMatrix` | n/a | Never called by the engine. |
+| `C3DLight::Persist` | done | `luma-adventure/src/scene3d.rs` `Saved::lights`: name, active and colour of every light. |
 
 ## `wme_base/3DLoader3DS.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DLoader3DS::C3DLoader3DS` | unreviewed |  |
-| `C3DLoader3DS::~C3DLoader3DS` | unreviewed |  |
-| `C3DLoader3DS::ParseFile` | unreviewed |  |
-| `C3DLoader3DS::GetNumMeshes` | unreviewed |  |
-| `C3DLoader3DS::GetMeshName` | unreviewed |  |
-| `C3DLoader3DS::LoadMesh` | unreviewed |  |
-| `C3DLoader3DS::GetNumLights` | unreviewed |  |
-| `C3DLoader3DS::GetLightName` | unreviewed |  |
-| `C3DLoader3DS::LoadLight` | unreviewed |  |
-| `C3DLoader3DS::GetNumCameras` | unreviewed |  |
-| `C3DLoader3DS::GetCameraName` | unreviewed |  |
-| `C3DLoader3DS::LoadCamera` | unreviewed |  |
+| `C3DLoader3DS::C3DLoader3DS` | replaced | `luma-3d/src/three_ds.rs` `File`. |
+| `C3DLoader3DS::~C3DLoader3DS` | replaced | Rust ownership. |
+| `C3DLoader3DS::ParseFile` | done | `three_ds.rs` `File::parse`: the same flat chunk walk (objects, mesh vertices with Y and Z swapped, mapping coordinates with `v` flipped, faces with the second and third index swapped, material face lists, local matrix, camera with lens and bank, light position, spot target, hotspot and falloff, off flag, float and byte colours inside a light, the camera roll from the first key of the keyframer's roll track). Luma returns an error on a truncated or inconsistent chunk where the original reads on. |
+| `C3DLoader3DS::GetNumMeshes` | done | `three_ds.rs` `File::meshes`. |
+| `C3DLoader3DS::GetMeshName` | done | `three_ds.rs` `File::meshes` yields the names. |
+| `C3DLoader3DS::LoadMesh` | done | `luma-3d/src/scene_geometry.rs` builds its meshes from the `.3ds` vertices and faces (positions and indices only, as here). |
+| `C3DLoader3DS::GetNumLights` | done | `three_ds.rs` `File::lights`. |
+| `C3DLoader3DS::GetLightName` | done | `three_ds.rs` `File::lights`. |
+| `C3DLoader3DS::LoadLight` | done | `scene_geometry.rs` `Light::from_3ds`: name, position, target, spot flag, active unless the off chunk is present, colour, falloff. |
+| `C3DLoader3DS::GetNumCameras` | done | `three_ds.rs` `File::cameras`. |
+| `C3DLoader3DS::GetCameraName` | done | `three_ds.rs` `File::cameras`. |
+| `C3DLoader3DS::LoadCamera` | done | `scene_geometry.rs` `Camera::from_3ds`: position, target, bank, field of view `1900 / lens` degrees or 45 when the lens is not positive. |
 
 ## `wme_base/3DLoaderMS3D.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DLoaderMS3D::C3DLoaderMS3D` | unreviewed |  |
-| `C3DLoaderMS3D::~C3DLoaderMS3D` | unreviewed |  |
-| `C3DLoaderMS3D::Cleanup` | unreviewed |  |
-| `C3DLoaderMS3D::ParseFile` | unreviewed |  |
-| `C3DLoaderMS3D::MergeMesh` | unreviewed |  |
-| `C3DLoaderMS3D::LoadModel` | unreviewed |  |
-| `C3DLoaderMS3D::LoadAnimation` | unreviewed |  |
-| `C3DLoaderMS3D::LoadMesh` | unreviewed |  |
-| `C3DLoaderMS3D::LoadMaterial` | unreviewed |  |
+| `C3DLoaderMS3D::C3DLoaderMS3D` | todo | Reader of Milkshape 3D (`.ms3d`) files for the legacy `ACTOR3D` actors. Luma refuses these actors (`luma-3d/src/actor3d.rs`: `legacy Milkshape actor, which is not supported`). |
+| `C3DLoaderMS3D::~C3DLoaderMS3D` | todo | Comes with the Milkshape loader. |
+| `C3DLoaderMS3D::Cleanup` | todo | Frees the parsed vertices, triangles, groups, materials and joints. Not in Luma. |
+| `C3DLoaderMS3D::ParseFile` | todo | Parses the `.ms3d` file: header, vertices with bone ids, triangles with normals and texture coordinates, groups, materials, animation frame rate and total frames, joints with their rotation and translation keys. Not in Luma. |
+| `C3DLoaderMS3D::MergeMesh` | todo | Adds one named group of another `.ms3d` file to a model, bound to one bone (`Actor3D.AddMesh`). Not in Luma. |
+| `C3DLoaderMS3D::LoadModel` | todo | Fills a `C3DModel` from the parsed file: one mesh per group, the materials, the joints with their rotation and translation converted to the left-handed system. Not in Luma. |
+| `C3DLoaderMS3D::LoadAnimation` | todo | Cuts an animation out of the file's keys between `StartFrame` and `EndFrame` (an end frame of 0 means the end of the file; key times in milliseconds from the start frame; frame time from the file's frame rate). Not in Luma. |
+| `C3DLoaderMS3D::LoadMesh` | todo | Builds a mesh from a group: three vertices per triangle with the winding swapped, `z` negated, negative `t` coordinates wrapped, the group's hidden flag as `m_Visible`. Not in Luma. |
+| `C3DLoaderMS3D::LoadMaterial` | todo | Copies a Milkshape material (ambient, diffuse, specular, emissive, shininess) and loads its texture relative to the model. Not in Luma. |
 
 ## `wme_base/3DMaterial.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DMaterial::C3DMaterial` | unreviewed |  |
-| `C3DMaterial::~C3DMaterial` | unreviewed |  |
-| `C3DMaterial::InvalidateDeviceObjects` | unreviewed |  |
-| `C3DMaterial::RestoreDeviceObjects` | unreviewed |  |
-| `C3DMaterial::SetTexture` | unreviewed |  |
-| `C3DMaterial::SetSprite` | unreviewed |  |
-| `C3DMaterial::SetTheora` | unreviewed |  |
-| `C3DMaterial::SetEffect` | unreviewed |  |
-| `C3DMaterial::GetSurface` | unreviewed |  |
+| `C3DMaterial::C3DMaterial` | done | `luma-3d/src/model.rs` `Material` and `luma-render/src/draw.rs` `MeshMaterial`; a zeroed material only exists for the default grey of `CXMesh::LoadFromXData`. |
+| `C3DMaterial::~C3DMaterial` | replaced | Rust ownership. |
+| `C3DMaterial::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
+| `C3DMaterial::RestoreDeviceObjects` | n/a | Direct3D device loss. |
+| `C3DMaterial::SetTexture` | partial | `model.rs` `load_material` (the material's name is the texture file's base name) and `luma-adventure/src/draw3d.rs` `ensure_texture` (default colour key). Differences: the original loads the texture as an ordinary surface with a single mip level, so the `MIPFILTER LINEAR` of `Setup3D` has nothing to filter; Luma builds a mipmap chain (`Renderer::mesh_texture`) and samples trilinearly, which makes distant textures softer than in the original (`docs/rendering.md` states the opposite about the original). A missing file becomes `invalid.bmp` in the original, untextured in Luma. |
+| `C3DMaterial::SetSprite` | done | `draw3d.rs` `ScriptTexture::Sprite`, `Still`: the sprite replaces the texture; the material keeps its name. |
+| `C3DMaterial::SetTheora` | done | `draw3d.rs` `ScriptTexture::Video`: the video replaces the texture; the material keeps its name. |
+| `C3DMaterial::SetEffect` | todo | Attaches or clears an effect and its parameters on the material; see `C3DEffect::CreateFromFile`. |
+| `C3DMaterial::GetSurface` | done | `draw3d.rs` `update_override`, `override_texture`: the video's current frame, else the sprite's current frame (stepped on the game timer), else the material's texture. |
 
 ## `wme_base/3DMesh.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DMesh::C3DMesh` | unreviewed |  |
-| `C3DMesh::~C3DMesh` | unreviewed |  |
-| `C3DMesh::Cleanup` | unreviewed |  |
-| `C3DMesh::FillVertexBuffer` | unreviewed |  |
-| `C3DMesh::CreateVertexBuffer` | unreviewed |  |
-| `C3DMesh::FillVertexBuffer #2` | unreviewed |  |
-| `C3DMesh::ComputeNormals` | unreviewed |  |
-| `C3DMesh::Persist` | unreviewed |  |
+| `C3DMesh::C3DMesh` | partial | For the scene geometry: `luma-3d/src/scene_geometry.rs` meshes (visible/active by default). The material index and the per-mesh visibility of Milkshape models have no counterpart (see `C3DModel::LoadFile`). |
+| `C3DMesh::~C3DMesh` | replaced | Rust ownership. |
+| `C3DMesh::Cleanup` | replaced | Rust ownership. |
+| `C3DMesh::FillVertexBuffer` | todo | Fills the vertex buffer of a Milkshape model mesh (position, normal, texture coordinates per face corner). Not in Luma with the Milkshape models. |
+| `C3DMesh::CreateVertexBuffer` | todo | Allocates that vertex buffer. Not in Luma with the Milkshape models. |
+| `C3DMesh::FillVertexBuffer #2` | todo | Fills a coloured vertex buffer for the geometry overlay (`Scene.ShowGeometry`: walk planes blue `0x700000FF`, blocks red `0x70FF0000`, generic meshes green `0x7000FF00`). Luma does not draw the overlay (`docs/rendering.md`, Not yet). |
+| `C3DMesh::ComputeNormals` | todo | Averages the face normals per vertex (`(v2 - v1) x (v3 - v2)`, normalised) for the geometry meshes; only the overlay drawing uses them. Comes with the overlay. |
+| `C3DMesh::Persist` | todo | Saves a mesh's visibility (Milkshape `ShowMesh`/`HideMesh`). Not in Luma; the geometry nodes' active flags are saved separately (`scene3d.rs` `Saved::nodes`). |
 
 ## `wme_base/3DModel.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DModel::C3DModel` | unreviewed |  |
-| `C3DModel::~C3DModel` | unreviewed |  |
-| `C3DModel::SetDefaults` | unreviewed |  |
-| `C3DModel::Cleanup` | unreviewed |  |
-| `C3DModel::ClearLoaderCache` | unreviewed |  |
-| `C3DModel::LoadFile` | unreviewed |  |
-| `C3DModel::LoadFinalize` | unreviewed |  |
-| `C3DModel::Update` | unreviewed |  |
-| `C3DModel::Render` | unreviewed |  |
-| `C3DModel::PrepareMeshes` | unreviewed |  |
-| `C3DModel::AnimSetupJoints` | unreviewed |  |
-| `C3DModel::AnimRestart` | unreviewed |  |
-| `C3DModel::AnimRestart #2` | unreviewed |  |
-| `C3DModel::AnimAdvance` | unreviewed |  |
-| `C3DModel::SetAnimation` | unreviewed |  |
-| `C3DModel::UpdateBoundingRect` | unreviewed |  |
-| `C3DModel::UpdateRect` | unreviewed |  |
-| `C3DModel::IsTransparentAt` | unreviewed |  |
-| `C3DModel::ShowMesh` | unreviewed |  |
-| `C3DModel::IsMeshVisible` | unreviewed |  |
-| `C3DModel::DeleteMesh` | unreviewed |  |
-| `C3DModel::AddMesh` | unreviewed |  |
-| `C3DModel::ParseFileMS3D` | unreviewed |  |
-| `C3DModel::ParseAnim` | unreviewed |  |
-| `C3DModel::ParseAnim NAME` | unreviewed |  |
-| `C3DModel::ParseAnim LOOPING` | unreviewed |  |
-| `C3DModel::ParseAnim START_FRAME` | unreviewed |  |
-| `C3DModel::ParseAnim END_FRAME` | unreviewed |  |
-| `C3DModel::ParseAnim MODEL` | unreviewed |  |
-| `C3DModel::ParseAnim EVENT` | unreviewed |  |
-| `C3DModel::ParseEvent` | unreviewed |  |
-| `C3DModel::ParseEvent NAME` | unreviewed |  |
-| `C3DModel::ParseEvent FRAME` | unreviewed |  |
-| `C3DModel::IsAnimPending` | unreviewed |  |
-| `C3DModel::IsAnimPending #2` | unreviewed |  |
-| `C3DModel::AnimStop` | unreviewed |  |
-| `C3DModel::AnimStop #2` | unreviewed |  |
-| `C3DModel::Persist` | unreviewed |  |
+| `C3DModel::C3DModel` | todo | A Milkshape (`.ms3d`) skeletal model, the model of the legacy `ACTOR3D` actors (`CAdActor3D`, `Game.LoadActor3D`). Luma refuses these actors (`luma-3d/src/actor3d.rs`: `legacy Milkshape actor, which is not supported`). |
+| `C3DModel::~C3DModel` | todo | Comes with the Milkshape models. |
+| `C3DModel::SetDefaults` | todo | Resets counts, the ten animation channels, the box, the rectangle and the stored pick matrices. Not in Luma. |
+| `C3DModel::Cleanup` | todo | Frees meshes, materials, joints, animations, the attached and deleted mesh lists. Not in Luma. |
+| `C3DModel::ClearLoaderCache` | todo | Drops the parsed `.ms3d` files kept while the actor file loads. Not in Luma. |
+| `C3DModel::LoadFile` | todo | Loads a `.ms3d` file (any other extension fails with `Error: no suitable loader found for file`). Not in Luma. |
+| `C3DModel::LoadFinalize` | todo | After the actor file: clears the loader cache, computes the joints' absolute matrices and moves the vertices into bone space, restarts the animations. Not in Luma. |
+| `C3DModel::Update` | todo | Advances the animations, re-skins the visible meshes and updates the bounding rectangle. Not in Luma. |
+| `C3DModel::Render` | todo | Draws each visible mesh with its material and texture (back faces culled unless `DrawBackfaces`), then stores the matrices and offsets for picking. Not in Luma. |
+| `C3DModel::PrepareMeshes` | todo | CPU skinning: each vertex and normal through its bone's final matrix (unbound vertices as loaded), and the bounding box of the result. Not in Luma. |
+| `C3DModel::AnimSetupJoints` | todo | Builds each joint's relative and absolute matrices from its Euler rotation and translation and brings vertices and normals into bone space. Not in Luma. |
+| `C3DModel::AnimRestart` | todo | Restarts every channel. Not in Luma. |
+| `C3DModel::AnimRestart #2` | todo | Restarts one channel: key indices to 0, final matrices to absolute, start time to the game timer, not finished. Not in Luma. |
+| `C3DModel::AnimAdvance` | todo | Per channel: local time, loop or finish (a finished animation on a channel other than 0 is dropped), events when the frame index changes, linear interpolation of translation and rotation keys per joint; the highest channel with a non-zero value wins per joint; final matrices down the hierarchy. Not in Luma. |
+| `C3DModel::SetAnimation` | todo | Selects the animation of a channel by name (none when not found) and restarts it when it changed or on `ForceReset`. Not in Luma. |
+| `C3DModel::UpdateBoundingRect` | todo | Projects the eight corners of the box to the screen rectangle. Not in Luma for these models (the `.X` equivalent is `CXModel::UpdateBoundingRect`). |
+| `C3DModel::UpdateRect` | todo | Grows the rectangle by a projected point. Not in Luma for these models. |
+| `C3DModel::IsTransparentAt` | todo | Pixel pick against the skinned triangles with the stored matrices. Not in Luma for these models (see `CBRenderer::GetObjectAt`, `m_Model` branch). |
+| `C3DModel::ShowMesh` | todo | Shows or hides the meshes of a name (`Actor3D.ShowMesh`, `HideMesh`), logging when none matches. Not in Luma. |
+| `C3DModel::IsMeshVisible` | todo | Whether the first mesh of a name is visible. Not in Luma. |
+| `C3DModel::DeleteMesh` | todo | Removes the meshes of a name and remembers the deletion for saved games (`Actor3D.DeleteMesh`). Not in Luma. |
+| `C3DModel::AddMesh` | todo | Adds a group of another `.ms3d` file bound to a named bone and remembers it for saved games (`Actor3D.AddMesh`). Not in Luma. |
+| `C3DModel::ParseFileMS3D` | todo | Parses a `.ms3d` file once and caches the loader by file name. Not in Luma. |
+| `C3DModel::ParseAnim` | todo | Reads an `ANIMATION` block of a legacy actor file and cuts the animation out of a `.ms3d` file. Not in Luma. |
+| `C3DModel::ParseAnim NAME` | todo | The animation's name. Not in Luma (legacy `ACTOR3D` files are refused). |
+| `C3DModel::ParseAnim LOOPING` | todo | Whether it loops, false by default in the block (the animation object's own default is true). Not in Luma. |
+| `C3DModel::ParseAnim START_FRAME` | todo | First frame of the range taken from the file, default 0. Not in Luma. |
+| `C3DModel::ParseAnim END_FRAME` | todo | Last frame of the range, default 0. Not in Luma. |
+| `C3DModel::ParseAnim MODEL` | todo | The `.ms3d` file to take the animation from, the model's own file by default. Not in Luma. |
+| `C3DModel::ParseAnim EVENT` | todo | An event block of the animation. Not in Luma. |
+| `C3DModel::ParseEvent` | todo | Reads an `EVENT` block; an event without a name is dropped. Not in Luma. |
+| `C3DModel::ParseEvent NAME` | todo | The event's name. Not in Luma. |
+| `C3DModel::ParseEvent FRAME` | todo | The frame the event fires on, stored minus one. Not in Luma. |
+| `C3DModel::IsAnimPending` | todo | Whether a channel plays an unfinished animation, optionally of a given name. Not in Luma for these models. |
+| `C3DModel::IsAnimPending #2` | todo | The same over all ten channels. Not in Luma for these models. |
+| `C3DModel::AnimStop` | todo | Clears a channel's animation. Not in Luma for these models. |
+| `C3DModel::AnimStop #2` | todo | Clears every channel. Not in Luma for these models. |
+| `C3DModel::Persist` | todo | Saves the box, rectangle, pick matrices, owner, joints, animations, the animation and start time of each channel, the deleted and attached meshes; reloads the file and replays the deletions and attachments on load. Not in Luma. |
 
 ## `wme_base/3DRenderTarget.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DRenderTarget::C3DRenderTarget` | unreviewed |  |
-| `C3DRenderTarget::~C3DRenderTarget` | unreviewed |  |
-| `C3DRenderTarget::InvalidateDeviceObjects` | unreviewed |  |
-| `C3DRenderTarget::RestoreDeviceObjects` | unreviewed |  |
-| `C3DRenderTarget::CreateRenderColorTarget` | unreviewed |  |
-| `C3DRenderTarget::CreateRenderDepthTarget` | unreviewed |  |
-| `C3DRenderTarget::SetClearColor` | unreviewed |  |
-| `C3DRenderTarget::SetClearDepth` | unreviewed |  |
-| `C3DRenderTarget::Activate` | unreviewed |  |
+| `C3DRenderTarget::C3DRenderTarget` | todo | A colour or depth render target of an effect; comes with `C3DEffect::AddRenderTarget`. |
+| `C3DRenderTarget::~C3DRenderTarget` | todo | Frees the target; comes with the effects. |
+| `C3DRenderTarget::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
+| `C3DRenderTarget::RestoreDeviceObjects` | n/a | Direct3D device loss. |
+| `C3DRenderTarget::CreateRenderColorTarget` | todo | Creates a render-target texture of a format, size and mip count. Not in Luma (effects). |
+| `C3DRenderTarget::CreateRenderDepthTarget` | todo | Creates a depth-stencil surface of a format and size. Not in Luma (effects). |
+| `C3DRenderTarget::SetClearColor` | todo | The colour the target is cleared to when activated. Not in Luma (effects). |
+| `C3DRenderTarget::SetClearDepth` | todo | The depth the target is cleared to when activated. Not in Luma (effects). |
+| `C3DRenderTarget::Activate` | todo | Makes the target current and clears it when a clear value was set. Not in Luma (effects). |
 
 ## `wme_base/3DShadowGen.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DShadowGen::C3DShadowGen` | unreviewed |  |
-| `C3DShadowGen::~C3DShadowGen` | unreviewed |  |
-| `C3DShadowGen::InvalidateDeviceObjects` | unreviewed |  |
-| `C3DShadowGen::RestoreDeviceObjects` | unreviewed |  |
-| `C3DShadowGen::CreateSimpleShadow` | unreviewed |  |
-| `C3DShadowGen::CreateFloor` | unreviewed |  |
-| `C3DShadowGen::CreateSurfaces` | unreviewed |  |
-| `C3DShadowGen::Render` | unreviewed |  |
-| `C3DShadowGen::RenderSimple` | unreviewed |  |
-| `C3DShadowGen::SetAdjustedProjectionMatrix` | unreviewed |  |
-| `C3DShadowGen::SetFrustumMatrix` | unreviewed |  |
-| `C3DShadowGen::SetColorFactorShader` | unreviewed |  |
-| `C3DShadowGen::SetTextureMatrixStage0Stage1` | unreviewed |  |
+| `C3DShadowGen::C3DShadowGen` | replaced | `luma-adventure/src/draw3d.rs` `Render3d`: no 512 by 512 shadow texture; the default shadow colour `0x80000000` is the actor's. Luma always reports real-time shadows as supported. |
+| `C3DShadowGen::~C3DShadowGen` | replaced | Rust ownership. |
+| `C3DShadowGen::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
+| `C3DShadowGen::RestoreDeviceObjects` | n/a | Direct3D device loss. |
+| `C3DShadowGen::CreateSimpleShadow` | done | `draw3d.rs` `shadow_quad`: the same four vertices, normals up and texture coordinates. |
+| `C3DShadowGen::CreateFloor` | replaced | The 500 by 500 floor quad that receives the projected shadow texture has no counterpart: Luma flattens the model's triangles onto the plane (see `Render`). |
+| `C3DShadowGen::CreateSurfaces` | replaced | The shadow render-target texture and its depth buffer are not needed by Luma's flat shadow (see `Render`). |
+| `C3DShadowGen::Render` | partial | `draw3d.rs` `shadow_items`, flat branch: simple shadow when the effective type is at most simple; otherwise the model seen from the shadow light in the shadow colour on the plane of the actor's feet. Luma projects the posed triangles onto that plane with `shadow_matrix` and uses the stencil so that overlaps darken once; the original renders the model from the light (45 degree cone, near 1, far 10000) into a 512 by 512 texture and projects it on a 500 by 500 floor quad centred on the actor. Differences: Luma's edge is sharp where the original's is the bilinear texture; the original clips the shadow to the light cone and to the floor quad; the original draws the `SHADOW_MODEL` when the actor has one (`RenderModel`), Luma the main model. The colour is the shadow colour squared with the shadow alpha, as documented in the code. |
+| `C3DShadowGen::RenderSimple` | partial | `draw3d.rs` `shadow_items`, simple branch: the quad scaled by `ShadowSize * Scale3D`, turned by the actor's angle, at its position, the actor's shadow image or the game's, no depth writes. Differences: without any shadow image the original draws nothing, Luma draws a generated round shadow (`default_shadow_image`); the original draws the quad lit with whatever material was last set, Luma unlit with the image's own colours. |
+| `C3DShadowGen::SetAdjustedProjectionMatrix` | replaced | Projection of the light's view for the shadow texture; Luma's `shadow_matrix` projects from the light point instead. |
+| `C3DShadowGen::SetFrustumMatrix` | replaced | See `SetAdjustedProjectionMatrix`. |
+| `C3DShadowGen::SetColorFactorShader` | replaced | Draws the model in one flat colour into the shadow texture; Luma's flat shadow uses an unlit `MeshMaterial` of the shadow colour. |
+| `C3DShadowGen::SetTextureMatrixStage0Stage1` | replaced | Texture matrix that projects the shadow texture onto the floor; not needed by Luma's geometric projection. |
 
 ## `wme_base/3DShadowVolume.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DShadowVolume::C3DShadowVolume` | unreviewed |  |
-| `C3DShadowVolume::~C3DShadowVolume` | unreviewed |  |
-| `C3DShadowVolume::Reset` | unreviewed |  |
-| `C3DShadowVolume::AddMesh` | unreviewed |  |
-| `C3DShadowVolume::AddVertex` | unreviewed |  |
-| `C3DShadowVolume::Render` | unreviewed |  |
-| `C3DShadowVolume::RenderToStencilBuffer` | unreviewed |  |
-| `C3DShadowVolume::RenderToScene` | unreviewed |  |
-| `C3DShadowVolume::InitMask` | unreviewed |  |
-| `C3DShadowVolume::SetColor` | unreviewed |  |
+| `C3DShadowVolume::C3DShadowVolume` | done | `luma-render/src/draw.rs` `ShadowVolumeDraw`, `StencilFill`; the default colour `0x7f000000` is always replaced by the actor's shadow colour before drawing. |
+| `C3DShadowVolume::~C3DShadowVolume` | replaced | Rust ownership. |
+| `C3DShadowVolume::Reset` | done | The volume's vertices are rebuilt every frame (`draw3d.rs` `shadow_items`). |
+| `C3DShadowVolume::AddMesh` | done | `draw3d.rs` `add_shadow_volume`: the light brought to model space, a face is lit when `(v2 - v1) x (v1 - v0)` dotted with the light is negative, an edge of a lit face is a silhouette edge when it has no neighbour or an unlit one, each edge extruded away from the light by the depth into two triangles in the same vertex order. The adjacency is Luma's own (`Adjacency::of`) in place of D3DX's. |
+| `C3DShadowVolume::AddVertex` | replaced | `Vec::push`. |
+| `C3DShadowVolume::Render` | done | `luma-render/src/renderer.rs` draws the volume's triangle list with the position-only shader (`shadow.wgsl`). |
+| `C3DShadowVolume::RenderToStencilBuffer` | done | `renderer.rs` shadow volume pipelines: depth test without depth or colour writes, counter-clockwise faces culled with increment on depth pass, then clockwise faces culled with decrement (`docs/rendering.md`, Shadow items). |
+| `C3DShadowVolume::RenderToScene` | done | `renderer.rs` stencil fill: a viewport-wide alpha-blended fill of the shadow colour where `1 <= stencil`, no depth test, no fog; the stencil is zeroed where the fill passed instead of a separate clear. |
+| `C3DShadowVolume::InitMask` | replaced | The full-screen quad of the fill is generated by the shader. |
+| `C3DShadowVolume::SetColor` | done | `draw.rs` `StencilFill::color` is the actor's shadow colour each frame. |
 
 ## `wme_base/3DSkelAnim.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DSkelAnim::C3DSkelAnim` | unreviewed |  |
-| `C3DSkelAnim::~C3DSkelAnim` | unreviewed |  |
-| `C3DSkelAnim::Persist` | unreviewed |  |
+| `C3DSkelAnim::C3DSkelAnim` | todo | An animation of a Milkshape model (per-joint rotation and translation keys, total and frame time, looping true by default, events). Not in Luma (see `C3DModel::LoadFile`). |
+| `C3DSkelAnim::~C3DSkelAnim` | todo | Frees the joint animations and events. Not in Luma. |
+| `C3DSkelAnim::Persist` | todo | Saves the animation: current frame, finished, frame time, looping, name, total time, events and every joint's keys. Not in Luma. |
 
 ## `wme_base/3DUtils.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DUtils::IntersectTriangle` | unreviewed |  |
-| `C3DUtils::MatrixSetTranslation` | unreviewed |  |
-| `C3DUtils::MatrixSetRotation` | unreviewed |  |
-| `C3DUtils::PickMakeRay` | unreviewed |  |
-| `C3DUtils::PickGetIntersect` | unreviewed |  |
-| `C3DUtils::DecomposeMatrixSimple` | unreviewed |  |
-| `C3DUtils::DecomposeMatrix` | unreviewed |  |
-| `C3DUtils::V3Combine` | unreviewed |  |
-| `C3DUtils::SetFixedVertexShader` | unreviewed |  |
-| `C3DUtils::SetStreamSource` | unreviewed |  |
-| `C3DUtils::SetIndices` | unreviewed |  |
-| `C3DUtils::CreateDepthStencilSurface` | unreviewed |  |
-| `C3DUtils::GetRenderTarget` | unreviewed |  |
-| `C3DUtils::SetRenderTarget` | unreviewed |  |
-| `C3DUtils::SetTextureStageState` | unreviewed |  |
-| `C3DUtils::CreateImageSurface` | unreviewed |  |
-| `C3DUtils::GetFrontBuffer` | unreviewed |  |
-| `C3DUtils::GetAdapterModeCount` | unreviewed |  |
-| `C3DUtils::EnumAdapterModes` | unreviewed |  |
-| `C3DUtils::DrawIndexedPrimitive` | unreviewed |  |
+| `C3DUtils::IntersectTriangle` | done | `luma-3d/src/math.rs` `intersect_triangle`: single-sided, `det < 0.0001` fails, no `t >= 0` test, the result is where the line meets the triangle's plane. |
+| `C3DUtils::MatrixSetTranslation` | todo | Writes a translation into a matrix; used only by the Milkshape model (`C3DModel::AnimSetupJoints`, `AnimAdvance`). Comes with it. |
+| `C3DUtils::MatrixSetRotation` | todo | Writes the rotation of three Euler angles (Milkshape order) into a matrix; used only by the Milkshape model. Comes with it. |
+| `C3DUtils::PickMakeRay` | n/a | Never called by the engine. |
+| `C3DUtils::PickGetIntersect` | done | `math.rs` `pick_get_intersect`: segment against the triangle's plane only, normal `(v1 - v0) x (v2 - v1)`, parallel below `0.00001`, position within 0 to 1. |
+| `C3DUtils::DecomposeMatrixSimple` | done | `math.rs` `decompose_simple`: translation row, column lengths as the scale, the quaternion of the matrix as it is. |
+| `C3DUtils::DecomposeMatrix` | n/a | Never called by the engine (the animation loader uses `DecomposeMatrixSimple`). |
+| `C3DUtils::V3Combine` | n/a | Only used by `DecomposeMatrix`, which is never called. |
+| `C3DUtils::SetFixedVertexShader` | n/a | Direct3D 8/9 difference wrapper (`SetVertexShader` or `SetFVF`). |
+| `C3DUtils::SetStreamSource` | n/a | Direct3D 8/9 difference wrapper. |
+| `C3DUtils::SetIndices` | n/a | Direct3D 8/9 difference wrapper. |
+| `C3DUtils::CreateDepthStencilSurface` | n/a | Direct3D 8/9 difference wrapper. |
+| `C3DUtils::GetRenderTarget` | n/a | Direct3D 8/9 difference wrapper. |
+| `C3DUtils::SetRenderTarget` | n/a | Direct3D 8/9 difference wrapper. |
+| `C3DUtils::SetTextureStageState` | n/a | Direct3D 8/9 difference wrapper (texture stage or sampler state). |
+| `C3DUtils::CreateImageSurface` | n/a | Direct3D 8/9 difference wrapper for the screenshot surface; see `CBRenderD3D::TakeScreenshot`. |
+| `C3DUtils::GetFrontBuffer` | n/a | Direct3D 8/9 difference wrapper for the screenshot; see `CBRenderD3D::TakeScreenshot`. |
+| `C3DUtils::GetAdapterModeCount` | n/a | Display mode enumeration for the settings dialog. |
+| `C3DUtils::EnumAdapterModes` | n/a | Display mode enumeration for the settings dialog. |
+| `C3DUtils::DrawIndexedPrimitive` | n/a | Direct3D 8/9 difference wrapper. |
 
 ## `wme_base/3DVertex.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DVertex::C3DVertex` | unreviewed |  |
-| `C3DVertex::~C3DVertex` | unreviewed |  |
+| `C3DVertex::C3DVertex` | replaced | A mesh vertex with a bone id (`-1`: none). The scene geometry keeps plain positions (`three_ds.rs` `Mesh::vertices`); the bone id only serves the Milkshape models (see `C3DModel::LoadFile`). |
+| `C3DVertex::~C3DVertex` | replaced | Rust ownership. |
 
 ## `wme_base/BImage.cpp`
 
