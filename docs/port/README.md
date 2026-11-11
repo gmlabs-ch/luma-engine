@@ -50,13 +50,13 @@ original does. `partial` and `todo` rows are the work that remains.
 <!-- counts -->
 | Table | Functions | Keys | unreviewed | done | partial | todo | replaced | n/a |
 |---|---|---|---|---|---|---|---|---|
-| [The adventure game: scenes, actors, entities, items, dialogue](adventure.md) | 564 | 358 | 207 | 359 | 166 | 43 | 80 | 67 |
-| [Windows, settings dialogs, hardware detection, plugins, network, debugger](platform.md) | 336 | 0 | 4 | 2 | 11 | 24 | 34 | 261 |
-| [Renderers, surfaces, 3D models and scenes](render.md) | 574 | 13 | 30 | 127 | 47 | 151 | 128 | 104 |
-| [Sound and video](sound-video.md) | 167 | 0 | 1 | 46 | 27 | 20 | 45 | 28 |
+| [The adventure game: scenes, actors, entities, items, dialogue](adventure.md) | 564 | 358 | 0 | 459 | 202 | 96 | 89 | 76 |
+| [Windows, settings dialogs, hardware detection, plugins, network, debugger](platform.md) | 336 | 0 | 0 | 2 | 11 | 24 | 34 | 265 |
+| [Renderers, surfaces, 3D models and scenes](render.md) | 574 | 13 | 0 | 128 | 50 | 165 | 138 | 106 |
+| [Sound and video](sound-video.md) | 167 | 0 | 0 | 46 | 27 | 20 | 46 | 28 |
 | [Windows and controls, fonts, text](ui-text.md) | 176 | 174 | 0 | 200 | 75 | 3 | 32 | 40 |
 | [The script engine, its classes, saved games](script.md) | 406 | 3 | 0 | 145 | 41 | 10 | 91 | 122 |
-| [Packages, files, the definition-file parser, utilities](files.md) | 127 | 0 | 4 | 14 | 17 | 1 | 65 | 26 |
+| [Packages, files, the definition-file parser, utilities](files.md) | 127 | 0 | 0 | 14 | 17 | 1 | 68 | 27 |
 | [The game, its objects, sprites, regions, effects](game.md) | 400 | 124 | 0 | 216 | 80 | 20 | 53 | 155 |
-| **Total** | **2750** | **672** | **246** | **1109** | **464** | **272** | **528** | **803** |
+| **Total** | **2750** | **672** | **0** | **1210** | **503** | **339** | **551** | **819** |
 <!-- /counts -->
