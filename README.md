@@ -10,10 +10,12 @@ Luma Engine plays point-and-click adventure games made with
 natively on today's machines, and aims to become a solid foundation for new
 narrative games.
 
-> **Status: alpha.** The two test games play from start to finish through the
-> headless player and every member of the Wintermute 1.x scripting interface
-> is implemented; a complete playthrough with a window and sound is the next
-> milestone. Follow the milestones below.
+> **Status: alpha.** The two test games play from start to finish and every
+> member of the Wintermute 1.x scripting interface is implemented. Both games
+> were replayed whole with the headless player and checked frame by frame
+> (every scene, menu, dialogue and video), and what that showed is fixed; the
+> sound has not been checked by ear yet, nor a whole game played by hand in a
+> window. Follow the milestones below.
 
 ## Why
 
@@ -40,7 +42,7 @@ Luma Engine reads the same game data with a new engine built for today:
 | 1 | Read and unpack WME game packages (`luma list`, `luma unpack`) | ✅ Done |
 | 2 | Display a static scene (`luma-player <game> --scene ...`) | ✅ Done |
 | 3 | Run compiled game scripts (`luma-player <game>` plays a game) | ✅ Done |
-| 4 | A complete game playable from start to finish on macOS | Planned |
+| 4 | A complete game playable from start to finish on macOS | ✅ Done (frames checked; sound by ear and a hand-played windowed run still to do) |
 | 5 | Playable in the browser, then on iOS | Planned |
 
 ## Workspace
@@ -213,8 +215,9 @@ or belong to the legacy WME 1.0 3D actors with MS3D models, which Luma refuses
 with a clear message. The behaviour follows the MIT-licensed WME 1.x sources,
 quirks included.
 
-The two test games play from start to finish with the headless player; a
-complete playthrough in a window is the next milestone.
+The two test games play from start to finish with the headless player, and
+their frames were checked along the way. Still to do: listen to the sound,
+and play a game through by hand in a window.
 
 ## Games
 
