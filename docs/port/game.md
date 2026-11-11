@@ -157,189 +157,189 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBGame::CBGame` | unreviewed |  |
-| `CBGame::~CBGame` | unreviewed |  |
-| `CBGame::Cleanup` | unreviewed |  |
-| `CBGame::Initialize1` | unreviewed |  |
-| `CBGame::Initialize2` | unreviewed |  |
-| `CBGame::Initialize3` | unreviewed |  |
-| `CBGame::DEBUG_DebugEnable` | unreviewed |  |
-| `CBGame::DEBUG_DebugDisable` | unreviewed |  |
-| `CBGame::LOG` | unreviewed |  |
-| `CBGame::SetEngineLogCallback` | unreviewed |  |
-| `CBGame::InitLoop` | unreviewed |  |
-| `CBGame::InitInput` | unreviewed |  |
-| `CBGame::GetSequence` | unreviewed |  |
-| `CBGame::SetOffset` | unreviewed |  |
-| `CBGame::GetOffset` | unreviewed |  |
-| `CBGame::LoadFile` | unreviewed |  |
-| `CBGame::LoadBuffer` | unreviewed |  |
-| `CBGame::LoadBuffer GAME` | unreviewed |  |
-| `CBGame::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CBGame::LoadBuffer NAME` | unreviewed |  |
-| `CBGame::LoadBuffer SYSTEM_FONT` | unreviewed |  |
-| `CBGame::LoadBuffer VIDEO_FONT` | unreviewed |  |
-| `CBGame::LoadBuffer EVENTS` | unreviewed |  |
-| `CBGame::LoadBuffer CURSOR` | unreviewed |  |
-| `CBGame::LoadBuffer ACTIVE_CURSOR` | unreviewed |  |
-| `CBGame::LoadBuffer NONINTERACTIVE_CURSOR` | unreviewed |  |
-| `CBGame::LoadBuffer PERSONAL_SAVEGAMES` | unreviewed |  |
-| `CBGame::LoadBuffer SCRIPT` | unreviewed |  |
-| `CBGame::LoadBuffer CAPTION` | unreviewed |  |
-| `CBGame::LoadBuffer PROPERTY` | unreviewed |  |
-| `CBGame::LoadBuffer SUBTITLES_SPEED` | unreviewed |  |
-| `CBGame::LoadBuffer SUBTITLES` | unreviewed |  |
-| `CBGame::LoadBuffer VIDEO_SUBTITLES` | unreviewed |  |
-| `CBGame::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CBGame::LoadBuffer THUMBNAIL_WIDTH` | unreviewed |  |
-| `CBGame::LoadBuffer THUMBNAIL_HEIGHT` | unreviewed |  |
-| `CBGame::LoadBuffer INDICATOR_X` | unreviewed |  |
-| `CBGame::LoadBuffer INDICATOR_Y` | unreviewed |  |
-| `CBGame::LoadBuffer INDICATOR_WIDTH` | unreviewed |  |
-| `CBGame::LoadBuffer INDICATOR_HEIGHT` | unreviewed |  |
-| `CBGame::LoadBuffer INDICATOR_COLOR` | unreviewed |  |
-| `CBGame::LoadBuffer SAVE_IMAGE_X` | unreviewed |  |
-| `CBGame::LoadBuffer SAVE_IMAGE_Y` | unreviewed |  |
-| `CBGame::LoadBuffer SAVE_IMAGE` | unreviewed |  |
-| `CBGame::LoadBuffer LOAD_IMAGE_X` | unreviewed |  |
-| `CBGame::LoadBuffer LOAD_IMAGE_Y` | unreviewed |  |
-| `CBGame::LoadBuffer LOAD_IMAGE` | unreviewed |  |
-| `CBGame::LoadBuffer SHADOW_IMAGE` | unreviewed |  |
-| `CBGame::LoadBuffer LOCAL_SAVE_DIR` | unreviewed |  |
-| `CBGame::LoadBuffer COMPAT_KILL_METHOD_THREADS` | unreviewed |  |
-| `CBGame::ScCallMethod` | unreviewed |  |
-| `CBGame::ScGetProperty` | unreviewed |  |
-| `CBGame::ScSetProperty` | unreviewed |  |
-| `CBGame::ScToString` | unreviewed |  |
-| `CBGame::DisplayQuickMsg` | unreviewed |  |
-| `CBGame::QuickMessage` | unreviewed |  |
-| `CBGame::QuickMessageForm` | unreviewed |  |
-| `CBGame::RegisterObject` | unreviewed |  |
-| `CBGame::UnregisterObject` | unreviewed |  |
-| `CBGame::InvalidateValues` | unreviewed |  |
-| `CBGame::ValidObject` | unreviewed |  |
-| `CBGame::PublishNatives` | unreviewed |  |
-| `CBGame::ExternalCall` | unreviewed |  |
-| `CBGame::ShowCursor` | unreviewed |  |
-| `CBGame::SaveGame` | unreviewed |  |
-| `CBGame::LoadGame` | unreviewed |  |
-| `CBGame::LoadGame #2` | unreviewed |  |
-| `CBGame::InitAfterLoad` | unreviewed |  |
-| `CBGame::AfterLoadRegion` | unreviewed |  |
-| `CBGame::AfterLoadSubFrame` | unreviewed |  |
-| `CBGame::AfterLoadSound` | unreviewed |  |
-| `CBGame::AfterLoadTheora` | unreviewed |  |
-| `CBGame::AfterLoadXModel` | unreviewed |  |
-| `CBGame::AfterLoadScript` | unreviewed |  |
-| `CBGame::DisplayWindows` | unreviewed |  |
-| `CBGame::PlayMusic` | unreviewed |  |
-| `CBGame::StopMusic` | unreviewed |  |
-| `CBGame::PauseMusic` | unreviewed |  |
-| `CBGame::ResumeMusic` | unreviewed |  |
-| `CBGame::SetMusicStartTime` | unreviewed |  |
-| `CBGame::LoadSettings` | unreviewed |  |
-| `CBGame::LoadSettings SETTINGS` | unreviewed |  |
-| `CBGame::LoadSettings GAME` | unreviewed |  |
-| `CBGame::LoadSettings STRING_TABLE` | unreviewed |  |
-| `CBGame::LoadSettings RESOLUTION` | unreviewed |  |
-| `CBGame::LoadSettings REQUIRE_3D_ACCELERATION` | unreviewed |  |
-| `CBGame::LoadSettings REQUIRE_SOUND` | unreviewed |  |
-| `CBGame::LoadSettings HWTL_MODE` | unreviewed |  |
-| `CBGame::LoadSettings ALLOW_WINDOWED_MODE` | unreviewed |  |
-| `CBGame::LoadSettings ALLOW_ACCESSIBILITY_TAB` | unreviewed |  |
-| `CBGame::LoadSettings ALLOW_ABOUT_TAB` | unreviewed |  |
-| `CBGame::LoadSettings ALLOW_ADVANCED` | unreviewed |  |
-| `CBGame::LoadSettings ALLOW_DESKTOP_RES` | unreviewed |  |
-| `CBGame::LoadSettings REGISTRY_PATH` | unreviewed |  |
-| `CBGame::LoadSettings RICH_SAVED_GAMES` | unreviewed |  |
-| `CBGame::LoadSettings SAVED_GAME_EXT` | unreviewed |  |
-| `CBGame::LoadSettings GUID` | unreviewed |  |
-| `CBGame::Persist` | unreviewed |  |
-| `CBGame::FocusWindow` | unreviewed |  |
-| `CBGame::Freeze` | unreviewed |  |
-| `CBGame::Unfreeze` | unreviewed |  |
-| `CBGame::HandleKeypress` | unreviewed |  |
-| `CBGame::HandleAccessKey` | unreviewed |  |
-| `CBGame::AccessPause` | unreviewed |  |
-| `CBGame::AccessUnpause` | unreviewed |  |
-| `CBGame::HandleMouseWheel` | unreviewed |  |
-| `CBGame::GetVersion` | unreviewed |  |
-| `CBGame::SetWindowTitle` | unreviewed |  |
-| `CBGame::GetSaveSlotFilename` | unreviewed |  |
-| `CBGame::GetSaveDir` | unreviewed |  |
-| `CBGame::GetSaveSlotDescription` | unreviewed |  |
-| `CBGame::IsSaveSlotUsed` | unreviewed |  |
-| `CBGame::EmptySaveSlot` | unreviewed |  |
-| `CBGame::SetActiveObject` | unreviewed |  |
-| `CBGame::PushViewport` | unreviewed |  |
-| `CBGame::PopViewport` | unreviewed |  |
-| `CBGame::GetCurrentViewportRect` | unreviewed |  |
-| `CBGame::GetCurrentViewportOffset` | unreviewed |  |
-| `CBGame::WindowLoadHook` | unreviewed |  |
-| `CBGame::WindowScriptMethodHook` | unreviewed |  |
-| `CBGame::SetInteractive` | unreviewed |  |
-| `CBGame::ResetMousePos` | unreviewed |  |
-| `CBGame::SetResourceModule` | unreviewed |  |
-| `CBGame::DisplayContent` | unreviewed |  |
-| `CBGame::DisplayContentSimple` | unreviewed |  |
-| `CBGame::DisplayIndicator` | unreviewed |  |
-| `CBGame::UpdateMusicCrossfade` | unreviewed |  |
-| `CBGame::ResetContent` | unreviewed |  |
-| `CBGame::DEBUG_DumpClassRegistry` | unreviewed |  |
-| `CBGame::InvalidateDeviceObjects` | unreviewed |  |
-| `CBGame::RestoreDeviceObjects` | unreviewed |  |
-| `CBGame::SetWaitCursor` | unreviewed |  |
-| `CBGame::BindDirectX` | unreviewed |  |
-| `CBGame::UnBindDirectX` | unreviewed |  |
-| `CBGame::IsDirectXBound` | unreviewed |  |
-| `CBGame::IsVideoPlaying` | unreviewed |  |
-| `CBGame::StopVideo` | unreviewed |  |
-| `CBGame::DrawCursor` | unreviewed |  |
-| `CBGame::RenderShadowGeometry` | unreviewed |  |
-| `CBGame::CreateValue` | unreviewed |  |
-| `CBGame::DeleteValue` | unreviewed |  |
-| `CBGame::CreateParamSet` | unreviewed |  |
-| `CBGame::DeleteParamSet` | unreviewed |  |
-| `CBGame::SubscribeEvent` | unreviewed |  |
-| `CBGame::UnsubscribeEvent` | unreviewed |  |
-| `CBGame::OpenFile` | unreviewed |  |
-| `CBGame::CloseFile` | unreviewed |  |
-| `CBGame::CreateObject` | unreviewed |  |
-| `CBGame::SendEvent` | unreviewed |  |
-| `CBGame::CallMethod` | unreviewed |  |
-| `CBGame::SetProperty` | unreviewed |  |
-| `CBGame::SetProperty #2` | unreviewed |  |
-| `CBGame::SetProperty #3` | unreviewed |  |
-| `CBGame::SetProperty #4` | unreviewed |  |
-| `CBGame::SetProperty #5` | unreviewed |  |
-| `CBGame::SetProperty #6` | unreviewed |  |
-| `CBGame::SetProperty #7` | unreviewed |  |
-| `CBGame::GetProperty` | unreviewed |  |
-| `CBGame::GetInterface` | unreviewed |  |
-| `CBGame::GetNextAccessObject` | unreviewed |  |
-| `CBGame::GetPrevAccessObject` | unreviewed |  |
-| `CBGame::OnActivate` | unreviewed |  |
-| `CBGame::OnMouseLeftDown` | unreviewed |  |
-| `CBGame::OnMouseLeftUp` | unreviewed |  |
-| `CBGame::OnMouseLeftDblClick` | unreviewed |  |
-| `CBGame::OnMouseRightDblClick` | unreviewed |  |
-| `CBGame::OnMouseRightDown` | unreviewed |  |
-| `CBGame::OnMouseRightUp` | unreviewed |  |
-| `CBGame::OnMouseMiddleDown` | unreviewed |  |
-| `CBGame::OnMouseMiddleUp` | unreviewed |  |
-| `CBGame::OnPaint` | unreviewed |  |
-| `CBGame::OnWindowClose` | unreviewed |  |
-| `CBGame::OnWinsock` | unreviewed |  |
-| `CBGame::DisplayDebugInfo` | unreviewed |  |
-| `CBGame::SetMaxShadowType` | unreviewed |  |
-| `CBGame::GetMaxShadowType` | unreviewed |  |
-| `CBGame::GetDebugMgr` | unreviewed |  |
-| `CBGame::GetLayerSize` | unreviewed |  |
-| `CBGame::GetAmbientLightColor` | unreviewed |  |
-| `CBGame::GetMousePos` | unreviewed |  |
-| `CBGame::GetFogParams` | unreviewed |  |
-| `CBGame::MiniUpdate` | unreviewed |  |
-| `CBGame::OnScriptShutdown` | unreviewed |  |
+| `CBGame::CBGame` | partial | `luma-adventure/src/world.rs` `World::with_audio`. Differing defaults: `m_VideoSubtitles` is true, Luma's `video_subtitles` false; `srand(time)` seeds `Random` from the clock, Luma's `rng` starts from a constant so every run draws the same sequence; `m_SoundBufferSizeSec` is 3, `Game.SoundBufferSize` reads 0. The other defaults agree (subtitles on, speed 70, interactive, `saves`, `dsv`, stencil shadows, ANSI, accessibility switches, 800x600). |
+| `CBGame::~CBGame` | replaced | Rust ownership; the `System/LastRun` registry flag and the debugger shutdown hook have no use in Luma. |
+| `CBGame::Cleanup` | replaced | Rust ownership. Its one observable use, `Persist` calling it before a load, is noted on `CBGame::Persist`. |
+| `CBGame::Initialize1` | replaced | `World::with_audio` builds the stores (`Objects`, `FontBank`, `Sounds`, `Fader`, `Keyboard`) and `Runtime::with_audio` the script engine. No network manager, plugin manager, debugger or transition manager is created. |
+| `CBGame::Initialize2` | replaced | One renderer (`luma-render`, wgpu) instead of the Direct3D / DirectDraw choice. |
+| `CBGame::Initialize3` | partial | The accessibility start is `World::init_accessibility` (`Runtime::start`). Missing: the indicator defaults (`m_IndicatorY` = height - indicator height, X 0, width = screen width), as the indicator is not implemented; the game object's own position set to the centre of the screen (`m_PosX`, `m_PosY`), Luma gives the game no position. |
+| `CBGame::DEBUG_DebugEnable` | replaced | `World::log` collects lines the front-end prints (`Runtime::tick` returns them); no `wme.log` file and no debug mode (`Game.DebugMode` reads false). |
+| `CBGame::DEBUG_DebugDisable` | replaced | See `DEBUG_DebugEnable`. |
+| `CBGame::LOG` | replaced | `World::log` (`luma-adventure/src/world.rs`): always on, no timestamp, no file; the engine log callback and the debugger hook are n/a. |
+| `CBGame::SetEngineLogCallback` | n/a | Callback for the editor tools hosting the engine. |
+| `CBGame::InitLoop` | partial | `Runtime::tick` and `World::advance_time` (`luma-adventure/src/world.rs`): timer stopped while frozen, live timer, delta capped at 1000 ms by the player, FPS counter, faders, `update_sounds`. Different: the focused window is not reset every frame to the topmost visible window (`m_Windows` from the end, `m_Visible` only); Luma keeps `ui.focused_window` until it is hidden or disabled (`World::update_ui`), so a window loaded or shown above the focused one does not take the keys as it does in WME. `UpdateMusicCrossfade` runs here before the timers in WME, after the scripts in Luma (no visible effect found). |
+| `CBGame::InitInput` | n/a | Empty in the original. |
+| `CBGame::GetSequence` | replaced | Object ids are `NativeId`s handed out by `Objects::insert` (`luma-adventure/src/objects.rs`); `m_ID` is not visible to scripts. |
+| `CBGame::SetOffset` | done | `World::offset_x`, `offset_y` (`luma-adventure/src/world.rs`), set by `scroll_step`, `skip_to`; per-layer offsets come from `Camera::layer_offset`. |
+| `CBGame::GetOffset` | done | `World::offset`. |
+| `CBGame::LoadFile` | partial | `World::with_audio` reads the file named by the settings and `GameFile::parse` (`luma-formats/src/game.rs`); a missing or unparsable file is an error, as in WME. `m_Filename` is not kept (`Game.Filename` is not answered for the game). |
+| `CBGame::LoadBuffer` | partial | `GameFile::from_document`. Different: an unknown key is skipped where WME fails the load (`PARSERR_TOKENNOTFOUND`); a cursor that does not load is logged and dropped where WME fails the load; the two fallbacks after the loop are missing: `system_font.fnt` as the system font when `SYSTEM_FONT` is absent (Luma has no system font then, so `Game.Msg` and the pause text show nothing) and `shadow.png` as the shadow image (Luma uses a built-in blob, `draw3d.rs`). |
+| `CBGame::LoadBuffer GAME` | done | `GameFile::from_document` requires the `GAME` block. |
+| `CBGame::LoadBuffer TEMPLATE` | todo | Loads another game file first (`LoadFile(params)`), whose keys the rest of the block then overrides. `GameFile::from_document` skips the key. |
+| `CBGame::LoadBuffer NAME` | done | `GameFile::name`, `World::name` (`Game.Name`, the saved games' game name). |
+| `CBGame::LoadBuffer SYSTEM_FONT` | done | `GameFile::system_font`, loaded by `World::with_audio` (`World::system_font`); a font that fails to load leaves none. The default when the key is absent is on the `LoadBuffer` row. |
+| `CBGame::LoadBuffer VIDEO_FONT` | done | `GameFile::video_font`, `World::video_font`, used for video subtitles (`video.rs`), the system font without one. |
+| `CBGame::LoadBuffer EVENTS` | done | In the token table with no case in the switch: accepted and ignored, as Luma ignores it. |
+| `CBGame::LoadBuffer CURSOR` | done | `GameFile::cursor`, `World::load_cursors` (`input.rs`), `Cursors::normal`. A failing sprite is on the `LoadBuffer` row. |
+| `CBGame::LoadBuffer ACTIVE_CURSOR` | done | `GameFile::active_cursor`, `Cursors::active`. |
+| `CBGame::LoadBuffer NONINTERACTIVE_CURSOR` | done | `GameFile::noninteractive_cursor`, `Cursors::noninteractive`. |
+| `CBGame::LoadBuffer PERSONAL_SAVEGAMES` | done | `GameFile::personal_savegames`, `World::personal_save`, read by `World::save_directory` (`save.rs`). |
+| `CBGame::LoadBuffer SCRIPT` | done | `GameFile::scripts`, attached in order by `Runtime::start`. |
+| `CBGame::LoadBuffer CAPTION` | partial | `GameFile::caption`, `World::caption`. `SetCaption` expands the text through the string table when the file is loaded; Luma keeps it raw, so a `/ID/text` caption shows unexpanded in the window title, in `Game.Caption` and in the personal save directory name. |
+| `CBGame::LoadBuffer PROPERTY` | partial | Parsed into `GameFile::properties`, never applied: nothing sets them as script properties of the game object (`ParseProperty` does). Parsed, not used. |
+| `CBGame::LoadBuffer SUBTITLES_SPEED` | done | `GameFile::subtitles_speed` (70 by default), `World::subtitles_speed`. |
+| `CBGame::LoadBuffer SUBTITLES` | done | `GameFile::subtitles` (true by default), `World::subtitles`. |
+| `CBGame::LoadBuffer VIDEO_SUBTITLES` | partial | Read and used (`World::video_subtitles`), but the default when the key is absent is false in `GameFile::default`; WME's is true (`m_VideoSubtitles = true` in the constructor). |
+| `CBGame::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once unless `m_EditorMode`; editor only. |
+| `CBGame::LoadBuffer THUMBNAIL_WIDTH` | done | `GameFile::thumbnail_width`, `World::thumbnail_size` (`capture.rs`). |
+| `CBGame::LoadBuffer THUMBNAIL_HEIGHT` | done | `GameFile::thumbnail_height`, `World::thumbnail_size`. |
+| `CBGame::LoadBuffer INDICATOR_X` | todo | Left edge of the save / load progress bar (`DisplayIndicator`); skipped, no progress bar in Luma. |
+| `CBGame::LoadBuffer INDICATOR_Y` | todo | Top of the progress bar (default: screen height minus its height); skipped. |
+| `CBGame::LoadBuffer INDICATOR_WIDTH` | todo | Full width of the progress bar (default: the screen width); skipped. |
+| `CBGame::LoadBuffer INDICATOR_HEIGHT` | todo | Height of the progress bar (default 8; 0 or less hides it); skipped. |
+| `CBGame::LoadBuffer INDICATOR_COLOR` | todo | Colour of the progress bar as `r,g,b,a` (default 255,0,0,128); skipped. |
+| `CBGame::LoadBuffer SAVE_IMAGE_X` | partial | Read (`GameFile::save_image_x`, `World::saving_screen`), kept and saved, but the saving screen is never drawn (see `SaveGame`). |
+| `CBGame::LoadBuffer SAVE_IMAGE_Y` | partial | As `SAVE_IMAGE_X`. |
+| `CBGame::LoadBuffer SAVE_IMAGE` | partial | Read and kept (`World::set_saving_screen`), never drawn: a Luma save finishes inside the frame that asks for it (see `SaveGame`). |
+| `CBGame::LoadBuffer LOAD_IMAGE_X` | done | `GameFile::load_image_x`, `World::loading_screen`, drawn by `World::draw_loading_screen`. |
+| `CBGame::LoadBuffer LOAD_IMAGE_Y` | done | As `LOAD_IMAGE_X`. |
+| `CBGame::LoadBuffer LOAD_IMAGE` | done | `World::set_loading_screen`; drawn over black in the frame between `Game.LoadGame` and the load (`World::draw_loading_screen`). |
+| `CBGame::LoadBuffer SHADOW_IMAGE` | todo | The default image of the 3D actors' simple shadows (`m_ShadowImage`, `shadow.png` when absent). `GameFile` skips the key; only `Game.SetShadowImage` sets `World::shadow_image`. |
+| `CBGame::LoadBuffer LOCAL_SAVE_DIR` | done | `GameFile::local_save_dir` (`saves` by default), `World::local_save_dir` (`save.rs`). |
+| `CBGame::LoadBuffer COMPAT_KILL_METHOD_THREADS` | todo | When true, `CScEngine::ResetObject` does not reset the scripts waiting for an object before finishing them (pre-1.9 behaviour). Skipped; whether Luma's engine resets them is for the script table. |
+| `CBGame::ScCallMethod` | partial | `World::game_call` (`natives.rs`), `game_sound_call` (`natives_sound.rs`). Different: `SetMousePos` does not clamp to the screen (WME: 0..width, 0..height) and cannot move the system cursor, so the next mouse motion puts the position back; `ClearScriptCache` returns null (WME true); `PlayVideo` reads its arguments as `PlayTheora` does, so its 6th argument (the subtitle file) is taken as `dropFrames` and no subtitles load; `Caption` does not refresh the window title; `DisplayLoadingIcon` shows from the next frame (WME redraws and flips at once); `Screenshot`, `ScreenshotEx` and `StoreSaveThumbnail` capture the next frame and answer true before the file exists; `SetSavingScreen` keeps an image never shown; `Game.LOG` prefixes `sc: `; `DEBUG_DumpClassRegistry` is not accepted (debugging aid). `DumpTextureStats`, `EnableScriptProfiling`, `DisableScriptProfiling` are accepted and ignored. The music, volume, registry, save-slot, cursor, fade, window, checksum and accessibility methods agree. |
+| `CBGame::ScGetProperty` | partial | `World::game_get` (`natives.rs`). Different: `SoundBufferSize` reads 0 (WME 3 or the value set); `SuppressScriptErrors` and `AutorunDisabled` always read false; `Hwnd`, `UsedMemory`, `HardwareTL`, `Direct3DDevice`, `DirectDrawInterface` are not answered (null; Windows values); `WindowsTime` counts from the game's start; `Interactive` and the others agree, `Frozen`, `FPS`, the shadow and accessibility properties included. |
+| `CBGame::ScSetProperty` | partial | `World::game_set`. Different: `MouseX`, `MouseY` change the position the game sees but not the system cursor (`ResetMousePos`); `Name` does not refresh the window title; `SoundBufferSize`, `SuppressScriptErrors`, `AutorunDisabled` are not kept (they become script properties, and the read still gives 0 / false); `MainObject` takes any handle without the `ValidObject` check. |
+| `CBGame::ScToString` | partial | `Natives::to_string` for `World` (`world.rs`) gives `[game]` for `Kind::Game`; WME gives `[game object]` (what `ToString(Game)` and string concatenation show). |
+| `CBGame::DisplayQuickMsg` | partial | `World::update_quick_messages`, `draw_quick_messages` (`world.rs`): from y 20, left, system font, nothing without one. Different: the three seconds run on the game timer (`World::timer`), WME's on `m_CurrentTime`, the system clock, so a message stays while the game is frozen; not drawn while a video plays or the loading screen shows (`World::draw` returns early), WME draws it after every `DisplayContent`. |
+| `CBGame::QuickMessage` | done | `World::quick_message`: five at most, the oldest goes. |
+| `CBGame::QuickMessageForm` | n/a | `printf` wrapper used by the engine's own debug output. |
+| `CBGame::RegisterObject` | replaced | `Objects::insert` (`objects.rs`): every native has a generational handle. |
+| `CBGame::UnregisterObject` | done | `World::unload_object` (`world.rs`) and `unload_control` (`ui.rs`): the window list, the focused window, the active object, the main object and the picked accessibility object (`update_accessibility`) forget it; script values holding it die with the generational handle. |
+| `CBGame::InvalidateValues` | replaced | Generational `NativeId`s: a value holding a removed object no longer resolves (`Objects::contains`). |
+| `CBGame::ValidObject` | done | `Host::valid_object` (`world.rs`), `Objects::contains`; the game itself is in the store. Plugin objects are n/a. |
+| `CBGame::PublishNatives` | done | `luma-compiler/src/lib.rs` `Natives::wme`: the same 28 functions and 5 variables (plus `Actor`, `Entity` of `CAdGame`); plugin classes through `Natives::function`. |
+| `CBGame::ExternalCall` | partial | `Engine::builtin` (`luma-script/src/engine.rs`) and `World::call_function` (`world.rs`). Missing: `new TcpClient()` (no `CSXTcpClient`); `Debug()` does nothing (no debugger); plugin functions are n/a. `LOG`, the constructors, `Sleep`, `WaitFor`, `Random`, `SetScriptTimeSlice`, the colour functions and the conversions agree. |
+| `CBGame::ShowCursor` | partial | `World::cursor_to_show` (`input.rs`). Different: the non-interactive branch tests only `!interactive`, WME `!m_Interactive && m_State==GAME_RUNNING`; while the response box waits or an exclusive (not system) window is up with the game non-interactive, WME goes to the else branch and draws the active object's cursor or the normal one, Luma draws the wait cursor (or nothing without one). The order own cursor, `usable` + active cursor, normal cursor agrees. |
+| `CBGame::SaveGame` | partial | `save::save_game` (`save.rs`): `BeforeSave` on the game, the file written, `MostRecentSaveSlot` noted. Missing: the saving screen (`m_SaveImageName`, not for a quick save) and the progress indicator drawn while saving; `quickSave` is ignored for that reason. The file format is Luma's own (postcard + zlib), not WME's. |
+| `CBGame::LoadGame` | done | `Runtime::tick` takes `World::scheduled_load` at the start of the next frame (WME: after the flip of the frame that asked) and calls `save::load_game`. |
+| `CBGame::LoadGame #2` | partial | `save::load_game`: the state replaced, `after_restore`, `AfterLoad` on the game. Missing: the progress indicator while loading; `AccessUnpause()` after the load (`World::access.paused` and its shield are not reset); the frame WME draws right after loading (`DisplayContent(true, false)`). A file of another game or an unreadable one is refused and logged, the game goes on. |
+| `CBGame::InitAfterLoad` | replaced | `World::after_restore` and `reload_assets` (`save.rs`) load again what the state names. |
+| `CBGame::AfterLoadRegion` | replaced | Region polygons are saved as points and tested directly (`path::polygon_contains`); no GDI region to rebuild. |
+| `CBGame::AfterLoadSubFrame` | replaced | `World::reload_assets`: the sprite banks load their images again. |
+| `CBGame::AfterLoadSound` | replaced | `World::restore_sounds` (`save.rs`). |
+| `CBGame::AfterLoadTheora` | partial | A video playing in an entity or full-screen is not brought back by a load (`after_restore` drops `World::video`); WME reopens the Theora players of the saved game (`InitializeSimple`). Check `entity_videos` with the sound-video table. |
+| `CBGame::AfterLoadXModel` | replaced | `World::reload_3d` (`save.rs`, `draw3d.rs`). |
+| `CBGame::AfterLoadScript` | replaced | `Engine::restore` (`luma-script`) rebuilds the scripts from the snapshot. |
+| `CBGame::DisplayWindows` | done | `World::update_ui` (focus fallback: the topmost visible, enabled window when the focused one is gone, hidden or disabled) and `World::draw_windows` (`ui.rs`): the visible windows of the pass, in list order. |
+| `CBGame::PlayMusic` | done | `World::play_music` (`sound.rs`): channel check, old music dropped, start time applied once, loop start, play. |
+| `CBGame::StopMusic` | done | `World::stop_music`. |
+| `CBGame::PauseMusic` | done | `World::pause_music`. |
+| `CBGame::ResumeMusic` | done | `World::resume_music`. |
+| `CBGame::SetMusicStartTime` | done | `World::set_music_start_time`: kept for the next music, applied at once when the channel plays. |
+| `CBGame::LoadSettings` | partial | `GameSettings::load`, `parse` (`luma-adventure/src/settings.rs`). Different: a missing `startup.settings` or a missing `SETTINGS` block gives the defaults where WME fails; a string table that fails to load is only logged (WME: load error); unknown keys are skipped (WME: syntax error); the `Debug` registry overrides (`AllowWindowed`, `CompressedSavegames`) are n/a. |
+| `CBGame::LoadSettings SETTINGS` | done | `GameSettings::parse` reads the `SETTINGS` block. |
+| `CBGame::LoadSettings GAME` | done | `GameSettings::game_file`, `default.game` by default. |
+| `CBGame::LoadSettings STRING_TABLE` | done | `GameSettings::string_table`, loaded first by `World::with_audio` (`load_string_table`). Luma also reads a `STRING_TABLE` key in the `GAME` block of the game file, which WME's `LoadBuffer` does not know. |
+| `CBGame::LoadSettings RESOLUTION` | done | `GameSettings::width`, `height` (800x600 by default). |
+| `CBGame::LoadSettings REQUIRE_3D_ACCELERATION` | n/a | Tells the Windows device selection to refuse software rendering; wgpu always renders on the GPU. |
+| `CBGame::LoadSettings REQUIRE_SOUND` | todo | When true the original refuses to start without a sound device (device selection); Luma skips the key and starts silent. |
+| `CBGame::LoadSettings HWTL_MODE` | n/a | Direct3D hardware transform and lighting mode. |
+| `CBGame::LoadSettings ALLOW_WINDOWED_MODE` | todo | Whether the player may run the game in a window (settings dialog and device selection). Skipped: `luma-player` always opens a window. |
+| `CBGame::LoadSettings ALLOW_ACCESSIBILITY_TAB` | partial | Luma reads the key from the `GAME` block of `default.game` (`GameFile::allow_accessibility_tab`), where WME's `LoadBuffer` does not accept it; WME reads it here, in the `SETTINGS` block of `startup.settings`, which `GameSettings::parse` skips. The effect (speech, keyboard play and pause forced off, `Accessibility::read_settings`) is right once the key is read from the right file. |
+| `CBGame::LoadSettings ALLOW_ABOUT_TAB` | n/a | A tab of the Windows settings dialog. |
+| `CBGame::LoadSettings ALLOW_ADVANCED` | n/a | The advanced button of the Windows settings dialog. |
+| `CBGame::LoadSettings ALLOW_DESKTOP_RES` | todo | Lets the player pick the desktop resolution (the game stretched to the screen) in the settings dialog. Skipped; `luma-player` picks its own window size (`--scale`). |
+| `CBGame::LoadSettings REGISTRY_PATH` | replaced | The registry base path of the game's settings; Luma keeps them in `settings.ini` of the save directory (`registry.rs`). |
+| `CBGame::LoadSettings RICH_SAVED_GAMES` | n/a | Windows Vista Games Explorer saved-game header and thumbnail handler. |
+| `CBGame::LoadSettings SAVED_GAME_EXT` | todo | The extension of the slot files (`save%03d.<ext>`, `dsv` by default). Skipped: `save::SAVE_EXTENSION` is always `dsv`. |
+| `CBGame::LoadSettings GUID` | n/a | The game's identifier for the Windows Games Explorer. |
+| `CBGame::Persist` | partial | `save.rs` `world_state!` saves the active and main objects, the cursors, the faders, the freeze state (`Ui`), the windows, the music and its crossfade, the offsets, the subtitles switches and fonts, both timers, the save / load images, the shadow type, the text encoding and direction, `SuspendedRendering`, the mouse lock, the keyboard. Different: on load WME runs `Cleanup()` first, Luma leaves `quick_messages` and `loading_icon` as they were (a message posted at a later timer value than the save's stays until the timer catches up); `m_PersonalizedSave`, `m_SoundBufferSizeSec`, `m_SuppressScriptErrors`, `m_AutorunDisabled` are not saved. |
+| `CBGame::FocusWindow` | partial | `World::focus_window` (`ui.rs`): the window moves to the end of the list, and a normal window focused over an exclusive one gives the focus back. Different: WME sets `m_FocusedWindow` only when the window was not already last in the list; Luma always sets it. |
+| `CBGame::Freeze` | done | `World::freeze` (`ui.rs`): first level pauses the freezable scripts and the sounds (music when asked), keeps `interactive` and sets it true; levels count. |
+| `CBGame::Unfreeze` | done | `World::unfreeze`: the last level restores `interactive` and resumes scripts and sounds. `m_OrigState` has no field: the semi-frozen state is derived (`World::semi_frozen`). |
+| `CBGame::HandleKeypress` | partial | `Runtime::key_down` (`world.rs`), fed by `luma-player/src/main.rs`. WME gets two messages per key: `WM_KEYDOWN` (`Printable` false, the virtual key code; raises `Keypress`) and `WM_CHAR` (`Printable` true, the character; never raises `Keypress`, only reaches the focused window). Luma merges them into one call with one code, so: (1) punctuation is given its ASCII code as key code and `World::edit_key` matches the code before the text, so typing `.` (46 = `VK_DELETE`), `%` `&` `'` `(` (37..40, the arrows), `#` `$` (35, 36, End, Home) in an editor edits or moves the caret instead of inserting; (2) key repeats are dropped (`!repeat`), WME repeats `Keypress` and the editor action while a key is held; (3) characters outside ASCII (accented letters) and keys without a mapping (numeric pad, F13+) never reach the game (`GamePlayer::key_code` returns `None`); (4) the keyboard state is recorded before the video and accessibility checks, WME records it after (a key that stops a video or is an accessibility shortcut leaves `Game.Keyboard` untouched). The dispatch agrees: Escape stops a video and every other key is swallowed, then the accessibility keys, then the focused window, else its `Keypress` handler, else the game's. |
+| `CBGame::HandleAccessKey` | done | `World::access_key` (`accessibility.rs`): Ctrl+Tab / Ctrl+Shift+Tab when keyboard play is on, Ctrl+Space toggles the pause when its switch is on; the key is swallowed. |
+| `CBGame::AccessPause` | done | `World::access_pause`: a full-screen shield window, the `/SYSENG0040/` text in the system font sized to fit, bottom centre, system-exclusive. |
+| `CBGame::AccessUnpause` | done | `World::access_unpause`: the shield is closed and removed. |
+| `CBGame::HandleMouseWheel` | partial | `Runtime::mouse_wheel` (`world.rs`). Different: WME first offers the wheel to the focused window's focused control (`CUIWindow::HandleMouseWheel`, a no-op for the stock controls), and its window branch reads `if(Delta<0 && CanHandleEvent("MouseWheelDown")) ... else if(CanHandleEvent("MouseWheelUp"))`: a wheel-down on a window that only handles `MouseWheelUp` raises `MouseWheelUp` on the window; Luma raises `MouseWheelDown` on the game then. |
+| `CBGame::GetVersion` | n/a | The original engine's version number, for its plugins and tools. |
+| `CBGame::SetWindowTitle` | partial | `luma-player/src/main.rs` sets the title once at start: the caption, or the name without one (WME: `<caption> - Wintermute Engine`, read in the game's text encoding). It is not refreshed when a script sets `Game.Name` or calls `Game.Caption`, as WME does. |
+| `CBGame::GetSaveSlotFilename` | partial | `World::save_slot_path` (`save.rs`): `<save dir>/save%03d.dsv`; the extension does not follow `SAVED_GAME_EXT`. |
+| `CBGame::GetSaveDir` | done | `World::checked_save_directory`, `save_directory`: the local directory tried once with `writest.$$$`, else (or with `PERSONAL_SAVEGAMES`) the user's directory named after the caption or the name with the characters a file name cannot hold (backslash, slash, colon, star, question mark, quote, angle brackets, bar) replaced by `_`. The user's directory is the platform's application data under `Luma Engine`. |
+| `CBGame::GetSaveSlotDescription` | done | `World::save_slot_description`: the header's description, empty for a free slot or another game's file. |
+| `CBGame::IsSaveSlotUsed` | done | `World::is_save_slot_used`. |
+| `CBGame::EmptySaveSlot` | done | `World::empty_save_slot`. |
+| `CBGame::SetActiveObject` | done | `World::update_active_object` (`input.rs`): none while not interactive unless the object has `NonIntMouseEvents`; `MouseLeave` on the old one, the caption spoken, `MouseEntry` on the new one (queued, delivered at the end of the frame). |
+| `CBGame::PushViewport` | partial | No viewport stack: `World::viewport` and `Camera` (`origin_x`, `origin_y`) place the scene in its viewport, but the renderer is not clipped to it (`docs/game-loop.md`: a scene larger than its viewport draws over what lies outside), where `m_Renderer->SetViewport` clips. |
+| `CBGame::PopViewport` | partial | See `PushViewport`: nothing to restore, as nothing is clipped. |
+| `CBGame::GetCurrentViewportRect` | partial | `World::viewport` gives the scene viewport or the whole screen; it is not a stack, and it is not what clips the active rectangles (see `CBActiveRect::ClipRect`). |
+| `CBGame::GetCurrentViewportOffset` | done | `Camera::origin_x`, `origin_y` from `World::camera` (`world.rs`): the viewport's top-left, 0 without one. |
+| `CBGame::WindowLoadHook` | n/a | Base stub returning failure; `CAdGame` overrides it (adventure table). |
+| `CBGame::WindowScriptMethodHook` | n/a | Base stub returning failure; `CAdGame` overrides it (adventure table). |
+| `CBGame::SetInteractive` | done | `World::game_set` `Interactive` sets `World::interactive`. The copy into the transition manager's `m_OrigInteractive` has no counterpart (no transition manager, see `CBTransitionMgr`). |
+| `CBGame::ResetMousePos` | todo | Moves the system cursor to `m_MousePos` after `Game.MouseX` / `MouseY` are set. Luma changes `World::mouse` only; a front-end has no way to learn that the cursor must be warped, so the next motion event undoes the change. |
+| `CBGame::SetResourceModule` | n/a | Windows resource DLL handle. |
+| `CBGame::DisplayContent` | n/a | Empty in the base class; `CAdGame::DisplayContent` is the frame (adventure table; `Runtime::tick` and `World::draw`). |
+| `CBGame::DisplayContentSimple` | partial | `World::draw_loading_screen` (`world.rs`): black and the loading image, for the one frame before a load. No frame is drawn during a save, and the indicator is never drawn. |
+| `CBGame::DisplayIndicator` | partial | The loading image at `LOAD_IMAGE_X/Y` is drawn (`draw_loading_screen`). Missing: the saving image at `SAVE_IMAGE_X/Y` while saving, and the progress bar (`m_IndicatorHeight` lines from `m_IndicatorX`, `m_IndicatorY`, `m_IndicatorWidth * progress / 100` long, in `m_IndicatorColor`). |
+| `CBGame::UpdateMusicCrossfade` | partial | `World::update_crossfade` (`sound.rs`): both channels started, volumes crossed over the live timer, the first stopped and the channels swapped at the end. Missing: the early return while `m_State==GAME_FROZEN`; Luma goes on fading during a freeze and calls `play` on a channel the freeze paused. The fading volume is `100 - trunc(p)` where WME truncates `100 - p` (one percent apart at most). |
+| `CBGame::ResetContent` | done | `World::reset_content` ends with `engine.clear_globals(false)`; the rest of that function is `CAdGame::ResetContent`. |
+| `CBGame::DEBUG_DumpClassRegistry` | n/a | Dumps the persistence class registry to a file; Luma has no such registry. |
+| `CBGame::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
+| `CBGame::RestoreDeviceObjects` | n/a | Direct3D device loss. |
+| `CBGame::SetWaitCursor` | partial | `World::set_wait_cursor` (`input.rs`). Different: when the sprite does not load WME has already deleted the old wait cursor and is left with none; Luma keeps the old one. |
+| `CBGame::BindDirectX` | n/a | Loads the DirectX DLLs. |
+| `CBGame::UnBindDirectX` | n/a | Frees the DirectX DLLs. |
+| `CBGame::IsDirectXBound` | n/a | DirectX DLL check. |
+| `CBGame::IsVideoPlaying` | done | `World::is_video_playing` (`video.rs`); one player, the AVI one does not exist. |
+| `CBGame::StopVideo` | done | `World::stop_video` (`video.rs`). |
+| `CBGame::DrawCursor` | done | `World::update_cursor` and `draw_cursor_sprite` (`input.rs`): a cursor other than the last one shown restarts its animation, then is drawn with its hotspot at the mouse. The clock its animation runs on is on `CBSprite::GetCurrentFrame`. |
+| `CBGame::RenderShadowGeometry` | n/a | Empty in the base class; `CAdGame` overrides it (adventure table). |
+| `CBGame::CreateValue` | n/a | `IWmeGame` interface for Windows DLL plugins. |
+| `CBGame::DeleteValue` | n/a | `IWmeGame` interface for Windows DLL plugins. |
+| `CBGame::CreateParamSet` | n/a | `IWmeGame` interface for Windows DLL plugins. |
+| `CBGame::DeleteParamSet` | n/a | `IWmeGame` interface for Windows DLL plugins. |
+| `CBGame::SubscribeEvent` | n/a | `IWmeGame` interface for Windows DLL plugins. |
+| `CBGame::UnsubscribeEvent` | n/a | `IWmeGame` interface for Windows DLL plugins. |
+| `CBGame::OpenFile` | n/a | `IWmeGame` interface for Windows DLL plugins. |
+| `CBGame::CloseFile` | n/a | `IWmeGame` interface for Windows DLL plugins. |
+| `CBGame::CreateObject` | n/a | `IWmeGame` interface for Windows DLL plugins. |
+| `CBGame::SendEvent` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::CallMethod` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::SetProperty` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::SetProperty #2` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::SetProperty #3` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::SetProperty #4` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::SetProperty #5` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::SetProperty #6` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::SetProperty #7` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::GetProperty` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::GetInterface` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBGame::GetNextAccessObject` | done | `World::next_access_object`, `access_objects` (`accessibility.rs`): the focused window's controls; the rest of that function is `CAdGame`'s override. |
+| `CBGame::GetPrevAccessObject` | done | `World::next_access_object` with `forward` false. |
+| `CBGame::OnActivate` | todo | When the window loses the focus the original pauses every sound and stops running frames (`m_Renderer->m_Active`), and resumes when it comes back, finding the object under the mouse again. `luma-player` handles no focus event: the game and its sounds run on in the background. |
+| `CBGame::OnMouseLeftDown` | done | `Runtime::mouse_left_down` (`world.rs`), which is `CAdGame`'s override; the shared part agrees: the active object takes the press (`World::ui_mouse_down`: capture, window drag), `LeftClick` goes to the game when running and handled, else to the active object. |
+| `CBGame::OnMouseLeftUp` | done | `Runtime::release_left`: the capture ends, `LeftRelease` to the game when running and handled, else to the active object. Luma delays a release that arrives before any frame saw the press (its own rule, `docs/game-loop.md`). |
+| `CBGame::OnMouseLeftDblClick` | partial | `Runtime::mouse_left_down` with `note_click` (400 ms, 4 pixels, fixed; WME takes the system's double-click settings). Different: WME's double click does not capture the object or set `m_MouseLeftDown` (no `LeftClick`, no button press on the second click); Luma runs `ui_mouse_down` first, so a button still presses and fires on a double click. |
+| `CBGame::OnMouseRightDblClick` | done | `Runtime::mouse_right_down`: nothing while a video plays or the game is not interactive, else `RightDoubleClick` to the game, else the active object. |
+| `CBGame::OnMouseRightDown` | done | `Runtime::mouse_right_down`; `CAdGame`'s override adds the scene and the sentence skip. |
+| `CBGame::OnMouseRightUp` | partial | `Runtime::mouse_right_up` raises `RightRelease` without the `IsVideoPlaying()` early return: a right release during a video reaches the game's handler. |
+| `CBGame::OnMouseMiddleDown` | done | `Runtime::mouse_middle_down`. |
+| `CBGame::OnMouseMiddleUp` | done | `Runtime::mouse_middle_up`. |
+| `CBGame::OnPaint` | n/a | Repaints a windowed DirectDraw surface on `WM_PAINT`; the window system and wgpu present the frame. |
+| `CBGame::OnWindowClose` | done | `Runtime::window_close` (`world.rs`), `GamePlayer::close_requested`. |
+| `CBGame::OnWinsock` | n/a | Winsock window message for the network manager. |
+| `CBGame::DisplayDebugInfo` | todo | Draws in the system font `FPS: n` (when `m_DEBUG_ShowFPS`) and, in debug mode, the video mode and renderer name, the script counts, the timer and the active object's name. Luma has no debug overlay. |
+| `CBGame::SetMaxShadowType` | done | `World::game_set` `MaxShadowType`: clamped to 0..3; the downgrade of flat shadows without real-time support never applies (Luma supports them). |
+| `CBGame::GetMaxShadowType` | done | `World::three_d_draws` (`luma-adventure/src/actor3d.rs`): the lowest of the game's type and the scene's (`CAdGame`'s override), then the actor's own. |
+| `CBGame::GetDebugMgr` | n/a | The debugger. |
+| `CBGame::GetLayerSize` | n/a | Base default (the screen); `CAdGame` overrides it (adventure table). |
+| `CBGame::GetAmbientLightColor` | n/a | Base default; `CAdGame` overrides it (adventure table). |
+| `CBGame::GetMousePos` | partial | `World::set_mouse` (`input.rs`) from `GamePlayer::to_game` (the letterbox mapping stands for the maximized-window correction): the position is clamped into the lock rectangle while its four edges are non-zero. Missing: the system cursor is not moved back into the rectangle. |
+| `CBGame::GetFogParams` | n/a | Base default (no fog); `CAdGame` overrides it (adventure table). |
+| `CBGame::MiniUpdate` | replaced | Keeps streamed sounds fed during long loads; Luma's audio runs on its own thread (`luma-audio`). |
+| `CBGame::OnScriptShutdown` | n/a | Empty in the base class; `CAdGame` overrides it (adventure table). |
 
 ## `wme_base/BGameExHelper.cpp`
 
