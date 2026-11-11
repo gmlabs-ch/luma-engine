@@ -1201,7 +1201,13 @@ impl World {
         let id = self.objects.insert(Kind::Actor);
         let properties = actor.def.properties.clone();
         let scripts = actor.def.scripts.clone();
+        // `SOUND_VOLUME` is the volume of the actor's sounds
+        // (`m_SFXVolume`).
+        let sound_volume = actor.def.sound_volume;
         self.actors.push((id, actor));
+        if sound_volume != 100 {
+            self.set_sfx_volume(id, sound_volume);
+        }
         self.apply_properties(id, &properties);
         for script in scripts {
             self.attach(engine, id, &script);
@@ -1831,6 +1837,7 @@ impl World {
                 &overlays,
                 |i| self.free_entity_stick(i),
             );
+            self.draw_entity_video_subtitles(list);
             // The scene's fader covers the scene viewport, under the
             // windows (`CAdScene::TraverseNodes` displays it last).
             if let Some(white) = white {
@@ -3322,6 +3329,7 @@ impl Runtime {
     /// is scheduled first.
     pub fn start(&mut self) {
         self.world.init_accessibility();
+        self.world.init_volumes();
         if let Some(scene) = self.world.startup_scene.clone() {
             self.world.schedule_scene(&scene, true);
         }

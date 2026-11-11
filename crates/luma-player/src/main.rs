@@ -1120,10 +1120,15 @@ impl GamePlayer {
     }
 }
 
-/// The game ends with its window: a script profiler still on writes its
-/// table, as the original engine does when it shuts down.
 impl Drop for GamePlayer {
+    /// The game ends: the four volumes go to the settings file for the
+    /// next run (`CBSoundMgr::~CBSoundMgr`), and a script profiler still
+    /// on writes its table, as the original engine does when it shuts
+    /// down.
     fn drop(&mut self) {
+        if self.started {
+            self.runtime.world.save_volume_settings();
+        }
         for line in self.runtime.shutdown() {
             eprintln!("{line}");
         }

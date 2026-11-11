@@ -44,6 +44,38 @@ impl VideoPlayback {
     }
 }
 
+/// Where a video goes and how much it is zoomed
+/// (`CVidTheoraPlayer::Play`): the top-left corner of its **coded
+/// frame** and the zoom in percent, for a coded frame of `width` x
+/// `height` on a screen of `screen_w` x `screen_h`. The engine sizes
+/// its texture after the coded frame (multiples of 16), not after the
+/// picture, so a 640x360 video is 640x368 here: stretched on a 1280x720
+/// screen it is zoomed 195.65 %, not 200 %.
+pub fn placement(
+    playback: VideoPlayback,
+    x: i32,
+    y: i32,
+    (screen_w, screen_h): (f32, f32),
+    (width, height): (f32, f32),
+) -> (i32, i32, f32) {
+    match playback {
+        VideoPlayback::Pos => (x, y, 100.0),
+        VideoPlayback::Stretch => {
+            let zoom = (screen_w / width.max(1.0) * 100.0).min(screen_h / height.max(1.0) * 100.0);
+            (
+                ((screen_w - width * (zoom / 100.0)) / 2.0) as i32,
+                ((screen_h - height * (zoom / 100.0)) / 2.0) as i32,
+                zoom,
+            )
+        }
+        VideoPlayback::Center => (
+            ((screen_w - width) / 2.0) as i32,
+            ((screen_h - height) / 2.0) as i32,
+            100.0,
+        ),
+    }
+}
+
 /// One subtitle of a `.sub` file: a text shown from a frame to a frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subtitle {
@@ -55,60 +87,110 @@ pub struct Subtitle {
     pub end: i64,
 }
 
+/// The number a text starts with, as C's `atoi` reads it: leading
+/// white space, an optional sign, digits; 0 without a digit.
+fn atoi(text: &[u8]) -> i64 {
+    let mut bytes = text
+        .iter()
+        .copied()
+        .skip_while(|b| matches!(b, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
+        .peekable();
+    let negative = match bytes.peek() {
+        Some(b'-') => {
+            bytes.next();
+            true
+        }
+        Some(b'+') => {
+            bytes.next();
+            false
+        }
+        _ => false,
+    };
+    let mut value: i64 = 0;
+    for b in bytes {
+        if !b.is_ascii_digit() {
+            break;
+        }
+        value = (value * 10 + i64::from(b - b'0')).min(i64::from(i32::MAX) + 1);
+    }
+    if negative { -value } else { value }
+}
+
 /// Parses a `.sub` file (`CVidSubtitler::LoadSubtitles`): each line is
-/// `{start}{end}text`; lines without a start, with no text, or with
-/// `{1}{1}` are dropped. The text is kept as the file holds it, one
-/// `char` per byte, like the rest of the game's text: the font reads it
-/// in the game's encoding when it is drawn.
+/// `{start}{end}text`, a `|` in the text a line break. As in the engine:
+///
+/// - a line ends at a line feed or a NUL; a carriage return before
+///   that end is dropped. (The engine dropped the byte before the end
+///   whatever it was, so a file with Unix line ends lost the last
+///   character of each line; that defect is not reproduced.)
+/// - the numbers are read as `atoi` reads them (`12a` is 12, no digit
+///   is 0); braces after the second pair are skipped with what they
+///   hold;
+/// - a line without a first number, with a first number of -1, without
+///   text, or with `{1}{1}` is dropped.
+///
+/// The text is kept as the file holds it, one `char` per byte, like the
+/// rest of the game's text: the font reads it in the game's encoding
+/// when it is drawn. The string table is applied by the caller.
 pub fn parse_subtitles(bytes: &[u8]) -> Vec<Subtitle> {
-    let text: String = bytes.iter().map(|&b| char::from(b)).collect();
     let mut out = Vec::new();
-    for line in text.split(['\n', '\0']) {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        let (mut start, mut end) = (None, None);
+    let size = bytes.len();
+    let mut pos = 0;
+    while pos < size {
+        let mut length = 0;
+        while pos + length < size && bytes[pos + length] != b'\n' && bytes[pos + length] != 0 {
+            length += 1;
+        }
+        let line = &bytes[pos..pos + length];
+        let ended = pos + length < size;
+        let line = match line.split_last() {
+            Some((b'\r', rest)) if ended => rest,
+            _ => line,
+        };
+        let (mut start, mut end) = (-1i64, -1i64);
         let mut in_token = false;
-        let mut token = String::new();
+        let mut token_start = 0;
+        let mut token_length = 0;
         let mut token_index: i32 = -1;
         let mut body = String::new();
-        for ch in line.chars() {
-            match ch {
-                '{' => {
+        for (i, &byte) in line.iter().enumerate() {
+            match byte {
+                b'{' => {
                     if in_token {
-                        token.push(ch);
+                        token_length += 1;
                     } else {
                         in_token = true;
-                        token.clear();
+                        token_start = i + 1;
+                        token_length = 0;
                         token_index += 1;
                     }
                 }
-                '}' => {
+                b'}' => {
                     if in_token {
                         in_token = false;
-                        let value = token.trim().parse::<i64>().unwrap_or(0);
+                        let value = atoi(&line[token_start..token_start + token_length]);
                         match token_index {
-                            0 => start = Some(value),
-                            1 => end = Some(value),
+                            0 => start = value,
+                            1 => end = value,
                             _ => {}
                         }
                     } else {
-                        body.push(ch);
+                        body.push('}');
                     }
                 }
-                _ if in_token => token.push(ch),
-                '|' => body.push('\n'),
-                _ => body.push(ch),
+                _ if in_token => token_length += 1,
+                b'|' => body.push('\n'),
+                _ => body.push(char::from(byte)),
             }
         }
-        if let Some(start) = start {
-            let end = end.unwrap_or(-1);
-            if !body.is_empty() && !(start == 1 && end == 1) {
-                out.push(Subtitle {
-                    text: body,
-                    start,
-                    end,
-                });
-            }
+        if start != -1 && !body.is_empty() && (start != 1 || end != 1) {
+            out.push(Subtitle {
+                text: body,
+                start,
+                end,
+            });
         }
+        pos += length + 1;
     }
     out
 }
@@ -132,6 +214,13 @@ impl Subtitler {
             show: false,
             last_frame: -1,
         }
+    }
+
+    /// Back to the first subtitle, for a video that starts again.
+    pub fn rewind(&mut self) {
+        self.current = 0;
+        self.show = false;
+        self.last_frame = -1;
     }
 
     /// Moves to the subtitle of a frame (`CVidSubtitler::Update`).
@@ -176,7 +265,9 @@ pub struct VideoPlayer {
     pub info: VideoInfo,
     /// How it is placed.
     pub playback: VideoPlayback,
-    /// Where the picture's top-left corner is.
+    /// Where the top-left corner of the coded frame is (the engine's
+    /// `m_PosX`, `m_PosY`); the picture is at
+    /// [`VideoPlayer::picture_offset`] from it.
     pub x: i32,
     /// See `x`.
     pub y: i32,
@@ -234,8 +325,8 @@ impl std::fmt::Debug for VideoPlayer {
 }
 
 impl VideoPlayer {
-    /// A player of a video used as a texture (`SetTheoraTexture`): loops,
-    /// has no sound, no placement and no subtitles.
+    /// A player of a video used as a texture (`SetMaterialTheora`):
+    /// loops, has no sound, no placement and no subtitles.
     #[cfg(feature = "3d")]
     pub(crate) fn texture_loop(filename: &str, video: Video) -> VideoPlayer {
         let info = video.info().clone();
@@ -282,6 +373,15 @@ impl VideoPlayer {
     /// Whether the video plays.
     pub fn is_playing(&self) -> bool {
         !self.finished
+    }
+
+    /// Where the picture is from the corner of the coded frame, on
+    /// screen: the picture's offset in the coded frame, zoomed. Luma
+    /// draws the picture only; the engine drew the whole coded frame,
+    /// its padding rows and columns included.
+    pub fn picture_offset(&self) -> (f32, f32) {
+        let zoom = self.zoom / 100.0;
+        (self.info.pic_x as f32 * zoom, self.info.pic_y as f32 * zoom)
     }
 
     /// The frame shown, by index.
@@ -383,10 +483,26 @@ pub(crate) fn step_player(
             .pending
             .as_ref()
             .is_some_and(|f| f.time_ms < movie_time);
-        // Before the start, the frames up to the start time are skipped
-        // (`SeekToTime`).
+        // Before the start (`SeekToTime`, `m_SeekingKeyframe`): the
+        // frames are passed up to the first key frame at or after the
+        // start time, and that key frame's time becomes the time offset:
+        // playback starts there, up to a key-frame interval after the
+        // time asked for, and the sound from the same place.
         let seeking = !player.started && player.time_offset_ms != 0;
-        if !late || !fresh || (!seeking && (player.dont_drop_frames || !player.started)) {
+        if seeking {
+            let key_time = player
+                .pending
+                .as_ref()
+                .filter(|f| !late && f.keyframe)
+                .map(|f| f.time_ms);
+            if let Some(time) = key_time {
+                player.time_offset_ms = time;
+                break;
+            }
+            player.pending = None;
+            continue;
+        }
+        if !late || !fresh || player.dont_drop_frames || !player.started {
             break;
         }
         player.pending = None;
@@ -398,9 +514,9 @@ pub(crate) fn step_player(
         player.started = true;
         player.start_clock = now;
         if let (Some(sound), Some(audio)) = (player.sound, audio) {
-            if player.time_offset_ms != 0 {
-                audio.set_position_ms(sound, player.time_offset_ms);
-            }
+            // `Play` starts a sound where its start position says, and
+            // keeps that position for the next play: set it each time.
+            audio.set_start_ms(sound, player.time_offset_ms);
             audio.play(sound, false);
         }
     }
@@ -518,6 +634,27 @@ impl World {
         Some((video, sound))
     }
 
+    /// The subtitles of a video (`CVidTheoraPlayer::Initialize`,
+    /// `CVidSubtitler::LoadSubtitles`): read from `subtitle_file` or the
+    /// video's name with `.sub`, each text passed through the string
+    /// table (`CVidSubtitle`). Nothing is loaded while `VideoSubtitles`
+    /// is off, even if it is turned on during the video, or when the
+    /// file is absent.
+    fn load_subtitler(&mut self, filename: &str, subtitle_file: Option<&str>) -> Option<Subtitler> {
+        if !self.video_subtitles {
+            return None;
+        }
+        let path = subtitle_file
+            .map(str::to_string)
+            .unwrap_or_else(|| subtitle_path_of(filename));
+        let bytes = self.vfs.read(&path).ok()?;
+        let mut subtitles = parse_subtitles(&bytes);
+        for subtitle in &mut subtitles {
+            subtitle.text = self.expand(&subtitle.text);
+        }
+        Some(Subtitler::new(subtitles))
+    }
+
     /// Opens and starts a video (`Game.PlayTheora`): the game freezes,
     /// the sound track plays at the sound effects' volume, the subtitles
     /// load from `subtitle_file` or the video's `.sub`. `false` when the
@@ -540,28 +677,10 @@ impl World {
             return false;
         };
         let info = video.info().clone();
-        let (sw, sh) = (self.settings.width as f32, self.settings.height as f32);
-        let (w, h) = (info.width as f32, info.height as f32);
-        let (px, py, zoom) = match playback {
-            VideoPlayback::Pos => (x, y, 100.0),
-            VideoPlayback::Stretch => {
-                let zoom = (sw / w.max(1.0) * 100.0).min(sh / h.max(1.0) * 100.0);
-                (
-                    ((sw - w * zoom / 100.0) / 2.0) as i32,
-                    ((sh - h * zoom / 100.0) / 2.0) as i32,
-                    zoom,
-                )
-            }
-            VideoPlayback::Center => (((sw - w) / 2.0) as i32, ((sh - h) / 2.0) as i32, 100.0),
-        };
-        let sub_path = subtitle_file
-            .map(str::to_string)
-            .unwrap_or_else(|| subtitle_path_of(filename));
-        let subtitler = self
-            .vfs
-            .read(&sub_path)
-            .ok()
-            .map(|bytes| Subtitler::new(parse_subtitles(&bytes)));
+        let screen = (self.settings.width as f32, self.settings.height as f32);
+        let coded = (info.coded_width as f32, info.coded_height as f32);
+        let (px, py, zoom) = placement(playback, x, y, screen, coded);
+        let subtitler = self.load_subtitler(filename, subtitle_file);
         self.freeze(engine, freeze_music);
         self.video = Some(VideoPlayer {
             filename: filename.to_string(),
@@ -648,11 +767,13 @@ impl World {
     }
 
     /// Plays a video in an entity's place (`CAdEntity::ScCallMethod`
-    /// `PlayTheora`): at the entity's position, scaled by its `Scale`
-    /// when it has one, at the entity's sound volume, from `start_ms`,
+    /// `PlayTheora`): at the entity's position, scaled by the `Scale`
+    /// the entity has at this moment (a later change does not rescale
+    /// the video), at the entity's sound volume, from `start_ms`,
     /// looping when asked, with the alpha channel of `alpha_file` masking
-    /// the frames. The game runs on; the entity's sprite shows again when
-    /// the video ends. `false`, logged, when the file cannot be opened.
+    /// the frames, with the subtitles of its `.sub` file. The game runs
+    /// on; the entity's sprite shows again when the video ends. `false`,
+    /// logged, when the file cannot be opened.
     pub fn play_entity_theora(
         &mut self,
         owner: NativeId,
@@ -661,12 +782,16 @@ impl World {
         alpha_file: Option<&str>,
         start_ms: u64,
     ) -> bool {
-        if !matches!(
-            self.objects.get(owner).map(|n| &n.kind),
-            Some(Kind::Entity(_))
-        ) {
+        let Some(Kind::Entity(r)) = self.objects.get(owner).map(|n| n.kind.clone()) else {
             return false;
-        }
+        };
+        // `Play(VID_PLAY_POS, ..., m_Scale >= 0 ? m_Scale : -1)`: the
+        // zoom is fixed here.
+        let scale = match r {
+            EntityRef::Ui(index) => self.ui_entities.get(index).and_then(|e| e.def.scale),
+            _ => self.entity_def(r).and_then(|e| e.scale),
+        };
+        let zoom = scale.filter(|s| *s >= 0.0).unwrap_or(100.0);
         self.stop_entity_video(owner);
         let volume = self.sounds.objects.get(&owner).map_or(100, |s| s.volume);
         let Some((video, sound)) = self.open_video(filename, volume) else {
@@ -674,7 +799,17 @@ impl World {
         };
         let alpha = alpha_file.and_then(|file| match self.vfs.read(file) {
             Ok(bytes) => match luma_formats::image::decode(&bytes, DEFAULT_COLOR_KEY) {
-                Ok(image) => Some(image),
+                // The mask is the image's alpha channel; an image
+                // without one is opaque, colour-key pixels included
+                // (`SetAlphaImage` applies no colour key).
+                Ok(mut image) => {
+                    if !image.has_alpha_channel {
+                        for pixel in image.pixels.chunks_exact_mut(4) {
+                            pixel[3] = 0xff;
+                        }
+                    }
+                    Some(image)
+                }
                 Err(err) => {
                     self.log(format!("Error loading alpha image '{file}': {err}"));
                     None
@@ -686,6 +821,7 @@ impl World {
             }
         });
         let info = video.info().clone();
+        let subtitler = self.load_subtitler(filename, None);
         let player = VideoPlayer {
             filename: filename.to_string(),
             video,
@@ -693,7 +829,7 @@ impl World {
             playback: VideoPlayback::Pos,
             x: 0,
             y: 0,
-            zoom: 100.0,
+            zoom,
             freeze_game: false,
             dont_drop_frames: false,
             looping,
@@ -709,7 +845,7 @@ impl World {
             frame: None,
             frame_serial: 0,
             finished: false,
-            subtitler: None,
+            subtitler,
             subtitle_height: 0,
         };
         self.entity_videos.insert(
@@ -796,6 +932,7 @@ impl World {
             }
             self.update_entity_video(owner);
         }
+        self.prepare_entity_video_subtitles();
     }
 
     fn update_entity_video(&mut self, owner: NativeId) {
@@ -822,19 +959,26 @@ impl World {
             self.stop_entity_video(owner);
             return;
         }
-        // `ResetStream`: back to the first frame, the sound with it.
+        // `ResetStream`: back to the first frame, the sound and the
+        // subtitles with it. The engine opened the file again and played
+        // it without a volume, so from the second round on the sound had
+        // the sound effects' global percentage as its own volume instead
+        // of the entity's; that defect is not reproduced.
+        let filename = video.player.filename.clone();
         match video.player.video.rewind() {
             Ok(()) => {
                 video.player.started = false;
                 video.player.sound_heard = None;
                 video.player.time_offset_ms = 0;
                 video.player.pending = None;
+                if let Some(subtitler) = video.player.subtitler.as_mut() {
+                    subtitler.rewind();
+                }
                 if let Some(sound) = video.player.sound {
                     self.sounds.audio.stop(sound);
                 }
             }
             Err(err) => {
-                let filename = video.player.filename.clone();
                 self.log(format!("Error restarting video '{filename}': {err}"));
                 self.stop_entity_video(owner);
             }
@@ -862,7 +1006,8 @@ impl World {
                 Some(VideoOverlay {
                     entity: r,
                     texture,
-                    zoom: entity.scale.filter(|s| *s >= 0.0).unwrap_or(100.0),
+                    zoom: video.player.zoom,
+                    offset: video.player.picture_offset(),
                     tint: view.scene.entity_tint(entity),
                 })
             })
@@ -884,12 +1029,13 @@ impl World {
             return None;
         };
         let entity = self.ui_entities.get(index)?;
-        let zoom = entity.def.scale.filter(|s| *s >= 0.0).unwrap_or(100.0) / 100.0;
+        let zoom = video.player.zoom / 100.0;
+        let (dx, dy) = video.player.picture_offset();
         Some(Quad {
             texture,
             dst: Rect::new(
-                x as f32,
-                y as f32,
+                x as f32 + dx,
+                y as f32 + dy,
                 (texture.width as f32 * zoom).trunc(),
                 (texture.height as f32 * zoom).trunc(),
             ),
@@ -906,6 +1052,16 @@ impl World {
         self.video_font.clone().or_else(|| self.system_font.clone())
     }
 
+    /// Lays out a subtitle in the video font and gives its height.
+    fn measure_video_subtitle(&mut self, text: &str) -> Option<i32> {
+        let width = self.settings.width as i32;
+        let font = self.video_font()?;
+        self.fonts.get_mut(&font).map(|f| {
+            f.prepare(text, width, TextAlign::Center, -1);
+            f.text_height(text, width)
+        })
+    }
+
     fn prepare_video_subtitle(&mut self) {
         if !self.video_subtitles {
             return;
@@ -919,16 +1075,75 @@ impl World {
         else {
             return;
         };
-        let width = self.settings.width as i32;
-        let Some(font) = self.video_font() else {
-            return;
-        };
-        let height = self.fonts.get_mut(&font).map_or(0, |f| {
-            f.prepare(&text, width, TextAlign::Center, -1);
-            f.text_height(&text, width)
-        });
+        let height = self.measure_video_subtitle(&text).unwrap_or(0);
         if let Some(player) = self.video.as_mut() {
             player.subtitle_height = height;
+        }
+    }
+
+    /// The same for the videos entities play: every player has its
+    /// subtitler (`CVidTheoraPlayer::Initialize`).
+    fn prepare_entity_video_subtitles(&mut self) {
+        if !self.video_subtitles {
+            return;
+        }
+        let shown: Vec<(NativeId, String)> = self
+            .entity_videos
+            .iter()
+            .filter_map(|(owner, video)| {
+                let text = video.player.subtitler.as_ref()?.shown()?;
+                Some((*owner, text.to_string()))
+            })
+            .collect();
+        for (owner, text) in shown {
+            let height = self.measure_video_subtitle(&text).unwrap_or(0);
+            if let Some(video) = self.entity_videos.get_mut(&owner) {
+                video.player.subtitle_height = height;
+            }
+        }
+    }
+
+    /// The subtitle an entity's video shows, when `VideoSubtitles` is on.
+    pub fn entity_video_subtitle(&self, owner: NativeId) -> Option<&str> {
+        if !self.video_subtitles {
+            return None;
+        }
+        self.entity_videos
+            .get(&owner)?
+            .player
+            .subtitler
+            .as_ref()?
+            .shown()
+    }
+
+    /// Draws the subtitles of the videos entities play
+    /// (`CVidTheoraPlayer::Display`): like the game video's, centred at
+    /// the bottom of the screen in the video font. The engine draws each
+    /// with its entity; Luma draws them after the scene, over it.
+    pub(crate) fn draw_entity_video_subtitles<'a>(&'a self, list: &mut DrawList<'a>) {
+        if !self.video_subtitles {
+            return;
+        }
+        let Some(font) = self.video_font().and_then(|f| self.fonts.get(&f)) else {
+            return;
+        };
+        let (width, height) = (self.settings.width as i32, self.settings.height as i32);
+        let mut owners: Vec<&NativeId> = self.entity_videos.keys().collect();
+        owners.sort();
+        for owner in owners {
+            let player = &self.entity_videos[owner].player;
+            let Some(text) = player.subtitler.as_ref().and_then(Subtitler::shown) else {
+                continue;
+            };
+            font.draw(
+                list,
+                text,
+                0,
+                height - player.subtitle_height - 5,
+                width,
+                TextAlign::Center,
+                -1,
+            );
         }
     }
 
@@ -968,11 +1183,12 @@ impl World {
         };
         if let (Some(texture), Some(_)) = (&self.video_texture, &player.frame) {
             let zoom = player.zoom / 100.0;
+            let (dx, dy) = player.picture_offset();
             list.push(Quad {
                 texture,
                 dst: Rect::new(
-                    player.x as f32,
-                    player.y as f32,
+                    player.x as f32 + dx,
+                    player.y as f32 + dy,
                     (texture.width as f32 * zoom).trunc(),
                     (texture.height as f32 * zoom).trunc(),
                 ),
@@ -1016,7 +1232,7 @@ mod tests {
     #[test]
     fn parses_subtitles_and_times_them() {
         let subs = parse_subtitles(
-            b"{12}{48}First line|second line\r\n{60}{0}Stays\n{1}{1}dropped\nno braces\n{100}{110}Last",
+            b"{12}{48}First line|second line\r\n{60}{0}Stays\r\n{1}{1}dropped\r\nno braces\r\n{100}{110}Last",
         );
         assert_eq!(subs.len(), 3);
         assert_eq!(subs[0].text, "First line\nsecond line");
@@ -1039,6 +1255,114 @@ mod tests {
         assert_eq!(s.shown(), Some("Last"));
         s.update(200);
         assert_eq!(s.shown(), None);
+    }
+
+    /// `CVidTheoraPlayer::SeekToTime`: playback starts at a key frame.
+    #[test]
+    fn a_start_time_begins_at_the_next_key_frame() {
+        // 20 frames at 10 per second, a key frame every eighth.
+        let clip = luma_video::synthetic_clip(32, 32, 20, 10);
+        let mut log = Vec::new();
+        let mut player = player_of(clip.clone(), None);
+        player.time_offset_ms = 500;
+        assert!(!step_player(&mut player, None, 1000, &mut log));
+        let frame = player.frame.as_ref().unwrap();
+        assert!(frame.keyframe);
+        assert_eq!((frame.index, frame.time_ms), (8, 800));
+        assert_eq!(player.time_offset_ms, 800);
+        // The movie goes on from the key frame.
+        assert!(!step_player(&mut player, None, 1100, &mut log));
+        assert_eq!(player.frame_index(), Some(9));
+        // A start time on a key frame starts there.
+        let mut player = player_of(clip.clone(), None);
+        player.time_offset_ms = 1600;
+        assert!(!step_player(&mut player, None, 0, &mut log));
+        assert_eq!(player.frame_index(), Some(16));
+        // Past the last key frame there is nothing to show.
+        let mut player = player_of(clip, None);
+        player.time_offset_ms = 1700;
+        assert!(step_player(&mut player, None, 0, &mut log));
+        assert!(log.is_empty(), "{log:?}");
+    }
+
+    /// `CVidTheoraPlayer::Play` places the coded frame, not the picture.
+    #[test]
+    fn a_video_is_placed_by_its_coded_frame() {
+        let screen = (1280.0, 720.0);
+        // 640x360 is coded as 640x368.
+        let (x, y, zoom) = placement(VideoPlayback::Stretch, 5, 6, screen, (640.0, 368.0));
+        assert!((zoom - 195.652).abs() < 0.01, "{zoom}");
+        assert_eq!((x, y), (13, 0));
+        assert_eq!(
+            placement(VideoPlayback::Center, 5, 6, screen, (640.0, 368.0)),
+            (320, 176, 100.0)
+        );
+        assert_eq!(
+            placement(VideoPlayback::Pos, 5, 6, screen, (640.0, 368.0)),
+            (5, 6, 100.0)
+        );
+        // A coded frame larger than the screen is centred with a
+        // negative corner, truncated towards zero.
+        assert_eq!(
+            placement(VideoPlayback::Center, 0, 0, (100.0, 100.0), (131.0, 103.0)),
+            (-15, -1, 100.0)
+        );
+        // The picture is drawn at its place in the coded frame.
+        let mut player = player_of(luma_video::synthetic_clip(32, 32, 2, 10), None);
+        assert_eq!(player.picture_offset(), (0.0, 0.0));
+        player.info.pic_x = 4;
+        player.info.pic_y = 8;
+        player.zoom = 150.0;
+        assert_eq!(player.picture_offset(), (6.0, 12.0));
+    }
+
+    /// The details of `CVidSubtitler::LoadSubtitles`.
+    #[test]
+    fn subtitle_lines_are_read_as_the_engine_reads_them() {
+        let texts = |bytes: &[u8]| -> Vec<(i64, i64, String)> {
+            parse_subtitles(bytes)
+                .into_iter()
+                .map(|s| (s.start, s.end, s.text))
+                .collect()
+        };
+        // Unix and Windows line ends read alike, and a carriage return
+        // is only dropped at the end of a line.
+        assert_eq!(
+            texts(b"{1}{2}One\n{3}{4}Two\r\n{5}{6}Three"),
+            [
+                (1, 2, "One".to_string()),
+                (3, 4, "Two".to_string()),
+                (5, 6, "Three".to_string())
+            ]
+        );
+        // A NUL ends a line like a line feed.
+        assert_eq!(
+            texts(b"{1}{2}A.\0{3}{4}B\r"),
+            [(1, 2, "A.".to_string()), (3, 4, "B\r".to_string())]
+        );
+        // Numbers as `atoi`: digits up to the first other character, 0
+        // without a digit; a start of -1 drops the line.
+        assert_eq!(
+            texts(b"{ 12a}{x}Kept\r\n{-1}{5}Dropped\r\n{abc}{7}Zero\r\n"),
+            [(12, 0, "Kept".to_string()), (0, 7, "Zero".to_string())]
+        );
+        // A missing end is -1; later braces are skipped with their
+        // content; a brace inside a token belongs to it; a closing brace
+        // outside a token is text.
+        assert_eq!(
+            texts(b"{4}Solo\r\n{1}{2}{y}Third}\r\n{1{2}}{3}x\r\n"),
+            [
+                (4, -1, "Solo".to_string()),
+                (1, 2, "Third}".to_string()),
+                (1, 3, "}x".to_string())
+            ]
+        );
+        // Lines without text, with `{1}{1}`, or empty are dropped.
+        assert!(texts(b"{5}{6}\r\n{1}{1}x\r\n\n\r\n").is_empty());
+        assert_eq!(atoi(b"  +42 "), 42);
+        assert_eq!(atoi(b"-7x"), -7);
+        assert_eq!(atoi(b""), 0);
+        assert!(atoi(b"99999999999999999999") > i64::from(i32::MAX));
     }
 
     fn player_of(bytes: Vec<u8>, sound: Option<SoundId>) -> VideoPlayer {

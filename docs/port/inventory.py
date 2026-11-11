@@ -32,6 +32,7 @@ STATUSES = OrderedDict(
         ("todo", "Luma does not do it and should"),
         ("replaced", "Luma reaches the same result another way; the note says how"),
         ("n/a", "has no meaning outside the original program; the note says why"),
+        ("excluded", "left out by a decision of the maintainer; the note says which and when"),
     ]
 )
 

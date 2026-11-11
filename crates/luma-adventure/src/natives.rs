@@ -155,6 +155,14 @@ impl World {
             }
             return true;
         }
+        // `SoundPanning` turned off centres the sounds
+        // (`CBObject::ScSetProperty`, `ResetSoundPan`).
+        if name == "SoundPanning"
+            && matches!(kind, Kind::Entity(_) | Kind::Actor | Kind::Actor3D)
+            && !value.get_bool(self)
+        {
+            self.reset_sound_pan(id);
+        }
         match kind {
             Kind::Game => self.game_set(name, value),
             Kind::Scene => self.scene_set(name, value),
@@ -214,6 +222,25 @@ impl World {
         }
         if let Some(ret) = self.object_call(id, name, args, ctx.engine) {
             return Some(ret);
+        }
+        // The sound methods of `CBObject`, on the kinds whose own
+        // methods do not already lead to them.
+        if matches!(
+            kind,
+            Kind::Scene
+                | Kind::Layer(_)
+                | Kind::Region { .. }
+                | Kind::EntityRegion(_)
+                | Kind::WaypointGroup(_)
+                | Kind::Attachment3D(_)
+                | Kind::Control
+                | Kind::Item
+                | Kind::Emitter(_)
+                | Kind::Object
+        ) {
+            if let Some(ret) = self.object_sound_call(id, name, args) {
+                return Some(ret);
+            }
         }
         match kind {
             Kind::Game => self.game_call(name, args, ctx),

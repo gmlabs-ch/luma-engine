@@ -13,6 +13,8 @@ use crate::error::{Error, Result};
 #[derive(Debug, Clone)]
 pub struct Clip {
     pub(crate) data: StaticSoundData,
+    /// The size of the file it was decoded from, in bytes.
+    pub(crate) file_size: usize,
 }
 
 impl Clip {
@@ -31,6 +33,18 @@ impl Clip {
         self.data.duration().as_millis() as u64
     }
 
+    /// The size in bytes of the file the clip was decoded from (0 for a
+    /// clip made in code): the engine streams the files over 1 MB.
+    pub fn file_size(&self) -> usize {
+        self.file_size
+    }
+
+    /// The same clip as if decoded from a file of that size.
+    pub fn with_file_size(mut self, bytes: usize) -> Clip {
+        self.file_size = bytes;
+        self
+    }
+
     /// A silent clip of a duration, for tests and stand-ins.
     pub fn silence(sample_rate: u32, ms: u64) -> Clip {
         let frames = (ms * u64::from(sample_rate) / 1000) as usize;
@@ -41,6 +55,7 @@ impl Clip {
                 settings: Default::default(),
                 slice: None,
             },
+            file_size: 0,
         }
     }
 }
@@ -53,7 +68,10 @@ pub fn decode(bytes: &[u8]) -> Result<Clip> {
     }
     let data = StaticSoundData::from_cursor(Cursor::new(bytes.to_vec()))
         .map_err(|e| Error::Decode(e.to_string()))?;
-    Ok(Clip { data })
+    Ok(Clip {
+        data,
+        file_size: bytes.len(),
+    })
 }
 
 /// A 16-bit PCM WAV file of silence, for tests and tools.

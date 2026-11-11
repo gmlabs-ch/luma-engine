@@ -616,7 +616,8 @@ impl Actor3d {
             font: def.font,
             cursor: def.cursor,
             ignore_items: false,
-            sound_panning: false,
+            // `CBObject::m_AutoSoundPanning` starts true.
+            sound_panning: true,
             tint: None,
             blend_mode: BlendMode::Normal,
             blocked_region: def.blocked_region,
