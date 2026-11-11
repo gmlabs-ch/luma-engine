@@ -905,43 +905,43 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdSceneGeometry::CAdSceneGeometry` | unreviewed |  |
-| `CAdSceneGeometry::~CAdSceneGeometry` | unreviewed |  |
-| `CAdSceneGeometry::Cleanup` | unreviewed |  |
-| `CAdSceneGeometry::GetGeometryExtension` | unreviewed |  |
-| `CAdSceneGeometry::LoadFile` | unreviewed |  |
-| `CAdSceneGeometry::DropWaypoints` | unreviewed |  |
-| `CAdSceneGeometry::SetActiveCamera` | unreviewed |  |
-| `CAdSceneGeometry::SetActiveCamera #2` | unreviewed |  |
-| `CAdSceneGeometry::GetActiveCamera` | unreviewed |  |
-| `CAdSceneGeometry::SetActiveLight` | unreviewed |  |
-| `CAdSceneGeometry::SetActiveLight #2` | unreviewed |  |
-| `CAdSceneGeometry::GetViewMatrix` | unreviewed |  |
-| `CAdSceneGeometry::StoreDrawingParams` | unreviewed |  |
-| `CAdSceneGeometry::Render` | unreviewed |  |
-| `CAdSceneGeometry::RenderShadowGeometry` | unreviewed |  |
-| `CAdSceneGeometry::GetHeightAt` | unreviewed |  |
-| `CAdSceneGeometry::DirectPathExists` | unreviewed |  |
-| `CAdSceneGeometry::GetBlockIntersection` | unreviewed |  |
-| `CAdSceneGeometry::Convert2Dto3DTolerant` | unreviewed |  |
-| `CAdSceneGeometry::Convert2Dto3D` | unreviewed |  |
-| `CAdSceneGeometry::GetPath` | unreviewed |  |
-| `CAdSceneGeometry::PathFinderStep` | unreviewed |  |
-| `CAdSceneGeometry::GetPointsDist` | unreviewed |  |
-| `CAdSceneGeometry::InitLoop` | unreviewed |  |
-| `CAdSceneGeometry::CreateLights` | unreviewed |  |
-| `CAdSceneGeometry::EnableLights` | unreviewed |  |
-| `CAdSceneGeometry::CompareLights` | unreviewed |  |
-| `CAdSceneGeometry::CorrectTargetPoint` | unreviewed |  |
-| `CAdSceneGeometry::EnableNode` | unreviewed |  |
-| `CAdSceneGeometry::IsNodeEnabled` | unreviewed |  |
-| `CAdSceneGeometry::EnableLight` | unreviewed |  |
-| `CAdSceneGeometry::IsLightEnabled` | unreviewed |  |
-| `CAdSceneGeometry::SetLightColor` | unreviewed |  |
-| `CAdSceneGeometry::GetLightColor` | unreviewed |  |
-| `CAdSceneGeometry::GetLightPos` | unreviewed |  |
-| `CAdSceneGeometry::Persist` | unreviewed |  |
-| `CAdSceneGeometry::Convert3Dto2D` | unreviewed |  |
+| `CAdSceneGeometry::CAdSceneGeometry` | done | `luma-3d/src/scene_geometry.rs` `SceneGeometry::default`/`from_file` (waypoint height 10, no active camera until a file gives one) and `luma-3d/src/path3d.rs` `PathFinder::new` (idle, no alternate target, alternate distance at the maximum). `m_PFMaxTime` (15 ms) has no effect in the original (see `InitLoop`); `m_ActiveLight` and the `m_Last*` values: see `SetActiveLight`, `StoreDrawingParams`. |
+| `CAdSceneGeometry::~CAdSceneGeometry` | replaced | Rust ownership: the `Scene3d` is dropped with its `SceneView`; the GPU receivers are freed by `draw3d.rs` `Render3d::upload_receivers` when the scene changes. |
+| `CAdSceneGeometry::Cleanup` | replaced | Rust ownership: `Scene3d::load` and `Scene3d::reload` build a new `SceneGeometry` and a new `PathFinder` instead of emptying the lists. |
+| `CAdSceneGeometry::GetGeometryExtension` | done | `luma-adventure/src/scene3d.rs` `Scene3d::load_file` + `luma-3d/src/node_patterns.rs` `NodePatterns::load`: the `.geometry` file of the same directory and base name; the standard nodes alone when it is absent or does not load. |
+| `CAdSceneGeometry::LoadFile` | done | `Scene3d::load_file` -> `SceneGeometry::load_3ds`/`from_file`: only `.3ds` (same log text otherwise), each mesh classified by the first matching node (walk plane, block, waypoint, generic, with `receive_shadows`; unmatched meshes dropped), every waypoint mesh into one group, cameras and lights in file order, first camera active, waypoints dropped to the floor, file name kept (`Scene3d::file`). A mesh that cannot be read fails the whole load in both. The `wpt.sprite` marker is only loaded for the overlay Luma does not draw (see `Render`). |
+| `CAdSceneGeometry::DropWaypoints` | done | `SceneGeometry::drop_waypoints`: `y = floor height (no tolerance) + waypoint height`; a waypoint over no walk plane keeps its own `y` plus the height. |
+| `CAdSceneGeometry::SetActiveCamera` | done | `SceneGeometry::active_camera` (index; the first camera after loading). The field of view and the clipping planes given here are not stored on the camera: `World::projection_3d` passes the scene's `FOV_OVERRIDE` and planes (`CameraSettings`) to `Projection::new` every frame, negative meaning the camera's own or the defaults, as in the original. |
+| `CAdSceneGeometry::SetActiveCamera #2` | done | `SceneGeometry::set_active_camera`: by name without case; an unknown name keeps the current camera and returns false. The callers log (`Scene3d::apply_scene_keys`, `scene3d_call`), with their own text rather than `Warning: Camera '%s' not found.` |
+| `CAdSceneGeometry::GetActiveCamera` | done | `SceneGeometry::active_camera()`: `None` when the index is out of range. |
+| `CAdSceneGeometry::SetActiveLight` | n/a | Only stores `m_ActiveLight`, which nothing reads but `CAdScene::GetActiveLight`, itself never called: no effect in the original. Luma has no such field. |
+| `CAdSceneGeometry::SetActiveLight #2` | n/a | By-name form of `SetActiveLight`: no effect in the original (see that row). |
+| `CAdSceneGeometry::GetViewMatrix` | done | `scene_geometry.rs` `Camera::view_matrix` of the active camera, kept in `Projection::view`. |
+| `CAdSceneGeometry::StoreDrawingParams` | replaced | By `World::projection_3d`: a `luma_3d::Projection` (viewport, projection and view matrices, scroll) built from the scene's current state at each update and kept for the frame's drawing (`Scene3d::set_projection`). The original converts with the values stored at the last drawn frame; scene coordinates do not depend on the scroll in either, so the results only differ during the frame in which the scene viewport changes. |
+| `CAdSceneGeometry::Render` | partial | The storing half is replaced (see `StoreDrawingParams`). Missing: the `Render(true)` overlay, which scripts can turn on at run time with `Scene.ShowGeometry` (a no-op property in Luma): wireframes of the active walk planes (`0x700000FF`), blocks (`0x70FF0000`) and generic meshes (`0x7000FF00`) without depth test, then the `wpt.sprite` marker at the projected position of every waypoint. |
+| `CAdSceneGeometry::RenderShadowGeometry` | done | `draw3d.rs` `Render3d::upload_receivers` + `overlays`: the active blocks, walk planes and generic meshes with `receive_shadows` are written to the depth buffer only (`Draw3d::DepthOnly`, back faces culled, identity world) before the main layer's nodes, when the lowest of the game's and the scene's shadow types is stencil. |
+| `CAdSceneGeometry::GetHeightAt` | done | `scene_geometry.rs` `height_at`: vertical ray from `y + tolerance` against every walk plane triangle (enabled or not), hits above `y + 2 x tolerance` skipped, the hit nearest to the raised start wins; `None` for the original's "unchanged `y`", which every caller turns back into the given `y`. |
+| `CAdSceneGeometry::DirectPathExists` | done | `SceneGeometry::direct_path_exists` + `segment_pierces`: every walk plane (enabled or not) and every enabled block, the original's pair of tests (`math::pick_get_intersect`, then `math::intersect_triangle` from each end). |
+| `CAdSceneGeometry::GetBlockIntersection` | done | `SceneGeometry::block_intersection`: enabled blocks in file order, the first pierced triangle wins; `None` for the original's origin, which `PathFinder::step` turns back into the origin. |
+| `CAdSceneGeometry::Convert2Dto3DTolerant` | done | `SceneGeometry::convert_2d_to_3d_tolerant`: exact conversion first, then scans of 10 pixels up to 1000 in the four directions, the nearer side per axis, the axis with the smaller shift (vertical when equal). |
+| `CAdSceneGeometry::Convert2Dto3D` | done | `SceneGeometry::convert_2d_to_3d` + `luma-3d/src/camera.rs` `Projection::pick_ray`: the pixel moved by the viewport margins and the layer's `Mod`, the ray `((2X/VW - 1)/P11, -(2Y/VH - 1)/P22, 1)` through the inverse view matrix, nearest hit over every walk plane triangle. Uses the frame's projection instead of the last drawn one (see `StoreDrawingParams`). |
+| `CAdSceneGeometry::GetPath` | done | `path3d.rs` `PathFinder::request`/`start`: refused while a request is open; both ends lifted to `floor (tolerance = waypoint height) + waypoint height`; nodes = source, target, the points of the active waypoint groups. The result is handed over with a ticket (`take_path`) instead of being written into the actor's path. |
+| `CAdSceneGeometry::PathFinderStep` | done | `PathFinder::step`: lowest unmarked node (first wins ties); none left: once, a rerun toward the alternate target when there is one, else an empty ready path; the target reached: the path back through the origins without the source; else relax the unmarked nodes over free segments, and note the alternate target (block hit backed off by 30 toward the node) for the shortest edge to the target that did not improve it. |
+| `CAdSceneGeometry::GetPointsDist` | done | Inlined in `PathFinder::step`: `direct_path_exists`, then the length. |
+| `CAdSceneGeometry::InitLoop` | done | `PathFinder::run`, called by `World::run_path_finder_3d` once per frame before the 3D actors: runs the open request to the end. The original's 15 ms budget compares `Game->m_CurrentTime`, which does not change inside the loop, so it also always runs to the end. |
+| `CAdSceneGeometry::CreateLights` | replaced | Registering the lights with the Direct3D device: Luma passes the lights of each object with its draws (`draw3d.rs` `convert_light`, `model_items`). |
+| `CAdSceneGeometry::EnableLights` | done | `scene3d.rs` `Scene3d::lights_for` (called by `World::three_d_draws` per actor): when more lights are active than the maximum, only the nearest count (a spot measured from three quarters of the way to its target); then in file order, skipping the ignored names (without case), the active ones up to the maximum. The maximum is fixed at 8 (`MAX_LIGHTS`) where the original asks the device, and the one-time log line `Warning: Using more lights than the hardware supports` is not written. |
+| `CAdSceneGeometry::CompareLights` | done | The `total_cmp` on distances in `Scene3d::lights_for`. |
+| `CAdSceneGeometry::CorrectTargetPoint` | n/a | Never called: its two call sites (`CAdActor3D::GoTo`, `PathFinderStep`) are commented out in the original, so it has no effect to port. (It moves a target along X or Z to where a straight line from it first hits a block or walk plane.) |
+| `CAdSceneGeometry::EnableNode` | done | `SceneGeometry::set_node_enabled` (`Scene.EnableNode3D`/`DisableNode3D`): every block, walk plane and generic mesh of that name, without case; false when none. |
+| `CAdSceneGeometry::IsNodeEnabled` | done | `SceneGeometry::is_node_enabled`: first match among blocks, then walk planes, then generic meshes; false for an unknown name. |
+| `CAdSceneGeometry::EnableLight` | done | `SceneGeometry::set_light_enabled`: every light of that name, without case; false when none. No device registration to redo. |
+| `CAdSceneGeometry::IsLightEnabled` | done | `SceneGeometry::is_light_enabled`: the first light of that name; false when unknown. |
+| `CAdSceneGeometry::SetLightColor` | partial | `SceneGeometry::set_light_color` (every light of that name; false when none). Different: only red, green and blue are kept (`Rgb`); the original stores the whole 32-bit value, alpha included, which `GetLightColor` returns. |
+| `CAdSceneGeometry::GetLightColor` | partial | `scene3d.rs` `scene3d_call` `GetLightColor`: the first light of that name, 0 when unknown. Different: the alpha byte is always `0xFF`; the original returns the value as stored (`0xFF` for a colour from the file, the script's own alpha after `SetLightColor`). |
+| `CAdSceneGeometry::GetLightPos` | done | `scene3d_call` `GetLightPosition`: the first light of that name, the origin when unknown. |
+| `CAdSceneGeometry::Persist` | partial | `scene3d.rs` `Saved`: the geometry file, the waypoint height, the active camera, each light's state and colour and each node's state by name, the fog; the geometry is read again from its file (`Scene3d::reload`). Missing: (1) the path finder's open request (`m_PFPath`, `m_PFReady`, source, target, alternate target, target path, rerun flag): the finder starts idle after a load and the actor's ticket is not saved, so an actor saved while waiting for its path never gets one (see `CAdActor3DX::Persist`). (2) Node states are put back by name over blocks, walk planes and generic meshes together (`set_node_enabled`), so two nodes of different kinds sharing a name end with the same state; the original restores each kind separately. (3) The active camera is saved by name (the first of that name is chosen), the original by index; a light's alpha is not kept (see `SetLightColor`). `m_ActiveLight` has no effect. |
+| `CAdSceneGeometry::Convert3Dto2D` | done | `camera.rs` `Projection::project`: the viewport projection of the point plus the scroll offset, truncated toward zero. |
 
 ## `wme_ad/AdSceneNode.cpp`
 
