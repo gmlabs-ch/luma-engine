@@ -136,6 +136,10 @@ impl Stack {
 
     /// Every slot, live or not, for snapshots.
     #[cfg(feature = "serde")]
+    pub(crate) fn slots_mut(&mut self) -> &mut [Slot] {
+        &mut self.slots
+    }
+
     pub(crate) fn slots(&self) -> &[Slot] {
         &self.slots
     }

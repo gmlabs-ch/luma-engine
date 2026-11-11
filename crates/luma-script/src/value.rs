@@ -428,6 +428,23 @@ impl Value {
         }
     }
 
+    /// Turns every handle to a destroyed native object held by this
+    /// value into `null`, inside the properties of a script object too
+    /// (`CBGame::InvalidateValues`, which the original runs over every
+    /// script value when an object is destroyed). `gone` says whether a
+    /// handle names a destroyed object.
+    pub fn invalidate_natives(&mut self, gone: &dyn Fn(NativeId) -> bool) {
+        match self {
+            Value::Native(id) if gone(*id) => *self = Value::Null,
+            Value::Object(props) => {
+                for value in props.values_mut() {
+                    value.invalidate_natives(gone);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Assigns `from` to this variable (`SetValue`): a variable holding a
     /// native that is assigned an integer, string or boolean keeps the
     /// native and hands it the scalar; anything else replaces the value.

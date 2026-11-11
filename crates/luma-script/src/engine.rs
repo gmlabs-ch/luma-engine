@@ -30,14 +30,15 @@ pub struct Global {
     pub is_const: bool,
 }
 
-/// How many scripts are in each state (`GetNumScripts`).
+/// How many scripts are in each state, grouped as the original's debug
+/// line groups them (`CScEngine::GetNumScripts`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Counts {
-    /// Scripts in total.
+    /// Every script but the finished ones.
     pub total: usize,
-    /// Running scripts.
+    /// Running, sleeping and paused scripts.
     pub running: usize,
-    /// Scripts waiting for an object, a time or a thread.
+    /// Scripts waiting for an object.
     pub waiting: usize,
     /// Persistent scripts, kept for their handlers.
     pub persistent: usize,
@@ -63,6 +64,15 @@ pub struct Engine {
     pub(crate) cache: HashMap<String, Rc<Program>>,
     pub(crate) next_id: u64,
     pub(crate) current: Option<ScriptId>,
+    /// `COMPAT_KILL_METHOD_THREADS` of the game file.
+    pub(crate) compat_kill_method_threads: bool,
+    /// Whether the script profiler is on (`m_IsProfiling`).
+    pub(crate) profiling: bool,
+    /// When profiling started, on [`Host::ticks`].
+    pub(crate) profiling_start: u64,
+    /// The time each script file ran while profiling, in milliseconds,
+    /// by its path in lower case (`m_ScriptTimes`).
+    pub(crate) script_times: BTreeMap<String, u64>,
 }
 
 impl Engine {
@@ -76,15 +86,28 @@ impl Engine {
     // ----------------------------------------------------------------
 
     /// The program of a script file, loaded through the host and cached
-    /// (case-insensitively) for the threads and the later runs of it.
+    /// (case-insensitively) for the threads and the later runs of it
+    /// (`GetCompiledScript`). A file that does not start with the magic
+    /// of a compiled script is source text: the host compiles it
+    /// ([`Host::compile_script`]), and the result is what is cached.
     pub fn program(&mut self, host: &mut dyn Host, filename: &str) -> Option<Rc<Program>> {
         let key = filename.to_ascii_lowercase();
         if let Some(program) = self.cache.get(&key) {
             return Some(Rc::clone(program));
         }
         let Some(bytes) = host.read_script(filename) else {
-            host.log(&format!("Error opening script '{filename}'"));
+            host.log(&format!(
+                "CScEngine::GetCompiledScript - error opening script '{filename}'"
+            ));
             return None;
+        };
+        let compiled = bytes
+            .get(..4)
+            .is_some_and(|magic| magic == crate::program::MAGIC.to_le_bytes());
+        let bytes = if compiled {
+            bytes
+        } else {
+            host.compile_script(filename, &bytes)?
         };
         match Program::parse(bytes) {
             Ok(program) => {
@@ -101,8 +124,9 @@ impl Engine {
         }
     }
 
-    /// Forgets the cached programs (`Game.ClearScriptCache`); running
-    /// scripts keep theirs.
+    /// Forgets the cached programs (`EmptyScriptCache`,
+    /// `Game.ClearScriptCache`); running scripts keep theirs, and a file
+    /// is read again the next time a script is started from it.
     pub fn clear_cache(&mut self) {
         self.cache.clear();
     }
@@ -168,21 +192,97 @@ impl Engine {
         self.current
     }
 
-    /// How many scripts are in each state.
+    /// How many scripts are in each state (`GetNumScripts`): finished
+    /// scripts are left out, sleeping and paused scripts count as
+    /// running, and only the scripts waiting for an object as waiting.
     pub fn counts(&self) -> Counts {
-        let mut counts = Counts {
-            total: self.scripts.len(),
-            ..Counts::default()
-        };
+        let mut counts = Counts::default();
         for script in &self.scripts {
             match script.state {
-                State::Running => counts.running += 1,
-                State::Waiting | State::Sleeping | State::WaitingScript => counts.waiting += 1,
+                State::Finished => continue,
+                State::Running | State::Sleeping | State::Paused => counts.running += 1,
+                State::Waiting => counts.waiting += 1,
                 State::Persistent => counts.persistent += 1,
                 _ => {}
             }
+            counts.total += 1;
         }
         counts
+    }
+
+    // ----------------------------------------------------------------
+    // Profiler
+    // ----------------------------------------------------------------
+
+    /// Starts measuring how long each script file runs
+    /// (`EnableProfiling`, `Game.EnableScriptProfiling`): the totals
+    /// start from zero. Nothing happens when it is already on.
+    pub fn enable_profiling(&mut self, host: &dyn Host) {
+        if self.profiling {
+            return;
+        }
+        self.script_times.clear();
+        self.profiling_start = host.ticks();
+        self.profiling = true;
+    }
+
+    /// Stops the profiler and writes its table to the log
+    /// (`DisableProfiling`, `Game.DisableScriptProfiling`). Nothing
+    /// happens when it is off.
+    pub fn disable_profiling(&mut self, host: &mut dyn Host) {
+        if !self.profiling {
+            return;
+        }
+        self.dump_stats(host);
+        self.profiling = false;
+    }
+
+    /// Whether the profiler is on.
+    pub fn is_profiling(&self) -> bool {
+        self.profiling
+    }
+
+    /// The time each script file ran since the profiler was turned on, in
+    /// milliseconds, by its path in lower case.
+    pub fn script_times(&self) -> &BTreeMap<String, u64> {
+        &self.script_times
+    }
+
+    /// Adds the time a script ran to its file's total (`AddScriptTime`).
+    fn add_script_time(&mut self, filename: &str, time: u64) {
+        if !self.profiling {
+            return;
+        }
+        *self
+            .script_times
+            .entry(filename.to_lowercase())
+            .or_insert(0) += time;
+    }
+
+    /// Writes the profiler's table to the log (`DumpStats`): the time
+    /// since profiling started, then every script file with its seconds
+    /// and its share of that time, longest first.
+    pub fn dump_stats(&self, host: &mut dyn Host) {
+        let total = host.ticks().saturating_sub(self.profiling_start);
+        let mut times: Vec<(u64, &str)> = self
+            .script_times
+            .iter()
+            .map(|(name, time)| (*time, name.as_str()))
+            .collect();
+        times.sort();
+        host.log("***** Script profiling information: *****");
+        host.log(&format!(
+            "  {:<40} {:.6}s",
+            "Total execution time",
+            total as f32 / 1000.0
+        ));
+        for (time, name) in times.iter().rev() {
+            host.log(&format!(
+                "  {name:<40} {:.6}s ({:.6}%)",
+                *time as f32 / 1000.0,
+                *time as f32 / total as f32 * 100.0
+            ));
+        }
     }
 
     // ----------------------------------------------------------------
@@ -214,6 +314,39 @@ impl Engine {
     /// Every engine-wide global.
     pub fn globals(&self) -> &BTreeMap<String, Global> {
         &self.globals
+    }
+
+    /// Turns every handle to a destroyed native object into `null`, in
+    /// every variable of every script and in the engine's globals
+    /// (`CBGame::InvalidateValues` over every script value, which the
+    /// original runs when an object is destroyed): `obj == null` is then
+    /// true for a variable that held the object. `gone` says whether a
+    /// handle names a destroyed object. The host does the same for the
+    /// values it keeps (the properties scripts set on its objects).
+    pub fn invalidate_natives(&mut self, gone: &dyn Fn(NativeId) -> bool) {
+        for global in self.globals.values_mut() {
+            global.value.invalidate_natives(gone);
+        }
+        for script in &mut self.scripts {
+            // A table shared with threads is visited once per script;
+            // the second visit finds nothing.
+            for value in script.globals.borrow_mut().values_mut() {
+                value.invalidate_natives(gone);
+            }
+            for scope in &mut script.scopes {
+                for value in scope.values_mut() {
+                    value.invalidate_natives(gone);
+                }
+            }
+            for slot in script.stack.slots_mut() {
+                if let Slot::Value(value) = slot {
+                    value.invalidate_natives(gone);
+                }
+            }
+            if let Slot::Value(value) = &mut script.reg1 {
+                value.invalidate_natives(gone);
+            }
+        }
     }
 
     /// Resets the non-constant globals to `null` (`ClearGlobals`), keeping
@@ -339,24 +472,34 @@ impl Engine {
     }
 
     /// Ends the threads of the script's file on the same owner
-    /// (`FinishThreads`).
+    /// (`FinishThreads`). The file is the path the script was attached
+    /// with (`m_Filename`), compared without case.
     fn finish_threads(&mut self, index: usize) {
         let owner = self.scripts[index].owner;
-        let filename = self.scripts[index].filename().to_string();
+        let filename = self.scripts[index].source.clone();
         for script in &mut self.scripts {
             if script.thread
                 && script.state != State::Finished
                 && script.owner == owner
-                && script.filename().eq_ignore_ascii_case(&filename)
+                && script.source.eq_ignore_ascii_case(&filename)
             {
                 script.finish();
             }
         }
     }
 
+    /// Sets the game's `COMPAT_KILL_METHOD_THREADS`: when on,
+    /// [`Engine::reset_object`] leaves the scripts waiting for the
+    /// scripts it ends alone, as engines before 1.9 did; they get `null`
+    /// for the call at the next tick and go on.
+    pub fn set_compat_kill_method_threads(&mut self, on: bool) {
+        self.compat_kill_method_threads = on;
+    }
+
     /// Ends every script waiting for the object (`ResetObject`): a
     /// top-level script takes its threads with it, and scripts waiting
-    /// for those scripts end too.
+    /// for those scripts end too, unless the game asked for the old
+    /// behaviour (`COMPAT_KILL_METHOD_THREADS`).
     pub fn reset_object(&mut self, object: NativeId) {
         let waiting: Vec<ScriptId> = self
             .scripts
@@ -365,7 +508,9 @@ impl Engine {
             .map(|s| s.id)
             .collect();
         for id in waiting {
-            self.reset_script(id);
+            if !self.compat_kill_method_threads {
+                self.reset_script(id);
+            }
             let is_thread = self.script(id).is_some_and(|s| s.thread || s.method_thread);
             self.finish(id, !is_thread);
         }
@@ -388,8 +533,7 @@ impl Engine {
             if Some(script.id) != current && !script.pause() {
                 host.log(&format!(
                     "Attempting to pause a paused script ('{}', line {})",
-                    script.filename(),
-                    script.line
+                    script.source, script.line
                 ));
             }
         }
@@ -535,20 +679,36 @@ impl Engine {
         }
     }
 
-    /// Runs one script until it blocks, or until its time slice is used.
+    /// Runs one script until it blocks, or until its time slice is used
+    /// (the body of the second loop of `Tick`). Whether the script is
+    /// time-sliced is decided once, from the slice it has when its turn
+    /// comes: a script that sets a slice in an unsliced turn runs on to
+    /// its next wait, and one that sets its slice to 0 in a sliced turn
+    /// stops at once (the original's unsigned `elapsed < slice` is then
+    /// false).
     fn execute(&mut self, i: usize, host: &mut dyn Host) {
         let id = self.scripts[i].id;
         self.current = Some(id);
-        let start = host.clock();
+        let sliced = self.scripts[i].time_slice > 0;
+        let profiling = self.profiling;
+        let start = if sliced || profiling { host.ticks() } else { 0 };
         while self.scripts[i].state == State::Running {
-            // The slice is read every time: a script may set it and loop
-            // in the same tick.
-            let slice = self.scripts[i].time_slice;
-            if slice > 0 && host.clock().saturating_sub(start) >= slice {
+            if sliced && host.ticks().saturating_sub(start) >= self.scripts[i].time_slice {
                 break;
             }
             if !self.step(i, host) {
                 break;
+            }
+        }
+        // A sliced turn is counted when profiling is on at its end, an
+        // unsliced one when it was on at its start.
+        if (sliced && self.profiling) || (!sliced && profiling) {
+            // The script is still in the list: nothing is removed
+            // before the end of the tick.
+            let elapsed = host.ticks().saturating_sub(start);
+            if let Some(index) = self.index_of(id) {
+                let filename = self.scripts[index].source.clone();
+                self.add_script_time(&filename, elapsed);
             }
         }
         self.current = None;
@@ -594,7 +754,7 @@ impl Engine {
         let script = &mut self.scripts[i];
         host.log(&format!(
             "Warning: variable '{name}' is inaccessible in the current block. Consider changing the script (script:{}, line:{})",
-            script.filename(),
+            script.source,
             script.line
         ));
         match script.scopes.last_mut() {
@@ -741,12 +901,13 @@ impl Engine {
     // Errors, sleeps and waits
     // ----------------------------------------------------------------
 
+    /// `CScScript::RuntimeError`: the error goes to the log with the
+    /// script's path and line, and the host tells the player.
     fn runtime_error(&self, i: usize, host: &mut dyn Host, message: &str) {
         let script = &self.scripts[i];
-        host.log(&format!(
+        host.script_error(&format!(
             "Runtime error. Script '{}', line {}: {message}",
-            script.filename(),
-            script.line
+            script.source, script.line
         ));
     }
 
@@ -898,8 +1059,7 @@ impl Engine {
                 let script = &mut self.scripts[i];
                 host.log(&format!(
                     "Fatal: {err} ('{}', line {}, IP:{ip:#x})",
-                    script.filename(),
-                    script.line
+                    script.source, script.line
                 ));
                 script.state = State::Finished;
                 return false;

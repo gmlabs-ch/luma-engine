@@ -48,13 +48,7 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 }
 
 /// Methods the engine has that later milestones implement.
-const GAME_STUBS: &[&str] = &[
-    "ShowStatusLine",
-    "HideStatusLine",
-    "DumpTextureStats",
-    "EnableScriptProfiling",
-    "DisableScriptProfiling",
-];
+const GAME_STUBS: &[&str] = &["ShowStatusLine", "HideStatusLine", "DumpTextureStats"];
 
 impl World {
     /// A built-in property of a native, if the native defines it.
@@ -308,7 +302,7 @@ impl World {
                 let found = ctx.engine.scripts_of(id).into_iter().find(|s| {
                     ctx.engine
                         .script(*s)
-                        .is_some_and(|s| s.filename().eq_ignore_ascii_case(&path))
+                        .is_some_and(|s| s.source().eq_ignore_ascii_case(&path))
                 });
                 match found {
                     Some(script) => {
@@ -322,7 +316,7 @@ impl World {
                 let path = arg(0).get_string(self);
                 let running = ctx.engine.scripts_of(id).into_iter().any(|s| {
                     ctx.engine.script(s).is_some_and(|s| {
-                        s.filename().eq_ignore_ascii_case(&path)
+                        s.source().eq_ignore_ascii_case(&path)
                             && !matches!(s.state(), State::Finished | State::Error)
                     })
                 });
@@ -437,11 +431,10 @@ impl World {
             "WindowedMode" => Value::Bool(self.windowed),
             "SuspendedRendering" => Value::Bool(self.suspended_rendering),
             "SoundAvailable" => Value::Bool(self.sounds.audio.device().is_some()),
-            "DebugMode"
-            | "SuppressScriptErrors"
-            | "AutorunDisabled"
-            | "AutoSaveOnExit"
-            | "CursorHidden" => Value::Bool(false),
+            "SuppressScriptErrors" => Value::Bool(self.suppress_script_errors),
+            "DebugMode" | "AutorunDisabled" | "AutoSaveOnExit" | "CursorHidden" => {
+                Value::Bool(false)
+            }
             "AcceleratedMode" | "Accelerated" => Value::Bool(true),
             "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => {
                 return Some(self.volume_property(name));
@@ -454,6 +447,9 @@ impl World {
             "SimpleShadows" => Value::Bool(self.max_shadow_type == 1),
             "SupportsRealTimeShadows" => Value::Bool(true),
             "MaxActiveLights" => Value::Int(8),
+            // `CBUtils::GetUsedMemMB`: the working set in a debug build
+            // of the original, 0 in the builds games ship with.
+            "UsedMemory" => Value::Int(0),
             "TextEncoding" => Value::Int(self.text_encoding),
             "TextRTL" => Value::Bool(self.text_rtl),
             "StartupScene" => self.startup_scene.clone().map_or(Value::Null, Value::from),
@@ -505,6 +501,7 @@ impl World {
             }
             "VideoSubtitles" => self.video_subtitles = value.get_bool(self),
             "SuspendedRendering" => self.suspended_rendering = value.get_bool(self),
+            "SuppressScriptErrors" => self.suppress_script_errors = value.get_bool(self),
             "VideoSkipButton" => {
                 self.video_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }
@@ -883,7 +880,23 @@ impl World {
                 Return::value(self.open_document(&target))
             }
             "FileExists" => Return::value(self.vfs().exists(&arg(0).get_string(self))),
-            "ClearScriptCache" => Return::null(),
+            // `CScEngine::EmptyScriptCache`: a script file is read again
+            // the next time a script is started from it.
+            "ClearScriptCache" => {
+                ctx.engine.clear_cache();
+                Return::value(true)
+            }
+            // The script profiler (`CScEngine::EnableProfiling`,
+            // `DisableProfiling`): turning it off writes its table to
+            // the log.
+            "EnableScriptProfiling" => {
+                ctx.engine.enable_profiling(self);
+                Return::null()
+            }
+            "DisableScriptProfiling" => {
+                ctx.engine.disable_profiling(self);
+                Return::null()
+            }
             "SaveGame" => {
                 // Done once `true` is on the caller's stack (`after_call`).
                 let slot = arg(0).get_int(self);

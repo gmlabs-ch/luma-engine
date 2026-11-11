@@ -254,3 +254,412 @@ on "Check"
     }
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// A script compiled under another name than the file it is stored as.
+fn compile_as(source: &str, recorded: &str) -> Vec<u8> {
+    compile(source, recorded)
+}
+
+#[test]
+fn sleep_runs_on_the_wall_clock_while_the_game_is_frozen() {
+    // The script of a system-exclusive window is not freezable: it runs
+    // while the game is frozen, and its `Sleep` cannot use the game
+    // timer, which is stopped.
+    let (dir, mut runtime, mut log) = start(
+        r#"
+global result = new Object();
+global w = Game.LoadWindow("w.window");
+w.AttachScript("w.script");
+w.GoSystemExclusive();
+"#,
+        &[
+            File::Raw("w.window", WINDOW),
+            File::Script(
+                "w.script",
+                r#"
+global result;
+on "Nap"
+{
+  result.frozen = Game.Frozen;
+  Sleep(100);
+  result.woke = true;
+}
+"#,
+            ),
+        ],
+    );
+    let w = runtime.engine.global("w").unwrap().as_native().unwrap();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, w, "Nap", false);
+    log.extend(runtime.tick(16));
+    assert_eq!(result(&runtime, "frozen"), Value::Bool(true), "{log:?}");
+    assert_eq!(result(&runtime, "woke"), Value::Null);
+    let timer = runtime.world.timer();
+    for _ in 0..10 {
+        log.extend(runtime.tick(16));
+    }
+    no_errors(&log);
+    assert_eq!(runtime.world.timer(), timer, "the game timer is stopped");
+    assert_eq!(
+        result(&runtime, "woke"),
+        Value::Bool(true),
+        "a sleep started while frozen ends on the wall clock"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn scripts_attached_to_a_system_exclusive_window_are_not_freezable() {
+    let (dir, mut runtime, log) = start(
+        r#"
+global result = new Object();
+global w = Game.LoadWindow("w.window");
+global other = Game.LoadWindow("w.window");
+global b = w.GetControl("b");
+w.GoSystemExclusive();
+"#,
+        &[
+            File::Raw("w.window", WINDOW),
+            File::Script("late.script", "on \"Nothing\" { }"),
+        ],
+    );
+    no_errors(&log);
+    // The calling script waits for the window; the scripts are attached
+    // behind its back, as a script of the window would.
+    for global in ["w", "b", "other"] {
+        let id = runtime.engine.global(global).unwrap().as_native().unwrap();
+        assert!(runtime.world.attach(&mut runtime.engine, id, "late.script"));
+    }
+    let freezable = |global: &str| -> Vec<bool> {
+        let id = runtime.engine.global(global).unwrap().as_native().unwrap();
+        runtime
+            .engine
+            .scripts_of(id)
+            .into_iter()
+            .map(|s| runtime.engine.script(s).unwrap().is_freezable())
+            .collect()
+    };
+    // The window went system-exclusive (`MakeFreezable(false)`) before
+    // the scripts were attached: they take the flag the window and its
+    // controls keep.
+    assert_eq!(freezable("w"), [false]);
+    assert_eq!(freezable("b"), [false]);
+    assert_eq!(freezable("other"), [true]);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_destroyed_object_nulls_the_values_that_held_it() {
+    let (dir, runtime, log) = start(
+        r#"
+global result = new Object();
+global o = new Object();
+var copy = o;
+var holder = new Object();
+holder.ref = o;
+var list = new Array();
+list.Push(o);
+var plain;
+plain.inner = o;
+result.kept = o;
+result.before = (o == null);
+Game.UnloadObject(o);
+result.isNull = (o == null);
+result.copyNull = (copy == null);
+result.propNull = (holder.ref == null);
+result.elementNull = (list[0] == null);
+result.innerNull = (plain.inner == null);
+result.text = ToString(copy);
+result.keptNull = (result.kept == null);
+"#,
+        &[],
+    );
+    no_errors(&log);
+    assert_eq!(result(&runtime, "before"), Value::Bool(false));
+    for key in [
+        "isNull",
+        "copyNull",
+        "propNull",
+        "elementNull",
+        "innerNull",
+        "keptNull",
+    ] {
+        assert_eq!(result(&runtime, key), Value::Bool(true), "{key}");
+    }
+    assert_eq!(result(&runtime, "text"), Value::from("[null]"));
+    assert_eq!(runtime.engine.global("o"), Some(&Value::Null));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn objects_of_a_scene_left_behind_are_null() {
+    let (dir, mut runtime, mut log) = start(
+        r#"
+global result = new Object();
+global prop;
+Game.ChangeScene("scenes/room.scene");
+
+on "Grab"
+{
+  var scene = Game.Scene;
+  prop = scene.GetNode("prop");
+  result.grabbed = (prop != null);
+  Game.ChangeScene("scenes/room.scene");
+}
+
+on "Check"
+{
+  result.gone = (prop == null);
+}
+"#,
+        &[File::Raw("scenes\\room.scene", ROOM)],
+    );
+    let game = runtime.world.game_id();
+    log.extend(runtime.tick(16));
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Grab", false);
+    log.extend(runtime.tick(16));
+    log.extend(runtime.tick(16));
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Check", false);
+    log.extend(runtime.tick(16));
+    no_errors(&log);
+    assert_eq!(result(&runtime, "grabbed"), Value::Bool(true), "{log:?}");
+    assert_eq!(result(&runtime, "gone"), Value::Bool(true));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[cfg(feature = "compiler")]
+#[test]
+fn a_script_shipped_as_source_is_compiled_when_loaded() {
+    let (dir, runtime, log) = start(
+        r#"
+global result = new Object();
+result.attached = Game.AttachScript("src.script");
+result.bad = Game.AttachScript("bad.script");
+"#,
+        &[
+            File::Raw(
+                "src.script",
+                b"#include \"inc\\base.inc\"\r\nresult.fromSource = Twice(21);\r\n",
+            ),
+            File::Raw(
+                "inc\\base.inc",
+                b"global result;\r\nfunction Twice(n) { return n * 2; }\r\n",
+            ),
+            File::Raw("bad.script", b"var a = ;\r\n"),
+        ],
+    );
+    no_errors(&log);
+    assert_eq!(result(&runtime, "attached"), Value::Bool(true), "{log:?}");
+    assert_eq!(result(&runtime, "fromSource"), Value::Int(42), "{log:?}");
+    // A file that does not compile is not attached; the log has the
+    // original's two lines and the player is told.
+    assert_eq!(result(&runtime, "bad"), Value::Bool(false));
+    let at = log
+        .iter()
+        .position(|l| l == "Compiling script 'bad.script'...")
+        .unwrap_or_else(|| panic!("{log:?}"));
+    assert!(log[at + 1].starts_with("  Error@line 1: "), "{log:?}");
+    assert!(
+        runtime
+            .world
+            .quick_messages()
+            .iter()
+            .any(|m| m.text == "Script compiler error. View log for details."),
+        "{:?}",
+        runtime.world.quick_messages()
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_runtime_error_tells_the_player_unless_suppressed() {
+    let message = "Script runtime error. View log for details.";
+    let (dir, runtime, log) = start(
+        r#"
+global result = new Object();
+result.before = Game.SuppressScriptErrors;
+var zero = 0;
+var x = 1 / zero;
+"#,
+        &[],
+    );
+    assert_eq!(result(&runtime, "before"), Value::Bool(false));
+    assert!(
+        log.iter()
+            .any(|l| l == "Runtime error. Script 'game.script', line 5: Division by zero."),
+        "{log:?}"
+    );
+    let shown = |runtime: &Runtime| {
+        runtime
+            .world
+            .quick_messages()
+            .iter()
+            .filter(|m| m.text == message)
+            .count()
+    };
+    assert_eq!(shown(&runtime), 1);
+    std::fs::remove_dir_all(&dir).ok();
+
+    let (dir, runtime, log) = start(
+        r#"
+global result = new Object();
+Game.SuppressScriptErrors = true;
+result.after = Game.SuppressScriptErrors;
+var zero = 0;
+var x = 1 / zero;
+var f = new File("nowhere.txt");
+f.ReadLine();
+"#,
+        &[],
+    );
+    assert_eq!(result(&runtime, "after"), Value::Bool(true));
+    assert_eq!(
+        log.iter()
+            .filter(|l| l.starts_with("Runtime error."))
+            .count(),
+        2,
+        "still logged: {log:?}"
+    );
+    assert_eq!(shown(&runtime), 0);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn scripts_are_known_by_the_path_they_were_attached_with() {
+    let recorded = compile_as("on \"Nothing\" { }", "other\\name.script");
+    let (dir, runtime, log) = start(
+        r#"
+global result = new Object();
+var o = new Object("obj.script");
+result.byPath = o.IsScriptRunning("OBJ.script");
+result.byRecorded = o.IsScriptRunning("other\name.script");
+result.again = o.AttachScript("obj.script");
+result.detachRecorded = o.DetachScript("other\name.script");
+result.detach = o.DetachScript("obj.script");
+"#,
+        &[File::Raw("obj.script", &recorded)],
+    );
+    no_errors(&log);
+    assert_eq!(result(&runtime, "byPath"), Value::Bool(true));
+    assert_eq!(result(&runtime, "byRecorded"), Value::Bool(false));
+    assert_eq!(result(&runtime, "again"), Value::Bool(true));
+    assert!(
+        log.iter()
+            .any(|l| l.contains("trying to add script 'obj.script' multiple times")),
+        "{log:?}"
+    );
+    assert_eq!(result(&runtime, "detachRecorded"), Value::Bool(false));
+    assert_eq!(result(&runtime, "detach"), Value::Bool(true));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn clearing_the_script_cache_reads_a_file_again() {
+    let (dir, mut runtime, mut log) = start(
+        r#"
+global result = new Object();
+global a;
+global b;
+global c;
+
+on "First"
+{
+  a = new Object("loose.script");
+}
+
+on "Second"
+{
+  b = new Object("loose.script");
+}
+
+on "Third"
+{
+  result.cleared = Game.ClearScriptCache();
+  c = new Object("loose.script");
+}
+"#,
+        &[],
+    );
+    let game = runtime.world.game_id();
+    let step = |runtime: &mut Runtime, event: &str, log: &mut Vec<String>| {
+        runtime
+            .engine
+            .apply_event(&mut runtime.world, game, event, false);
+        log.extend(runtime.tick(16));
+        log.extend(runtime.tick(16));
+    };
+    let version = |n: i32| {
+        compile(
+            &format!("global result;\nresult.version = {n};"),
+            "loose.script",
+        )
+    };
+    std::fs::write(dir.join("loose.script"), version(1)).unwrap();
+    step(&mut runtime, "First", &mut log);
+    assert_eq!(result(&runtime, "version"), Value::Int(1), "{log:?}");
+    // The file changes on disk: the cached program still runs.
+    std::fs::write(dir.join("loose.script"), version(2)).unwrap();
+    step(&mut runtime, "Second", &mut log);
+    assert_eq!(result(&runtime, "version"), Value::Int(1));
+    step(&mut runtime, "Third", &mut log);
+    assert_eq!(result(&runtime, "cleared"), Value::Bool(true));
+    assert_eq!(result(&runtime, "version"), Value::Int(2));
+    no_errors(&log);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn the_profiler_logs_its_table_and_small_members_answer() {
+    let (dir, mut runtime, mut log) = start(
+        r#"
+global result = new Object();
+Game.EnableScriptProfiling();
+result.memory = Game.UsedMemory;
+var t = new TcpClient("host");
+var u = new TcpClient();
+result.tcpType = t.Type;
+result.tcpText = "" + t;
+result.tcpEqual = (t == u);
+result.tcpValid = (t != null);
+var list = new Array();
+list[""] = "zero";
+result.emptyIndex = list[0];
+result.length = list.Length;
+// The turn in which profiling is turned on is not measured, as in the
+// original; the next one is.
+Sleep(1);
+Sleep(1);
+Game.DisableScriptProfiling();
+"#,
+        &[],
+    );
+    log.extend(runtime.tick(16));
+    log.extend(runtime.tick(16));
+    no_errors(&log);
+    assert_eq!(result(&runtime, "memory"), Value::Int(0));
+    assert_eq!(result(&runtime, "tcpType"), Value::from("tcp-client"));
+    assert_eq!(
+        result(&runtime, "tcpText"),
+        Value::from("[tcp-client object]")
+    );
+    assert_eq!(result(&runtime, "tcpEqual"), Value::Bool(true));
+    assert_eq!(result(&runtime, "tcpValid"), Value::Bool(true));
+    assert_eq!(result(&runtime, "emptyIndex"), Value::from("zero"));
+    assert_eq!(result(&runtime, "length"), Value::Int(1));
+    let at = log
+        .iter()
+        .position(|l| l == "***** Script profiling information: *****")
+        .unwrap_or_else(|| panic!("{log:?}"));
+    assert!(
+        log[at + 1].starts_with("  Total execution time "),
+        "{log:?}"
+    );
+    assert!(log[at + 2].starts_with("  game.script "), "{log:?}");
+    assert!(!runtime.engine.is_profiling());
+    std::fs::remove_dir_all(&dir).ok();
+}

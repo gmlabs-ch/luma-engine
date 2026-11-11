@@ -356,7 +356,7 @@ impl FileObject {
         let writing_text = matches!(self.mode, Mode::Write | Mode::Append) && self.text;
         let writing_binary = matches!(self.mode, Mode::Write | Mode::Append) && !self.text;
         let error = |host: &mut H, what: &str| {
-            host.log(&ctx.runtime_error(&format!("File.{name}: {what}")));
+            host.script_error(&ctx.runtime_error(&format!("File.{name}: {what}")));
         };
         Some(match name {
             "SetFilename" => {

@@ -273,7 +273,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
 | `CUIObject::CUIObject` | done | `luma-adventure/src/ui.rs` `Control::new`: no back, image, font or text, size 0, enabled, visible, no parent notify, not focusable; mouse events while the game is not interactive (`World::non_int_mouse_events`). |
-| `CUIObject::~CUIObject` | replaced | `luma-adventure/src/ui.rs` `World::unload_control`: the control's scripts end and its handle goes, so script values that pointed to it are invalid, as `InvalidateValues` makes them. |
+| `CUIObject::~CUIObject` | done | `luma-adventure/src/ui.rs` `World::unload_control`: the control's scripts end and its handle goes; the script values that held it become null (`world.rs` `flush_removed_objects`), as `InvalidateValues` makes them. |
 | `CUIObject::SetText` | done | `luma-adventure/src/ui.rs` `Control::set_text` (`luma-formats/src/window.rs` `control_text`): every vertical bar becomes a line break. |
 | `CUIObject::Display` | done | Empty base method; each kind has its own drawing in `ui.rs`. |
 | `CUIObject::SetListener` | replaced | `luma-adventure/src/ui.rs` `ButtonListener`: an enum on the button names the four listeners the engine installs itself (a menu's shield, the inventory box, the response box and its choices) instead of an object pointer with parameters. |

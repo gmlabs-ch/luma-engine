@@ -191,6 +191,11 @@ pub struct ObjectState {
     /// `SetLightPosition`: the shadow light relative to the object
     /// (`CBObject::m_ShadowLightPos`), as `x, y, z`; `None` until set.
     pub shadow_light: Option<[f32; 3]>,
+    /// `CBScriptHolder::m_Freezable`: whether the scripts attached to the
+    /// object pause with the game (true by default). A window that went
+    /// system-exclusive, its controls and a container's entity are not;
+    /// a script attached later takes the flag.
+    pub freezable: bool,
 }
 
 /// The inventory of an object other than the game (`CAdInventory`).
@@ -229,6 +234,7 @@ impl Default for ObjectState {
             access_caption: None,
             shadow_image: None,
             shadow_light: None,
+            freezable: true,
         }
     }
 }
@@ -262,6 +268,10 @@ pub struct Native {
 pub struct Objects {
     slots: Vec<(u32, Option<Native>)>,
     free: Vec<u32>,
+    /// The handles removed since the script values were last told
+    /// (`World::flush_removed_objects`); not part of a saved game.
+    #[serde(skip)]
+    removed: Vec<NativeId>,
 }
 
 fn encode(index: u32, generation: u32) -> NativeId {
@@ -329,7 +339,14 @@ impl Objects {
         }
         let native = slot.1.take()?;
         self.free.push(index);
+        self.removed.push(id);
         Some(native)
+    }
+
+    /// The handles removed since the last call, for the script values
+    /// that held them to be set to `null`.
+    pub(crate) fn take_removed(&mut self) -> Vec<NativeId> {
+        std::mem::take(&mut self.removed)
     }
 
     /// Every live object with its handle.

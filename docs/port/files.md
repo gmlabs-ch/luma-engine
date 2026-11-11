@@ -182,7 +182,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBUtils::GetArgCount` | replaced | Splits the Windows command line for `CBPlatform::Initialize`; `luma-player` gets its arguments already split from `std::env::args`. The options themselves are in `platform.md` (`CBPlatform::Initialize`). |
 | `CBUtils::GetArg` | replaced | Same as `GetArgCount`: `std::env::args`. |
 | `CBUtils::MatchesPattern` | done | `matches_pattern` in `crates/luma-3d/src/node_patterns.rs`: same branches (`*`, `?`, the DOS rules for `*.`, a trailing `.`, case ignored). |
-| `CBUtils::GetUsedMemMB` | partial | `Game.UsedMemory`: the working set in debug builds, 0 in release builds. Luma has no `UsedMemory` property (`docs/compatibility.md` lists it as a no-op, but no native answers it), so a script reads null instead of 0. |
+| `CBUtils::GetUsedMemMB` | done | `Game.UsedMemory` (`luma-adventure/src/natives.rs` `game_get`): 0, as in the release builds of the original; only its debug build measures the working set. |
 | `CBUtils::GetPath` | replaced | `Path::parent`; only used on the executable's and the ini file's path. |
 | `CBUtils::GetFilename` | replaced | `Path::file_name`; only used on the `-ini` argument. |
 | `CBUtils::RGBtoHSL` | done | `rgb_to_hsl` in `crates/luma-script/src/engine.rs`: same single-precision formulas, hue and saturation 0 for a grey, each result truncated to a byte. |

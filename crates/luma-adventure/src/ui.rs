@@ -1476,12 +1476,16 @@ impl World {
         }
     }
 
-    /// Marks the scripts of a window and of its controls as freezable or
-    /// not (`MakeFreezable`).
+    /// Marks a window and its controls, and their scripts, as freezable
+    /// or not (`CUIWindow::MakeFreezable`, `CBScriptHolder::MakeFreezable`):
+    /// the flag stays on the objects, for the scripts attached later.
     fn make_freezable(&mut self, engine: &mut Engine, id: NativeId, freezable: bool) {
         let mut all = self.descendants(id);
         all.push(id);
         for control in all {
+            if let Some(native) = self.objects.get_mut(control) {
+                native.state.freezable = freezable;
+            }
             for script in engine.scripts_of(control) {
                 if let Some(script) = engine.script_mut(script) {
                     script.set_freezable(freezable);
@@ -1887,6 +1891,9 @@ impl World {
             if let Some(e) = self.ui_entities.get_mut(*index) {
                 e.freezable = freezable;
             }
+        }
+        if let Some(native) = self.objects.get_mut(entity) {
+            native.state.freezable = freezable;
         }
         for script in engine.scripts_of(entity) {
             if let Some(script) = engine.script_mut(script) {

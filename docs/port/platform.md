@@ -332,18 +332,18 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXTcpClient::CSXTcpClient` | partial | `new TcpClient(arg)` gives scripts an object (its one argument is dropped, a socket is opened and never used). Luma has no such object: the compiler knows the name (`crates/luma-compiler/src/lib.rs`) but `World::call_function` does not build it, so the script gets no object where the original returns one. |
+| `CSXTcpClient::CSXTcpClient` | done | `luma-script/src/classes/mod.rs` `ClassObject::TcpClient`: `new TcpClient(arg)` gives scripts an object, its argument dropped (`ClassObject::construct`, `World::call_function`). No socket is opened; the original opens one and never uses it. |
 | `CSXTcpClient::~CSXTcpClient` | n/a | Empty. |
 | `CSXTcpClient::InitWinSock` | n/a | Opens a WinSock socket that nothing ever uses. |
 | `CSXTcpClient::ShutdownWinSock` | n/a | Opens a WinSock socket that nothing ever uses. |
 | `CSXTcpClient::InitSocket` | n/a | Opens a WinSock socket that nothing ever uses. |
 | `CSXTcpClient::ConnectToSocket` | n/a | No caller: the class's script methods are commented out in the original. |
-| `CSXTcpClient::ScToString` | todo | `[tcp-client object]`; needs the object of the constructor row. |
-| `CSXTcpClient::ScCallMethod` | todo | Every method call fails (the body is commented out); needs the object of the constructor row. |
-| `CSXTcpClient::ScGetProperty` | todo | `Type` is `tcp-client`, the rest is `CBScriptable`'s; needs the object of the constructor row. |
-| `CSXTcpClient::ScSetProperty` | todo | Every assignment fails; needs the object of the constructor row. |
-| `CSXTcpClient::Persist` | todo | Saves only the `CBScriptable` base, so the object survives a save; needs the object of the constructor row. |
-| `CSXTcpClient::ScCompare` | todo | Always 0: any two objects compare equal; needs the object of the constructor row. |
+| `CSXTcpClient::ScToString` | done | `luma-script/src/classes/mod.rs` `ClassObject::TcpClient`: `[tcp-client object]` (`ClassObject::to_string`). |
+| `CSXTcpClient::ScCallMethod` | done | `luma-script/src/classes/mod.rs` `ClassObject::TcpClient`: no method (`call_method` answers `None`, an undefined method for the script). |
+| `CSXTcpClient::ScGetProperty` | done | `luma-script/src/classes/mod.rs` `ClassObject::TcpClient`: `Type` is `tcp-client`; other names come from the properties scripts set. |
+| `CSXTcpClient::ScSetProperty` | done | `luma-script/src/classes/mod.rs` `ClassObject::TcpClient`: `set_property` refuses every name, and the property is kept as a script property of the object (the original keeps it on the script value that holds the object). |
+| `CSXTcpClient::Persist` | done | `luma-script/src/classes/mod.rs` `ClassObject::TcpClient`: saved with the objects table like the other library objects. |
+| `CSXTcpClient::ScCompare` | done | `luma-script/src/classes/mod.rs` `ClassObject::TcpClient`: any two compare equal (`ClassObject::compare`). |
 
 ## `wme_base/ThemeLibEx.cpp`
 

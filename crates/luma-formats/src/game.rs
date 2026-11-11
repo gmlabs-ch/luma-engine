@@ -78,6 +78,11 @@ pub struct GameFile {
     /// `AD_GAME`'s `STARTUP_SCENE`: the first scene, when the script does
     /// not pick one.
     pub startup_scene: Option<String>,
+    /// `COMPAT_KILL_METHOD_THREADS`: the behaviour of engines before
+    /// 1.9, where a new order to an object ends the scripts waiting for
+    /// it but leaves alone the scripts waiting for those
+    /// (`CScEngine::ResetObject`). False by default.
+    pub compat_kill_method_threads: bool,
 }
 
 impl Default for GameFile {
@@ -114,6 +119,7 @@ impl Default for GameFile {
             talk_skip_button: None,
             video_skip_button: None,
             startup_scene: None,
+            compat_kill_method_threads: false,
         }
     }
 }
@@ -150,6 +156,9 @@ impl GameFile {
                     game.subtitles_speed = node.as_int().unwrap_or(70) as i32;
                 }
                 "VIDEO_SUBTITLES" => game.video_subtitles = node.as_bool().unwrap_or(false),
+                "COMPAT_KILL_METHOD_THREADS" => {
+                    game.compat_kill_method_threads = node.as_bool().unwrap_or(false);
+                }
                 "PERSONAL_SAVEGAMES" => {
                     game.personal_savegames = node.as_bool().unwrap_or(false);
                 }

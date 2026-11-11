@@ -100,9 +100,16 @@ pub trait ClassHost: Natives {
     /// returns a new `Array`).
     fn create_object(&mut self, object: ClassObject) -> NativeId;
 
-    /// A line for the game's log: the runtime errors the classes report
-    /// (worded by [`Context::runtime_error`]) and their warnings.
+    /// A line for the game's log: the warnings of the classes.
     fn log(&mut self, message: &str);
+
+    /// A runtime error a class reports, worded by
+    /// [`Context::runtime_error`]: logged, and shown to the player by a
+    /// host that does what `CScScript::RuntimeError` does. The default
+    /// only logs it.
+    fn script_error(&mut self, message: &str) {
+        self.log(message);
+    }
 }
 
 /// The Unix time, in seconds.
@@ -129,12 +136,18 @@ pub enum ClassObject {
     MemBuffer(MemBuffer),
     /// The global `Directory` object; one per game.
     Directory(DirectoryObject),
+    /// `new TcpClient(...)` (`CSXTcpClient`): an object without methods
+    /// or properties of its own. The class is unfinished in the
+    /// original: its script interface is commented out, and the socket
+    /// it opens is never used.
+    TcpClient,
 }
 
 impl ClassObject {
     /// The constructor names (`new Name(...)`); `Directory` is not one,
     /// the host makes the single object with [`ClassObject::directory`].
-    pub const NAMES: [&'static str; 5] = ["String", "Array", "Date", "File", "MemBuffer"];
+    pub const NAMES: [&'static str; 6] =
+        ["String", "Array", "Date", "File", "MemBuffer", "TcpClient"];
 
     /// Whether `name` is one of the library classes.
     pub fn is_class(name: &str) -> bool {
@@ -161,12 +174,15 @@ impl ClassObject {
             "Date" => ClassObject::Date(DateObject::new(args, host)),
             "File" => ClassObject::File(FileObject::new(args, host)),
             "MemBuffer" => ClassObject::MemBuffer(MemBuffer::new(args, host)),
+            // The constructor takes one argument and drops it.
+            "TcpClient" => ClassObject::TcpClient,
             _ => return None,
         })
     }
 
     /// The `Type` property: `string`, `array`, `date`, `file`,
-    /// `membuffer` or `directory`. Also the class name natives compare by.
+    /// `membuffer`, `directory` or `tcp-client`. Also the class name
+    /// natives compare by.
     pub fn type_name(&self) -> &'static str {
         match self {
             ClassObject::String(_) => "string",
@@ -175,6 +191,7 @@ impl ClassObject {
             ClassObject::File(_) => "file",
             ClassObject::MemBuffer(_) => "membuffer",
             ClassObject::Directory(_) => "directory",
+            ClassObject::TcpClient => "tcp-client",
         }
     }
 
@@ -191,6 +208,7 @@ impl ClassObject {
             ClassObject::File(f) => f.to_string(),
             ClassObject::MemBuffer(_) => "[membuffer object]".to_string(),
             ClassObject::Directory(_) => "[native object]".to_string(),
+            ClassObject::TcpClient => "[tcp-client object]".to_string(),
         }
     }
 
@@ -204,6 +222,8 @@ impl ClassObject {
             (ClassObject::String(a), ClassObject::String(b)) => a.text().cmp(b.text()),
             (ClassObject::Date(a), ClassObject::Date(b)) => a.cmp(b),
             (ClassObject::MemBuffer(_), ClassObject::MemBuffer(_)) => MemBuffer::compare(handles),
+            // `CSXTcpClient::ScCompare` is always 0: any two are equal.
+            (ClassObject::TcpClient, ClassObject::TcpClient) => Ordering::Equal,
             _ if self.type_name() == other.type_name() => handles,
             _ => self.type_name().cmp(other.type_name()),
         }
@@ -223,6 +243,7 @@ impl ClassObject {
             ClassObject::File(f) => f.get_property(name),
             ClassObject::MemBuffer(m) => m.get_property(name),
             ClassObject::Directory(d) => d.get_property(name, host),
+            ClassObject::TcpClient => (name == "Type").then(|| Value::from("tcp-client")),
         }
     }
 
@@ -242,7 +263,16 @@ impl ClassObject {
             }
             ClassObject::Date(_) => true,
             ClassObject::Directory(d) => d.set_property(name),
-            ClassObject::File(_) | ClassObject::MemBuffer(_) => false,
+            ClassObject::File(_) | ClassObject::MemBuffer(_) | ClassObject::TcpClient => false,
+        }
+    }
+
+    /// Turns the handles to destroyed native objects the object holds
+    /// into `null` ([`Value::invalidate_natives`]): the elements of an
+    /// `Array`; the other classes hold no values.
+    pub fn invalidate_natives(&mut self, gone: &dyn Fn(NativeId) -> bool) {
+        if let ClassObject::Array(array) = self {
+            array.invalidate_natives(gone);
         }
     }
 
@@ -271,6 +301,8 @@ impl ClassObject {
             ClassObject::File(f) => f.call_method(name, args, host, ctx),
             ClassObject::MemBuffer(m) => m.call_method(name, args, host, ctx),
             ClassObject::Directory(d) => d.call_method(name, args, host),
+            // Every method of the original is commented out.
+            ClassObject::TcpClient => None,
         }
     }
 }
