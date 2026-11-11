@@ -31,6 +31,9 @@ const CACHED_TEXTS: usize = 30;
 /// screen a game draws on, so nothing visible is lost.
 const MAX_UNBOUNDED_WIDTH: i32 = 4096;
 
+/// The tallest image a text is rendered to.
+const MAX_TEXT_HEIGHT: i32 = 4096;
+
 /// How far to the right an imitated italic leans, per pixel of height.
 const SLANT: f32 = 0.2;
 
@@ -773,7 +776,8 @@ impl TrueTypeFont {
             let width = widest.saturating_add(self.px.ceil() as i32);
             (width.clamp(1, MAX_UNBOUNDED_WIDTH), TextAlign::Left)
         };
-        let text_height = text_height.max(1);
+        // A text of thousands of lines must not ask for gigabytes.
+        let text_height = text_height.clamp(1, MAX_TEXT_HEIGHT);
         let mut image = Image {
             width: width as u32,
             height: text_height as u32,

@@ -532,12 +532,13 @@ impl Control {
             .or_else(|| self.image.as_ref().map(|_| ImageSlot::Image))
     }
 
-    /// Sets the text; `|` becomes a line break (`SetText`).
+    /// Sets the text; `|` becomes a line break (`SetText`). The caret
+    /// stays inside the new text, between two characters.
     pub fn set_text(&mut self, text: &str) {
         self.text = luma_formats::window::control_text(text);
         if let ControlKind::Edit(e) = &mut self.kind {
-            e.sel_start = e.sel_start.min(self.text.len());
-            e.sel_end = e.sel_end.min(self.text.len());
+            e.sel_start = char_floor(&self.text, e.sel_start);
+            e.sel_end = char_floor(&self.text, e.sel_end);
         }
     }
 
@@ -2373,11 +2374,14 @@ impl World {
         let (parent, parent_notify, name) =
             (control.parent, control.parent_notify, control.name.clone());
         let len = control.text.len();
+        let held = control.text.clone();
         let Some(e) = control.edit_mut() else {
             return false;
         };
-        e.sel_start = e.sel_start.min(len);
-        e.sel_end = e.sel_end.min(len);
+        // A script may have put the caret anywhere (`SelStart`,
+        // `SelEnd`): keep it inside the text and between two characters.
+        e.sel_start = char_floor(&held, e.sel_start.min(len));
+        e.sel_end = char_floor(&held, e.sel_end.min(len));
         let (mut start, mut end) = (e.sel_start, e.sel_end);
         let max_length = e.max_length;
         let mut handled = true;
@@ -2965,4 +2969,14 @@ impl World {
             }
         }
     }
+}
+
+/// The largest offset not above `at` that falls between two characters
+/// of `text` (and inside it): where a caret may stand.
+fn char_floor(text: &str, at: usize) -> usize {
+    let mut at = at.min(text.len());
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
 }

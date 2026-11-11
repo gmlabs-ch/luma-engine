@@ -586,6 +586,145 @@ fn an_editor_with_a_truetype_font_shows_what_is_typed() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// Loads `edit.window` and returns its editor.
+fn load_edit(runtime: &mut Runtime) -> luma_script::NativeId {
+    let game = runtime.world.game_id();
+    let window = call_native(runtime, game, "LoadWindow", &[Value::from("edit.window")])
+        .as_native()
+        .unwrap();
+    call_native(runtime, window, "GetWidget", &[Value::from("name")])
+        .as_native()
+        .unwrap()
+}
+
+/// A script may put the caret in the middle of a multibyte character
+/// (`SelStart`, `SelEnd`); the keys must not panic nor cut a character.
+#[test]
+fn a_caret_set_inside_a_multibyte_character_never_breaks_the_editor() {
+    use luma_script::Natives;
+    use luma_script::classes::text_to_utf8;
+    for utf8 in [true, false] {
+        let (dir, mut runtime, _) = start();
+        if utf8 {
+            assert!(runtime.world.load_string_table("utf8.tab", true));
+        }
+        let edit = load_edit(&mut runtime);
+        let text = if utf8 {
+            text_to_utf8("a\u{e9}\u{e9}")
+        } else {
+            "a\u{e9}\u{e9}".to_string()
+        };
+        // Keys: Backspace, Delete, Left, Right, Home, End, a typed character.
+        let keys: [(i32, Option<char>); 7] = [
+            (8, None),
+            (46, None),
+            (37, None),
+            (39, None),
+            (36, None),
+            (35, None),
+            (0, Some('\u{e9}')),
+        ];
+        for start_at in 0..=8 {
+            for end_at in [start_at, 0, 1, 2, 3, 5] {
+                for key in keys {
+                    runtime
+                        .world
+                        .set_property(edit, "Text", &Value::from(text.clone()));
+                    runtime
+                        .world
+                        .set_property(edit, "SelStart", &Value::Int(start_at));
+                    runtime
+                        .world
+                        .set_property(edit, "SelEnd", &Value::Int(end_at));
+                    runtime.world.edit_key(edit, key.0, key.1);
+                    let control = runtime.world.control(edit).unwrap();
+                    let e = control.edit().unwrap();
+                    assert!(
+                        control.text.is_char_boundary(e.sel_start)
+                            && control.text.is_char_boundary(e.sel_end),
+                        "utf8={utf8} {start_at}/{end_at} key {key:?}: {:?} {}..{}",
+                        control.text,
+                        e.sel_start,
+                        e.sel_end
+                    );
+                    runtime.tick(16);
+                }
+            }
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+/// A shorter `Text` leaves the caret between two characters of it.
+#[test]
+fn a_shorter_text_keeps_the_caret_between_two_characters() {
+    use luma_script::Natives;
+    let (dir, mut runtime, _) = start();
+    assert!(runtime.world.load_string_table("utf8.tab", true));
+    let edit = load_edit(&mut runtime);
+    for (long, short) in [
+        ("abcdef", "\u{e9}\u{e9}"),
+        ("abcdef", "a\u{e9}"),
+        ("\u{e9}\u{e9}\u{e9}", "\u{e9}"),
+    ] {
+        for caret in 0..=long.len() as i32 + 2 {
+            runtime.world.set_property(edit, "Text", &Value::from(long));
+            runtime
+                .world
+                .set_property(edit, "SelStart", &Value::Int(caret));
+            runtime
+                .world
+                .set_property(edit, "SelEnd", &Value::Int(caret));
+            runtime
+                .world
+                .set_property(edit, "Text", &Value::from(short));
+            let control = runtime.world.control(edit).unwrap();
+            let e = control.edit().unwrap();
+            assert!(e.sel_start <= control.text.len() && e.sel_end <= control.text.len());
+            assert!(
+                control.text.is_char_boundary(e.sel_start),
+                "{short:?} {caret}"
+            );
+            assert!(
+                control.text.is_char_boundary(e.sel_end),
+                "{short:?} {caret}"
+            );
+            runtime.world.edit_key(edit, 8, None);
+            runtime.world.edit_key(edit, 0, Some('z'));
+            runtime.tick(16);
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A text of a hundred thousand lines is rendered to an image no taller
+/// than 4096 pixels.
+#[test]
+fn a_very_long_truetype_text_renders_to_a_bounded_image() {
+    use luma_adventure::Font;
+    use luma_formats::font::TextAlign;
+    let (dir, mut runtime, _) = start();
+    let game = runtime.world.game_id();
+    call_native(
+        &mut runtime,
+        game,
+        "LoadWindow",
+        &[Value::from("tt.window")],
+    );
+    let Some(Font::TrueType(font)) = runtime.world.fonts_mut().get_mut("tt.font") else {
+        eprintln!("skipped: no system font to stand for the game's");
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    };
+    let text = "line\n".repeat(100_000);
+    font.prepare(&text, -1, TextAlign::Left, -1);
+    let (_, height) = font
+        .prepared_size(&text, -1, TextAlign::Left, -1)
+        .expect("prepared");
+    assert!((1..=4096).contains(&height), "height {height}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn new_actor_and_new_entity_make_objects_of_the_game() {
     let (dir, mut runtime, log) = start();
