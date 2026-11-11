@@ -215,6 +215,12 @@ or belong to the legacy WME 1.0 3D actors with MS3D models, which Luma refuses
 with a clear message. The behaviour follows the MIT-licensed WME 1.x sources,
 quirks included.
 
+The scripting interface is one surface of the engine. The rest (how the
+definition files are loaded, what happens every frame, drawing, saving,
+sound) is being checked function by function against the original sources:
+[docs/port/](docs/port/README.md) lists every function and definition-file
+key of the engine core with its status.
+
 The two test games play from start to finish with the headless player, and
 their frames were checked along the way. Still to do: listen to the sound,
 and play a game through by hand in a window.

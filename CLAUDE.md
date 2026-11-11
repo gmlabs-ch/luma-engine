@@ -80,6 +80,22 @@ optional modules that a compiled game only includes when it needs them.
 - Declare shared versions in `[workspace.dependencies]` and reference them with
   `workspace = true` in crates.
 
+## The port is exhaustive
+
+- Luma ports the whole Wintermute Engine 1.x, not what a test game happens
+  to need. The reference is the original source: `docs/port/` lists every
+  function and every definition-file key of the engine core, generated from
+  the MIT sources by `docs/port/inventory.py`, with a status per row.
+- "No test game uses it" is never a reason to skip or defer something the
+  original engine does. `n/a` is only for what has no meaning outside the
+  original program (Windows dialogs, editor hooks, the debugger), with the
+  reason in the row.
+- A row is `done` only after reading the original function and Luma's and
+  finding that they agree on every branch; a key only when Luma reads it and
+  acts on it. When you port or fix something, update its rows in the same
+  commit. Games are the proof that the port works, not the list of what to
+  port.
+
 ## Documentation is the specification
 
 - `docs/formats/` describes the Wintermute file formats as observed; `docs/`
