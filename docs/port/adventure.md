@@ -787,119 +787,119 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdScene::CAdScene` | unreviewed |  |
-| `CAdScene::~CAdScene` | unreviewed |  |
-| `CAdScene::SetDefaults` | unreviewed |  |
-| `CAdScene::Cleanup` | unreviewed |  |
-| `CAdScene::GetPath` | unreviewed |  |
-| `CAdScene::PFAddWaypointGroup` | unreviewed |  |
-| `CAdScene::GetZoomAt` | unreviewed |  |
-| `CAdScene::GetAlphaAt` | unreviewed |  |
-| `CAdScene::IsBlockedAt` | unreviewed |  |
-| `CAdScene::IsWalkableAt` | unreviewed |  |
-| `CAdScene::GetPointsDist` | unreviewed |  |
-| `CAdScene::PathFinderStep` | unreviewed |  |
-| `CAdScene::InitLoop` | unreviewed |  |
-| `CAdScene::LoadFile` | unreviewed |  |
-| `CAdScene::LoadBuffer` | unreviewed |  |
-| `CAdScene::LoadBuffer SCENE` | unreviewed |  |
-| `CAdScene::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdScene::LoadBuffer NAME` | unreviewed |  |
-| `CAdScene::LoadBuffer LAYER` | unreviewed |  |
-| `CAdScene::LoadBuffer WAYPOINTS` | unreviewed |  |
-| `CAdScene::LoadBuffer EVENTS` | unreviewed |  |
-| `CAdScene::LoadBuffer CURSOR` | unreviewed |  |
-| `CAdScene::LoadBuffer GEOMETRY` | unreviewed |  |
-| `CAdScene::LoadBuffer CAMERA` | unreviewed |  |
-| `CAdScene::LoadBuffer ENTITY` | unreviewed |  |
-| `CAdScene::LoadBuffer SCALE_LEVEL` | unreviewed |  |
-| `CAdScene::LoadBuffer ROTATION_LEVEL` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_MARGIN_H` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_MARGIN_V` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_FRAME` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_ENTITY_SEL` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_REGION_SEL` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_DECORATION_SEL` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_BLOCKED_SEL` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_WAYPOINTS_SEL` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_REGION` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_DECORATION` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_BLOCKED` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_ENTITY` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_WAYPOINTS` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_COLOR_SCALE` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_SHOW_REGIONS` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_SHOW_DECORATION` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_SHOW_BLOCKED` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_SHOW_ENTITIES` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_SHOW_SCALE` | unreviewed |  |
-| `CAdScene::LoadBuffer SCRIPT` | unreviewed |  |
-| `CAdScene::LoadBuffer CAPTION` | unreviewed |  |
-| `CAdScene::LoadBuffer PROPERTY` | unreviewed |  |
-| `CAdScene::LoadBuffer VIEWPORT` | unreviewed |  |
-| `CAdScene::LoadBuffer PERSISTENT_STATE_SPRITES` | unreviewed |  |
-| `CAdScene::LoadBuffer PERSISTENT_STATE` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_SHOW_GEOMETRY` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_RESOLUTION_WIDTH` | unreviewed |  |
-| `CAdScene::LoadBuffer EDITOR_RESOLUTION_HEIGHT` | unreviewed |  |
-| `CAdScene::LoadBuffer FOV_OVERRIDE` | unreviewed |  |
-| `CAdScene::LoadBuffer WAYPOINT_HEIGHT` | unreviewed |  |
-| `CAdScene::LoadBuffer NEAR_CLIPPING_PLANE` | unreviewed |  |
-| `CAdScene::LoadBuffer FAR_CLIPPING_PLANE` | unreviewed |  |
-| `CAdScene::LoadBuffer 2D_PATHFINDING` | unreviewed |  |
-| `CAdScene::LoadBuffer MAX_SHADOW_TYPE` | unreviewed |  |
-| `CAdScene::LoadBuffer SCROLL_3D_COMPATIBILITY` | unreviewed |  |
-| `CAdScene::LoadBuffer AMBIENT_LIGHT_COLOR` | unreviewed |  |
-| `CAdScene::TraverseNodes` | unreviewed |  |
-| `CAdScene::Display3DContent` | unreviewed |  |
-| `CAdScene::Display` | unreviewed |  |
-| `CAdScene::UpdateFreeObjects` | unreviewed |  |
-| `CAdScene::DisplayRegionContent` | unreviewed |  |
-| `CAdScene::CompareObjs` | unreviewed |  |
-| `CAdScene::DisplayRegionContentOld` | unreviewed |  |
-| `CAdScene::Update` | unreviewed |  |
-| `CAdScene::ScrollTo` | unreviewed |  |
-| `CAdScene::ScrollToObject` | unreviewed |  |
-| `CAdScene::SkipToObject` | unreviewed |  |
-| `CAdScene::SkipTo` | unreviewed |  |
-| `CAdScene::ScCallMethod` | unreviewed |  |
-| `CAdScene::ScGetProperty` | unreviewed |  |
-| `CAdScene::ScSetProperty` | unreviewed |  |
-| `CAdScene::ScToString` | unreviewed |  |
-| `CAdScene::AddObject` | unreviewed |  |
-| `CAdScene::RemoveObject` | unreviewed |  |
-| `CAdScene::SaveAsText` | unreviewed |  |
-| `CAdScene::SortScaleLevels` | unreviewed |  |
-| `CAdScene::SortRotLevels` | unreviewed |  |
-| `CAdScene::GetScaleAt` | unreviewed |  |
-| `CAdScene::Persist` | unreviewed |  |
-| `CAdScene::AfterLoad` | unreviewed |  |
-| `CAdScene::CorrectTargetPoint2` | unreviewed |  |
-| `CAdScene::CorrectTargetPoint` | unreviewed |  |
-| `CAdScene::PFPointsStart` | unreviewed |  |
-| `CAdScene::PFPointsAdd` | unreviewed |  |
-| `CAdScene::GetViewportOffset` | unreviewed |  |
-| `CAdScene::GetViewportSize` | unreviewed |  |
-| `CAdScene::GetOffsetLeft` | unreviewed |  |
-| `CAdScene::GetOffsetTop` | unreviewed |  |
-| `CAdScene::PointInViewport` | unreviewed |  |
-| `CAdScene::SetOffset` | unreviewed |  |
-| `CAdScene::GetNodeByName` | unreviewed |  |
-| `CAdScene::SaveState` | unreviewed |  |
-| `CAdScene::LoadState` | unreviewed |  |
-| `CAdScene::PersistState` | unreviewed |  |
-| `CAdScene::GetRotationAt` | unreviewed |  |
-| `CAdScene::HandleItemAssociations` | unreviewed |  |
-| `CAdScene::GetRegionsAt` | unreviewed |  |
-| `CAdScene::GetActiveLight` | unreviewed |  |
-| `CAdScene::RestoreDeviceObjects` | unreviewed |  |
-| `CAdScene::GetNextAccessObject` | unreviewed |  |
-| `CAdScene::GetPrevAccessObject` | unreviewed |  |
-| `CAdScene::GetSceneObjects` | unreviewed |  |
-| `CAdScene::GetRegionObjects` | unreviewed |  |
-| `CAdScene::SetMaxShadowType` | unreviewed |  |
-| `CAdScene::OnLayerResized` | unreviewed |  |
+| `CAdScene::CAdScene` | done | Only allocates the path-finder target and calls `SetDefaults` (see that row); `World` holds the scene state (`luma-adventure/src/world.rs`). |
+| `CAdScene::~CAdScene` | replaced | Rust ownership: `World::load_scene` drops the old `SceneView` and its natives. |
+| `CAdScene::SetDefaults` | partial | Same defaults at start-up (`World::with_audio`, `Scene::from_document`), but the original runs this on every scene load (`LoadBuffer` → `Cleanup` → `SetDefaults`): `World::load_scene` resets the offsets, the fader, the viewport and the script properties but keeps `auto_scroll`, `scroll_pixels_x/y`, `scroll_time_x/y` and `last_scroll_x/y` of the previous scene (original: `AutoScroll=true`, `ScrollPixelsX/Y=1`, `ScrollSpeedX/Y=10`, last times 0). |
+| `CAdScene::Cleanup` | partial | `World::load_scene` removes the layers, regions, waypoint groups, free objects, scripts and the fader state as the original; what is not put back to its default is listed under `SetDefaults`. |
+| `CAdScene::GetPath` | partial | `luma-adventure/src/path.rs` `Floor::find_path` with `World::obstacles_for`. Differences: (1) waypoints of layer-node entities are added, the original only adds those of free objects (`m_Objects` of the scene and of the game); (2) waypoints of the game's own entities (`game_view`) and of 3D actors are not added for a 2D actor; (3) when the start equals the target the original path has one point, Luma's two; (4) computed at once instead of sliced over frames, and several actors can get a path in one frame (original: one request at a time, `GetPath` returns false while busy and the actor retries). |
+| `CAdScene::PFAddWaypointGroup` | done | `Floor::find_path` leaves out waypoints on blocked points; inactive groups are filtered in `actor.rs` `scene_obstacles`. |
+| `CAdScene::GetZoomAt` | done | `luma-formats/src/scene.rs` `Scene::zoom_at`: last active non-blocked region of the main layer containing the point with a non-zero `SCALE`, else the scale levels. |
+| `CAdScene::GetAlphaAt` | done | `Scene::tint_at`. The `ColorCheck` branch (actors drawn red off the floor) only runs in the engine's debug mode, which Luma does not have (`Game.DebugMode` is always false). |
+| `CAdScene::IsBlockedAt` | partial | `path.rs` `Floor::is_blocked_at`, `Scene::is_blocked_at` for scripts. Region rules agree. With free objects: Luma also counts the `BLOCKED_REGION` of layer-node entities (the original only looks at free objects), and does not count those of the game's own entities (`game_view`) nor of 3D actors for a 2D actor. The `default_block=false` variant used while walking is an `AdActor` matter. |
+| `CAdScene::IsWalkableAt` | partial | `Floor::is_walkable_at`; same differences in the free objects considered as `IsBlockedAt`. |
+| `CAdScene::GetPointsDist` | done | `Floor::line_length`. |
+| `CAdScene::PathFinderStep` | replaced | The loop of `Floor::find_path` (same lowest-unmarked rule and relaxation); the target is recognised by its index, not by its coordinates, so a waypoint on the target point does not end the search early (same path length). |
+| `CAdScene::InitLoop` | replaced | No time slicing: 2D paths are found synchronously; the 3D finder runs once per frame in `scene3d.rs` `run_path_finder_3d`. Observable only as timing (an actor starts walking in the frame of the request). |
+| `CAdScene::LoadFile` | partial | `scene_view.rs` `SceneView::load`. A missing or unparsable file is an error as in the original. Not done: the original keeps the file name before parsing so that a nested `TEMPLATE` load ends with the outer name (no meaning while `TEMPLATE` is not followed). |
+| `CAdScene::LoadBuffer` | partial | `Scene::from_document` + `World::load_scene`. Differences in control flow: unknown keys are ignored (original: `Syntax error in SCENE definition`, the load fails); a sub-object that fails to load (layer, waypoints, levels, entity, cursor sprite, geometry) silently stops the parsing of the rest of the file in the original (`PARSERR_GENERIC` ends the loop, the load still succeeds), Luma goes on; the missing main layer warning is not logged. Sorting of the levels and the camera/waypoint-height fixups are done. |
+| `CAdScene::LoadBuffer SCENE` | done | Root block required (`'SCENE' keyword expected`). |
+| `CAdScene::LoadBuffer TEMPLATE` | partial | Parsed into `Scene::template`, never followed. Original: loads that scene file at this point, which first clears everything read so far (`Cleanup`), then the following keys apply on top. |
+| `CAdScene::LoadBuffer NAME` | done | `Scene::name`, `Scene.Name`. |
+| `CAdScene::LoadBuffer LAYER` | done | `Layer::from_node`; the last layer with `MAIN=TRUE` is the main layer and gives the scene its size. |
+| `CAdScene::LoadBuffer WAYPOINTS` | done | `WaypointGroup::from_node`, natives created on demand. |
+| `CAdScene::LoadBuffer EVENTS` | done | In the token table but handled by no `case` in the original: ignored by both. |
+| `CAdScene::LoadBuffer CURSOR` | partial | Parsed into `Scene::cursor` and never loaded. The original loads the sprite as the scene object's cursor; the engine never draws it, but `Scene.GetCursor()`, `GetCursorObject()` and `HasCursor()` see it (Luma answers null/false for the scene). |
+| `CAdScene::LoadBuffer GEOMETRY` | done | `scene3d.rs` `Scene3d::load` (feature `3d`; without it logged and ignored, like the original without Direct3D). |
+| `CAdScene::LoadBuffer CAMERA` | done | `Scene3d::apply_scene_keys`: applied after the whole file is read, unknown name keeps the first camera. |
+| `CAdScene::LoadBuffer ENTITY` | done | Free entity (`Scene::free_entities`), registered by `World::load_scene`. (Its `PROPERTY` blocks are not registered at scene load: see `AdEntity`.) |
+| `CAdScene::LoadBuffer SCALE_LEVEL` | done | `ScaleLevel::from_node`, sorted by `Y`. |
+| `CAdScene::LoadBuffer ROTATION_LEVEL` | done | `RotationLevel::from_node`, sorted by `X`. |
+| `CAdScene::LoadBuffer EDITOR_MARGIN_H` | n/a | SceneEdit display setting: stored, saved and written back, read by no runtime code. |
+| `CAdScene::LoadBuffer EDITOR_MARGIN_V` | n/a | SceneEdit display setting, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_FRAME` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_ENTITY_SEL` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_REGION_SEL` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_DECORATION_SEL` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_BLOCKED_SEL` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_WAYPOINTS_SEL` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_REGION` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_DECORATION` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_BLOCKED` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_ENTITY` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_WAYPOINTS` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_COLOR_SCALE` | n/a | SceneEdit display colour, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_SHOW_REGIONS` | n/a | SceneEdit display switch, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_SHOW_DECORATION` | n/a | SceneEdit display switch, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_SHOW_BLOCKED` | n/a | SceneEdit display switch, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_SHOW_ENTITIES` | n/a | SceneEdit display switch, no runtime reader. |
+| `CAdScene::LoadBuffer EDITOR_SHOW_SCALE` | n/a | SceneEdit display switch, no runtime reader. |
+| `CAdScene::LoadBuffer SCRIPT` | done | `Scene::scripts`, attached to the scene first by `World::load_scene`. |
+| `CAdScene::LoadBuffer CAPTION` | partial | Parsed into `Scene::caption` but not expanded through the string table at load (layers, nodes and free entities are) and not readable: the scene has no `Caption` property or `GetCaption` in `natives.rs` `scene_get` (to check with the `BObject` rows). |
+| `CAdScene::LoadBuffer PROPERTY` | partial | Parsed into `Scene::properties`, never registered: `World::load_scene` does not copy them to the scene native's script properties, so `Scene.<name>` reads null. |
+| `CAdScene::LoadBuffer VIEWPORT` | partial | `Scene::viewport`, used by `World::viewport` before the game's (unclamped, as `SetRect(..., NoCheck=true)`). Missing quirk: the original `case` has no `break` and falls into `PERSISTENT_STATE`, so a `VIEWPORT` also sets `PersistentState` from its first number (`%b`: true only for `1`), overriding an earlier `PERSISTENT_STATE` key; `SaveAsText` writes `PERSISTENT_STATE` before `VIEWPORT`, so an editor-saved scene with a viewport whose left is not 1 is not persistent in the original. |
+| `CAdScene::LoadBuffer PERSISTENT_STATE_SPRITES` | done | `Scene::persistent_state_sprites`, default true, used by `scene_state.rs`. |
+| `CAdScene::LoadBuffer PERSISTENT_STATE` | done | `Scene::persistent_state`, used by `scene_state.rs` (see `VIEWPORT` for the fall-through that also writes it). |
+| `CAdScene::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
+| `CAdScene::LoadBuffer EDITOR_SHOW_GEOMETRY` | n/a | Forced to false outside the editor mode. |
+| `CAdScene::LoadBuffer EDITOR_RESOLUTION_WIDTH` | n/a | Stored and written back only; the runtime reads the game's `m_EditorResolutionWidth`, not the scene's. |
+| `CAdScene::LoadBuffer EDITOR_RESOLUTION_HEIGHT` | n/a | As `EDITOR_RESOLUTION_WIDTH`. |
+| `CAdScene::LoadBuffer FOV_OVERRIDE` | done | `Scene::fov_override`, applied by `scene3d.rs` `projection_3d` (`CameraSettings`). |
+| `CAdScene::LoadBuffer WAYPOINT_HEIGHT` | done | `Scene3d::apply_scene_keys`: when not negative, set on the geometry and the waypoints dropped again. |
+| `CAdScene::LoadBuffer NEAR_CLIPPING_PLANE` | done | `Scene::near_clipping_plane` → `CameraSettings::near_plane`. |
+| `CAdScene::LoadBuffer FAR_CLIPPING_PLANE` | done | `Scene::far_clipping_plane` → `CameraSettings::far_plane`. |
+| `CAdScene::LoadBuffer 2D_PATHFINDING` | done | `Scene::pathfinding_2d`, read by `actor3d.rs`. |
+| `CAdScene::LoadBuffer MAX_SHADOW_TYPE` | done | Clamped to 0..3 as `SetMaxShadowType`, default 2; used in `actor3d.rs` with the game's maximum. |
+| `CAdScene::LoadBuffer SCROLL_3D_COMPATIBILITY` | done | `Scene::scroll_3d_compatibility` → `ViewSetup::for_scene`. |
+| `CAdScene::LoadBuffer AMBIENT_LIGHT_COLOR` | done | `Scene::ambient_light_color`, used for 3D actors without their own. |
+| `CAdScene::TraverseNodes` | partial | Update half: `Runtime::tick` (`update_scene`, `update_actors`, `scroll_step`); display half: `SceneView::draw_order` / `draw_with_overlays`, `World::draw`. Missing or different: (1) a `CLOSE_UP` layer displays a full-screen shield window under it, so nothing of the layers below can be hovered or clicked: `input.rs` `scene_hits` has no such shield; (2) entities of an inactive layer are not updated in the original (animation, talk, frame sounds and events frozen), `SceneView::advance_with` updates every entity; (3) a region node with `Active=false` still shows the objects standing in it at its place in the original (only `BLOCKED` and `DECORATION` are skipped), `draw_order` skips it and draws them at the end of the main layer; (4) the scroll step runs before the objects update in the original (the target set this frame moves the view next frame), after them in Luma; (5) parallax offset: the original truncates `ratio*(layer-viewport) - viewportX` as a whole, `Camera::layer_offset` truncates before subtracting (one pixel apart when the result is negative and fractional); (6) `Game.m_OffsetPercentX/Y` are not kept. Same: layer order, scene viewport before the game's, fader last, geometry and shadow receivers on the main layer. |
+| `CAdScene::Display3DContent` | n/a | Dead code: its only caller is the commented-out mirror block of `TraverseNodes`. |
+| `CAdScene::Display` | partial | `World::draw` → `SceneView::draw_with_overlays`; see `TraverseNodes`. |
+| `CAdScene::UpdateFreeObjects` | done | `World::update_actors` (2D then 3D actors), game entities in `update_scene`; then `ScrollToObject(main object)` when `AutoScroll`. The original updates the game's objects then the scene's in list order; Luma by kind. |
+| `CAdScene::DisplayRegionContent` | partial | `SceneView::draw_order` (`draw_in`): objects stuck to the region or standing in it, sorted by `y`, each drawn once; `NULL` takes the rest. Difference: an inactive region is skipped by the caller (see `TraverseNodes`). `Display3DOnly` and the editor-only objects have no caller/meaning at runtime. |
+| `CAdScene::CompareObjs` | done | `sort_by_key` on `y` in `draw_order`; stable where `qsort` is unspecified for equal `y`. |
+| `CAdScene::DisplayRegionContentOld` | n/a | Dead code: no caller in the engine. |
+| `CAdScene::Update` | partial | See `TraverseNodes`. |
+| `CAdScene::ScrollTo` | done | `world.rs` `World::scroll_to` (`centred_offset`), with the 5-pixel tolerance for a 3D main object. |
+| `CAdScene::ScrollToObject` | partial | `World::position_of` + `scroll_to`: position minus half the height for actors and entities. For another object the original uses its `m_PosX/m_PosY` and `GetHeight()` (0,0 for a region or a layer, the position of a window); Luma takes the top-left of a region's bounds and (0,0) for the rest. |
+| `CAdScene::SkipToObject` | partial | As `ScrollToObject`. |
+| `CAdScene::SkipTo` | done | `World::skip_to`. |
+| `CAdScene::ScCallMethod` | partial | `natives.rs` `scene_call`, `scene3d.rs` `scene3d_call`. Differences: `GetNode` does not look among the waypoint groups (third lookup of `GetNodeByName`); `GetFreeNode` only sees free entities, not the actors loaded with `Scene.LoadActor`/`LoadActor3D` (they are in `m_Objects`); `IsPointInViewport` excludes the right and bottom edges (original `<=`); `SetActiveCamera` returns null (original: true/false); `GetLightColor`/`GetLightPosition` without geometry return null (original 0); `UnloadObject` also removes an object that is not the scene's (original: only from the scene's list, else nothing); `SkipTo`/`ScrollTo` with an object: see `ScrollToObject`; fade colours are clamped (original: truncated to a byte). Present and equal: `LoadActor`, `LoadActor3D`, `LoadEntity`, `CreateEntity`, `DeleteEntity`, `GetLayer`, `GetWaypointGroup`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `IsScrolling`, `FadeOut/In(Async)`, `GetFadeColor`, `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled`, `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `SetViewport`, `AddLayer`, `InsertLayer`, `DeleteLayer`, `EnableFog`, `DisableFog`. |
+| `CAdScene::ScGetProperty` | partial | `scene_get`, `scene3d_get`. Missing: `ShowGeometry` (no built-in: reads null until a script sets it); `NumFreeNodes` does not count the actors loaded into the scene. The rest agrees (`Type`, `NumLayers`, `NumWaypointGroups`, `MainLayer`, `MouseX/Y`, `AutoScroll`, `PersistentState(Sprites)`, `ScrollPixelsX/Y`, `ScrollSpeedX/Y`, `OffsetX/Y`, `GeometryFile`, `WaypointsHeight`, `Width`, `Height`, `MaxShadowType`, `AmbientLightColor`, `NumLights`). |
+| `CAdScene::ScSetProperty` | partial | `scene_set`, `scene3d_set`. `OffsetX`/`OffsetY`: the original treats the value as a point to centre on and clamps it (`max(0, v - viewport/2)`, then `min(.., scene - viewport)`); Luma stores the raw value. `ShowGeometry` has no effect (the geometry overlay is not drawn). The rest agrees. |
+| `CAdScene::ScToString` | done | `world.rs` `to_string`: `[scene object]`. |
+| `CAdScene::AddObject` | done | `scene_edit.rs` `add_free_entity`, `World::load_actor(.., scene_bound=true)`. |
+| `CAdScene::RemoveObject` | done | `scene_edit.rs` `remove_free_entity`, `World::unload_object`. |
+| `CAdScene::SaveAsText` | n/a | Only reachable from the editor tools: no caller in the engine and no script method. |
+| `CAdScene::SortScaleLevels` | done | `sort_by_key` (stable, as the bubble sort) in `Scene::from_document`. |
+| `CAdScene::SortRotLevels` | done | Same, by `x`. |
+| `CAdScene::GetScaleAt` | done | `Scene::scale_at` (`interpolate`): 100 outside the levels. |
+| `CAdScene::Persist` | replaced | serde: `save.rs` `world_state!` keeps the `SceneView` (definition as scripts changed it, 3D state), offsets and targets, scroll settings and clocks, the scene fader. The path-finder state is not kept (paths are found at once). `ShowGeometry` only as a script property. |
+| `CAdScene::AfterLoad` | replaced | `Scene3d::reload` puts the active camera back; field of view and clipping planes are applied every frame by `projection_3d`. |
+| `CAdScene::CorrectTargetPoint2` | done | `path.rs` `Floor::correct_target_along_line`, including the scan that only runs while the coordinate grows. |
+| `CAdScene::CorrectTargetPoint` | partial | `Floor::correct_target`. Same scans and choice. Difference: the final test `IsWalkableAt(*X, *Y)` of the original does not look at the free objects (default arguments), Luma's does, so a corrected point inside another object's blocked region goes to `CorrectTargetPoint2` in Luma and is accepted in the original. |
+| `CAdScene::PFPointsStart` | replaced | Local vectors in `Floor::find_path`. |
+| `CAdScene::PFPointsAdd` | replaced | Local vectors in `Floor::find_path`. |
+| `CAdScene::GetViewportOffset` | done | `World::viewport`: the scene's own viewport, else the game's, else (0,0). |
+| `CAdScene::GetViewportSize` | done | `World::viewport`: same order, the screen by default. |
+| `CAdScene::GetOffsetLeft` | done | `offset_x - viewport().0`, as in `scene_get` `MouseX` and `Camera::layer_offset`. |
+| `CAdScene::GetOffsetTop` | done | As `GetOffsetLeft`. |
+| `CAdScene::PointInViewport` | partial | `Runtime::mouse_in_viewport` and `Scene.IsPointInViewport`: Luma excludes `x == left+width` and `y == top+height`, the original includes them. |
+| `CAdScene::SetOffset` | done | No caller in the engine; `World::offset_x/offset_y` are plain fields. |
+| `CAdScene::GetNodeByName` | partial | `World::find_node`: layer nodes, then free entities. The waypoint groups, looked up last by the original, are not searched. |
+| `CAdScene::SaveState` | partial | `scene_state.rs` `save_scene_state`; see `PersistState`. |
+| `CAdScene::LoadState` | partial | `scene_state.rs` `restore_scene_state`; see `PersistState`. |
+| `CAdScene::PersistState` | partial | `scene_state.rs`. Missing: the `Active` flag of the waypoint groups is neither noted nor put back; a region with `SaveState=false` is still noted (regions have no `SaveState` in Luma). Entities (layer nodes and free, `SAVE_STATE`), regions' `Active`, lookup by name without case and the key by file name agree. |
+| `CAdScene::GetRotationAt` | done | `Scene::rotation_at`: 0 outside the levels. |
+| `CAdScene::HandleItemAssociations` | partial | `inventory.rs` `handle_item_associations`: layer and free entities. Luma compares the item name without case, the original with `strcmp`. |
+| `CAdScene::GetRegionsAt` | done | `scene_view.rs` `regions_at`: active regions of the main layer, last first, at most 9. |
+| `CAdScene::GetActiveLight` | n/a | Dead code: no caller in the engine. |
+| `CAdScene::RestoreDeviceObjects` | replaced | No lost Direct3D device with wgpu; the lights are passed to the mesh pass every frame. |
+| `CAdScene::GetNextAccessObject` | partial | `accessibility.rs` `next_access_object`; the list is incomplete, see `GetSceneObjects`. |
+| `CAdScene::GetPrevAccessObject` | partial | `accessibility.rs` `next_access_object(.., false)`; see `GetSceneObjects`. |
+| `CAdScene::GetSceneObjects` | partial | `accessibility.rs` `access_objects`: layer entities in order, a close-up layer clearing what is below, then the 2D actors. Missing: at each region node the original inserts the free objects standing in or stuck to it sorted by `y`, then those outside any region; the scene's free entities, the game's entities and the 3D actors are never listed by Luma, and the 2D actors always come last. |
+| `CAdScene::GetRegionObjects` | partial | No per-region list in `access_objects`; see `GetSceneObjects`. |
+| `CAdScene::SetMaxShadowType` | done | Clamp to 0..3 in `Scene::from_document` and `scene3d_set`. |
+| `CAdScene::OnLayerResized` | done | `Scene::width()`/`height()` read the main layer's size each time. |
 
 ## `wme_ad/AdSceneGeometry.cpp`
 
