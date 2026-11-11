@@ -196,6 +196,12 @@ pub struct ObjectState {
     /// system-exclusive, its controls and a container's entity are not;
     /// a script attached later takes the flag.
     pub freezable: bool,
+    /// `CBScriptHolder::m_Filename` for the kinds that keep it nowhere
+    /// else: the file an entity was loaded from (`LoadEntity`,
+    /// `AddAttachment`, an entity container's `ENTITY`) and the response
+    /// box's definition file. `None` for an object written inside
+    /// another file or created empty: its `Filename` reads `null`.
+    pub filename: Option<String>,
 }
 
 /// The inventory of an object other than the game (`CAdInventory`).
@@ -235,6 +241,7 @@ impl Default for ObjectState {
             shadow_image: None,
             shadow_light: None,
             freezable: true,
+            filename: None,
         }
     }
 }

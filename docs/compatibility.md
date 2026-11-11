@@ -102,9 +102,9 @@ How the list was made. For every class with a script interface, the names tested
 | `DetachScript` | method | **done** | Detaches the script attached under that path (optionally killing its threads). |
 | `IsScriptRunning` | method | **done** | True when a script is attached under that path and neither finished nor failed. |
 | `Type` | get | **done** | Class name string (`game`, `scene`, `entity`, ...). Luma returns the right value for each object it has. |
-| `Name` | get | **done** | Object name. |
-| `Name` | set | **done** | Renames the object. |
-| `Filename` | get | **done** | Source file of the object. Luma: scenes, actors and windows only; entities and others return null. |
+| `Name` | get | **done** | Object name: `<unnamed>` until the file's `NAME` or a script gives one (empty for a sprite and for the scene object). |
+| `Name` | set | **done** | Renames the object; the value is kept as a string. |
+| `Filename` | get | **done** | The file the object itself was loaded from (the game file, a scene, an actor, a window, a sprite, the response box, an entity loaded by `LoadEntity`, `AddAttachment` or a container); null for an object written inside another file or created empty. |
 
 ### CBObject (base of the game, scenes, layers, entities, actors, windows, controls, regions)
 
@@ -1110,7 +1110,6 @@ These are accepted by Luma and not counted above; some come from later WME versi
 | Actor | `SetStopOnBlocked`, `GetStopOnBlocked`, `ActorIsBlocked` | Stop-on-blocked behaviour and the matching event / property. |
 | 3D actor | `NumAttachments`, `GetAttachment(index)` | The bone attachments counted and found by index; WME's `GetAttachment` on a 3D actor takes a name, and its inherited `NumAttachments` counts the 2D attachments of `CAdObject`, always 0 on a 3D actor. |
 | Attachment of a 3D actor | `Bone`, `Filename` | The parent bone and the model file, which WME keeps private. |
-| Sprite | `Filename` | The file the sprite was loaded from. |
 
 ## Maintenance
 

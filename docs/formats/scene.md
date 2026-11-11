@@ -116,7 +116,7 @@ is absent.
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. |
+| `NAME` | string | `""` | Name used by scripts. The scene object starts with an empty name, where every other object starts as `<unnamed>`. |
 | `CAPTION` | string | `""` | Caption shown by the interface. |
 | `TEMPLATE` | string | | Another scene file loaded first; this file then overrides it. Not written by the editor. |
 | `SCRIPT` | string, repeatable | | Scripts attached to the scene, run in order. |
@@ -149,7 +149,7 @@ A scene with no main layer loads, with a warning, and has a size of
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. |
+| `NAME` | string | `<unnamed>` | Name used by scripts. |
 | `CAPTION` | string | `""` | |
 | `MAIN` | bool | false | The main layer. The scene takes its `WIDTH` and `HEIGHT`, its regions define the floor, and actors are drawn inside it. The last layer with `MAIN=TRUE` wins. |
 | `WIDTH`, `HEIGHT` | int | 0 | Size of the layer in pixels. Layers larger than the main one scroll faster, smaller ones slower (parallax). |
@@ -178,7 +178,7 @@ scene and the root block of an `.entity` file.
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. |
+| `NAME` | string | `<unnamed>` | Name used by scripts. |
 | `CAPTION` | string | `""` | Caption shown by the interface when the mouse is over the entity. Often a string-table reference (`/STORER0002/Console`). |
 | `ACTIVE` | bool | true | An inactive entity is neither drawn, updated nor clickable. |
 | `X`, `Y` | int | 0 | Position: the sprite's hotspot is placed here, and the position is used for depth sorting, scale and tint lookups. |
@@ -229,7 +229,7 @@ joined to the first. A region in a layer carries the extra keys marked
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. `<unnamed>` is what the editor writes for a nameless one. |
+| `NAME` | string | `<unnamed>` | Name used by scripts. |
 | `CAPTION` | string | `""` | |
 | `ACTIVE` | bool | true | An inactive region does not block, scale, tint or contain anything. |
 | `POINT` | `x,y`, repeatable | | The vertices. A polygon needs at least three; fewer contain no point. |
@@ -268,7 +268,7 @@ counted consistently.
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. |
+| `NAME` | string | `<unnamed>` | Name used by scripts. |
 | `POINT` | `x,y`, repeatable | | The waypoints. |
 | `PROPERTY` | block, repeatable | | Script properties. |
 | `TEMPLATE` | string | | Another file loaded first. |
@@ -296,9 +296,14 @@ PROPERTY {
 }
 ```
 
-Sets the script property `NAME` of the object to the string `VALUE`.
-Both keys are required; a block missing one fails to load. Scripts read
-it as `this.xSurface`.
+Sets the property `NAME` of the object to the string `VALUE`, as a
+script assignment would (`CBScriptHolder::ParseProperty` calls
+`ScSetProperty`): a name the object defines (`Active`, `X`, `Caption`...)
+sets that property, the string converted as a script value is, and any
+other name becomes a script property, read as `this.xSurface`. Both keys
+are required; a block missing one fails to load. Luma sets the blocks
+once the object is loaded, after its other keys, where the original
+sets each one where it stands in the file.
 
 `EDITOR_PROPERTY` has the same shape and is ignored outside the editors.
 

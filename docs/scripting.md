@@ -331,6 +331,20 @@ where the engine gives each object its own copy; and
 `DeleteFrame(index)` / `DeleteSubframe(index)` delete, where WME 1.x only
 checks the index and deletes with a frame or sub-frame object.
 
+Every object scripts can attach scripts to (a script holder: the game,
+the scene, layers, regions, entities, actors, items, windows and
+controls, sprites, particle emitters, `new Object()`) has a `Name` and a
+`Filename`. The name is `<unnamed>` until the object's file gives one
+with `NAME` or a script sets it (`CBScriptHolder`'s constructor); a
+sprite starts with an empty name and so does the scene object, as in
+the original. Setting `Name` stores the value as a string. `Filename`
+is the file the object itself was loaded from: the game file for
+`Game`, the scene, actor, window, sprite or response box file, the file
+of an entity loaded by `LoadEntity`, `AddAttachment` or an entity
+container; it is `null` for an object written inside another file (an
+entity or a region of a scene, a control of a window, an item) or
+created empty.
+
 A script is known on its object by the path it was attached with
 (`CScScript::m_Filename`), compared without case: attaching a file that
 is already attached and not finished is logged and does nothing,

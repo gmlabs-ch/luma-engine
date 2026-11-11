@@ -60,7 +60,7 @@ adds its own. Texts (`TEXT`, `TITLE`) go through the string table
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `TEMPLATE` | string | | Another file of the same kind (`.button`, `.static`, `.edit`, `.window`), loaded in place where the key stands: the keys that follow override it, the keys before it are overridden. Templates chain, up to 8 deep and 32 files per control in Luma. A window's own template is loaded first and the window's controls are added to the template's. A template that cannot be read is logged and skipped. The controls of the window inside a `.def` response box or inventory box file take their templates the same way. |
-| `NAME` | string | `""` | Name used by scripts (`GetWidget`, `PARENT_NOTIFY`). |
+| `NAME` | string | `<unnamed>` | Name used by scripts (`GetWidget`, `PARENT_NOTIFY`). |
 | `CAPTION` | string | `""` | Free caption. |
 | `X`, `Y` | int | `0` | Position, relative to the parent window. |
 | `WIDTH`, `HEIGHT` | int | `0` | Size; `0` is corrected after loading (see each control). |
@@ -299,7 +299,7 @@ The items file is a list of `ITEM` blocks:
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | | Name used by `TakeItem`, `DropItem`, `HasItem` and as the event an item raises when used on an object. |
+| `NAME` | string | `<unnamed>` | Name used by `TakeItem`, `DropItem`, `HasItem` and as the event an item raises when used on an object. |
 | `CAPTION` | string | | Caption shown by the game's scripts. |
 | `IMAGE`, `SPRITE` | string | | The item's sprite in the box. |
 | `IMAGE_HOVER`, `SPRITE_HOVER` | string | | Shown instead while the mouse is over the item. |

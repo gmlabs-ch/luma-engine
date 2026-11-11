@@ -120,6 +120,9 @@ impl World {
             self.load_font(font);
         }
         self.responses.def = Some(def);
+        // `CAdResponseBox::LoadFile` keeps the file name.
+        let box_id = self.response_box_id;
+        self.set_holder_filename(box_id, path);
         true
     }
 

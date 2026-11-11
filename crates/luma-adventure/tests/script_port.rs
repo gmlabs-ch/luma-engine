@@ -663,3 +663,72 @@ Game.DisableScriptProfiling();
     assert!(!runtime.engine.is_profiling());
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn holders_are_unnamed_and_keep_the_file_they_were_loaded_from() {
+    let (dir, runtime, log) = start(
+        r#"
+global result = new Object();
+result.gameFile = Game.Filename;
+var e = Game.CreateEntity();
+result.createdName = e.Name;
+result.createdFile = e.Filename;
+var f = Game.LoadEntity("ent/free.entity");
+result.loadedName = f.Name;
+result.loadedFile = f.Filename;
+result.active = f.Active;
+result.custom = f.Custom;
+var a = new Actor();
+result.actorName = a.Name;
+var w = Game.LoadWindow("w.window");
+result.windowName = w.Name;
+var b = w.CreateButton();
+result.buttonName = b.Name;
+var em = e.CreateParticleEmitter();
+result.emitterName = em.Name;
+result.emitterFile = em.Filename;
+em.Name = 12;
+result.emitterNamed = em.Name;
+var s = f.GetSpriteObject();
+result.spriteName = s.Name;
+s.Name = "turn";
+result.spriteNamed = s.Name;
+result.spriteFile = s.Filename;
+"#,
+        &[
+            File::Raw(
+                "ent\\free.entity",
+                b"ENTITY { X=3 Y=4 SPRITE=\"spin.sprite\" PROPERTY { NAME=\"Active\" VALUE=\"FALSE\" } PROPERTY { NAME=\"Custom\" VALUE=\"7\" } }",
+            ),
+            File::Raw("spin.sprite", b"SPRITE { NAME=\"spin\" LOOPING=TRUE }"),
+            File::Raw("w.window", WINDOW),
+        ],
+    );
+    no_errors(&log);
+    let text = |key: &str| result(&runtime, key);
+    assert_eq!(text("gameFile"), Value::from("default.game"));
+    // `CBScriptHolder`'s constructor: `<unnamed>`, and no file.
+    assert_eq!(text("createdName"), Value::from("<unnamed>"));
+    assert_eq!(text("createdFile"), Value::Null);
+    assert_eq!(text("loadedName"), Value::from("<unnamed>"), "no NAME key");
+    assert_eq!(text("loadedFile"), Value::from("ent/free.entity"));
+    assert_eq!(text("actorName"), Value::from("<unnamed>"));
+    assert_eq!(text("windowName"), Value::from("w"));
+    assert_eq!(text("buttonName"), Value::from("<unnamed>"));
+    assert_eq!(text("emitterName"), Value::from("<unnamed>"));
+    assert_eq!(text("emitterFile"), Value::Null);
+    assert_eq!(
+        text("emitterNamed"),
+        Value::from("12"),
+        "a name is a string"
+    );
+    // A sprite starts with the name of its file, empty without one.
+    assert_eq!(text("spriteName"), Value::from("spin"), "{log:?}");
+    assert_eq!(text("spriteNamed"), Value::from("turn"));
+    assert_eq!(text("spriteFile"), Value::from("spin.sprite"));
+    // A PROPERTY block is an assignment: a built-in property is set, any
+    // other name is kept as the string it was written as.
+    assert_eq!(text("active"), Value::Bool(false));
+    assert_eq!(text("custom"), Value::from("7"));
+    std::fs::remove_dir_all(&dir).ok();
+}

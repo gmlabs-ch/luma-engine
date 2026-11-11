@@ -216,7 +216,7 @@ pub struct Layer {
 impl Default for Layer {
     fn default() -> Self {
         Layer {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             caption: String::new(),
             template: None,
             main: false,
@@ -341,7 +341,7 @@ pub struct Entity {
 impl Default for Entity {
     fn default() -> Self {
         Entity {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             caption: String::new(),
             template: None,
             kind: EntityKind::Normal,
@@ -415,7 +415,7 @@ pub struct Region {
 impl Default for Region {
     fn default() -> Self {
         Region {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             caption: String::new(),
             template: None,
             active: true,
@@ -502,7 +502,7 @@ pub struct WaypointGroup {
 impl Default for WaypointGroup {
     fn default() -> Self {
         WaypointGroup {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             template: None,
             points: Vec::new(),
             properties: Vec::new(),

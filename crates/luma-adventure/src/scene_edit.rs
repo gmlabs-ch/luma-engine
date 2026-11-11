@@ -159,13 +159,7 @@ impl World {
         for sprite in missing {
             self.log(format!("  missing: {sprite}"));
         }
-        if let Some(native) = self.objects.get_mut(id) {
-            for property in &entity.properties {
-                native
-                    .props
-                    .insert(property.name.clone(), Value::from(property.value.clone()));
-            }
-        }
+        self.apply_properties(id, &entity.properties);
         self.load_entity_sound(id);
         self.register_entity_region(id);
         for script in entity.scripts {
@@ -219,7 +213,9 @@ impl World {
     /// when the file does not load.
     pub fn load_scene_entity(&mut self, engine: &mut Engine, path: &str) -> Option<NativeId> {
         let def = self.read_entity_def(path)?;
-        self.add_free_entity(engine, def)
+        let id = self.add_free_entity(engine, def)?;
+        self.set_holder_filename(id, path);
+        Some(id)
     }
 
     /// Removes a free entity from the scene (`UnloadObject` on one); the
@@ -268,7 +264,9 @@ impl World {
     /// `None` when the file does not load.
     pub fn load_game_entity(&mut self, engine: &mut Engine, path: &str) -> Option<NativeId> {
         let def = self.read_entity_def(path)?;
-        Some(self.add_game_entity(engine, def))
+        let id = self.add_game_entity(engine, def);
+        self.set_holder_filename(id, path);
+        Some(id)
     }
 
     /// Removes an entity of the game (`Game.UnloadObject` on one, the
@@ -318,6 +316,7 @@ impl World {
         def.y = y;
         def.active = true;
         let id = self.add_game_entity(engine, def);
+        self.set_holder_filename(id, path);
         if let Some(state) = self.object_state_mut(id) {
             state.attached_to = Some(owner);
         }

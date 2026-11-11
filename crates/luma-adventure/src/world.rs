@@ -949,6 +949,22 @@ impl World {
         }
     }
 
+    /// Sets the `PROPERTY { NAME VALUE }` blocks of a definition file on
+    /// an object (`CBScriptHolder::ParseProperty`): each value, a string,
+    /// goes through the same path as an assignment by a script
+    /// (`ScSetProperty`), so a block naming a built-in property (`Active`,
+    /// `X`...) sets it, and any other name becomes a script property.
+    pub(crate) fn apply_properties(
+        &mut self,
+        id: NativeId,
+        properties: &[luma_formats::scene::Property],
+    ) {
+        for property in properties {
+            let value = Value::from(property.value.clone());
+            Natives::set_property(self, id, &property.name, &value);
+        }
+    }
+
     /// Reports a script runtime error, already worded
     /// (`CScScript::RuntimeError`): to the log, and to the player as a
     /// quick message unless the game set `Game.SuppressScriptErrors`.
@@ -1183,15 +1199,10 @@ impl World {
             self.log(format!("  missing: {file}: {reason}"));
         }
         let id = self.objects.insert(Kind::Actor);
-        if let Some(native) = self.objects.get_mut(id) {
-            for property in &actor.def.properties {
-                native
-                    .props
-                    .insert(property.name.clone(), Value::from(property.value.clone()));
-            }
-        }
+        let properties = actor.def.properties.clone();
         let scripts = actor.def.scripts.clone();
         self.actors.push((id, actor));
+        self.apply_properties(id, &properties);
         for script in scripts {
             self.attach(engine, id, &script);
         }

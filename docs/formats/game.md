@@ -38,7 +38,7 @@ AD_GAME {
 
 | Block | Key | Meaning |
 |-------|-----|---------|
-| `GAME` | `NAME`, `CAPTION` | The game's name (`Game.Name`) and window title. |
+| `GAME` | `NAME`, `CAPTION` | The game's name (`Game.Name`, `<unnamed>` without the key) and window title. |
 | | `SCRIPT` | A script attached to the game object when it starts; repeatable. The game's logic starts there: the first script picks the first scene with `Game.ChangeScene`. |
 | | `STRING_TABLE` | A string table loaded at startup (see below). |
 | | `SYSTEM_FONT` | The font of engine messages. |

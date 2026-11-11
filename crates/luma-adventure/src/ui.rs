@@ -356,7 +356,7 @@ impl Control {
     fn new(kind: ControlKind, parent: Option<NativeId>) -> Control {
         let can_focus = matches!(kind, ControlKind::Window(_) | ControlKind::Edit(_));
         Control {
-            name: String::new(),
+            name: luma_formats::UNNAMED.to_string(),
             caption: String::new(),
             x: 0,
             y: 0,
@@ -1797,6 +1797,7 @@ impl World {
             freezable: false,
         });
         let entity = self.objects.insert(Kind::Entity(EntityRef::Ui(index)));
+        self.set_holder_filename(entity, path);
         self.register_entity_region(entity);
         for script in scripts {
             self.attach(engine, entity, &script);

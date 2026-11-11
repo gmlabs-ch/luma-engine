@@ -61,6 +61,9 @@ impl World {
         if let Some(value) = self.object_get(id, name) {
             return Some(value);
         }
+        if name == "Name" && Self::name_is_a_property(&kind) {
+            return Some(self.holder_name(id, &kind));
+        }
         match kind {
             Kind::Game => self.game_get(name),
             Kind::Keyboard => match name {
@@ -75,6 +78,7 @@ impl World {
             },
             Kind::ResponseBox => match name {
                 "Type" => Some(Value::from("responses")),
+                "Filename" => Some(self.holder_filename(id)),
                 _ => None,
             },
             Kind::Math => match name {
@@ -122,15 +126,6 @@ impl World {
             },
             Kind::Object => match name {
                 "Type" => Some(Value::from("object")),
-                // `CBScriptHolder` names a fresh object `<unnamed>`; a
-                // name scripts give is kept as a property.
-                "Name" => Some(
-                    self.native(id)?
-                        .props
-                        .get("Name")
-                        .cloned()
-                        .unwrap_or(Value::from("<unnamed>")),
-                ),
                 _ => None,
             },
             Kind::Class(_) => None,
@@ -150,6 +145,14 @@ impl World {
             None => return false,
         };
         if self.object_set(id, name, value) {
+            return true;
+        }
+        if name == "Name" && Self::name_is_a_property(&kind) {
+            // `SetName(Value->GetString())`.
+            let text = Value::from(value.get_string(self));
+            if let Some(native) = self.objects.get_mut(id) {
+                native.props.insert("Name".to_string(), text);
+            }
             return true;
         }
         match kind {
@@ -265,6 +268,62 @@ impl World {
                     Some(Return::null())
                 }
             },
+        }
+    }
+
+    /// Whether the object's `Name` (`CBScriptHolder::m_Name`) is kept
+    /// among its properties: the script holders that have no name of
+    /// their own in Luma's data, which are sprites, particle emitters,
+    /// the faders, the response box and `new Object()`.
+    fn name_is_a_property(kind: &Kind) -> bool {
+        matches!(
+            kind,
+            Kind::Sprite(_)
+                | Kind::HoverSprite(_)
+                | Kind::CursorSprite { .. }
+                | Kind::ControlImage { .. }
+                | Kind::Emitter(_)
+                | Kind::Fader
+                | Kind::SceneFader
+                | Kind::ResponseBox
+                | Kind::Object
+        )
+    }
+
+    /// `Name` of such a holder: what a script set, else the name its
+    /// class starts with: the `NAME` of a sprite's file, empty without
+    /// one (`CBSprite`'s constructor), `<unnamed>` for the others
+    /// (`CBScriptHolder`'s).
+    fn holder_name(&self, id: NativeId, kind: &Kind) -> Value {
+        if let Some(name) = self.native(id).and_then(|n| n.props.get("Name")) {
+            return name.clone();
+        }
+        match kind {
+            Kind::Sprite(_)
+            | Kind::HoverSprite(_)
+            | Kind::CursorSprite { .. }
+            | Kind::ControlImage { .. } => Value::from(
+                self.sprite_def(id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default(),
+            ),
+            _ => Value::from(luma_formats::UNNAMED),
+        }
+    }
+
+    /// `Filename` of a holder that keeps it in its object state
+    /// (`CBScriptHolder::m_Filename`): `null` when it was not loaded
+    /// from a file of its own.
+    pub(crate) fn holder_filename(&self, id: NativeId) -> Value {
+        self.object_state(id)
+            .and_then(|s| s.filename.clone())
+            .map_or(Value::Null, Value::from)
+    }
+
+    /// Records the file a holder was loaded from (`SetFilename`).
+    pub(crate) fn set_holder_filename(&mut self, id: NativeId, path: &str) {
+        if let Some(state) = self.object_state_mut(id) {
+            state.filename = Some(path.to_string());
         }
     }
 
@@ -397,6 +456,8 @@ impl World {
         Some(match name {
             "Type" => Value::from("game"),
             "Name" => Value::from(self.name.clone()),
+            // The game file (`CBGame::LoadFile`).
+            "Filename" => Value::from(self.settings().game_file.clone()),
             "Caption" => Value::from(self.caption.clone()),
             "CurrentTime" => Value::Int(self.timer() as i32),
             // `timeGetTime`: a clock that runs while the game is frozen.
@@ -1514,7 +1575,11 @@ impl World {
             "Type" => Value::from("entity"),
             "Name" => Value::from(e.name.clone()),
             "Caption" => Value::from(e.caption.clone()),
-            "Filename" => Value::Null,
+            // The file the entity was loaded from (`CAdEntity::LoadFile`);
+            // null for an entity written in a scene file or created empty.
+            "Filename" => self
+                .node_id(r)
+                .map_or(Value::Null, |id| self.holder_filename(id)),
             "X" => Value::Int(e.x),
             "Y" => Value::Int(e.y),
             "Height" => Value::Int(self.entity_height(r)),
