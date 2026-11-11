@@ -134,12 +134,14 @@ impl Stack {
         self.len.checked_sub(depth + 1).map(|i| &self.slots[i])
     }
 
-    /// Every slot, live or not, for snapshots.
-    #[cfg(feature = "serde")]
+    /// Every slot, live or not, mutable: the dead ones still hold the
+    /// values a saved game keeps.
     pub(crate) fn slots_mut(&mut self) -> &mut [Slot] {
         &mut self.slots
     }
 
+    /// Every slot, live or not, for snapshots.
+    #[cfg(feature = "serde")]
     pub(crate) fn slots(&self) -> &[Slot] {
         &self.slots
     }

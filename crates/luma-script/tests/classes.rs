@@ -583,7 +583,8 @@ fn string_case_index_and_split() {
     p.text("parts4", "split4Text");
     p.get_store("parts4", Arg::Str("Length"), "split4Len");
     let (result, host) = p.run();
-    assert_eq!(result["upper"], s("HÉLLO ß"));
+    // An ANSI game converts in the C locale: the letters A to Z only.
+    assert_eq!(result["upper"], s("HéLLO ß"));
     assert_eq!(result["lower"], s("héllo ß"));
     assert_eq!(result["unchanged"], s("Héllo ß"));
     assert_eq!(result["i1"], i(2));
@@ -652,17 +653,41 @@ fn strings_count_characters_in_a_utf8_game() {
             .value,
         i(10)
     );
+    // `Split` looks the low byte of each character up among the bytes
+    // of the separator string, as the original's `strchr` does: `ý`
+    // (bytes C3 BD) does not split at `ý` (U+00FD)...
     let parts = string
         .call_method("Split", &[s(&text_to_utf8("ý"))], &mut host)
         .unwrap()
         .value
         .as_native()
         .unwrap();
-    assert_eq!(
-        host.get_property(parts, "0").unwrap(),
-        s(&text_to_utf8("Žluťoučk"))
-    );
+    assert_eq!(host.get_property(parts, "Length").unwrap(), i(1));
+    assert_eq!(host.get_property(parts, "0").unwrap(), s(&raw));
+    // ... `Ã` (bytes C3 83) splits at `Ã` (U+00C3), and a comma splits
+    // at `Ĭ` (U+012C) as well as at itself.
+    let mut odd = StringObject::new(&[Value::from(text_to_utf8("xÃy,zĬw"))], &host);
+    let parts = odd
+        .call_method("Split", &[s(&text_to_utf8("Ã"))], &mut host)
+        .unwrap()
+        .value
+        .as_native()
+        .unwrap();
     assert_eq!(host.get_property(parts, "Length").unwrap(), i(2));
+    assert_eq!(host.get_property(parts, "0").unwrap(), s("x"));
+    assert_eq!(
+        host.get_property(parts, "1").unwrap(),
+        s(&text_to_utf8("y,zĬw"))
+    );
+    let parts = odd
+        .call_method("Split", &[], &mut host)
+        .unwrap()
+        .value
+        .as_native()
+        .unwrap();
+    assert_eq!(host.get_property(parts, "Length").unwrap(), i(3));
+    assert_eq!(host.get_property(parts, "1").unwrap(), s("z"));
+    assert_eq!(host.get_property(parts, "2").unwrap(), s("w"));
 
     // Bytes that are not UTF-8 are replaced, not a panic.
     let mut broken = StringObject::new(&[Value::from("caf\u{e9}")], &host);
@@ -975,7 +1000,7 @@ fn text_files_read_from_the_game() {
     assert_eq!(result["gmode"], i(0));
     assert_eq!(result["badMode"], Value::Bool(false));
     assert_eq!(result["hstr"], s("[file object]"));
-    assert_eq!(result["hname"], s(""));
+    assert_eq!(result["hname"], Value::Null);
     assert_eq!(result["hopen"], Value::Bool(false));
     assert_eq!(result["setName"], Value::Null);
     assert_eq!(result["hopen2"], Value::Bool(true), "a missing mode reads");
@@ -1059,8 +1084,9 @@ fn text_files_written_copied_and_deleted() {
     assert_eq!(result["wtext"], Value::Bool(true));
     assert_eq!(result["wl"], Value::Bool(true));
     assert_eq!(result["wt"], Value::Bool(true));
-    assert_eq!(result["wpos"], i(10));
-    assert_eq!(result["wlen"], i(10));
+    // A text file gets CR LF line ends, as the original writes them.
+    assert_eq!(result["wpos"], i(11));
+    assert_eq!(result["wlen"], i(11));
     assert_eq!(result["rl"], Value::Null);
     assert_eq!(result["wi"], Value::Bool(false));
     assert_eq!(result["ro"], Value::Bool(true));
@@ -1068,9 +1094,9 @@ fn text_files_written_copied_and_deleted() {
     assert_eq!(result["r2"], s("tail"));
     assert_eq!(result["r3"], Value::Null);
     assert_eq!(result["ao"], Value::Bool(true));
-    assert_eq!(result["apos"], i(10));
-    assert_eq!(result["alen"], i(15));
-    assert_eq!(result["apos2"], i(15));
+    assert_eq!(result["apos"], i(11));
+    assert_eq!(result["alen"], i(17));
+    assert_eq!(result["apos2"], i(17));
     assert_eq!(result["a1"], s("héllo"));
     assert_eq!(result["a2"], s("tailmore"));
     assert_eq!(result["a3"], Value::Null);
@@ -1356,6 +1382,13 @@ fn the_directory_object_works_under_the_writable_root() {
     let mut p = Script::new();
     // result.created = Directory.Create("sub\\deep");
     p.call_store("Directory", "Create", &[Arg::Str("sub\\deep")], "created");
+    p.call_store(
+        "Directory",
+        "Create",
+        &[Arg::Str("sub\\deep")],
+        "createdAgain",
+    );
+    p.call_store("Directory", "Create", &[Arg::Str("made\\")], "createdSlash");
     // Files are listed with what the writable directory holds...
     p.var_new("f", "File", &[Arg::Str("sub\\A.txt")]);
     p.call_drop("f", "OpenAsText", &[Arg::Int(2)]);
@@ -1412,6 +1445,12 @@ fn the_directory_object_works_under_the_writable_root() {
     });
     assert_eq!(host.errors(), Vec::<&str>::new());
     assert_eq!(result["created"], Value::Bool(true));
+    // The answer is the final mkdir's: false for a directory that was
+    // there, and for a path ending with a separator, which the walk
+    // over the path has just made.
+    assert_eq!(result["createdAgain"], Value::Bool(false));
+    assert_eq!(result["createdSlash"], Value::Bool(false));
+    assert!(host.dir.join("made").is_dir());
     assert!(host.dir.join("sub").is_dir());
     assert!(!host.dir.join("sub/deep").exists(), "deleted later");
     assert_eq!(result["files"], i(1));

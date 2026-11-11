@@ -146,6 +146,12 @@ impl StringObject {
                 };
                 Return::value(encode(Self::slice(&chars, start, (end - start + 1).max(0))))
             }
+            // An ANSI game converts with `_strupr` and `_strlwr` in the C
+            // locale the engine runs in: only the letters A to Z change,
+            // accented letters stay as they are. A UTF-8 game converts
+            // wide characters, every letter that has another case.
+            "ToUpperCase" if !utf8 => Return::value(self.text.to_ascii_uppercase()),
+            "ToLowerCase" if !utf8 => Return::value(self.text.to_ascii_lowercase()),
             "ToUpperCase" => Return::value(encode(
                 chars
                     .iter()
@@ -181,17 +187,30 @@ impl StringObject {
             }
             // Every character of the argument separates; a missing
             // argument means a comma. An empty text gives one empty part.
+            // The original looks each character up with `strchr` in the
+            // separator string as the game holds it: in a UTF-8 game
+            // that compares the low byte of the character with the UTF-8
+            // bytes of the separators, so a separator outside ASCII does
+            // not split at itself but at the characters whose low byte
+            // is one of its bytes, and `Ĭ` (U+012C) splits like a comma.
             "Split" => {
                 let separators_arg = arg(args, 0);
                 let separators: Vec<char> = if separators_arg.is_null() {
                     vec![',']
                 } else {
-                    decode(separators_arg.get_string(host)).chars().collect()
+                    separators_arg.get_string(host).chars().collect()
                 };
                 let mut parts = Vec::new();
                 let mut part = String::new();
                 for &c in &chars {
-                    if separators.contains(&c) {
+                    let looked_up = if utf8 {
+                        char::from(u32::from(c) as u8)
+                    } else {
+                        c
+                    };
+                    // A character whose low byte is 0 finds the end of
+                    // the separator string, as `strchr` does.
+                    if separators.contains(&looked_up) || (utf8 && looked_up == '\0') {
                         parts.push(Value::String(encode(std::mem::take(&mut part))));
                     } else {
                         part.push(c);

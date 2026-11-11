@@ -766,7 +766,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
 | `Substring`, `Substr` | method | **done** | Part of the string by (start, end) or (start, length), with WME's clamping and swapping; positions count characters. |
-| `ToUpperCase`, `ToLowerCase` | method | **done** | Case conversion (Unicode simple mapping; WME uses the C locale). |
+| `ToUpperCase`, `ToLowerCase` | method | **done** | Case conversion: the letters A to Z only in an ANSI game, as WME's `_strupr`/`_strlwr` in the C locale; Unicode's simple mapping in a UTF-8 game (WME: the wide-character functions in the user's locale). |
 | `IndexOf` | method | **done** | Position of a substring from an index, -1 when absent. |
 | `Split` | method | **done** | Splits on any of the separator characters and returns an array. |
 | `Type` | get | **done** | `string`. |
@@ -811,13 +811,13 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | `OpenAsText`, `OpenAsBinary` | method | **done** | Opens the file for read / write / append as text or binary. |
 | `Close` | method | **done** | Closes the file. |
 | `SetPosition` | method | **done** | Seeks. |
-| `Delete`, `Copy` | method | **done** | Deletes the file / copies it to a new name, under the save directory. |
+| `Delete`, `Copy` | method | **done** | Deletes the file / copies it to a new name, under the save directory. The source of `Copy` is a file on disk (one a script wrote, or a loose file of the game), as WME's `CopyFile`. |
 | `ReadLine`, `ReadText` | method | **done** | Reads a line / N characters of text (`\r` skipped). |
-| `WriteLine`, `WriteText` | method | **done** | Writes text with / without a line break (`\n`; WME on Windows wrote `\r\n`). |
+| `WriteLine`, `WriteText` | method | **done** | Writes text with / without a line break; every `\n` is written as `\r\n`, as WME's text-mode stream does. |
 | `ReadBool`, `ReadByte`, `ReadShort`, `ReadInt`, `ReadLong`, `ReadFloat`, `ReadDouble`, `ReadString` | method | **done** | Reads a binary value, little-endian; `ReadShort` is 65536 plus the signed value, as in WME. |
 | `WriteBool`, `WriteByte`, `WriteShort`, `WriteInt`, `WriteLong`, `WriteFloat`, `WriteDouble`, `WriteString` | method | **done** | Writes a binary value. |
 | `Type` | get | **done** | `file`. |
-| `Filename`, `Position`, `Length`, `TextMode`, `AccessMode` | get | **done** | Current file state. |
+| `Filename`, `Position`, `Length`, `TextMode`, `AccessMode` | get | **done** | Current file state; `Filename` is null without a name. |
 
 ### CSXDirectory (the global `Directory`)
 
@@ -827,7 +827,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Create`, `Delete` | method | **done** | Creates every level of a directory / deletes an empty one, under the save directory. `Create` answers whether the directory exists afterwards; WME's second `mkdir` of the path it just created answers false unless the path ends with a separator. |
+| `Create`, `Delete` | method | **done** | Creates every level of a directory / deletes an empty one, under the save directory. `Create` answers as WME's final `mkdir` does: true when the call made the directory, false when it existed or when the path ends with a separator. |
 | `GetFiles`, `GetDirectories` | method | **done** | Lists the files / sub-directories matching a Windows wildcard mask (`*.*` by default, without case): the save directory's, then the game's own under the same path. Names, not paths, sorted; directories starting with `.` skipped as in WME. |
 | `GetDrives` | method | **no-op** | Lists Windows drive letters; no meaning on macOS. Answers an empty array. |
 | `Type` | get | **done** | `directory`. |

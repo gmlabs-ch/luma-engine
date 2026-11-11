@@ -3001,6 +3001,18 @@ impl ClassHost for World {
         self.vfs.read(name).ok()
     }
 
+    /// A file a script wrote, else a loose file of the game; not a file
+    /// inside a package, which the system cannot copy.
+    fn read_disk_file(&mut self, name: &str) -> Option<Vec<u8>> {
+        if let Some(path) = self.writable_path(name) {
+            if path.is_file() {
+                return std::fs::read(path).ok();
+            }
+        }
+        let path = self.vfs.find_loose(name)?;
+        std::fs::read(path).ok()
+    }
+
     /// Under the save directory (the game's, or the user's own when the
     /// game's is not writable), never outside it. A name spelled from
     /// the save directory itself (`Game.SaveDirectory + "\\notes.txt"`,

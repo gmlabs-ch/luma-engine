@@ -52,6 +52,16 @@ pub trait ClassHost: Natives {
     /// own files. `None` when there is no such file.
     fn read_file(&mut self, name: &str) -> Option<Vec<u8>>;
 
+    /// The bytes of a file on disk, for `File.Copy`, whose source the
+    /// original gives to the system (`CopyFile`): a file a script wrote
+    /// or a loose file of the game, never one inside a package. The
+    /// default knows no difference and reads like [`read_file`].
+    ///
+    /// [`read_file`]: ClassHost::read_file
+    fn read_disk_file(&mut self, name: &str) -> Option<Vec<u8>> {
+        self.read_file(name)
+    }
+
     /// Where a script may write, delete or copy to a file of this name:
     /// a path under the game's writable directory, or `None` when the
     /// name is not acceptable (an absolute path, a parent directory).
