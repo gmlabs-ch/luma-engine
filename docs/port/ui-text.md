@@ -6,418 +6,418 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBFont::CBFont` | unreviewed |  |
-| `CBFont::~CBFont` | unreviewed |  |
-| `CBFont::DrawText` | unreviewed |  |
-| `CBFont::GetTextHeight` | unreviewed |  |
-| `CBFont::GetTextWidth` | unreviewed |  |
-| `CBFont::GetLetterHeight` | unreviewed |  |
-| `CBFont::Persist` | unreviewed |  |
-| `CBFont::CreateFromFile` | unreviewed |  |
-| `CBFont::IsTrueType` | unreviewed |  |
-| `CBFont::IsTrueType FONT` | unreviewed |  |
-| `CBFont::IsTrueType TTFONT` | unreviewed |  |
+| `CBFont::CBFont` | done | Sets nothing; `luma-adventure/src/text.rs` `Font`. |
+| `CBFont::~CBFont` | replaced | Rust ownership; nothing observable. |
+| `CBFont::DrawText` | done | Empty base method; `luma-adventure/src/text.rs` `Font::draw` dispatches to the two kinds. |
+| `CBFont::GetTextHeight` | done | Base answers 0; `luma-adventure/src/text.rs` `Font::text_height` dispatches to the two kinds. |
+| `CBFont::GetTextWidth` | done | Base answers 0; `luma-adventure/src/text.rs` `Font::text_width` dispatches to the two kinds. |
+| `CBFont::GetLetterHeight` | done | Base answers 0; `luma-adventure/src/text.rs` `Font::line_height`. |
+| `CBFont::Persist` | replaced | Fonts are not part of a saved game: the fonts in use are loaded again from their files after a load (`save.rs`, `FontBank::load`). |
+| `CBFont::CreateFromFile` | done | `luma-adventure/src/text.rs` `Font::load`: a `TTFONT` root makes a TrueType font, else a bitmap font; a failed load gives no font. |
+| `CBFont::IsTrueType` | done | `luma-formats/src/font.rs` `FontFile::parse`: the file is TrueType when its root block is `TTFONT`; an unreadable file is not. |
+| `CBFont::IsTrueType FONT` | done | `luma-formats/src/font.rs` `FontFile::parse`. |
+| `CBFont::IsTrueType TTFONT` | done | `luma-formats/src/font.rs` `FontFile::parse`. |
 
 ## `wme_base/BFontBitmap.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBFontBitmap::CBFontBitmap` | unreviewed |  |
-| `CBFontBitmap::~CBFontBitmap` | unreviewed |  |
-| `CBFontBitmap::DrawText` | unreviewed |  |
-| `CBFontBitmap::GetTextHeight` | unreviewed |  |
-| `CBFontBitmap::GetTextWidth` | unreviewed |  |
-| `CBFontBitmap::TextHeightDraw` | unreviewed |  |
-| `CBFontBitmap::DrawChar` | unreviewed |  |
-| `CBFontBitmap::LoadFile` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer FONTEXT_FIX` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer FONT` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer IMAGE` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer TRANSPARENT` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer COLUMNS` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer TILE_WIDTH` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer TILE_HEIGHT` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer DEFAULT_WIDTH` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer WIDTHS` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer AUTO_WIDTH` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer SPACE_WIDTH` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer EXPAND_WIDTH` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer SPRITE` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer WIDTHS_FRAME` | unreviewed |  |
-| `CBFontBitmap::LoadBuffer PAINT_WHOLE_CELL` | unreviewed |  |
-| `CBFontBitmap::Persist` | unreviewed |  |
-| `CBFontBitmap::GetCharWidth` | unreviewed |  |
-| `CBFontBitmap::GetWidths` | unreviewed |  |
-| `CBFontBitmap::GetLetterHeight` | unreviewed |  |
+| `CBFontBitmap::CBFontBitmap` | done | `luma-formats/src/font.rs` `BitmapFontDef::default`: no image, no sprite, zero widths, sizes and columns, no `FONTEXT_FIX`, no whole cell. `m_Freezable` has no meaning for a font. |
+| `CBFontBitmap::~CBFontBitmap` | replaced | Rust ownership; nothing observable. |
+| `CBFontBitmap::DrawText` | done | `luma-adventure/src/text.rs` `BitmapFont::draw` (the layout of `TextHeightDraw`, then one quad per character). `MaxLength` is only used by the editor, which cuts its text itself in Luma. |
+| `CBFontBitmap::GetTextHeight` | done | `luma-adventure/src/text.rs` `BitmapFont::text_height`: the layout's height, left aligned, no height limit. |
+| `CBFontBitmap::GetTextWidth` | done | `luma-formats/src/font.rs` `BitmapFontDef::text_width` over `luma-adventure/src/text.rs` `BitmapFont::codes` (UTF-8 text converted to ANSI first; for the code page see `CBTextUtils::Utf8ToAnsi`). |
+| `CBFontBitmap::TextHeightDraw` | done | `luma-formats/src/font.rs` `BitmapFontDef::layout`, ported line for line: empty text is one tile high, break on the last space or mid-word, `max_height` stops the lines, a single-line box does not break on spaces, alignment per line. |
+| `CBFontBitmap::DrawChar` | partial | `luma-formats/src/font.rs` `BitmapFontDef::tile` and `luma-adventure/src/text.rs` `BitmapFont::draw`: same tile rectangle (`FONTEXT_FIX`, `PAINT_WHOLE_CELL`). Missing: (1) with `SPRITE` the original draws from the sprite's current frame, so an animated sprite animates the font; Luma always draws the first frame's image. (2) a window's `ALPHA`/`ALPHA_COLOR` (`m_ForceAlphaColor`) tints the characters in the original; Luma draws them opaque white. |
+| `CBFontBitmap::LoadFile` | done | `luma-adventure/src/text.rs` `Font::load` through the Vfs; a failure is kept in `FontBank::missing` and logged. |
+| `CBFontBitmap::LoadBuffer` | partial | `luma-formats/src/font.rs` `BitmapFontDef::from_node`, `widths`; `luma-adventure/src/text.rs` `BitmapFont::load`. Different: when both `SPRITE` and `IMAGE` are given the original uses the sprite (the image only if the sprite fails to load), Luma the image; an unknown key is a syntax error that fails the font in the original, ignored in Luma. Same: `FONT` root, incomplete definition error, widths filled after the listed ones. |
+| `CBFontBitmap::LoadBuffer FONTEXT_FIX` | done | `luma-formats/src/font.rs`: character `c` uses tile and width `c - 1` (`tile`, `char_width`), and the space of `AUTO_WIDTH` is index 31. |
+| `CBFontBitmap::LoadBuffer FONT` | done | `luma-formats/src/font.rs` `FontFile::parse`: required root block. |
+| `CBFontBitmap::LoadBuffer IMAGE` | done | `luma-adventure/src/text.rs` `BitmapFont::load`: the tile image, with the `TRANSPARENT` colour key or the default one. (Precedence over `SPRITE` differs: see the `SPRITE` row.) |
+| `CBFontBitmap::LoadBuffer TRANSPARENT` | done | `luma-formats/src/font.rs` `transparent`, used as the colour key of `IMAGE`; without it the default key (magenta). |
+| `CBFontBitmap::LoadBuffer COLUMNS` | done | `luma-formats/src/font.rs` `columns`; zero is an incomplete definition. |
+| `CBFontBitmap::LoadBuffer TILE_WIDTH` | done | `luma-formats/src/font.rs` `tile_width`; zero is an incomplete definition. |
+| `CBFontBitmap::LoadBuffer TILE_HEIGHT` | done | `luma-formats/src/font.rs` `tile_height`: tile and line height; zero is an incomplete definition. |
+| `CBFontBitmap::LoadBuffer DEFAULT_WIDTH` | done | `luma-formats/src/font.rs` `widths`: default 8, given to the characters after the listed `WIDTHS`, only without `AUTO_WIDTH`. |
+| `CBFontBitmap::LoadBuffer WIDTHS` | done | `luma-formats/src/font.rs`: widths from character 0 on, several `WIDTHS` keys continue the list, 256 at most. |
+| `CBFontBitmap::LoadBuffer AUTO_WIDTH` | partial | `luma-formats/src/font.rs` `widths` measures the tiles, then `EXPAND_WIDTH` and the space rule as the original. The measure itself differs for soft edges: see `CBFontBitmap::GetWidths`. |
+| `CBFontBitmap::LoadBuffer SPACE_WIDTH` | done | `luma-formats/src/font.rs` `widths`: with `AUTO_WIDTH`, the width of the space; 0 means computed (half of `m` plus `i` when the measured space is empty). |
+| `CBFontBitmap::LoadBuffer EXPAND_WIDTH` | done | `luma-formats/src/font.rs` `widths`: with `AUTO_WIDTH`, added to every measured width, not below 0. |
+| `CBFontBitmap::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once unless the game runs in editor mode: no effect at run time. |
+| `CBFontBitmap::LoadBuffer SPRITE` | partial | `luma-adventure/src/text.rs` `BitmapFont::load` reads the first sub-frame of the sprite's first frame as the tile image. Missing: the original keeps the sprite and draws each character from its current frame (animated fonts); it also prefers the sprite over `IMAGE`, Luma prefers `IMAGE`. |
+| `CBFontBitmap::LoadBuffer WIDTHS_FRAME` | partial | Parsed (`luma-formats/src/font.rs` `widths_frame`), never used: `AUTO_WIDTH` always measures the sprite's first frame, the original the frame of this index. |
+| `CBFontBitmap::LoadBuffer PAINT_WHOLE_CELL` | done | `luma-formats/src/font.rs` `tile`: the whole tile width is drawn, the advance stays the character's width. |
+| `CBFontBitmap::Persist` | replaced | Fonts are not part of a saved game: the fonts in use are loaded again from their files after a load (`save.rs`, `FontBank::load`). |
+| `CBFontBitmap::GetCharWidth` | done | `luma-formats/src/font.rs` `BitmapFontDef::char_width`. |
+| `CBFontBitmap::GetWidths` | partial | `luma-formats/src/font.rs` `BitmapFontDef::measure_tile`: same scan (right-most inked column plus one, pixels outside the image skipped). Different: a pixel is ink when its alpha is above 128; in the original any pixel whose alpha is not 0 is ink (`IsTransparentAtLite`), so the soft edge of an antialiased character counts and the character is wider. `WIDTHS_FRAME` is ignored (first frame measured). |
+| `CBFontBitmap::GetLetterHeight` | done | `luma-adventure/src/text.rs` `Font::line_height`: the tile height. |
 
 ## `wme_base/BFontStorage.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBFontStorage::CBFontStorage` | unreviewed |  |
-| `CBFontStorage::~CBFontStorage` | unreviewed |  |
-| `CBFontStorage::Cleanup` | unreviewed |  |
-| `CBFontStorage::RegisterTTFont` | unreviewed |  |
-| `CBFontStorage::RegTTFontInternal` | unreviewed |  |
-| `CBFontStorage::AddFont` | unreviewed |  |
-| `CBFontStorage::RemoveFont` | unreviewed |  |
-| `CBFontStorage::Persist` | unreviewed |  |
+| `CBFontStorage::CBFontStorage` | done | `luma-adventure/src/text.rs` `FontBank::new`. |
+| `CBFontStorage::~CBFontStorage` | replaced | Rust ownership; nothing observable. (The `Removing orphan font` log lines are not written.) |
+| `CBFontStorage::Cleanup` | replaced | Rust ownership; no font file is registered with the system, so there is nothing to unregister. |
+| `CBFontStorage::RegisterTTFont` | partial | Replaced by reading `FILENAME` through the Vfs (`luma-adventure/src/text.rs` `TrueTypeFont::load`, `FaceSet::from_bytes`), which also finds a file inside a package. Different: the original registers the file with Windows for the whole process, so the faces of one font's `FILENAME` can be named by the `FACE` of any other `.font` file; Luma looks for `FACE` only in the font's own `FILENAME`, then among the system's fonts. |
+| `CBFontStorage::RegTTFontInternal` | replaced | The list only avoids registering a file twice; Luma registers nothing, and a font that failed is remembered in `luma-adventure/src/text.rs` `FontBank::missing` so that it is not tried again. |
+| `CBFontStorage::AddFont` | done | `luma-adventure/src/text.rs` `FontBank::load` (`World::load_font`): one font per file name, ignoring case; none when the file fails. No reference count is kept. |
+| `CBFontStorage::RemoveFont` | replaced | No reference counting: a font stays loaded until the game ends. Nothing a player or a script can see. |
+| `CBFontStorage::Persist` | replaced | Fonts are not part of a saved game: the fonts in use are loaded again from their files after a load (`save.rs`, `FontBank::load`). |
 
 ## `wme_base/BFontTT.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBFontTT::CBFontTT` | unreviewed |  |
-| `CBFontTT::~CBFontTT` | unreviewed |  |
-| `CBFontTT::ClearCache` | unreviewed |  |
-| `CBFontTT::CreateWinFont` | unreviewed |  |
-| `CBFontTT::DeleteWinFont` | unreviewed |  |
-| `CBFontTT::GetTextWidth` | unreviewed |  |
-| `CBFontTT::GetTextHeight` | unreviewed |  |
-| `CBFontTT::DrawText` | unreviewed |  |
-| `CBFontTT::DrawTextDD` | unreviewed |  |
-| `CBFontTT::DrawTextD3D` | unreviewed |  |
-| `CBFontTT::SetTextAlign` | unreviewed |  |
-| `CBFontTT::FormatText` | unreviewed |  |
-| `CBFontTT::FormatTextW` | unreviewed |  |
-| `CBFontTT::GetLetterHeight` | unreviewed |  |
-| `CBFontTT::LoadFile` | unreviewed |  |
-| `CBFontTT::LoadBuffer` | unreviewed |  |
-| `CBFontTT::LoadBuffer TTFONT` | unreviewed |  |
-| `CBFontTT::LoadBuffer SIZE` | unreviewed |  |
-| `CBFontTT::LoadBuffer FACE` | unreviewed |  |
-| `CBFontTT::LoadBuffer FILENAME` | unreviewed |  |
-| `CBFontTT::LoadBuffer BOLD` | unreviewed |  |
-| `CBFontTT::LoadBuffer ITALIC` | unreviewed |  |
-| `CBFontTT::LoadBuffer UNDERLINE` | unreviewed |  |
-| `CBFontTT::LoadBuffer STRIKE` | unreviewed |  |
-| `CBFontTT::LoadBuffer CHARSET` | unreviewed |  |
-| `CBFontTT::LoadBuffer COLOR` | unreviewed |  |
-| `CBFontTT::LoadBuffer ALPHA` | unreviewed |  |
-| `CBFontTT::LoadBuffer LAYER` | unreviewed |  |
-| `CBFontTT::ParseLayer` | unreviewed |  |
-| `CBFontTT::ParseLayer OFFSET_X` | unreviewed |  |
-| `CBFontTT::ParseLayer OFFSET_Y` | unreviewed |  |
-| `CBFontTT::ParseLayer COLOR` | unreviewed |  |
-| `CBFontTT::ParseLayer ALPHA` | unreviewed |  |
-| `CBFontTT::GetWindowsCharset` | unreviewed |  |
-| `CBFontTT::Persist` | unreviewed |  |
+| `CBFontTT::CBFontTT` | partial | `luma-formats/src/font.rs` `TrueTypeFontDef::from_node`. Different defaults: size 12 in the original, 0 in Luma (a `TTFONT` without `SIZE` draws nothing); no font file in the original, `arial.ttf` in Luma (harmless unless the game has a file of that name); 50 cached texts, 30 in Luma (`CACHED_TEXTS`). Same: face `Arial`, no bold, italic, underline, strike. |
+| `CBFontTT::~CBFontTT` | replaced | Rust ownership; nothing observable. |
+| `CBFontTT::ClearCache` | replaced | Rust ownership; `luma-adventure/src/text.rs` clears `texts` when the encoding or the direction changes. |
+| `CBFontTT::CreateWinFont` | partial | GDI's `CreateFont` is replaced by `luma-adventure/src/text.rs` `TrueTypeFont::load` with `font_face.rs` (face `FACE` in the weight and slant of `BOLD`/`ITALIC`, from `FILENAME` or the system's fonts, imitated when the face lacks them) and fontdue. Missing: `STRIKE` (parsed, never drawn) and `CHARSET` (not read). Different: the pixel size is `size * 96 / 72` unrounded, `MulDiv` rounds it to a whole pixel (size 10: 13 px there, 13.33 here). |
+| `CBFontTT::DeleteWinFont` | n/a | Frees the GDI font handle the original creates around every measure and draw. |
+| `CBFontTT::GetTextWidth` | partial | `luma-adventure/src/text.rs` `Font::text_width` (`TrueTypeFont::measure`). Different: the width is the sum of the integer parts of fontdue's advances and kernings (WME Lite's rule), not GDI's `GetTextExtentPoint32`, so it is a few pixels off; a text with line breaks gives its widest line, GDI the whole string on one line. Same: `MaxLength` is ignored by the original too. |
+| `CBFontTT::GetTextHeight` | partial | `luma-adventure/src/text.rs` `Font::text_height`: lines times line height, empty text 0, as the original. Different: the line height is `ceil(ascent - descent + line gap) + 2` (the WME Lite rule, `TrueTypeFont::from_face`) where the original uses the font's cell height (`GetTextExtentPoint32("Ay").cy`: no line gap, no 2 pixels), so a block of text is taller and vertically centred labels sit elsewhere; the lines come from `wrap`, not from `FormatText` (see that row). |
+| `CBFontTT::DrawText` | done | `luma-adventure/src/text.rs` `TrueTypeFont::prepare`/`draw`: an empty text draws nothing; only the texture path exists. |
+| `CBFontTT::DrawTextDD` | n/a | The DirectDraw renderer's path (GDI text straight on the back buffer, layer alpha ignored); Luma has one renderer. |
+| `CBFontTT::DrawTextD3D` | partial | `luma-adventure/src/text.rs` `TrueTypeFont::prepare` (render once to a texture, kept by text, width, alignment, height) and `draw` (one quad per layer with its offset and colour). Different: (1) a text must be prepared before the frame is drawn and the cache holds 30 texts (original: 50, and a text not in the cache is rendered and drawn at once): with more than 30 different texts of one font in a frame the first ones are evicted and do not appear. (2) a window's `ALPHA` (`m_ForceAlphaColor`: its alpha replaces the layer's) is not applied. (3) the image is drawn `offset` pixels above `y` (WME Lite's rule), GDI puts the top of the cell at `y`: not compared pixel for pixel. |
+| `CBFontTT::SetTextAlign` | done | `luma-formats/src/font.rs` `TextAlign::start_x`, per line: left at 0, right at `width - line`, centred at `(width - line) / 2`. |
+| `CBFontTT::FormatText` | partial | `luma-adventure/src/text.rs` `TrueTypeFont::wrap` is WME Lite's `WrapText`, not this loop. Different: (1) after a line that holds a space the original skips one more character, so an empty line right after it (two line breaks) is dropped; Luma keeps the empty line. (2) when the character that overflows is a space, the original breaks at the last space that fitted (or mid-word), Luma at that space. (3) right-to-left: the original gives the line to GDI with `ETO_RTLREADING` (reordering and Arabic shaping by Windows), Luma reverses the characters of the line. (4) the line height is `ceil(ascent - descent + line gap) + 2` (the WME Lite rule, `TrueTypeFont::from_face`) where the original uses the font's cell height (`GetTextExtentPoint32("Ay").cy`: no line gap, no 2 pixels). Same: break at the last space, else mid-word; stop when the next line passes `MaxHeight`; stop when one character does not fit. |
+| `CBFontTT::FormatTextW` | partial | The UTF-8 twin of `FormatText`: `luma-adventure/src/text.rs` `TrueTypeFont::characters` decodes the text, then the same `wrap`; same differences as `CBFontTT::FormatText`. |
+| `CBFontTT::GetLetterHeight` | partial | `luma-adventure/src/text.rs` `Font::line_height`. Different: the line height is `ceil(ascent - descent + line gap) + 2` (the WME Lite rule, `TrueTypeFont::from_face`) where the original uses the font's cell height (`GetTextExtentPoint32("Ay").cy`: no line gap, no 2 pixels). |
+| `CBFontTT::LoadFile` | done | `luma-adventure/src/text.rs` `Font::load` through the Vfs; a failure is kept in `FontBank::missing` and logged. |
+| `CBFontTT::LoadBuffer` | partial | `luma-formats/src/font.rs` `TrueTypeFontDef::from_node`. Missing: `CHARSET`. Different: `SIZE` defaults to 0, not 12; an unknown key (also inside `LAYER`) is a syntax error that fails the font in the original, ignored in Luma. Same: `COLOR`/`ALPHA` make the single default layer when the file has no `LAYER`. |
+| `CBFontTT::LoadBuffer TTFONT` | done | `luma-formats/src/font.rs` `FontFile::parse`: root block. |
+| `CBFontTT::LoadBuffer SIZE` | partial | Read (`luma-formats/src/font.rs` `size`, `pixel_size`). Different: absent, the size is 0 instead of 12; the pixel size is not rounded to a whole pixel as `MulDiv(size, 96, 72)` does. |
+| `CBFontTT::LoadBuffer FACE` | done | `luma-adventure/src/text.rs` `TrueTypeFont::load` with `font_face.rs`: the family is looked for in `FILENAME`'s faces, then in the system's fonts (with metric-compatible substitutes for Arial, Times New Roman, Courier New), default `Arial`. Which font stands in for a missing family is the font mapper's choice in the original and Luma's own here. |
+| `CBFontTT::LoadBuffer FILENAME` | done | `luma-adventure/src/text.rs` `TrueTypeFont::load`: the game's font file, read through the Vfs, used when it holds the `FACE` asked for, or when no font has that family. See `CBFontStorage::RegisterTTFont` for the process-wide registration Luma does not imitate. |
+| `CBFontTT::LoadBuffer BOLD` | done | `font_face.rs` `choose_face`: a bold face of the family, else the glyphs are thickened (`luma-adventure/src/text.rs` `Glyph::emboldened`). |
+| `CBFontTT::LoadBuffer ITALIC` | done | `font_face.rs` `choose_face`: an italic face of the family, else the glyphs are slanted (`luma-adventure/src/text.rs` `Glyph::slanted`). |
+| `CBFontTT::LoadBuffer UNDERLINE` | partial | `luma-adventure/src/text.rs` `TrueTypeFont::render` draws a 1 pixel line under the text, but its row does not follow the line being drawn: in a text of several lines only the first is underlined. Position and thickness are a guess (half the descent under the baseline), not the font's underline metrics that GDI uses. |
+| `CBFontTT::LoadBuffer STRIKE` | partial | Parsed (`luma-formats/src/font.rs` `strike`), never drawn: no strike-through line. |
+| `CBFontTT::LoadBuffer CHARSET` | todo | Not read. The Windows character set of the font (1 default, 3 Baltic, 5 Eastern Europe, 7 Greek, 10 Russian... see `GetWindowsCharset`): in an ANSI game it decides in which code page GDI reads the text's bytes. Luma always reads ANSI text as Windows-1252, so a game written in another code page shows wrong letters. |
+| `CBFontTT::LoadBuffer COLOR` | done | `luma-formats/src/font.rs`: colour of the default layer, used only when the file has no `LAYER`. |
+| `CBFontTT::LoadBuffer ALPHA` | done | `luma-formats/src/font.rs`: opacity of the default layer, 0 when absent as in the original. |
+| `CBFontTT::LoadBuffer LAYER` | done | `luma-formats/src/font.rs`: one layer per block, drawn in file order by `luma-adventure/src/text.rs` `TrueTypeFont::draw`. |
+| `CBFontTT::ParseLayer` | done | `luma-formats/src/font.rs` `TrueTypeFontDef::from_node`, `LAYER` arm: offsets 0 and colour 0,0,0 alpha 0 by default. (An unknown key in the block fails the font in the original; Luma ignores it: noted on `LoadBuffer`.) |
+| `CBFontTT::ParseLayer OFFSET_X` | done | `luma-formats/src/font.rs`: added to the position of the layer's quad (`luma-adventure/src/text.rs` `TrueTypeFont::draw`). |
+| `CBFontTT::ParseLayer OFFSET_Y` | done | `luma-formats/src/font.rs`: added to the position of the layer's quad (`luma-adventure/src/text.rs` `TrueTypeFont::draw`). |
+| `CBFontTT::ParseLayer COLOR` | done | `luma-formats/src/font.rs`: the layer's colour, its alpha kept. |
+| `CBFontTT::ParseLayer ALPHA` | done | `luma-formats/src/font.rs`: the layer's opacity, 0 when absent. |
+| `CBFontTT::GetWindowsCharset` | todo | Maps the `CHARSET` number (1 to 18) to a Windows character set, ANSI otherwise. Luma would need the matching code page to decode ANSI text (1250, 1251, 1253, 1254, 1255, 1256, 1257, 1258, 874, 932, 936, 949, 950...) instead of always Windows-1252. |
+| `CBFontTT::Persist` | replaced | Fonts are not part of a saved game: the fonts in use are loaded again from their files after a load (`save.rs`, `FontBank::load`). |
 
 ## `wme_base/BStringTable.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBStringTable::CBStringTable` | unreviewed |  |
-| `CBStringTable::~CBStringTable` | unreviewed |  |
-| `CBStringTable::AddString` | unreviewed |  |
-| `CBStringTable::GetKey` | unreviewed |  |
-| `CBStringTable::Expand` | unreviewed |  |
-| `CBStringTable::ExpandStatic` | unreviewed |  |
-| `CBStringTable::LoadFile` | unreviewed |  |
-| `CBStringTable::LocalizeWindow` | unreviewed |  |
-| `CBStringTable::LocWinCallback` | unreviewed |  |
+| `CBStringTable::CBStringTable` | done | `luma-formats/src/strings.rs` `StringTable::new`. |
+| `CBStringTable::~CBStringTable` | replaced | Rust ownership; nothing observable. |
+| `CBStringTable::AddString` | done | `luma-formats/src/strings.rs` `StringTable::add`: lower-cased key, the last definition wins, `@right-to-left` turns `Game.TextRTL` on (`World::load_string_table`) and nothing turns it off. The duplicate-definition warning is not logged. |
+| `CBStringTable::GetKey` | done | `luma-formats/src/strings.rs` `StringTable::key_of`: the identifier of `/ID/text`, followed through values that are references themselves. |
+| `CBStringTable::Expand` | done | `luma-formats/src/strings.rs` `StringTable::expand` (`World::expand`): the table's text, else the fallback, expanded again while it starts with a slash (16 times at most, where the original recurses without limit). `m_DoNotExpandStrings` is only ever set by the tools. |
+| `CBStringTable::ExpandStatic` | done | Same function as `Expand` in Luma: `luma-formats/src/strings.rs` `StringTable::expand`. |
+| `CBStringTable::LoadFile` | partial | `luma-formats/src/strings.rs` `StringTable::load`, `World::load_string_table`: byte order mark switches to UTF-8 and any other file back to ANSI, key up to the first tab (else the first space), `;` comments, vertical bar to line break, a key alone is an empty text. Different: (1) the original drops the last byte of every line that is followed by a line break (it expects CR LF), so a file with bare LF line ends loses the last character of each text; Luma only removes a CR. (2) when the file cannot be read the original has already emptied the table (`ClearOld`); Luma leaves it as it was. |
+| `CBStringTable::LocalizeWindow` | n/a | Translates the texts of a Win32 dialog (the settings dialog). |
+| `CBStringTable::LocWinCallback` | n/a | `EnumChildWindows` callback of `LocalizeWindow`: Win32 dialogs only. |
 
 ## `wme_base/BStringUtil.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBStringUtil::ToLowerCase` | unreviewed |  |
-| `CBStringUtil::ToUpperCase` | unreviewed |  |
-| `CBStringUtil::CompareNoCase` | unreviewed |  |
-| `CBStringUtil::Split` | unreviewed |  |
-| `CBStringUtil::Replace` | unreviewed |  |
-| `CBStringUtil::Trim` | unreviewed |  |
+| `CBStringUtil::ToLowerCase` | replaced | Generic helper with no behaviour of its own; Rust `str` methods stand for it. Its callers are `3DEffect.cpp`, `3DEffectScript.cpp` and `ScEngine.cpp`, reviewed in their own tables. |
+| `CBStringUtil::ToUpperCase` | replaced | Generic helper with no behaviour of its own; Rust `str` methods stand for it. Its callers are `3DEffect.cpp`, `3DEffectScript.cpp` and `ScEngine.cpp`, reviewed in their own tables. |
+| `CBStringUtil::CompareNoCase` | replaced | Generic helper with no behaviour of its own; Rust `str` methods stand for it. Its callers are `3DEffect.cpp`, `3DEffectScript.cpp` and `ScEngine.cpp`, reviewed in their own tables. |
+| `CBStringUtil::Split` | replaced | Generic helper with no behaviour of its own; Rust `str` methods stand for it. Its callers are `3DEffect.cpp`, `3DEffectScript.cpp` and `ScEngine.cpp`, reviewed in their own tables. (Only the effect-script parser uses it; empty items are dropped unless asked.) |
+| `CBStringUtil::Replace` | replaced | Generic helper with no behaviour of its own; Rust `str` methods stand for it. Its callers are `3DEffect.cpp`, `3DEffectScript.cpp` and `ScEngine.cpp`, reviewed in their own tables. |
+| `CBStringUtil::Trim` | replaced | Generic helper with no behaviour of its own; Rust `str` methods stand for it. Its callers are `3DEffect.cpp`, `3DEffectScript.cpp` and `ScEngine.cpp`, reviewed in their own tables. (It strips spaces, tabs and CR, not LF: to keep in mind when the effect-script parser is ported.) |
 
 ## `wme_base/BTextUtils.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBTextUtils::CBTextUtils` | unreviewed |  |
-| `CBTextUtils::~CBTextUtils` | unreviewed |  |
-| `CBTextUtils::ConvertToNative` | unreviewed |  |
-| `CBTextUtils::SetWindowText` | unreviewed |  |
-| `CBTextUtils::GetTextLength` | unreviewed |  |
-| `CBTextUtils::Utf8ToUnicode` | unreviewed |  |
-| `CBTextUtils::AnsiToUnicode` | unreviewed |  |
-| `CBTextUtils::AnsiToUtf8` | unreviewed |  |
-| `CBTextUtils::UnicodeToUtf8` | unreviewed |  |
-| `CBTextUtils::Utf8ToAnsi` | unreviewed |  |
-| `CBTextUtils::NativeToUnicode` | unreviewed |  |
+| `CBTextUtils::CBTextUtils` | n/a | Empty: the class only has static functions and is never instantiated. |
+| `CBTextUtils::~CBTextUtils` | n/a | Empty: the class only has static functions and is never instantiated. |
+| `CBTextUtils::ConvertToNative` | partial | `luma-adventure/src/text.rs` `TrueTypeFont::characters`: a UTF-8 game's text is decoded (`utf8_to_text`), an ANSI game's bytes are read as Windows-1252 (`ansi_to_text`). Different: the original hands ANSI bytes to GDI, which reads them in the code page of the font's `CHARSET` (or the system's), so ANSI games in another code page come out wrong in Luma (see the `CHARSET` row). `MaxLength` is not needed: the editor cuts its text itself. |
+| `CBTextUtils::SetWindowText` | n/a | Win32 `SetWindowText` wrapper (ANSI, wide, or Windows 9x fallback); its callers are the game window's title and the settings dialog, rows of the game and platform tables. |
+| `CBTextUtils::GetTextLength` | done | `luma-script/src/value.rs` `Value::get_property` `Length`: characters in a UTF-8 game, bytes in an ANSI game. |
+| `CBTextUtils::Utf8ToUnicode` | done | `luma-script/src/classes/mod.rs` `utf8_to_text`; an invalid sequence becomes U+FFFD, as Windows does. |
+| `CBTextUtils::AnsiToUnicode` | partial | `World::display_text` and `text.rs` `ansi_to_text`: ANSI bytes are read as Latin-1/Windows-1252. The original uses the system's ANSI code page (`CP_ACP`): spoken text and saved-game names of an ANSI game in another code page differ. |
+| `CBTextUtils::AnsiToUtf8` | done | `World::game_text` (`text_to_utf8`), used for an editor's `Text` in a UTF-8 game. An editor holds Unicode characters in Luma, so nothing is lost in the round trip. |
+| `CBTextUtils::UnicodeToUtf8` | done | `luma-script/src/classes/mod.rs` `text_to_utf8`. |
+| `CBTextUtils::Utf8ToAnsi` | partial | `luma-adventure/src/text.rs` `text_to_ansi` (bitmap fonts) and `World::display_text` (editor `Text`): the characters of Windows-1252, `?` for the others. Different: the original converts to the system's ANSI code page, with Windows' best-fit substitutions: a UTF-8 game whose bitmap fonts are laid out for another code page (1250, 1251, 1253...) draws `?` in Luma. |
+| `CBTextUtils::NativeToUnicode` | done | `World::display_text`: `AnsiToUnicode` or `Utf8ToUnicode` by the game's encoding (code page caveat on `AnsiToUnicode`). Its only caller is the Windows Game Explorer helper. |
 
 ## `wme_base/UIButton.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CUIButton::CUIButton` | unreviewed |  |
-| `CUIButton::~CUIButton` | unreviewed |  |
-| `CUIButton::LoadFile` | unreviewed |  |
-| `CUIButton::LoadBuffer` | unreviewed |  |
-| `CUIButton::LoadBuffer BUTTON` | unreviewed |  |
-| `CUIButton::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CUIButton::LoadBuffer DISABLED` | unreviewed |  |
-| `CUIButton::LoadBuffer VISIBLE` | unreviewed |  |
-| `CUIButton::LoadBuffer FOCUSABLE` | unreviewed |  |
-| `CUIButton::LoadBuffer BACK_HOVER` | unreviewed |  |
-| `CUIButton::LoadBuffer BACK_PRESS` | unreviewed |  |
-| `CUIButton::LoadBuffer BACK_DISABLE` | unreviewed |  |
-| `CUIButton::LoadBuffer BACK_FOCUS` | unreviewed |  |
-| `CUIButton::LoadBuffer BACK` | unreviewed |  |
-| `CUIButton::LoadBuffer CENTER_IMAGE` | unreviewed |  |
-| `CUIButton::LoadBuffer IMAGE_HOVER` | unreviewed |  |
-| `CUIButton::LoadBuffer IMAGE_PRESS` | unreviewed |  |
-| `CUIButton::LoadBuffer IMAGE_DISABLE` | unreviewed |  |
-| `CUIButton::LoadBuffer IMAGE_FOCUS` | unreviewed |  |
-| `CUIButton::LoadBuffer IMAGE` | unreviewed |  |
-| `CUIButton::LoadBuffer FONT_HOVER` | unreviewed |  |
-| `CUIButton::LoadBuffer FONT_PRESS` | unreviewed |  |
-| `CUIButton::LoadBuffer FONT_DISABLE` | unreviewed |  |
-| `CUIButton::LoadBuffer FONT_FOCUS` | unreviewed |  |
-| `CUIButton::LoadBuffer FONT` | unreviewed |  |
-| `CUIButton::LoadBuffer TEXT_ALIGN` | unreviewed |  |
-| `CUIButton::LoadBuffer TEXT` | unreviewed |  |
-| `CUIButton::LoadBuffer X` | unreviewed |  |
-| `CUIButton::LoadBuffer Y` | unreviewed |  |
-| `CUIButton::LoadBuffer WIDTH` | unreviewed |  |
-| `CUIButton::LoadBuffer HEIGHT` | unreviewed |  |
-| `CUIButton::LoadBuffer CURSOR` | unreviewed |  |
-| `CUIButton::LoadBuffer NAME` | unreviewed |  |
-| `CUIButton::LoadBuffer EVENTS` | unreviewed |  |
-| `CUIButton::LoadBuffer SCRIPT` | unreviewed |  |
-| `CUIButton::LoadBuffer CAPTION` | unreviewed |  |
-| `CUIButton::LoadBuffer PARENT_NOTIFY` | unreviewed |  |
-| `CUIButton::LoadBuffer PRESSED` | unreviewed |  |
-| `CUIButton::LoadBuffer PIXEL_PERFECT` | unreviewed |  |
-| `CUIButton::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CUIButton::SaveAsText` | unreviewed |  |
-| `CUIButton::CorrectSize` | unreviewed |  |
-| `CUIButton::Display` | unreviewed |  |
-| `CUIButton::Press` | unreviewed |  |
-| `CUIButton::ScCallMethod` | unreviewed |  |
-| `CUIButton::ScGetProperty` | unreviewed |  |
-| `CUIButton::ScSetProperty` | unreviewed |  |
-| `CUIButton::ScToString` | unreviewed |  |
-| `CUIButton::Persist` | unreviewed |  |
+| `CUIButton::CUIButton` | partial | `luma-adventure/src/ui.rs` `ButtonState::default`, `Control::new`. One default differs: `m_Align` is `TAL_CENTER`, but `ButtonState::default()` gives `TextAlign::Left`. Buttons read from a file get Center from `luma-formats/src/window.rs` `ButtonDef::default`; a button made by a script (`CreateButton`) gets a left-aligned label. Rest equal: no state images, backs or fonts, not focusable, not pressed, no centred image, not pixel perfect. |
+| `CUIButton::~CUIButton` | replaced | Rust ownership; nothing observable. |
+| `CUIButton::LoadFile` | partial | Only reached through `TEMPLATE` (`luma-formats/src/window.rs` `ButtonDef::apply_counted`). A missing file is logged and skipped; a file that does not parse or has no `BUTTON` root is skipped without a log. The original fails the control, and with it the window being loaded. |
+| `CUIButton::LoadBuffer` | partial | `luma-formats/src/window.rs` `ButtonDef::apply_counted` reads the keys in file order, `luma-adventure/src/ui.rs` `apply_button_def` loads what they name, then `correct_size`. Different: (1) a `BACK`, `IMAGE`, `FONT` or `CURSOR` (any state) that fails to load fails the control and its window in the original; Luma logs it and keeps the control without it. (2) an unknown key is a syntax error there, ignored here. (3) `CorrectSize` runs once at the end, not also at the end of each `TEMPLATE`. |
+| `CUIButton::LoadBuffer BUTTON` | done | `luma-formats/src/window.rs` `WindowDef::apply_with` (a block in a window) and `ButtonDef::parse` (a file's root). |
+| `CUIButton::LoadBuffer TEMPLATE` | partial | `luma-formats/src/window.rs` `ButtonDef::apply_counted`: the template file is applied where the key stands, so later keys override it (8 deep, 32 files at most). Different: the original also runs `CorrectSize` at the end of the template, so a size taken there from the template's image (or text) stays when later keys change the image; a template that cannot be loaded fails the control (see `LoadFile`). |
+| `CUIButton::LoadBuffer DISABLED` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: the control ignores the mouse and the focus. |
+| `CUIButton::LoadBuffer VISIBLE` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: not drawn, no hit area. |
+| `CUIButton::LoadBuffer FOCUSABLE` | done | `luma-adventure/src/ui.rs` `apply_button_def`: `can_focus`. |
+| `CUIButton::LoadBuffer BACK_HOVER` | done | `luma-adventure/src/ui.rs` `apply_button_def` (`load_tiled`), chosen by state in `draw_button`: disabled, pressed, hover, focus, else `BACK`. |
+| `CUIButton::LoadBuffer BACK_PRESS` | done | `luma-adventure/src/ui.rs` `apply_button_def` (`load_tiled`), chosen by state in `draw_button`: disabled, pressed, hover, focus, else `BACK`. |
+| `CUIButton::LoadBuffer BACK_DISABLE` | done | `luma-adventure/src/ui.rs` `apply_button_def` (`load_tiled`), chosen by state in `draw_button`: disabled, pressed, hover, focus, else `BACK`. |
+| `CUIButton::LoadBuffer BACK_FOCUS` | done | `luma-adventure/src/ui.rs` `apply_button_def` (`load_tiled`), chosen by state in `draw_button`: disabled, pressed, hover, focus, else `BACK`. |
+| `CUIButton::LoadBuffer BACK` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: tiled background (`load_tiled`), drawn first, rounds the size to whole tiles. |
+| `CUIButton::LoadBuffer CENTER_IMAGE` | done | `luma-adventure/src/ui.rs` `draw_button`: the image is centred in the button from its first frame's size. (The pixel-perfect hit area ignores it: see `PIXEL_PERFECT`.) |
+| `CUIButton::LoadBuffer IMAGE_HOVER` | done | `luma-adventure/src/ui.rs` `apply_button_def`, chosen by state in `Control::button_image_slot`, each with its own animation; also the fallbacks of `CorrectSize`. |
+| `CUIButton::LoadBuffer IMAGE_PRESS` | done | `luma-adventure/src/ui.rs` `apply_button_def`, chosen by state in `Control::button_image_slot`, each with its own animation; also the fallbacks of `CorrectSize`. |
+| `CUIButton::LoadBuffer IMAGE_DISABLE` | done | `luma-adventure/src/ui.rs` `apply_button_def`, chosen by state in `Control::button_image_slot`, each with its own animation; also the fallbacks of `CorrectSize`. |
+| `CUIButton::LoadBuffer IMAGE_FOCUS` | done | `luma-adventure/src/ui.rs` `apply_button_def`, chosen by state in `Control::button_image_slot`, each with its own animation; also the fallbacks of `CorrectSize`. |
+| `CUIButton::LoadBuffer IMAGE` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: sprite or image (`load_ui_image`), gives the size when none is set. |
+| `CUIButton::LoadBuffer FONT_HOVER` | done | `luma-adventure/src/ui.rs` `apply_button_def`, chosen by state in `button_font`, else `FONT`, else the system font. |
+| `CUIButton::LoadBuffer FONT_PRESS` | done | `luma-adventure/src/ui.rs` `apply_button_def`, chosen by state in `button_font`, else `FONT`, else the system font. |
+| `CUIButton::LoadBuffer FONT_DISABLE` | done | `luma-adventure/src/ui.rs` `apply_button_def`, chosen by state in `button_font`, else `FONT`, else the system font. |
+| `CUIButton::LoadBuffer FONT_FOCUS` | done | `luma-adventure/src/ui.rs` `apply_button_def`, chosen by state in `button_font`, else `FONT`, else the system font. |
+| `CUIButton::LoadBuffer FONT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `load_font`; without it the system font. |
+| `CUIButton::LoadBuffer TEXT_ALIGN` | done | `luma-formats/src/window.rs`: `left`, `right`, anything else centred. |
+| `CUIButton::LoadBuffer TEXT` | done | `luma-formats/src/window.rs` `control_text` (vertical bar to line break), then the string table (`luma-adventure/src/ui.rs` `apply_button_def`). |
+| `CUIButton::LoadBuffer X` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: position in the parent window. |
+| `CUIButton::LoadBuffer Y` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: position in the parent window. |
+| `CUIButton::LoadBuffer WIDTH` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`; 0 or less is corrected from the image, else 100. |
+| `CUIButton::LoadBuffer HEIGHT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`; 0 or less is corrected from the image. |
+| `CUIButton::LoadBuffer CURSOR` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `load_cursor`; the cursor shown over the control (`natives_object.rs`). |
+| `CUIButton::LoadBuffer NAME` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`. |
+| `CUIButton::LoadBuffer EVENTS` | done | In the original's token table but handled by no case: read and ignored. Luma ignores it too. |
+| `CUIButton::LoadBuffer SCRIPT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `World::attach`, in file order. |
+| `CUIButton::LoadBuffer CAPTION` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`. |
+| `CUIButton::LoadBuffer PARENT_NOTIFY` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: a press (or an edit) raises an event named after the control on its parent. |
+| `CUIButton::LoadBuffer PRESSED` | partial | `luma-adventure/src/ui.rs` `stay_pressed`: the pressed back, image and font are shown. Different: Luma also shifts the image and the label by one pixel; the original shifts only while the button is really pressed (see `CUIButton::Display`). |
+| `CUIButton::LoadBuffer PIXEL_PERFECT` | partial | `luma-adventure/src/ui.rs` `window_hits`: the hit area is the opaque pixels of the plain `IMAGE` at the button's corner. The original registers the image it draws: the state's image, at the `CENTER_IMAGE` position (see `CUIButton::Display`). |
+| `CUIButton::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once unless the game runs in editor mode: no effect at run time. |
+| `CUIButton::SaveAsText` | n/a | Only the editors call it (SceneEdit, WindowEdit through the tools); no script method and nothing in the engine reaches it. |
+| `CUIButton::CorrectSize` | partial | `luma-adventure/src/ui.rs` `World::correct_size`: image order (normal, disabled, hover, pressed, focus), 100 wide without image, at least the text's height, 100 high when still 0, `BACK` rounding. Different: a `TEXT` that is present but empty still counts in the original (a bitmap font answers one line for an empty text): the button is at least one line high. Luma treats an empty text as none, so such a button is 100 high without an image, and is not raised to the line height with a small image. |
+| `CUIButton::Display` | partial | `luma-adventure/src/ui.rs` `update_button` (state) and `draw_button`. Same: hover rule (active object, interactive or semi-frozen), fire on release or 100 ms after `Press()`, state order (disabled, pressed, hover, focus) with fallbacks, centred image, label centred vertically, accessibility hint (`update_accessibility`). Different: (1) `PRESSED` (stay pressed) shifts image and label by 1 pixel in Luma; the original shifts only for a real press or a one-time press. (2) the sprites not shown are not reset (`CBSprite::Reset`): a state image's animation goes on from where it stopped instead of starting again. (3) `PIXEL_PERFECT`: Luma's hit area comes from the plain `IMAGE` at the button's corner; the original registers the image actually drawn (state image, `CENTER_IMAGE` offset, pressed shift) and uses the rectangle only when the button has no `IMAGE`. |
+| `CUIButton::Press` | done | `luma-adventure/src/ui.rs` `World::press_button`: `Press` on the button, the listener (`ButtonListener`), an event named after the button on its parent with `PARENT_NOTIFY`, one-time press cleared. |
+| `CUIButton::ScCallMethod` | partial | `luma-adventure/src/natives_ui.rs` `control_call`: the four `Set*Font`, the four `Set*Image`, `Get*Image`, `Get*ImageObject` and `Press` are there. Different: `Press()` is ignored by the original on a hidden or disabled button; `press_button_later` has no such test: a disabled button fires, a hidden one fires as soon as it is shown. |
+| `CUIButton::ScGetProperty` | done | `luma-adventure/src/natives_ui.rs` `control_get`: `Type` (`button`), `TextAlign`, `Focusable`, `Pressed`, `PixelPerfect`, then the control's. |
+| `CUIButton::ScSetProperty` | partial | `luma-adventure/src/natives_ui.rs` `control_set`: `TextAlign`, `Focusable`, `Pressed`, `PixelPerfect`. Minor: a `TextAlign` above 2 becomes Left (0) in the original, Center in `luma-formats/src/font.rs` `TextAlign::from_code`. |
+| `CUIButton::ScToString` | done | `luma-adventure/src/world.rs` `to_string`: `[button]`. |
+| `CUIButton::Persist` | replaced | The whole `Ui` (every `Control` with its kind's state) is saved and restored by serde (`luma-adventure/src/save.rs`); images, fonts and cursors are loaded again from their files. `one_time_press` is kept where the original clears it on load: harmless. |
 
 ## `wme_base/UIEdit.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CUIEdit::CUIEdit` | unreviewed |  |
-| `CUIEdit::~CUIEdit` | unreviewed |  |
-| `CUIEdit::LoadFile` | unreviewed |  |
-| `CUIEdit::LoadBuffer` | unreviewed |  |
-| `CUIEdit::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CUIEdit::LoadBuffer DISABLED` | unreviewed |  |
-| `CUIEdit::LoadBuffer VISIBLE` | unreviewed |  |
-| `CUIEdit::LoadBuffer BACK` | unreviewed |  |
-| `CUIEdit::LoadBuffer IMAGE` | unreviewed |  |
-| `CUIEdit::LoadBuffer FONT_SELECTED` | unreviewed |  |
-| `CUIEdit::LoadBuffer FONT` | unreviewed |  |
-| `CUIEdit::LoadBuffer TEXT` | unreviewed |  |
-| `CUIEdit::LoadBuffer X` | unreviewed |  |
-| `CUIEdit::LoadBuffer Y` | unreviewed |  |
-| `CUIEdit::LoadBuffer WIDTH` | unreviewed |  |
-| `CUIEdit::LoadBuffer HEIGHT` | unreviewed |  |
-| `CUIEdit::LoadBuffer CURSOR_BLINK_RATE` | unreviewed |  |
-| `CUIEdit::LoadBuffer CURSOR` | unreviewed |  |
-| `CUIEdit::LoadBuffer FRAME_WIDTH` | unreviewed |  |
-| `CUIEdit::LoadBuffer NAME` | unreviewed |  |
-| `CUIEdit::LoadBuffer SCRIPT` | unreviewed |  |
-| `CUIEdit::LoadBuffer PARENT_NOTIFY` | unreviewed |  |
-| `CUIEdit::LoadBuffer MAX_LENGTH` | unreviewed |  |
-| `CUIEdit::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CUIEdit::LoadBuffer EDIT` | unreviewed |  |
-| `CUIEdit::LoadBuffer CAPTION` | unreviewed |  |
-| `CUIEdit::SaveAsText` | unreviewed |  |
-| `CUIEdit::ScCallMethod` | unreviewed |  |
-| `CUIEdit::ScGetProperty` | unreviewed |  |
-| `CUIEdit::ScSetProperty` | unreviewed |  |
-| `CUIEdit::ScToString` | unreviewed |  |
-| `CUIEdit::SetCursorChar` | unreviewed |  |
-| `CUIEdit::Display` | unreviewed |  |
-| `CUIEdit::HandleKeypress` | unreviewed |  |
-| `CUIEdit::DeleteChars` | unreviewed |  |
-| `CUIEdit::InsertChars` | unreviewed |  |
-| `CUIEdit::Persist` | unreviewed |  |
+| `CUIEdit::CUIEdit` | partial | `luma-adventure/src/ui.rs` `EditState::default`, `Control::new`. One default differs: the caret blink rate is the system's (`GetCaretBlinkTime`, 530 ms on a default Windows), 600 in Luma. Rest equal: a vertical bar as caret, selection at the end, no scroll, frame 0, no length limit, focusable, empty text. |
+| `CUIEdit::~CUIEdit` | replaced | Rust ownership; nothing observable. |
+| `CUIEdit::LoadFile` | partial | Only reached through `TEMPLATE` (`luma-formats/src/window.rs` `EditDef::apply_counted`). A missing file is logged and skipped; a file that does not parse or has no `EDIT` root is skipped without a log. The original fails the control, and with it the window being loaded. |
+| `CUIEdit::LoadBuffer` | partial | `luma-formats/src/window.rs` `EditDef::apply_counted` reads the keys in file order, `luma-adventure/src/ui.rs` `apply_edit_def` loads what they name, then `correct_size`. Different: (1) a `BACK`, `IMAGE`, `FONT` or `CURSOR` (any state) that fails to load fails the control and its window in the original; Luma logs it and keeps the control without it. (2) an unknown key is a syntax error there, ignored here. (3) `CorrectSize` runs once at the end, not also at the end of each `TEMPLATE`. (4) `TEXT` is not looked up in the string table. |
+| `CUIEdit::LoadBuffer TEMPLATE` | partial | `luma-formats/src/window.rs` `EditDef::apply_counted`: the template file is applied where the key stands, so later keys override it (8 deep, 32 files at most). Different: the original also runs `CorrectSize` at the end of the template, so a size taken there from the template's image (or text) stays when later keys change the image; a template that cannot be loaded fails the control (see `LoadFile`). |
+| `CUIEdit::LoadBuffer DISABLED` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: the control ignores the mouse and the focus. |
+| `CUIEdit::LoadBuffer VISIBLE` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: not drawn, no hit area. |
+| `CUIEdit::LoadBuffer BACK` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: tiled background (`load_tiled`), drawn first, rounds the size to whole tiles. |
+| `CUIEdit::LoadBuffer IMAGE` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: sprite or image (`load_ui_image`), gives the size when none is set. |
+| `CUIEdit::LoadBuffer FONT_SELECTED` | partial | Loaded (`luma-adventure/src/ui.rs` `apply_edit_def`, `font_selected`), never used: the selected part of the text is drawn with the normal font and is not told apart (see `CUIEdit::Display`). |
+| `CUIEdit::LoadBuffer FONT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `load_font`; without it the system font. |
+| `CUIEdit::LoadBuffer TEXT` | partial | `luma-adventure/src/ui.rs` `apply_edit_def` sets the text (vertical bar to line break) but does not expand it through the string table as the original does (`Game->m_StringTable->Expand`). |
+| `CUIEdit::LoadBuffer X` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: position in the parent window. |
+| `CUIEdit::LoadBuffer Y` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: position in the parent window. |
+| `CUIEdit::LoadBuffer WIDTH` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`; 0 or less is corrected from the image, else 100. |
+| `CUIEdit::LoadBuffer HEIGHT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`; 0 or less is corrected from the image. |
+| `CUIEdit::LoadBuffer CURSOR_BLINK_RATE` | done | `luma-adventure/src/ui.rs` `cursor_blink_rate`, milliseconds between blinks (`update_edit`). |
+| `CUIEdit::LoadBuffer CURSOR` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `load_cursor`; the cursor shown over the control (`natives_object.rs`). |
+| `CUIEdit::LoadBuffer FRAME_WIDTH` | done | `luma-adventure/src/ui.rs` `frame_width`: margin between the frame and the text, in the scroll rule and the drawing. |
+| `CUIEdit::LoadBuffer NAME` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`. |
+| `CUIEdit::LoadBuffer SCRIPT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `World::attach`, in file order. |
+| `CUIEdit::LoadBuffer PARENT_NOTIFY` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: a press (or an edit) raises an event named after the control on its parent. |
+| `CUIEdit::LoadBuffer MAX_LENGTH` | done | `luma-adventure/src/ui.rs` `max_length`: characters accepted; negative for no limit (`edit_key`). |
+| `CUIEdit::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once unless the game runs in editor mode: no effect at run time. |
+| `CUIEdit::LoadBuffer EDIT` | done | `luma-formats/src/window.rs` `WindowDef::apply_with` (a block in a window) and `EditDef::parse` (a file's root). |
+| `CUIEdit::LoadBuffer CAPTION` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`. |
+| `CUIEdit::SaveAsText` | n/a | Only the editors call it (SceneEdit, WindowEdit through the tools); no script method and nothing in the engine reaches it. |
+| `CUIEdit::ScCallMethod` | done | `luma-adventure/src/natives_ui.rs` `control_call`: `SetSelectedFont`, then the control's. |
+| `CUIEdit::ScGetProperty` | partial | `luma-adventure/src/natives_ui.rs` `control_get`: `Type` (`editor`), `SelStart`, `SelEnd`, `CursorBlinkRate`, `CursorChar`, `FrameWidth`, `MaxLength`, `Text` (converted in a UTF-8 game). Different: `SelStart`/`SelEnd` are byte offsets in Luma's UTF-8 text, character indexes in the original: they differ after any non-ASCII character. Minor: they are answered clamped to the text (the original answers the raw value, 10000 before the first frame); `CursorChar` is one character. |
+| `CUIEdit::ScSetProperty` | partial | `luma-adventure/src/natives_ui.rs` `control_set`. Different: `SelStart`/`SelEnd` are taken as byte offsets (then moved back to a character boundary), character indexes in the original; `CursorChar` keeps only the first character, the original keeps the string (it measures all of it and draws its first character). `Text`, `CursorBlinkRate`, `FrameWidth`, `MaxLength` equal. |
+| `CUIEdit::ScToString` | partial | `luma-adventure/src/world.rs` `to_string` answers `[editor]` (from `Control::type_name`); the original answers `[edit]`. |
+| `CUIEdit::SetCursorChar` | partial | `luma-adventure/src/natives_ui.rs` `control_set` `CursorChar`: only the first character is kept; the original copies the whole string. |
+| `CUIEdit::Display` | partial | `luma-adventure/src/ui.rs` `update_edit` (scroll, blink) and `draw_edit`. Same: text drawn as ANSI characters whatever the game's encoding, back and image, caret kept in view by the scroll offset, right-to-left alignment offset, hit rectangle, accessibility hint. Different: (1) the selection is not drawn: no `FONT_SELECTED`, and the scroll rule measures everything with the normal font. (2) while the caret is in the hidden half of its blink, Luma draws the text without it, so the text after the caret moves left by the caret's width at every blink; the original always keeps the caret's room while the editor is focused. (3) the text is not cut at the right frame: the original draws each part in the room left up to `x + width - frame` and one letter high, Luma draws with no width. (4) minor: the blink starts visible (the original's first test hides it) and an unfocused editor resets it. |
+| `CUIEdit::HandleKeypress` | partial | `luma-adventure/src/ui.rs` `World::edit_key`. Same: Escape, Tab, Return left to others; Backspace, Delete, arrows, Home, End, Shift to extend, Ctrl+A, right-to-left variants, the typed key spoken. Missing: Ctrl+C, Ctrl+X, Ctrl+V (clipboard). Different: (1) typing over a selection made from left to right: Luma inserts at the selection's start; the original deletes, then inserts at the old `SelEnd` (clamped to the text), that is after the text that followed the selection (an original bug, to decide). (2) the parent is notified once per key; the original once per `DeleteChars` and once per `InsertChars` (twice when typing over a selection). (3) Ctrl+A is not refused while Alt is down (AltGr). |
+| `CUIEdit::DeleteChars` | done | Inlined in `luma-adventure/src/ui.rs` `edit_key` (`replace_range` on the ordered, clamped range), parent event queued with `PARENT_NOTIFY`. |
+| `CUIEdit::InsertChars` | done | Inlined in `luma-adventure/src/ui.rs` `edit_key`: inserted at the caret when the length stays under `MAX_LENGTH` (counted in characters), parent event queued with `PARENT_NOTIFY`. |
+| `CUIEdit::Persist` | replaced | The whole `Ui` (every `Control` with its kind's state) is saved and restored by serde (`luma-adventure/src/save.rs`); images, fonts and cursors are loaded again from their files. The blink state is kept where the original resets it on load: harmless. |
 
 ## `wme_base/UIMarkup.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CUIMarkup::CUIMarkup` | unreviewed |  |
-| `CUIMarkup::~CUIMarkup` | unreviewed |  |
-| `CUIMarkup::ScCallMethod` | unreviewed |  |
-| `CUIMarkup::ScSetProperty` | unreviewed |  |
-| `CUIMarkup::ScGetProperty` | unreviewed |  |
-| `CUIMarkup::ScToString` | unreviewed |  |
-| `CUIMarkup::Display` | unreviewed |  |
-| `CUIMarkup::LoadFile` | unreviewed |  |
-| `CUIMarkup::LoadBuffer` | unreviewed |  |
-| `CUIMarkup::LoadBuffer HTML` | unreviewed |  |
-| `CUIMarkup::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CUIMarkup::LoadBuffer VISIBLE` | unreviewed |  |
-| `CUIMarkup::LoadBuffer X` | unreviewed |  |
-| `CUIMarkup::LoadBuffer Y` | unreviewed |  |
-| `CUIMarkup::LoadBuffer WIDTH` | unreviewed |  |
-| `CUIMarkup::LoadBuffer HEIGHT` | unreviewed |  |
-| `CUIMarkup::LoadBuffer NAME` | unreviewed |  |
-| `CUIMarkup::LoadBuffer SCRIPT` | unreviewed |  |
-| `CUIMarkup::LoadBuffer PARENT_NOTIFY` | unreviewed |  |
-| `CUIMarkup::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CUIMarkup::Persist` | unreviewed |  |
+| `CUIMarkup::CUIMarkup` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::~CUIMarkup` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::ScCallMethod` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::ScSetProperty` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::ScGetProperty` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::ScToString` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::Display` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadFile` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer HTML` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer TEMPLATE` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer VISIBLE` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer X` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer Y` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer WIDTH` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer HEIGHT` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer NAME` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer SCRIPT` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer PARENT_NOTIFY` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::LoadBuffer EDITOR_PROPERTY` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
+| `CUIMarkup::Persist` | n/a | Never created: no definition-file key and no script method makes a `CUIMarkup` (an unfinished HTML control: its `Display` draws nothing, `dcgf.h` only includes the header). |
 
 ## `wme_base/UIObject.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CUIObject::CUIObject` | unreviewed |  |
-| `CUIObject::~CUIObject` | unreviewed |  |
-| `CUIObject::SetText` | unreviewed |  |
-| `CUIObject::Display` | unreviewed |  |
-| `CUIObject::SetListener` | unreviewed |  |
-| `CUIObject::CorrectSize` | unreviewed |  |
-| `CUIObject::ScCallMethod` | unreviewed |  |
-| `CUIObject::ScGetProperty` | unreviewed |  |
-| `CUIObject::ScSetProperty` | unreviewed |  |
-| `CUIObject::ScToString` | unreviewed |  |
-| `CUIObject::IsFocused` | unreviewed |  |
-| `CUIObject::HandleMouse` | unreviewed |  |
-| `CUIObject::Focus` | unreviewed |  |
-| `CUIObject::GetTotalOffset` | unreviewed |  |
-| `CUIObject::Persist` | unreviewed |  |
-| `CUIObject::GetAccessCaption` | unreviewed |  |
-| `CUIObject::SaveAsText` | unreviewed |  |
+| `CUIObject::CUIObject` | done | `luma-adventure/src/ui.rs` `Control::new`: no back, image, font or text, size 0, enabled, visible, no parent notify, not focusable; mouse events while the game is not interactive (`World::non_int_mouse_events`). |
+| `CUIObject::~CUIObject` | replaced | `luma-adventure/src/ui.rs` `World::unload_control`: the control's scripts end and its handle goes, so script values that pointed to it are invalid, as `InvalidateValues` makes them. |
+| `CUIObject::SetText` | done | `luma-adventure/src/ui.rs` `Control::set_text` (`luma-formats/src/window.rs` `control_text`): every vertical bar becomes a line break. |
+| `CUIObject::Display` | done | Empty base method; each kind has its own drawing in `ui.rs`. |
+| `CUIObject::SetListener` | replaced | `luma-adventure/src/ui.rs` `ButtonListener`: an enum on the button names the four listeners the engine installs itself (a menu's shield, the inventory box, the response box and its choices) instead of an object pointer with parameters. |
+| `CUIObject::CorrectSize` | done | `luma-adventure/src/ui.rs` `World::correct_size`: width from the image else 100, height from the image, then the `BACK` rounding. |
+| `CUIObject::ScCallMethod` | partial | `luma-adventure/src/natives_ui.rs` `control_call`/`move_widget`. Wrong: `MoveToTop` aims at index `len - 1` and then takes one off because the target is after the control, so the control ends just under the top one (with two controls nothing moves); the original puts it last. Equal: `SetFont`, `SetImage`, `GetImage`, `GetImageObject`, `Focus`, `MoveAfter`, `MoveBefore`, `MoveToBottom`. |
+| `CUIObject::ScGetProperty` | done | `luma-adventure/src/natives_ui.rs` `control_get`: `Type`, `Name`, `Parent`, `ParentNotify`, `Width`, `Height`, `Visible`, `Disabled`, `Text`, `NextSibling`, `PrevSibling`. |
+| `CUIObject::ScSetProperty` | done | `luma-adventure/src/natives_ui.rs` `control_set`: `Name`, `ParentNotify`, `Width`, `Height`, `Visible`, `Disabled`, `Text`. |
+| `CUIObject::ScToString` | done | Never seen: every control class has its own string form (`world.rs` `to_string`). |
+| `CUIObject::IsFocused` | done | `luma-adventure/src/ui.rs` `World::is_focused`: on the chain of focused controls from the game's focused window. |
+| `CUIObject::HandleMouse` | todo | A left click on a control gives it the focus (`Focus()`): it becomes its window's focused control and its top window comes to the front and takes the keys. Luma's `ui_mouse_down` only notes the captured object and starts a drag; `focus_control` is reached only from the script method `Focus`. So clicking an editor does not let the player type in it, and clicking a window does not raise it. |
+| `CUIObject::Focus` | done | `luma-adventure/src/ui.rs` `World::focus_control`: nothing when a window above is disabled; else each enabled, focusable control on the way up becomes its parent's focused control and the top window is focused. |
+| `CUIObject::GetTotalOffset` | done | `luma-adventure/src/ui.rs` `World::control_screen_position` (the parents' positions, plus the control's own, which the callers of the original add themselves). |
+| `CUIObject::Persist` | replaced | The whole `Ui` (every `Control` with its kind's state) is saved and restored by serde (`luma-adventure/src/save.rs`); images, fonts and cursors are loaded again from their files. |
+| `CUIObject::GetAccessCaption` | partial | `luma-adventure/src/accessibility.rs` `spoken_caption`: the accessibility caption, else the text, else the caption. Minor: an empty text falls through to the caption; the original answers the empty text when the control has one (an editor always has). |
+| `CUIObject::SaveAsText` | n/a | Base method that only fails; the editors' saving. |
 
 ## `wme_base/UIText.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CUIText::CUIText` | unreviewed |  |
-| `CUIText::~CUIText` | unreviewed |  |
-| `CUIText::Display` | unreviewed |  |
-| `CUIText::LoadFile` | unreviewed |  |
-| `CUIText::LoadBuffer` | unreviewed |  |
-| `CUIText::LoadBuffer STATIC` | unreviewed |  |
-| `CUIText::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CUIText::LoadBuffer DISABLED` | unreviewed |  |
-| `CUIText::LoadBuffer VISIBLE` | unreviewed |  |
-| `CUIText::LoadBuffer BACK` | unreviewed |  |
-| `CUIText::LoadBuffer IMAGE` | unreviewed |  |
-| `CUIText::LoadBuffer FONT` | unreviewed |  |
-| `CUIText::LoadBuffer TEXT_ALIGN` | unreviewed |  |
-| `CUIText::LoadBuffer VERTICAL_ALIGN` | unreviewed |  |
-| `CUIText::LoadBuffer TEXT` | unreviewed |  |
-| `CUIText::LoadBuffer X` | unreviewed |  |
-| `CUIText::LoadBuffer Y` | unreviewed |  |
-| `CUIText::LoadBuffer WIDTH` | unreviewed |  |
-| `CUIText::LoadBuffer HEIGHT` | unreviewed |  |
-| `CUIText::LoadBuffer CURSOR` | unreviewed |  |
-| `CUIText::LoadBuffer NAME` | unreviewed |  |
-| `CUIText::LoadBuffer SCRIPT` | unreviewed |  |
-| `CUIText::LoadBuffer CAPTION` | unreviewed |  |
-| `CUIText::LoadBuffer PARENT_NOTIFY` | unreviewed |  |
-| `CUIText::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CUIText::SaveAsText` | unreviewed |  |
-| `CUIText::ScCallMethod` | unreviewed |  |
-| `CUIText::ScGetProperty` | unreviewed |  |
-| `CUIText::ScSetProperty` | unreviewed |  |
-| `CUIText::ScToString` | unreviewed |  |
-| `CUIText::Persist` | unreviewed |  |
-| `CUIText::SizeToFit` | unreviewed |  |
+| `CUIText::CUIText` | done | `luma-adventure/src/ui.rs` `StaticState::default`, `Control::new`: left aligned, vertically centred, not focusable. |
+| `CUIText::~CUIText` | replaced | Rust ownership; nothing observable. |
+| `CUIText::Display` | done | `luma-adventure/src/ui.rs` `update_static` and `draw_static`: back, image, then the text in the control's font (else the system font) at the top, the bottom or the middle of the height, limited to the height; no hit area. (A window's `ALPHA` on the text: see the font rows.) |
+| `CUIText::LoadFile` | partial | Only reached through `TEMPLATE` (`luma-formats/src/window.rs` `StaticDef::apply_counted`). A missing file is logged and skipped; a file that does not parse or has no `STATIC` root is skipped without a log. The original fails the control, and with it the window being loaded. |
+| `CUIText::LoadBuffer` | partial | `luma-formats/src/window.rs` `StaticDef::apply_counted` reads the keys in file order, `luma-adventure/src/ui.rs` `apply_static_def` loads what they name, then `correct_size`. Different: (1) a `BACK`, `IMAGE`, `FONT` or `CURSOR` (any state) that fails to load fails the control and its window in the original; Luma logs it and keeps the control without it. (2) an unknown key is a syntax error there, ignored here. (3) `CorrectSize` runs once at the end, not also at the end of each `TEMPLATE`. |
+| `CUIText::LoadBuffer STATIC` | done | `luma-formats/src/window.rs` `WindowDef::apply_with` (a block in a window) and `StaticDef::parse` (a file's root). |
+| `CUIText::LoadBuffer TEMPLATE` | partial | `luma-formats/src/window.rs` `StaticDef::apply_counted`: the template file is applied where the key stands, so later keys override it (8 deep, 32 files at most). Different: the original also runs `CorrectSize` at the end of the template, so a size taken there from the template's image (or text) stays when later keys change the image; a template that cannot be loaded fails the control (see `LoadFile`). |
+| `CUIText::LoadBuffer DISABLED` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: the control ignores the mouse and the focus. |
+| `CUIText::LoadBuffer VISIBLE` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: not drawn, no hit area. |
+| `CUIText::LoadBuffer BACK` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: tiled background (`load_tiled`), drawn first, rounds the size to whole tiles. |
+| `CUIText::LoadBuffer IMAGE` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: sprite or image (`load_ui_image`), gives the size when none is set. |
+| `CUIText::LoadBuffer FONT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `load_font`; without it the system font. |
+| `CUIText::LoadBuffer TEXT_ALIGN` | done | `luma-formats/src/window.rs`: `left`, `right`, anything else centred; default left. |
+| `CUIText::LoadBuffer VERTICAL_ALIGN` | done | `luma-formats/src/window.rs` `VerticalAlign::from_name`: `top`, `bottom`, anything else centred; default centred. |
+| `CUIText::LoadBuffer TEXT` | done | `luma-formats/src/window.rs` `control_text` (vertical bar to line break), then the string table (`luma-adventure/src/ui.rs` `apply_static_def`). |
+| `CUIText::LoadBuffer X` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: position in the parent window. |
+| `CUIText::LoadBuffer Y` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: position in the parent window. |
+| `CUIText::LoadBuffer WIDTH` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`; 0 or less is corrected from the image, else 100. |
+| `CUIText::LoadBuffer HEIGHT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`; 0 or less is corrected from the image. |
+| `CUIText::LoadBuffer CURSOR` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `load_cursor`; the cursor shown over the control (`natives_object.rs`). |
+| `CUIText::LoadBuffer NAME` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`. |
+| `CUIText::LoadBuffer SCRIPT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `World::attach`, in file order. |
+| `CUIText::LoadBuffer CAPTION` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`. |
+| `CUIText::LoadBuffer PARENT_NOTIFY` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: a press (or an edit) raises an event named after the control on its parent. |
+| `CUIText::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once unless the game runs in editor mode: no effect at run time. |
+| `CUIText::SaveAsText` | n/a | Only the editors call it (SceneEdit, WindowEdit through the tools); no script method and nothing in the engine reaches it. |
+| `CUIText::ScCallMethod` | partial | `luma-adventure/src/natives_ui.rs` `control_call`: `SizeToFit`, `HeightToFit` (`luma-adventure/src/ui.rs` `size_static_to_fit`), then the control's. Minor: with an empty text Luma changes nothing; the original's `HeightToFit` sets the height of an empty text (one line of a bitmap font, 0 for TrueType). |
+| `CUIText::ScGetProperty` | done | `luma-adventure/src/natives_ui.rs` `control_get`: `Type` (`static`), `TextAlign`, `VerticalAlign`, then the control's. |
+| `CUIText::ScSetProperty` | partial | `luma-adventure/src/natives_ui.rs` `control_set`: `TextAlign`, `VerticalAlign`. Minor, out-of-range values: a `TextAlign` above 2 becomes Left (0) in the original, Center in Luma; a `VerticalAlign` outside 0..2 becomes Top (0) in the original, Center in `luma-formats/src/window.rs` `VerticalAlign::from_code`. |
+| `CUIText::ScToString` | done | `luma-adventure/src/world.rs` `to_string`: `[static]`. |
+| `CUIText::Persist` | replaced | The whole `Ui` (every `Control` with its kind's state) is saved and restored by serde (`luma-adventure/src/save.rs`); images, fonts and cursors are loaded again from their files. |
+| `CUIText::SizeToFit` | partial | `luma-adventure/src/ui.rs` `size_static_to_fit`: needs the control's own font; width of the text on one line, then its height in that width. Minor: with an empty text Luma changes nothing; the original sets width 0 and the height of an empty text. |
 
 ## `wme_base/UITiledImage.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CUITiledImage::CUITiledImage` | unreviewed |  |
-| `CUITiledImage::~CUITiledImage` | unreviewed |  |
-| `CUITiledImage::Display` | unreviewed |  |
-| `CUITiledImage::LoadFile` | unreviewed |  |
-| `CUITiledImage::LoadBuffer` | unreviewed |  |
-| `CUITiledImage::LoadBuffer TILED_IMAGE` | unreviewed |  |
-| `CUITiledImage::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CUITiledImage::LoadBuffer IMAGE` | unreviewed |  |
-| `CUITiledImage::LoadBuffer UP_LEFT` | unreviewed |  |
-| `CUITiledImage::LoadBuffer UP_RIGHT` | unreviewed |  |
-| `CUITiledImage::LoadBuffer UP_MIDDLE` | unreviewed |  |
-| `CUITiledImage::LoadBuffer DOWN_LEFT` | unreviewed |  |
-| `CUITiledImage::LoadBuffer DOWN_RIGHT` | unreviewed |  |
-| `CUITiledImage::LoadBuffer DOWN_MIDDLE` | unreviewed |  |
-| `CUITiledImage::LoadBuffer MIDDLE_LEFT` | unreviewed |  |
-| `CUITiledImage::LoadBuffer MIDDLE_RIGHT` | unreviewed |  |
-| `CUITiledImage::LoadBuffer MIDDLE_MIDDLE` | unreviewed |  |
-| `CUITiledImage::LoadBuffer VERTICAL_TILES` | unreviewed |  |
-| `CUITiledImage::LoadBuffer HORIZONTAL_TILES` | unreviewed |  |
-| `CUITiledImage::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CUITiledImage::SaveAsText` | unreviewed |  |
-| `CUITiledImage::CorrectSize` | unreviewed |  |
-| `CUITiledImage::Persist` | unreviewed |  |
+| `CUITiledImage::CUITiledImage` | done | `luma-formats/src/window.rs` `TiledImage::default`: no image, nine empty tiles. |
+| `CUITiledImage::~CUITiledImage` | replaced | Rust ownership; nothing observable. |
+| `CUITiledImage::Display` | partial | `luma-adventure/src/ui.rs` `World::draw_tiled`: corners, edges, then the middle, in whole tiles; nothing without an image. Different: (1) the original steps down the rows by the middle tile's width (`yyy += tile_width`), Luma by its height: they differ when the middle tile is not square. (2) the right tile of the middle rows is placed after `MIDDLE_LEFT`'s width in the original, after `UP_LEFT`'s in Luma (equal unless the rectangles are given by hand with different widths). |
+| `CUITiledImage::LoadFile` | done | `luma-adventure/src/ui.rs` `World::load_tiled`: read through the Vfs, an error is logged and gives no background. |
+| `CUITiledImage::LoadBuffer` | partial | `luma-formats/src/window.rs` `TiledImage::apply`, `luma-adventure/src/ui.rs` `load_tiled`. Different: (1) a `TEMPLATE` is merged first, wherever the key stands; the original loads it in place, so keys written before it are overridden by the template. (2) `HORIZONTAL_TILES`/`VERTICAL_TILES` with fewer than three numbers are ignored (the original takes zeros). (3) an unknown key is a syntax error there, ignored here. Same: the two tile lists together lay out the nine tiles; empty tiles become thirds of the image; a missing `IMAGE` or `TEMPLATE` does not fail the load in the original either (its error code is overwritten by the next key). |
+| `CUITiledImage::LoadBuffer TILED_IMAGE` | done | `luma-formats/src/window.rs` `TiledImage::parse`: required root block. |
+| `CUITiledImage::LoadBuffer TEMPLATE` | partial | `luma-adventure/src/ui.rs` `load_tiled`: the template's image and tiles are the base, the file's image and non-empty tiles go over them. Different: always applied first; the original applies it where the key stands, so keys before it lose to the template. |
+| `CUITiledImage::LoadBuffer IMAGE` | done | `luma-adventure/src/ui.rs` `load_tiled`: the image (default colour key), whose thirds are the default tiles. |
+| `CUITiledImage::LoadBuffer UP_LEFT` | done | `luma-formats/src/window.rs` `TiledImage::apply`: the tile's rectangle in the image (left, top, right, bottom). |
+| `CUITiledImage::LoadBuffer UP_RIGHT` | done | `luma-formats/src/window.rs` `TiledImage::apply`: the tile's rectangle in the image (left, top, right, bottom). |
+| `CUITiledImage::LoadBuffer UP_MIDDLE` | done | `luma-formats/src/window.rs` `TiledImage::apply`: the tile's rectangle in the image (left, top, right, bottom). |
+| `CUITiledImage::LoadBuffer DOWN_LEFT` | done | `luma-formats/src/window.rs` `TiledImage::apply`: the tile's rectangle in the image (left, top, right, bottom). |
+| `CUITiledImage::LoadBuffer DOWN_RIGHT` | done | `luma-formats/src/window.rs` `TiledImage::apply`: the tile's rectangle in the image (left, top, right, bottom). |
+| `CUITiledImage::LoadBuffer DOWN_MIDDLE` | done | `luma-formats/src/window.rs` `TiledImage::apply`: the tile's rectangle in the image (left, top, right, bottom). |
+| `CUITiledImage::LoadBuffer MIDDLE_LEFT` | done | `luma-formats/src/window.rs` `TiledImage::apply`: the tile's rectangle in the image (left, top, right, bottom). |
+| `CUITiledImage::LoadBuffer MIDDLE_RIGHT` | done | `luma-formats/src/window.rs` `TiledImage::apply`: the tile's rectangle in the image (left, top, right, bottom). |
+| `CUITiledImage::LoadBuffer MIDDLE_MIDDLE` | done | `luma-formats/src/window.rs` `TiledImage::apply`: the tile's rectangle in the image (left, top, right, bottom). |
+| `CUITiledImage::LoadBuffer VERTICAL_TILES` | done | `luma-formats/src/window.rs` `TiledImage::apply`: three sizes; with both lists the nine tiles are laid out from them, over any rectangle given. |
+| `CUITiledImage::LoadBuffer HORIZONTAL_TILES` | done | `luma-formats/src/window.rs` `TiledImage::apply`: three sizes; with both lists the nine tiles are laid out from them, over any rectangle given. |
+| `CUITiledImage::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once unless the game runs in editor mode: no effect at run time. |
+| `CUITiledImage::SaveAsText` | n/a | Only the editors call it (SceneEdit, WindowEdit through the tools); no script method and nothing in the engine reaches it. |
+| `CUITiledImage::CorrectSize` | done | `luma-formats/src/window.rs` `TiledImage::corrected_size`: side tiles plus whole middle tiles. (With an empty middle tile the original divides by zero; Luma leaves the size.) |
+| `CUITiledImage::Persist` | replaced | The whole `Ui` (every `Control` with its kind's state) is saved and restored by serde (`luma-adventure/src/save.rs`); images, fonts and cursors are loaded again from their files. |
 
 ## `wme_base/UIWindow.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CUIWindow::CUIWindow` | unreviewed |  |
-| `CUIWindow::~CUIWindow` | unreviewed |  |
-| `CUIWindow::Cleanup` | unreviewed |  |
-| `CUIWindow::Display` | unreviewed |  |
-| `CUIWindow::LoadFile` | unreviewed |  |
-| `CUIWindow::LoadBuffer` | unreviewed |  |
-| `CUIWindow::LoadBuffer WINDOW` | unreviewed |  |
-| `CUIWindow::LoadBuffer ALPHA_COLOR` | unreviewed |  |
-| `CUIWindow::LoadBuffer ALPHA` | unreviewed |  |
-| `CUIWindow::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CUIWindow::LoadBuffer DISABLED` | unreviewed |  |
-| `CUIWindow::LoadBuffer VISIBLE` | unreviewed |  |
-| `CUIWindow::LoadBuffer BACK_INACTIVE` | unreviewed |  |
-| `CUIWindow::LoadBuffer BACK` | unreviewed |  |
-| `CUIWindow::LoadBuffer IMAGE_INACTIVE` | unreviewed |  |
-| `CUIWindow::LoadBuffer IMAGE` | unreviewed |  |
-| `CUIWindow::LoadBuffer FONT_INACTIVE` | unreviewed |  |
-| `CUIWindow::LoadBuffer FONT` | unreviewed |  |
-| `CUIWindow::LoadBuffer TITLE_ALIGN` | unreviewed |  |
-| `CUIWindow::LoadBuffer TITLE_RECT` | unreviewed |  |
-| `CUIWindow::LoadBuffer TITLE` | unreviewed |  |
-| `CUIWindow::LoadBuffer DRAG_RECT` | unreviewed |  |
-| `CUIWindow::LoadBuffer X` | unreviewed |  |
-| `CUIWindow::LoadBuffer Y` | unreviewed |  |
-| `CUIWindow::LoadBuffer WIDTH` | unreviewed |  |
-| `CUIWindow::LoadBuffer HEIGHT` | unreviewed |  |
-| `CUIWindow::LoadBuffer FADE_ALPHA` | unreviewed |  |
-| `CUIWindow::LoadBuffer FADE_COLOR` | unreviewed |  |
-| `CUIWindow::LoadBuffer CURSOR` | unreviewed |  |
-| `CUIWindow::LoadBuffer NAME` | unreviewed |  |
-| `CUIWindow::LoadBuffer BUTTON` | unreviewed |  |
-| `CUIWindow::LoadBuffer STATIC` | unreviewed |  |
-| `CUIWindow::LoadBuffer TRANSPARENT` | unreviewed |  |
-| `CUIWindow::LoadBuffer SCRIPT` | unreviewed |  |
-| `CUIWindow::LoadBuffer CAPTION` | unreviewed |  |
-| `CUIWindow::LoadBuffer PARENT_NOTIFY` | unreviewed |  |
-| `CUIWindow::LoadBuffer MENU` | unreviewed |  |
-| `CUIWindow::LoadBuffer IN_GAME` | unreviewed |  |
-| `CUIWindow::LoadBuffer CLIP_CONTENTS` | unreviewed |  |
-| `CUIWindow::LoadBuffer PAUSE_MUSIC` | unreviewed |  |
-| `CUIWindow::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CUIWindow::LoadBuffer EDIT` | unreviewed |  |
-| `CUIWindow::SaveAsText` | unreviewed |  |
-| `CUIWindow::EnableWidget` | unreviewed |  |
-| `CUIWindow::ShowWidget` | unreviewed |  |
-| `CUIWindow::ScCallMethod` | unreviewed |  |
-| `CUIWindow::ScGetProperty` | unreviewed |  |
-| `CUIWindow::ScSetProperty` | unreviewed |  |
-| `CUIWindow::ScToString` | unreviewed |  |
-| `CUIWindow::HandleKeypress` | unreviewed |  |
-| `CUIWindow::HandleMouseWheel` | unreviewed |  |
-| `CUIWindow::HandleMouse` | unreviewed |  |
-| `CUIWindow::Persist` | unreviewed |  |
-| `CUIWindow::MoveFocus` | unreviewed |  |
-| `CUIWindow::GoExclusive` | unreviewed |  |
-| `CUIWindow::GoSystemExclusive` | unreviewed |  |
-| `CUIWindow::Close` | unreviewed |  |
-| `CUIWindow::Listen` | unreviewed |  |
-| `CUIWindow::MakeFreezable` | unreviewed |  |
-| `CUIWindow::GetNextAccessObject` | unreviewed |  |
-| `CUIWindow::GetPrevAccessObject` | unreviewed |  |
-| `CUIWindow::GetWindowObjects` | unreviewed |  |
+| `CUIWindow::CUIWindow` | done | `luma-adventure/src/ui.rs` `WindowState::default`, `Control::new`: no title or drag rectangle, title left, not transparent, normal mode, ready, no fade, not a menu, not in game, no clipping, pauses the music, focusable. |
+| `CUIWindow::~CUIWindow` | replaced | `luma-adventure/src/ui.rs` `World::unload_control`: a system-exclusive window unfreezes the game (the `Close()` of the destructor), then the window and everything under it go. |
+| `CUIWindow::Cleanup` | partial | Rust ownership for the memory. Its one visible use is not done: `LoadFromFile` calls it first, which removes every control, the shields and the inactive back, image and font of the window before the file is read (see `CUIWindow::ScCallMethod`). |
+| `CUIWindow::Display` | partial | `luma-adventure/src/ui.rs` `update_window` (shield, drag, focus), `window_hits`, `draw_window`. Same: shield first (a full-screen window under an exclusive one, a `close` button under a menu), nothing more when hidden, fade, drag, focus moved off a control that cannot hold it, inactive back/image/font when not focused, then back, image, title, hit area, controls in order. Different: (1) `CLIP_CONTENTS`: the controls are not clipped to the window. (2) `ALPHA`/`ALPHA_COLOR` reach the images and tiled backs but not the texts (title, labels, statics, editors); the original forces them on bitmap fonts and their alpha on TrueType layers. (3) the title is drawn with the system font when the window has no `FONT`; the original draws no title then. (4) the hit area always comes from `IMAGE`; the original uses the image it shows (`IMAGE_INACTIVE` when not focused) and the rectangle when it shows none. (5) quirk: after a nested window with its own `ALPHA` the original draws the parent's remaining controls with no forced colour; Luma goes back to the parent's. |
+| `CUIWindow::LoadFile` | done | `luma-adventure/src/ui.rs` `read_window_def`, `load_window`, `load_window_into`: the file read through the Vfs, an error is logged and gives no window; the file name is kept. |
+| `CUIWindow::LoadBuffer` | partial | `luma-formats/src/window.rs` `WindowDef::apply_with`, `luma-adventure/src/ui.rs` `apply_window_def`, then `correct_size`. Different: (1) a `BACK`, `IMAGE`, `FONT` or `CURSOR` (any variant) or a control that fails to load fails the whole window in the original (`Game.LoadWindow` gives null); Luma logs it and goes on. (2) an unknown key is a syntax error there (after `WindowLoadHook`, which the adventure game uses for `ENTITY_CONTAINER`), ignored here. (3) the fade and alpha colours are put together at the end: see the `FADE_*` and `ALPHA*` rows. (4) `TEMPLATE` order: see that row. |
+| `CUIWindow::LoadBuffer WINDOW` | partial | `luma-formats/src/window.rs` `WindowDef::apply_with`, `luma-adventure/src/ui.rs` `create_widget`: a nested window, with its own controls. Missing: a `TEMPLATE` inside a nested `WINDOW` block is recorded and never loaded (only `read_window_def` follows `TEMPLATE`, for a file's root); the same holds for the `WINDOW` block of an inventory box or a response box. |
+| `CUIWindow::LoadBuffer ALPHA_COLOR` | partial | `luma-formats/src/window.rs`: the colour is kept only with this key. Different: alone, the original gives it alpha 0 (`ALPHA` defaults to 0: the window's images vanish), Luma alpha 255; with 0,0,0 and an `ALPHA` the original turns the colour to white, Luma keeps black. |
+| `CUIWindow::LoadBuffer ALPHA` | partial | `luma-formats/src/window.rs`: ignored without `ALPHA_COLOR`. In the original `ALPHA` alone means white at that alpha, the plain way to make a window translucent; its default is 0, Luma's 255. (And the alpha does not reach the texts: see `CUIWindow::Display`.) |
+| `CUIWindow::LoadBuffer TEMPLATE` | partial | `luma-adventure/src/ui.rs` `read_window_def` loads the root's template first, then the file over it. Different: (1) the original loads it where the key stands: keys before it are overridden by the template, and controls declared before it come before the template's. (2) the `FADE_*`/`ALPHA*` of a template are kept by Luma; the original recomputes both colours from the outer file's values at the end, so a template's are lost. (3) no `CorrectSize` at the end of the template. (4) a nested window's `TEMPLATE` is not loaded (see the `WINDOW` row). |
+| `CUIWindow::LoadBuffer DISABLED` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: the control ignores the mouse and the focus. |
+| `CUIWindow::LoadBuffer VISIBLE` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: not drawn, no hit area. |
+| `CUIWindow::LoadBuffer BACK_INACTIVE` | done | `luma-adventure/src/ui.rs` `apply_window_def`, `draw_window`: the tiled background while the window is not focused. |
+| `CUIWindow::LoadBuffer BACK` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: tiled background (`load_tiled`), drawn first, rounds the size to whole tiles. |
+| `CUIWindow::LoadBuffer IMAGE_INACTIVE` | done | `luma-adventure/src/ui.rs` `apply_window_def`, `draw_window`: the image while the window is not focused, with its own animation. (Hit area: see `CUIWindow::Display`.) |
+| `CUIWindow::LoadBuffer IMAGE` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: sprite or image (`load_ui_image`), gives the size when none is set. |
+| `CUIWindow::LoadBuffer FONT_INACTIVE` | done | `luma-adventure/src/ui.rs` `apply_window_def`, `window_font`: the title's font while the window is not focused. |
+| `CUIWindow::LoadBuffer FONT` | partial | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: the title's font (`load_font`). Different when absent: Luma draws the title with the system font, the original draws no title without `FONT` (or `FONT_INACTIVE` while not focused). |
+| `CUIWindow::LoadBuffer TITLE_ALIGN` | done | `luma-formats/src/window.rs`: `left`, `right`, anything else centred; default left. |
+| `CUIWindow::LoadBuffer TITLE_RECT` | done | `luma-formats/src/window.rs` `title_rect`: where the title is drawn, relative to the window; no title while it is empty. |
+| `CUIWindow::LoadBuffer TITLE` | done | `luma-formats/src/window.rs` `control_text` (vertical bar to line break), then the string table (`luma-adventure/src/ui.rs` `apply_window_def`). |
+| `CUIWindow::LoadBuffer DRAG_RECT` | done | `luma-formats/src/window.rs` `drag_rect`, `luma-adventure/src/ui.rs` `ui_mouse_down`: a left click inside starts dragging the window. |
+| `CUIWindow::LoadBuffer X` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: position in the parent window. |
+| `CUIWindow::LoadBuffer Y` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: position in the parent window. |
+| `CUIWindow::LoadBuffer WIDTH` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`; 0 or less is corrected from the image, else 100. |
+| `CUIWindow::LoadBuffer HEIGHT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`; 0 or less is corrected from the image. |
+| `CUIWindow::LoadBuffer FADE_ALPHA` | partial | `luma-formats/src/window.rs`: used only with `FADE_COLOR`, default 255. In the original it defaults to 0 and `FADE_ALPHA` alone turns the fade on (black at that alpha). |
+| `CUIWindow::LoadBuffer FADE_COLOR` | partial | `luma-formats/src/window.rs`: turns the fade on. Different: without `FADE_ALPHA` the original's alpha is 0 (nothing to see), Luma's 255 (the screen is filled with the colour). |
+| `CUIWindow::LoadBuffer CURSOR` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `load_cursor`; the cursor shown over the control (`natives_object.rs`). |
+| `CUIWindow::LoadBuffer NAME` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`. |
+| `CUIWindow::LoadBuffer BUTTON` | done | `luma-formats/src/window.rs` `WindowDef::apply_with`, `luma-adventure/src/ui.rs` `create_widget`: a button appended to the controls, with this window as parent. |
+| `CUIWindow::LoadBuffer STATIC` | done | `luma-formats/src/window.rs` `WindowDef::apply_with`, `luma-adventure/src/ui.rs` `create_widget`: a static text appended to the controls. |
+| `CUIWindow::LoadBuffer TRANSPARENT` | done | `luma-adventure/src/ui.rs` `window_hits`: the window itself has no hit area (its controls keep theirs). |
+| `CUIWindow::LoadBuffer SCRIPT` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: `World::attach`, in file order. |
+| `CUIWindow::LoadBuffer CAPTION` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`. |
+| `CUIWindow::LoadBuffer PARENT_NOTIFY` | done | `luma-formats/src/window.rs` `ControlDef::apply_key`, `luma-adventure/src/ui.rs` `apply_control_def`: a press (or an edit) raises an event named after the control on its parent. |
+| `CUIWindow::LoadBuffer MENU` | done | `luma-adventure/src/ui.rs` `shield_of`: a full-screen `close` button under the window; a click outside closes it. |
+| `CUIWindow::LoadBuffer IN_GAME` | done | `luma-adventure/src/ui.rs` `windows_in_pass`: drawn and hit with the scene, before the other windows. |
+| `CUIWindow::LoadBuffer CLIP_CONTENTS` | partial | Parsed, stored and readable by scripts (`luma-adventure/src/ui.rs` `clip_contents`), never applied: `draw_window` does not clip the controls to the window (the original pushes a viewport of the window's rectangle). |
+| `CUIWindow::LoadBuffer PAUSE_MUSIC` | done | `luma-adventure/src/ui.rs` `go_system_exclusive`: the freeze pauses the music too; default true. |
+| `CUIWindow::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once unless the game runs in editor mode: no effect at run time. |
+| `CUIWindow::LoadBuffer EDIT` | done | `luma-formats/src/window.rs` `WindowDef::apply_with`, `luma-adventure/src/ui.rs` `create_widget`: an editor appended to the controls. |
+| `CUIWindow::SaveAsText` | n/a | Only the editors call it (SceneEdit, WindowEdit through the tools); no script method and nothing in the engine reaches it. |
+| `CUIWindow::EnableWidget` | partial | Inlined in `luma-adventure/src/inventory.rs` (the box's `prev` and `next`). Minor: only the first control of that name is changed; the original changes every control of the name. |
+| `CUIWindow::ShowWidget` | partial | Inlined in `luma-adventure/src/responses.rs` (the box's `prev` and `next`). Minor: only the first control of that name is changed; the original changes every control of the name. |
+| `CUIWindow::ScCallMethod` | partial | `luma-adventure/src/natives_ui.rs` `control_call`. Different: `LoadFromFile` does not remove the window's controls first (the original's `Cleanup()` deletes the controls, the shields and the inactive back, image and font, even for a null argument or a file that then fails), so the file's controls are added to the old ones; and `apply_control_def` sets the fields the file does not name back to their defaults, where the original keeps their current values. Equal: `GetWidget`/`GetControl` (index or name), `SetInactiveFont`, `SetInactiveImage`, `GetInactiveImage`, `GetInactiveImageObject`, `Close`, `GoExclusive`, `GoSystemExclusive` (both wait for the window), `Center`, `CreateButton`, `CreateStatic`, `CreateEditor`, `CreateWindow`, the five `Delete*`, and the adventure game's `CreateEntityContainer`. |
+| `CUIWindow::ScGetProperty` | done | `luma-adventure/src/natives_ui.rs` `control_get`: `Type` (`window`), `NumWidgets`/`NumControls`, `Exclusive`, `SystemExclusive`, `Menu`, `InGame`, `PauseMusic`, `ClipContents`, `Transparent`, `FadeColor`, then the control's. |
+| `CUIWindow::ScSetProperty` | partial | `luma-adventure/src/natives_ui.rs` `control_set`, `luma-adventure/src/ui.rs` `set_window_mode`: `Name`, `Menu`, `InGame`, `PauseMusic`, `ClipContents`, `Transparent`, `FadeColor` (0 turns the fade off), `Exclusive`, `SystemExclusive`. Different: `SystemExclusive = true`, and setting either to false on a system-exclusive window, take effect at the next window update (`pending_modes`), not at once: a script that reads the property back in the same step sees the old value. |
+| `CUIWindow::ScToString` | done | `luma-adventure/src/world.rs` `to_string`: `[window]`. |
+| `CUIWindow::HandleKeypress` | done | `luma-adventure/src/ui.rs` `World::window_key`: Tab moves the focus (back with Shift), any other key goes to the focused control (a nested window or an editor). The answer for Tab is `MoveFocus`'s: see that row. |
+| `CUIWindow::HandleMouseWheel` | done | The forward to the focused control always answers false, since no control class handles the wheel (`CBObject::HandleMouseWheel`); `Runtime::mouse_wheel` (`world.rs`) goes straight to the window's and the game's events. |
+| `CUIWindow::HandleMouse` | partial | `luma-adventure/src/ui.rs` `ui_mouse_down`/`ui_mouse_up`: a left click in the drag rectangle starts the drag, the release ends it. Missing: the focus change of `CUIObject::HandleMouse` (see that row). Minor: any left release ends every drag; in the original only a release that reaches the window does. |
+| `CUIWindow::Persist` | replaced | The whole `Ui` (every `Control` with its kind's state) is saved and restored by serde (`luma-adventure/src/save.rs`); images, fonts and cursors are loaded again from their files. |
+| `CUIWindow::MoveFocus` | partial | `luma-adventure/src/ui.rs` `World::move_focus`: same walk (from the focused control, forward or back, the first other control that is focusable, visible and enabled). Minor: for a window without controls the original succeeds, Luma answers false, so Tab is not swallowed there and goes on as a `Keypress` event. |
+| `CUIWindow::GoExclusive` | partial | `luma-adventure/src/ui.rs` `World::go_exclusive`: nothing when already exclusive, fails on a system-exclusive window, else not ready, exclusive, visible, enabled, focused. Missing: the keyboard-accessibility selection is not cleared (`m_AccessMgr->SetActiveObject()`), which `go_system_exclusive` does. Minor: for a nested window Luma focuses its top window; the original's `FocusWindow` only knows top-level windows and does nothing. |
+| `CUIWindow::GoSystemExclusive` | done | `luma-adventure/src/ui.rs` `World::go_system_exclusive`: nothing when already so; scripts made non-freezable, accessibility selection cleared, system-exclusive, not ready, visible, enabled, focused, game frozen (with the music when `PAUSE_MUSIC`). |
+| `CUIWindow::Close` | done | `luma-adventure/src/ui.rs` `World::close_window`: unfreezes when system-exclusive, then normal, hidden, ready (and a drag in progress ends). |
+| `CUIWindow::Listen` | done | `luma-adventure/src/ui.rs` `press_button`, `ButtonListener::CloseParent`: the menu shield's `close` button closes the window. |
+| `CUIWindow::MakeFreezable` | partial | `luma-adventure/src/ui.rs` `World::make_freezable` marks the scripts now running on the window and on everything under it. Missing: the original also sets the flag on the objects, so a script attached later (`AttachScript`, an event handler's thread) is not freezable either; in Luma `World::attach` gives a new script its owner's flag only for a container's entity. |
+| `CUIWindow::GetNextAccessObject` | done | `luma-adventure/src/accessibility.rs` `next_access_object`: the control after the current one, else the first. |
+| `CUIWindow::GetPrevAccessObject` | done | `luma-adventure/src/accessibility.rs` `next_access_object` (backwards): the control before the current one, else the last. |
+| `CUIWindow::GetWindowObjects` | done | `luma-adventure/src/accessibility.rs` `window_access_objects`: buttons and editors, nested windows walked in place, disabled controls skipped. Only the interactive form exists, the only one the original calls. |
