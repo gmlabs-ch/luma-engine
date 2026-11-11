@@ -549,15 +549,15 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdNodeState::CAdNodeState` | unreviewed |  |
-| `CAdNodeState::~CAdNodeState` | unreviewed |  |
-| `CAdNodeState::SetName` | unreviewed |  |
-| `CAdNodeState::SetFilename` | unreviewed |  |
-| `CAdNodeState::SetCursor` | unreviewed |  |
-| `CAdNodeState::Persist` | unreviewed |  |
-| `CAdNodeState::SetCaption` | unreviewed |  |
-| `CAdNodeState::GetCaption` | unreviewed |  |
-| `CAdNodeState::TransferEntity` | unreviewed |  |
+| `CAdNodeState::CAdNodeState` | done | `scene_state.rs` `NodeState::default`: inactive, no caption, no sprite, no cursor, no alpha colour. |
+| `CAdNodeState::~CAdNodeState` | replaced | Rust ownership. |
+| `CAdNodeState::SetName` | done | The key of `SceneState::nodes`. |
+| `CAdNodeState::SetFilename` | done | `NodeState::sprite`. |
+| `CAdNodeState::SetCursor` | done | `NodeState::cursor`. |
+| `CAdNodeState::Persist` | partial | serde derive on `NodeState`; only the first of the seven caption cases exists (see `SetCaption`). |
+| `CAdNodeState::SetCaption` | partial | `NodeState::caption` holds one caption (case 1). The original keeps the seven caption cases of the entity (`SetCaption(text, case)`); cases 2 to 7 are lost between visits in Luma. |
+| `CAdNodeState::GetCaption` | partial | As `SetCaption`: only case 1. |
+| `CAdNodeState::TransferEntity` | partial | `NodeState::note` / `NodeState::apply`: sprite (only without a `REGION`, empty when `PERSISTENT_STATE_SPRITES=FALSE`), cursor, alpha colour and `Active` agree, restoring included (sprite and cursor only when different). Missing: caption cases 2 to 7. |
 
 ## `wme_ad/AdObject.cpp`
 
@@ -957,30 +957,30 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdSceneState::CAdSceneState` | unreviewed |  |
-| `CAdSceneState::~CAdSceneState` | unreviewed |  |
-| `CAdSceneState::Persist` | unreviewed |  |
-| `CAdSceneState::SetFilename` | unreviewed |  |
-| `CAdSceneState::GetNodeState` | unreviewed |  |
+| `CAdSceneState::CAdSceneState` | done | `scene_state.rs` `SceneState::default`. |
+| `CAdSceneState::~CAdSceneState` | replaced | Rust ownership. |
+| `CAdSceneState::Persist` | replaced | serde: `scene_states` in `save.rs` `world_state!`. |
+| `CAdSceneState::SetFilename` | done | The key of `World::scene_states` (`state_key`: backslashes, no case). |
+| `CAdSceneState::GetNodeState` | done | `SceneState::nodes` keyed by the lowercased name: found without case, created only when saving. |
 
 ## `wme_ad/AdSentence.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdSentence::CAdSentence` | unreviewed |  |
-| `CAdSentence::~CAdSentence` | unreviewed |  |
-| `CAdSentence::SetText` | unreviewed |  |
-| `CAdSentence::SetStances` | unreviewed |  |
-| `CAdSentence::GetCurrentStance` | unreviewed |  |
-| `CAdSentence::GetNextStance` | unreviewed |  |
-| `CAdSentence::GetStance` | unreviewed |  |
-| `CAdSentence::Display` | unreviewed |  |
-| `CAdSentence::SetSound` | unreviewed |  |
-| `CAdSentence::Finish` | unreviewed |  |
-| `CAdSentence::Persist` | unreviewed |  |
-| `CAdSentence::SetupTalkFile` | unreviewed |  |
-| `CAdSentence::Update` | unreviewed |  |
-| `CAdSentence::CanSkip` | unreviewed |  |
+| `CAdSentence::CAdSentence` | partial | `luma-adventure/src/talk.rs` `Sentence`, built whole by `World::talk` (the constructor's defaults are all overwritten there). Missing fields: `m_Freezable` (see `Display`) and the talk definition (`m_TalkDef`, `m_CurrentSprite`: see `SetupTalkFile`). |
+| `CAdSentence::~CAdSentence` | replaced | Rust ownership; the speech sound is stopped and removed by `sound.rs` `update_speech` / `stop_speech`. |
+| `CAdSentence::SetText` | done | `Sentence::text`, set (expanded) by `World::talk`. |
+| `CAdSentence::SetStances` | done | `Sentence::stances`. |
+| `CAdSentence::GetCurrentStance` | done | No caller in the engine; `Sentence::stance(current_stance)`. |
+| `CAdSentence::GetNextStance` | done | `Sentence::next_stance`. |
+| `CAdSentence::GetStance` | done | `Sentence::stance`: the n-th comma-separated name with its spaces trimmed, `None` past the last. |
+| `CAdSentence::Display` | partial | `talk.rs` `SentenceDraw::of`, drawn by `World::draw`. Differences: (1) the scroll taken off is `offset_x/offset_y`; the original takes off `GetOffsetLeft/Top` (offset minus the scene viewport's origin), and `World::talk` makes the same simplification, so with a scene viewport that does not start at (0,0) the text is shifted by the viewport origin; (2) `m_Freezable`: the original still shows, while the game is frozen, the sentence of a non-freezable object (an entity of a window's entity container); `World::draw` hides every sentence while frozen; (3) the speech sound starts in `World::talk` instead of at the first display (same frame unless the game is frozen). The clamps (`x` in `0..screen-width`, `y >= 0`) and the subtitles switch agree. |
+| `CAdSentence::SetSound` | done | `World::talk` → `sound.rs` `start_speech`, id kept in `Sentence::sound`. |
+| `CAdSentence::Finish` | partial | `Sentence::finish` (duration 0, as `FinishSentences`) with `stop_speech`. Not equal: an entity's sentence that reaches its duration while its speech still plays (a script gave a `Duration` shorter than the sound) is dropped by `SceneView::talk_step` without stopping the sound; the original ends such a sentence only when the sound ends (`TimeIsUp` looks at the sound alone when there is one). The sentences of 3D actors are not visited by `update_speech`/`stop_speech`: their speech is neither the end criterion nor stopped by a skip. |
+| `CAdSentence::Persist` | partial | serde derive on `Sentence`. Not kept: the speech sound (`#[serde(skip)]`: after loading a game the sentence finishes silently on its remaining duration; the original saves the sound with its position and resumes it), `m_SoundStarted`, `m_Freezable`, the talk definition. |
+| `CAdSentence::SetupTalkFile` | todo | Looks for a `.talk` file next to the speech sound (same path, extension `.talk`) and loads it as a `CAdTalkDef` (timed talk sprites, lip-sync); Luma never looks for it. |
+| `CAdSentence::Update` | todo | With a talk definition: picks, for the time since the sentence started, the sprite of the node whose interval contains it (several when `PlayToEnd`), else the definition's default sprite, resetting a sprite when it changes; the result (`m_CurrentSprite`) replaces the talk stance in `CAdEntity/CAdActor::Update`. |
+| `CAdSentence::CanSkip` | done | `Sentence::can_skip`: more than 300 ms after the start. |
 
 ## `wme_ad/AdSpriteSet.cpp`
 
@@ -1031,15 +1031,15 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdTalkHolder::CAdTalkHolder` | unreviewed |  |
-| `CAdTalkHolder::~CAdTalkHolder` | unreviewed |  |
-| `CAdTalkHolder::GetTalkStance` | unreviewed |  |
-| `CAdTalkHolder::ScCallMethod` | unreviewed |  |
-| `CAdTalkHolder::ScGetProperty` | unreviewed |  |
-| `CAdTalkHolder::ScSetProperty` | unreviewed |  |
-| `CAdTalkHolder::ScToString` | unreviewed |  |
-| `CAdTalkHolder::SaveAsText` | unreviewed |  |
-| `CAdTalkHolder::Persist` | unreviewed |  |
+| `CAdTalkHolder::CAdTalkHolder` | done | `Entity::sprite` is `None` by default (`luma-formats/src/scene.rs`). |
+| `CAdTalkHolder::~CAdTalkHolder` | replaced | Rust ownership. |
+| `CAdTalkHolder::GetTalkStance` | partial | `scene_view.rs` `SceneView::talk_stance` + `World::forced_talk_sprite` (entities; items do not talk in Luma). Difference: a stance is matched against the file name of each talk sprite without directory and extension (`sprite_name`); the original matches the sprite's own name, the `NAME` key of the `.sprite` file (empty for a plain image). Same: forced sprite once, special set before generic, else a random generic one, else the object's sprite. |
+| `CAdTalkHolder::ScCallMethod` | partial | `natives.rs` `entity_call`, `natives_item.rs` `item_call`. Differences: `SetSprite` with a file that does not load leaves the object without sprite in the original (the old one is deleted first), Luma keeps the old sprite on an entity; an entity's `SetSprite` also ends a running `PlayAnim` and restarts the sprite shown (`reset_entity_anim`), the original only swaps the current sprite when it was the object's own; `RemoveTalkSprite` of the sprite being played: the original shows the object's own sprite until it ends or the sentence does, Luma picks the next stance on the next frame; on an item `SetSprite(null)` returns false (original true) and `AddTalkSprite`/`SetTalkSprite`/`RemoveTalkSprite` only load the file, the sets are not kept. `GetSprite`, `GetSpriteObject`, `AddTalkSprite`, `SetTalkSprite` on entities agree. |
+| `CAdTalkHolder::ScGetProperty` | done | Only `Type` (`talk-holder`), always overridden by the entity (`entity`) and item (`item`) classes. |
+| `CAdTalkHolder::ScSetProperty` | done | Passes everything to `CAdObject`. |
+| `CAdTalkHolder::ScToString` | done | Overridden by `CAdEntity` and `CAdItem`; never seen. |
+| `CAdTalkHolder::SaveAsText` | n/a | Only reachable from the editor tools. |
+| `CAdTalkHolder::Persist` | replaced | serde: the entity definition (`sprite`, `talk_sprites`, `talk_special_sprites`) is saved with the `SceneView`. |
 
 ## `wme_ad/AdTalkNode.cpp`
 
