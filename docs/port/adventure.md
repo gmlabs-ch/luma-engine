@@ -135,86 +135,86 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdActor3DX::CAdActor3DX` | unreviewed |  |
-| `CAdActor3DX::~CAdActor3DX` | unreviewed |  |
-| `CAdActor3DX::Update` | unreviewed |  |
-| `CAdActor3DX::Display` | unreviewed |  |
-| `CAdActor3DX::RenderModel` | unreviewed |  |
-| `CAdActor3DX::DisplayShadowVolume` | unreviewed |  |
-| `CAdActor3DX::UpdateAttachments` | unreviewed |  |
-| `CAdActor3DX::DisplayAttachments` | unreviewed |  |
-| `CAdActor3DX::TurnTo` | unreviewed |  |
-| `CAdActor3DX::GoTo3D` | unreviewed |  |
-| `CAdActor3DX::GoTo2D` | unreviewed |  |
-| `CAdActor3DX::FollowPath3D` | unreviewed |  |
-| `CAdActor3DX::GetNextStep3D` | unreviewed |  |
-| `CAdActor3DX::InitLine3D` | unreviewed |  |
-| `CAdActor3DX::GetNextStep2D` | unreviewed |  |
-| `CAdActor3DX::FollowPath2D` | unreviewed |  |
-| `CAdActor3DX::PrepareTurn` | unreviewed |  |
-| `CAdActor3DX::TurnToStep` | unreviewed |  |
-| `CAdActor3DX::LoadFile` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer ACTOR3DX` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer X` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer Y` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer Z` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer ANGLE` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer VELOCITY` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer ANGULAR_VELOCITY` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer NAME` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer REGISTRABLE` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer INTERACTIVE` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer ACTIVE` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer MODEL` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer EVENTS` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer FONT` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer CURSOR` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer DROP_TO_FLOOR` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer SCRIPT` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer CAPTION` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer PROPERTY` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer ANIMATION` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer SHADOW_IMAGE` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer SHADOW_SIZE` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer SIMPLE_SHADOW` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer SHADOW_COLOR` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer SHADOW_MODEL` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer SHADOW_TYPE` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer LIGHT_POSITION` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer SHADOW` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer SCALE` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer DRAW_BACKFACES` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer BLOCKED_REGION` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer WAYPOINTS` | unreviewed |  |
-| `CAdActor3DX::LoadBuffer EFFECT` | unreviewed |  |
-| `CAdActor3DX::DirToAngle` | unreviewed |  |
-| `CAdActor3DX::AngleToDir` | unreviewed |  |
-| `CAdActor3DX::PlayAnim` | unreviewed |  |
-| `CAdActor3DX::PlayAnim #2` | unreviewed |  |
-| `CAdActor3DX::Talk` | unreviewed |  |
-| `CAdActor3DX::GetHeight` | unreviewed |  |
-| `CAdActor3DX::ScCallMethod` | unreviewed |  |
-| `CAdActor3DX::ScGetProperty` | unreviewed |  |
-| `CAdActor3DX::ScSetProperty` | unreviewed |  |
-| `CAdActor3DX::ScToString` | unreviewed |  |
-| `CAdActor3DX::Persist` | unreviewed |  |
-| `CAdActor3DX::InvalidateDeviceObjects` | unreviewed |  |
-| `CAdActor3DX::RestoreDeviceObjects` | unreviewed |  |
-| `CAdActor3DX::MergeAnimations` | unreviewed |  |
-| `CAdActor3DX::MergeAnimations2` | unreviewed |  |
-| `CAdActor3DX::MergeAnimations2 ANIMATION` | unreviewed |  |
-| `CAdActor3DX::UnloadAnimation` | unreviewed |  |
-| `CAdActor3DX::IsGoToNeeded` | unreviewed |  |
-| `CAdActor3DX::GetAnimTransitionTime` | unreviewed |  |
-| `CAdActor3DX::CreateParticleEmitter` | unreviewed |  |
-| `CAdActor3DX::CreateParticleEmitter #2` | unreviewed |  |
-| `CAdActor3DX::UpdatePartEmitter` | unreviewed |  |
-| `CAdActor3DX::ParseEffect` | unreviewed |  |
-| `CAdActor3DX::ParseEffect MATERIAL` | unreviewed |  |
-| `CAdActor3DX::ParseEffect EFFECT_FILE` | unreviewed |  |
+| `CAdActor3DX::CAdActor3DX` | done | `luma-adventure/src/actor3d.rs` `Actor3d::from_definition`: same defaults (target angle 0, after-walk angle -1, animation names `talk`/`idle`/`walk`/`turnleft`/`turnright`, talk channel 0, direct modes none with velocities 0, state channel -1, `GoToTolerance` 2, no particle bone); the transition times 200/200 are `luma-3d/src/animation.rs` `AnimatedModel::new`. `EnableShadows` is the renderer's business. |
+| `CAdActor3DX::~CAdActor3DX` | replaced | Rust ownership: `World::unload_object` drops the `Actor3d` with its attachments, paths and transition table; the attachments' script objects are removed by `forget_attachments3d`. |
+| `CAdActor3DX::Update` | partial | `actor3d.rs` `Actor3d::update` (called by `World::update_actors3d`); the state machine, the order (state, `Ready`, `CAdObject3D::Update`, `AfterMove`, model, attachments) and the walking, turning, talking and `PlayAnim` branches agree. Missing or different: (1) `update_actors3d` returns before any actor when the scene has no geometry or no camera, so in such a scene a 3D actor is not updated at all: a sentence never ends, `PlayAnim` never finishes and `Ready` stays false (scripts waiting on `Talk`/`PlayAnim` hang); the original still runs the state machine and the model there. (2) Direct control with a turn and no walk: the original still runs the walk test with an unchanged position, which succeeds, and so plays the direct walk animation (or `WalkAnimName`) after the turn animation every frame; `direct_step` plays the turn animation (or idle) and returns. (3) The original returns at once while the game is frozen; Luma runs the state machine with a zero delta (path requests and state changes still happen). (4) `UpdateBlockRegion` has no effect: the actor's blocked region and waypoints are never given to the 2D path finder (see `BLOCKED_REGION`). (5) No shadow model is updated (see `SHADOW_MODEL`). (6) An active attachment whose bone no longer exists is not animated (original: every active attachment). The 2D path is found at once in `SearchingPath` instead of over the following frames (same path). |
+| `CAdActor3DX::Display` | partial | `World::three_d_draws` and `draw3d.rs` `Render3d::overlays` (`shadow_items`, then `model_items`); hit rectangles `World::actor3d_hits` + `Actor3d::is_transparent_at`; emitter drawn after the actor by `World::scene_draw_parts`. Agree: lights chosen for the actor's position without the ignored ones, ambient override, shadow type = lowest of actor, game and scene, shadow light = position + `LIGHT_POSITION` x scale, shadow before model, blend mode, the rectangle registered only when interactive, attachments after the model. Missing: the shadow never uses the `SHADOW_MODEL` (see `DisplayShadowVolume`, `RenderModel`); attachments are culled by their own flag (see `CAdAttach3DX::Display`). The accessibility hint rectangle was not compared. |
+| `CAdActor3DX::RenderModel` | partial | Used by the flat shadow (`C3DShadowGen`): `draw3d.rs` `shadow_items`, `ShadowType::Flat` projects the actor's model and its attachments (`ModelDraw::all`). Missing: when the actor has a `SHADOW_MODEL` the original renders that model instead of the actor's; Luma never loads it. |
+| `CAdActor3DX::DisplayShadowVolume` | partial | `draw3d.rs` `shadow_items`, `ShadowType::Stencil`: light vector = (position + light position x scale) - position, extrusion depth = its length x 1.5, shadow colour, active attachments with an existing bone included, stencil pass then fill. Missing: the volume is always built from the actor's model; the original builds it from the `SHADOW_MODEL` when there is one. |
+| `CAdActor3DX::UpdateAttachments` | done | `Actor3d::update`, last block: every active attachment is updated (`Attachment3d::update`) and its animation events go to the actor. One whose bone is gone is skipped (cannot happen: `AddAttachment` checks the bone and frames are never removed). |
+| `CAdActor3DX::DisplayAttachments` | partial | `World::three_d_draws` (active attachments whose bone exists, matrix `own x bone x actor world` computed in `Attachment3d::update`) and `draw3d.rs` `model_items`; the owner's rectangle per attachment in `Actor3d::hit_rects`. Different: culling, see `CAdAttach3DX::Display`. |
+| `CAdActor3DX::TurnTo` | done | `Actor3d::turn_to`: `prepare_turn`, then the next state when already facing the angle, else `Turning`. |
+| `CAdActor3DX::GoTo3D` | done | `Actor3d::go_to_3d`: keeps a walk already going to the same point, else resets the path and goes to `SearchingPath`. |
+| `CAdActor3DX::GoTo2D` | done | `Actor3d::go_to_2d`: same early return, path reset, target corrected with `Floor::correct_target` (free objects checked, the actor excluded by `World::obstacles_for`). |
+| `CAdActor3DX::FollowPath3D` | partial | `Actor3d::follow_path_3d`: first point, `init_line(first step)`; an empty path turns to the after-walk angle. Different: with an empty path and no after-walk angle the original sets `STATE_READY`; Luma's `arrive` takes `next_state`, which is still `FollowingPath` when the previous walk was interrupted during its first turn, so the actor spends one more frame in `FollowingPath` (walk animation requested) before `Ready`. |
+| `CAdActor3DX::GetNextStep3D` | done | `Actor3d::next_step_3d` + `step_toward_target`: turn step, step along the target heading at velocity x scale, snap to the point when the step would not get closer, next point or arrival (`arrive`). |
+| `CAdActor3DX::InitLine3D` | done | `Actor3d::init_line` with `heading_to` (`degrees(-atan2(dz, dx)) - 90`): the first step turns in place with `FollowingPath` as next state, the others only prepare the turn. |
+| `CAdActor3DX::GetNextStep2D` | done | `Actor3d::next_step_2d`: ends the walk when there is no current point (or it cannot be converted), else as the 3D step with each point converted by the tolerant conversion. |
+| `CAdActor3DX::FollowPath2D` | partial | `Actor3d::follow_path_2d`: skips the points equal to the actor's 2D position, then `init_line(first step)`. Different: as `FollowPath3D`, an empty path without after-walk angle goes to `next_state` instead of `STATE_READY`. |
+| `CAdActor3DX::PrepareTurn` | done | `Actor3d::prepare_turn`: both angles normalised, the shortest of the three deltas, returns left when negative (and true when already equal, as the original). |
+| `CAdActor3DX::TurnToStep` | done | `Actor3d::turn_to_step`: step by velocity x delta, clamp at the target, normalise when reached. |
+| `CAdActor3DX::LoadFile` | done | `Actor3d::load`: reads the file (same log texts), keeps the path as `Filename`, parses with `Actor3dDef::parse_with`. See `LoadBuffer TEMPLATE` for the file name after a template. |
+| `CAdActor3DX::LoadBuffer` | partial | `luma-3d/src/actor3d.rs` `Actor3dDef::apply_file` + `Actor3d::load`/`from_definition`: root keyword `ACTOR3DX` required, an unknown key fails the load, a file without `MODEL` fails, the model and shadow model are dropped at the start of every (template) file, state `Ready` at the end. Different: the model files are loaded after the whole file is parsed, so the keys that act on the model at their place in the original (`ANIMATION`, `EFFECT`, `SHADOW_MODEL`) lose their order dependence (see those rows), and a `CURSOR` that fails to load does not fail the actor; template handling: see `TEMPLATE`. |
+| `CAdActor3DX::LoadBuffer ACTOR3DX` | done | Root keyword checked by `Actor3dDef::apply_file` (`'ACTOR3DX' keyword expected`); the legacy `ACTOR3D` root is refused there (see `CAdActor3D::CreateFromFile`). |
+| `CAdActor3DX::LoadBuffer X` | done | `Actor3dDef::position.x` -> `Actor3d::position`. |
+| `CAdActor3DX::LoadBuffer Y` | done | `Actor3dDef::position.y` -> `Actor3d::position` (re-seated on the floor at the first update when `DROP_TO_FLOOR`). |
+| `CAdActor3DX::LoadBuffer Z` | done | `Actor3dDef::position.z` -> `Actor3d::position`. |
+| `CAdActor3DX::LoadBuffer ANGLE` | done | `Actor3dDef::angle`, kept as written: the original computes the normalised angle and discards it. |
+| `CAdActor3DX::LoadBuffer VELOCITY` | done | `Actor3dDef::velocity` -> `Actor3d::velocity` (default 1), used by the walk steps. |
+| `CAdActor3DX::LoadBuffer ANGULAR_VELOCITY` | done | `Actor3dDef::angular_velocity` -> `Actor3d::angular_velocity` (default 1), used by `turn_to_step`. |
+| `CAdActor3DX::LoadBuffer TEMPLATE` | partial | `Actor3dDef::parse_with`: the template file is applied in place over the values read so far, after dropping the models, shadow model, animation and effect blocks; an unreadable or invalid template fails the load. Different: (1) the original's `LoadFile` on the template overwrites `m_Filename`, so the actor's `Filename` property is the (last) template's path; Luma keeps the actor file's path. (2) A template without `MODEL` fails in the original (the nested `LoadBuffer` requires a model); Luma accepts it when the outer file gives a `MODEL` afterwards. |
+| `CAdActor3DX::LoadBuffer NAME` | done | `Actor3dDef::name` -> `Actor3d::name`. |
+| `CAdActor3DX::LoadBuffer REGISTRABLE` | done | Same field as `INTERACTIVE`: `Actor3dDef::interactive` -> `Actor3d::interactive`, tested by `World::actor3d_hits`. |
+| `CAdActor3DX::LoadBuffer INTERACTIVE` | done | `Actor3dDef::interactive` -> `Actor3d::interactive` (default true), tested by `World::actor3d_hits`. |
+| `CAdActor3DX::LoadBuffer ACTIVE` | done | `Actor3dDef::active` -> `Actor3d::active` (default true): not updated (`update_actors3d`) nor drawn (`World::free_objects`) when false. |
+| `CAdActor3DX::LoadBuffer MODEL` | done | `Actor3dDef::models` -> `actor3d.rs` `load_model`: the first file is the model (`Model::parse`), each later one merges its animation sets (`Model::merge_animations`); a failure fails the actor. |
+| `CAdActor3DX::LoadBuffer EVENTS` | done | Accepted and ignored (`"EDITOR_PROPERTY" / "EVENTS" => {}`), as the original: the token is in the table and has no case. |
+| `CAdActor3DX::LoadBuffer FONT` | done | `Actor3dDef::font` -> `Actor3d::font`, the speech font (`World::own_font`), loaded with the other fonts. |
+| `CAdActor3DX::LoadBuffer CURSOR` | partial | `Actor3dDef::cursor` -> `Actor3d::cursor`, shown over the actor (`World::object_cursor`). Different: the path is only kept; the original loads the sprite at once and a cursor that fails to load fails the whole actor. |
+| `CAdActor3DX::LoadBuffer DROP_TO_FLOOR` | done | `Actor3dDef::drop_to_floor` (default true) -> `Actor3d::drop_to_floor`, applied every update (`height_at(position, 5.0)`). |
+| `CAdActor3DX::LoadBuffer SCRIPT` | done | `Actor3dDef::scripts`, attached by `World::load_actor3d`. |
+| `CAdActor3DX::LoadBuffer CAPTION` | done | `Actor3dDef::caption`, expanded through the string table in `World::load_actor3d`. |
+| `CAdActor3DX::LoadBuffer PROPERTY` | done | `Actor3dDef::properties`, set as script properties by `World::load_actor3d`. |
+| `CAdActor3DX::LoadBuffer ANIMATION` | partial | `AnimationDef::from_node` (`NAME`, `LOOPING`, `EVENT` after the `NAME`), applied by `Actor3dDef::apply_animations` -> `AnimationDef::apply`; a block before any `MODEL` is dropped. Different: (1) the blocks are applied once every `MODEL` file is merged, the original applies each block at its place, so a block naming a set that a later `MODEL` line brings works in Luma and is only logged in the original. (2) A block with an unknown key: the original stops there (events already read stay, `LOOPING` is not applied); Luma ignores the key and applies the rest. |
+| `CAdActor3DX::LoadBuffer EDITOR_PROPERTY` | n/a | `CBBase::ParseEditorProperty` returns at once unless the game runs in editor mode; Luma accepts and ignores the key. |
+| `CAdActor3DX::LoadBuffer SHADOW_IMAGE` | done | `Actor3dDef::shadow_image` -> `Actor3d::shadow_image`: the image of the simple shadow, the game's when absent (`World::three_d_draws`). |
+| `CAdActor3DX::LoadBuffer SHADOW_SIZE` | done | `Actor3dDef::shadow_size`, clamped at 0, default 10; multiplied by the scale for the simple shadow quad. |
+| `CAdActor3DX::LoadBuffer SIMPLE_SHADOW` | done | `TRUE` sets `ShadowType::Simple`, `FALSE` changes nothing; in file order with `SHADOW` and `SHADOW_TYPE`. |
+| `CAdActor3DX::LoadBuffer SHADOW_COLOR` | done | `Actor3dDef::shadow_color` -> `Actor3d::shadow_color` (default `0x80000000`). A channel outside 0..255 is clamped; the original keeps its low byte. |
+| `CAdActor3DX::LoadBuffer SHADOW_MODEL` | partial | Parsed, not used: `Actor3dDef::shadow_model` -> `Actor3d::shadow_model_file`, which nothing reads. The original loads the file as a second model sharing the actor's skeleton (`LoadFromFile(file, m_ModelX)`), updates it every frame and uses it for the stencil volume and the flat shadow; a file that fails to load fails the actor. The key before any `MODEL` is ignored in both. |
+| `CAdActor3DX::LoadBuffer SHADOW_TYPE` | done | `ShadowType::parse`: `none`/`simple`/`flat`/`stencil` without case, else the leading number clamped to 0..3. |
+| `CAdActor3DX::LoadBuffer LIGHT_POSITION` | done | `Actor3dDef::light_position` (default -40, 200, -40) -> `Actor3d::light_position`, the shadow light relative to the actor. |
+| `CAdActor3DX::LoadBuffer SHADOW` | done | `FALSE` sets `ShadowType::None`, `TRUE` changes nothing. |
+| `CAdActor3DX::LoadBuffer SCALE` | done | `Actor3dDef::scale` = value / 100 -> `Actor3d::scale`: world matrix, walking speed, shadow light and size. |
+| `CAdActor3DX::LoadBuffer DRAW_BACKFACES` | done | `Actor3dDef::draw_backfaces` (default true) -> `Actor3d::draw_backfaces` -> `cull_backfaces` of the actor's mesh draws. |
+| `CAdActor3DX::LoadBuffer BLOCKED_REGION` | partial | Parsed, not used: `Actor3dDef::blocked_region` -> `Actor3d::blocked_region`; `Actor3d::block_polygon` exists but nothing calls it (`World::obstacles_for` only collects the 2D actors). In the original the region, moved and scaled to the actor (`UpdateBlockRegion`), blocks the 2D path finding of every other object. |
+| `CAdActor3DX::LoadBuffer WAYPOINTS` | partial | Parsed, not used: `Actor3dDef::waypoints` -> `Actor3d::waypoints`, read by nothing. In the original the group follows the actor (`UpdateBlockRegion`) and its points are offered to the 2D path finder of the other objects. |
+| `CAdActor3DX::LoadBuffer EFFECT` | partial | Parsed, not used: `EffectDef::from_node` keeps `MATERIAL` and `EFFECT_FILE` in `Actor3dDef::effects`, which nothing reads. The original compiles the `.fx` file and assigns it to the material (`ParseEffect`). |
+| `CAdActor3DX::DirToAngle` | done | `actor3d.rs` `dir_to_angle`: same table, -1 for `DI_NONE`, 0 for anything else. |
+| `CAdActor3DX::AngleToDir` | done | `actor3d.rs` `angle_to_dir`: same eight sectors (22, 67, ... 337). |
+| `CAdActor3DX::PlayAnim` | done | `Actor3d::play_anim(0, ...)`. |
+| `CAdActor3DX::PlayAnim #2` | done | `Actor3d::play_anim`: restarted (`force`), the pair's transition time else the default, the default stop transition; with `set_state` the state becomes `PlayingAnim` on that channel. |
+| `CAdActor3DX::Talk` | done | Only calls `CAdObject::Talk`: `World::talk_call` -> `Actor3d::talk`. |
+| `CAdActor3DX::GetHeight` | done | `Actor3d::height`: `Y - top of the projected box - 5`, 0 without a model. |
+| `CAdActor3DX::ScCallMethod` | partial | `natives_actor3d.rs` `actor3d_call`. Agree: `PlayAnim`/`Async`, `PlayAnimChannel`/`Async`, `StopAnim`, `StopAnimChannel`, `IsAnimPlaying`, `IsAnimChannelPlaying`, `AddAttachment`/`AddMesh`, `RemoveAttachment`/`RemoveMesh`, `GetAttachment` (by name), `GoTo3D`, `GoTo`, `TurnToAngle`, `IsWalking`, `DirectWalk`/`Back`/`Stop`, `DirectTurnLeft`/`Right`/`Stop`, `MergeAnims`, `UnloadAnim`, `SetAnimTransitionTime`, `GetAnimTransitionTime`, `CreateParticleEmitterBone`. Different: (1) `SetEffect`, `RemoveEffect`, `SetEffectParam`, `SetEffectParamVector`, `SetEffectParamColor` are stubs returning false (material effects are not implemented). (2) `GoToObject` when no walk is needed and the entity has a `WALK_TO` point but no direction: the original turns to `DirToAngle(DI_NONE)` = -1 (359 degrees) and waits; Luma does not turn. (3) `GoToObject` with 3D path finding and a `WALK_TO` of 0,0: the original converts the point 0,0, Luma walks to the entity's position. (4) `TurnTo(object)` when the object's position is off the walk planes: the original turns to an undefined point, Luma does nothing; objects other than actors, entities and regions are taken as a direction number. (5) `SetTexture`/`SetTheoraTexture` succeed when the file exists; the original loads it and fails on a file that does not load. (6) `GetAttachment` also accepts an index (extension). |
+| `CAdActor3DX::ScGetProperty` | done | `natives_actor3d.rs` `actor3d_get`: `Type` (`actor3dx`), `TalkAnimName`, `TalkAnimChannel`, `WalkAnimName`, `IdleAnimName`, `TurnLeftAnimName`, `TurnRightAnimName`, `DirectionAngle`/`DirAngle`, `Direction`, `AnimTransitionTime`, `AnimStopTransitionTime`, `GoToTolerance`. The inherited members are under `CAdObject3D::ScGetProperty`. |
+| `CAdActor3DX::ScSetProperty` | done | `natives_actor3d.rs` `actor3d_set`: the animation names (null restores the default name), `TalkAnimChannel`, `DirectionAngle`/`DirAngle` (normalised), `Direction`, `AnimTransitionTime`, `AnimStopTransitionTime`, `GoToTolerance`. |
+| `CAdActor3DX::ScToString` | done | `world.rs`: `[actor3dx object]`. |
+| `CAdActor3DX::Persist` | partial | serde on `Actor3d` (`save.rs`): the paths with their cursors, target point and angle, turning side, after-walk angle, animation names, direct control, state channel, `GoToTolerance`, talk channel, particle bone and offset, attachments; default and per-pair transition times are in `AnimationState`. Missing: the open request of the 3D path finder. `Actor3d::ticket` is skipped and `Scene3d` does not save its finder (see `CAdSceneGeometry::Persist`), and nothing asks again: an actor saved in `WaitingPath` (the frame after a `GoTo`) stays there after loading, and a script waiting for it hangs. `docs/saving.md` says such an actor asks again; the code does not. |
+| `CAdActor3DX::InvalidateDeviceObjects` | n/a | Direct3D device loss; `luma-render` owns the GPU resources (`draw3d.rs` `Render3d`). |
+| `CAdActor3DX::RestoreDeviceObjects` | n/a | Direct3D device restore; see `InvalidateDeviceObjects`. |
+| `CAdActor3DX::MergeAnimations` | done | `Actor3d::merge_anims` -> `merge_into`: merges the sets of the file, then applies the `.anim` file of the same directory and base name when it exists (`Actor3dDef::anim_sidecar`); the file is remembered for saved games. |
+| `CAdActor3DX::MergeAnimations2` | partial | `AnimationDef::parse_file`, applied in `Actor3d::merge_into`; a syntax error fails the merge as in the original. Different: a top-level key other than `ANIMATION`, or an unknown key inside a block, fails the original (`MergeAnims` then returns false although the sets are merged); Luma skips it and returns true. |
+| `CAdActor3DX::MergeAnimations2 ANIMATION` | done | `AnimationDef::from_node` + `AnimationDef::apply` (`LOOPING` and the events of the named set); the unknown-key case is under `MergeAnimations2`. |
+| `CAdActor3DX::UnloadAnimation` | done | `Actor3d::unload_anim` -> `AnimatedModel::remove_animation_set`; false when the model has no such set. The name is remembered for saved games. |
+| `CAdActor3DX::IsGoToNeeded` | done | `Actor3d::is_go_to_needed`: false within `GoToTolerance` pixels on both axes. |
+| `CAdActor3DX::GetAnimTransitionTime` | done | `AnimatedModel::transition_time`: the time of the pair (names without case), else the default; called by `AnimatedModel::play` and, for attachments, `Attachment3d::play_anim`. |
+| `CAdActor3DX::CreateParticleEmitter` | done | `actor3d_call` `CreateParticleEmitter`: forgets the bone, then the common `emitter_owner_call`. (`DeleteParticleEmitter` also forgets the bone, without effect.) |
+| `CAdActor3DX::CreateParticleEmitter #2` | done | `actor3d_call` `CreateParticleEmitterBone`: keeps the bone and the offset, creates a following emitter. |
+| `CAdActor3DX::UpdatePartEmitter` | partial | `natives_particles.rs` (emitter position of a `Kind::Actor3D`) + `World::actor3d_bone_emitter_position`: with a bone, the bone's position with the offset, projected (an unknown bone keeps the actor's position; the original uses an uninitialised point). Different, without a bone (`CAdObject::UpdatePartEmitter`): Luma applies the emitter's offsets at scale 100; the original scales them by `GetScale`, which for a 3D actor (zoomable by default) is the scene's zoom at its 2D position, or its `Scale`/`ScaleX`/`ScaleY` when set. |
+| `CAdActor3DX::ParseEffect` | partial | `EffectDef::from_node` reads the block (both keys required); nothing creates or assigns the effect. The original builds a `C3DEffect` from the file and calls `SetMaterialEffect(material, file)` on the model, logging failures. |
+| `CAdActor3DX::ParseEffect MATERIAL` | partial | Parsed into `EffectDef::material`, not used. |
+| `CAdActor3DX::ParseEffect EFFECT_FILE` | partial | Parsed into `EffectDef::effect_file`, not used: `.fx` effects are not implemented. |
 
 ## `wme_ad/AdActorDir.cpp`
 
