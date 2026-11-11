@@ -2131,6 +2131,9 @@ impl World {
         for (file, reason) in self.fonts.take_missing() {
             self.log(format!("Error loading font '{file}': {reason}"));
         }
+        for (file, face) in self.fonts.take_chosen() {
+            self.log(format!("TrueType font '{file}' is drawn with {face}"));
+        }
         ok
     }
 

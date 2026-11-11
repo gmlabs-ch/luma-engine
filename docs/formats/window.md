@@ -100,7 +100,11 @@ height. A `BACK` tiled image then rounds the size down to whole tiles.
 | `BUTTON`, `STATIC`, `EDIT`, `WINDOW` | block | | A control, in drawing order. |
 | `ENTITY_CONTAINER` | block | | A control showing an entity: `NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, and `ENTITY`, an `.entity` file (an `ENTITY` block as in a scene). The entity is drawn at the container's position with its own sprite and animation, takes the mouse through its sprite when it is active and registrable and the container is enabled, and its own scripts get the mouse events; `GetEntity` hands it to scripts, `SetEntity` loads another file. OpenQuest's verb bar is made of them. The entity's scripts do not pause when the game freezes unless a script sets the container's `Freezable` to `true`; `CreateEntityContainer(name)` on a window makes an empty one at runtime. |
 
-A window with a `TITLE` but no `TITLE_RECT` shows no title. A window
+A window with a `TITLE` but no `TITLE_RECT` shows no title. The title
+is laid out in the rectangle's width and height
+(`CUIWindow::Display`): lines that do not fit the height are dropped,
+so a font whose line is higher than the rectangle shows no title at
+all; nothing is clipped. A window
 whose size is `0` after the correction has the width of its image or
 `100` and the height of its image, as any control.
 

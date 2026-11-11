@@ -21,6 +21,7 @@ use luma_formats::{DEFAULT_COLOR_KEY, Image, Rgb, Rgba, Sprite};
 use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
 use luma_script::classes::utf8_to_text;
 
+use crate::font_face::{FaceChoice, FaceOrigin, FaceSet, choose_face, resolve_face};
 use crate::scene_view::key;
 
 /// The number of rendered texts a TrueType font keeps.
@@ -30,7 +31,11 @@ const CACHED_TEXTS: usize = 30;
 /// screen a game draws on, so nothing visible is lost.
 const MAX_UNBOUNDED_WIDTH: i32 = 4096;
 
-/// System font files tried when a TrueType font is not in the game.
+/// How far to the right an imitated italic leans, per pixel of height.
+const SLANT: f32 = 0.2;
+
+/// System font files tried last, when neither the game nor the list of
+/// the system's fonts has a face for a TrueType font.
 const SYSTEM_FONTS: &[&str] = &[
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
@@ -347,6 +352,64 @@ impl Glyph {
     fn bearing_y(&self) -> i32 {
         self.metrics.ymin + self.metrics.height as i32
     }
+
+    /// The glyph thickened by `by` pixels, for a bold the font file
+    /// lacks: every pixel spreads to the `by` pixels on its right, and
+    /// the glyph and its advance grow as much.
+    fn emboldened(mut self, by: usize) -> Glyph {
+        self.metrics.advance_width += by as f32;
+        let (w, h) = (self.metrics.width, self.metrics.height);
+        if w == 0 || h == 0 || by == 0 {
+            return self;
+        }
+        let wide = w + by;
+        let mut coverage = vec![0u8; wide * h];
+        for row in 0..h {
+            for col in 0..w {
+                let a = self.coverage[row * w + col];
+                if a == 0 {
+                    continue;
+                }
+                for at in &mut coverage[row * wide + col..=row * wide + col + by] {
+                    *at = (*at).max(a);
+                }
+            }
+        }
+        self.metrics.width = wide;
+        self.coverage = coverage;
+        self
+    }
+
+    /// The glyph slanted to the right, for an italic the font file
+    /// lacks: each row moves by `slope` times its height above the
+    /// baseline, to the left below it. The advance is kept.
+    fn slanted(mut self, slope: f32) -> Glyph {
+        let (w, h) = (self.metrics.width, self.metrics.height);
+        if w == 0 || h == 0 {
+            return self;
+        }
+        let top = self.bearing_y() as f32;
+        let shift = |row: usize| slope * (top - row as f32 - 0.5);
+        let origin = shift(h - 1).floor();
+        let wide = w + (shift(0) - origin).ceil() as usize + 1;
+        let mut coverage = vec![0u16; wide * h];
+        for row in 0..h {
+            // The row lands between two columns: its coverage is shared
+            // between them.
+            let moved = shift(row) - origin;
+            let (whole, part) = (moved.floor() as usize, moved.fract());
+            for col in 0..w {
+                let a = f32::from(self.coverage[row * w + col]);
+                let at = row * wide + col + whole;
+                coverage[at] += (a * (1.0 - part)).round() as u16;
+                coverage[at + 1] += (a * part).round() as u16;
+            }
+        }
+        self.metrics.xmin += origin as i32;
+        self.metrics.width = wide;
+        self.coverage = coverage.into_iter().map(|a| a.min(255) as u8).collect();
+        self
+    }
 }
 
 /// A text rendered to an image, kept for reuse.
@@ -371,6 +434,12 @@ pub struct TrueTypeFont {
     pub source: String,
     font: fontdue::Font,
     px: f32,
+    /// The pixels the glyphs are thickened by, to imitate a bold the
+    /// file lacks; 0 when the face is used as it is.
+    embolden: usize,
+    /// Whether the glyphs are slanted, to imitate an italic the file
+    /// lacks.
+    slant: bool,
     /// The height of a line.
     pub line_height: i32,
     ascender: f32,
@@ -385,37 +454,97 @@ pub struct TrueTypeFont {
 }
 
 impl TrueTypeFont {
-    /// Loads the font file from the game, or a system font when the
-    /// game has none.
+    /// Loads the face the definition asks for (`CBFontTT::CreateWinFont`):
+    /// the typeface `FACE` in the weight and slant of `BOLD` and
+    /// `ITALIC`, from the game's `FILENAME` file when that file is of
+    /// that typeface, else from the system's fonts. When neither has
+    /// the typeface the game's file is used whatever its name, and a
+    /// usual system font without one. A bold or an italic the face found
+    /// lacks is imitated.
     pub fn load(vfs: &Vfs, def: TrueTypeFontDef) -> Result<TrueTypeFont, String> {
-        let (source, bytes) = match vfs.read(&def.filename) {
-            Ok(bytes) => (def.filename.clone(), bytes),
-            Err(_) => {
-                let fallback = SYSTEM_FONTS
-                    .iter()
-                    .find_map(|p| std::fs::read(p).ok().map(|b| (p.to_string(), b)));
-                match fallback {
-                    Some(found) => found,
-                    None => {
-                        return Err(format!(
-                            "Error loading TrueType font '{}': no system font found",
-                            def.filename
-                        ));
-                    }
+        let game = vfs.read(&def.filename).ok().map(FaceSet::from_bytes);
+        let game_faces = game.as_ref().map_or(&[][..], FaceSet::faces);
+        let (face, bold, italic) = (def.face.clone(), def.bold, def.italic);
+        // The system's fonts are only listed when the game's file is not
+        // the typeface asked for.
+        let found = match choose_face(game_faces, Some(&face), bold, italic) {
+            Some(choice) => Some((FaceOrigin::Game, choice)),
+            None => resolve_face(&[], FaceSet::system().faces(), &face, bold, italic),
+        };
+        if let Some((FaceOrigin::System, choice)) = found {
+            let system = FaceSet::system();
+            let source = system.path(choice.index).unwrap_or_else(|| face.clone());
+            let loaded = system.with_data(choice.index, |bytes, index| {
+                TrueTypeFont::from_face(def.clone(), &source, bytes, index, choice)
+            });
+            // A system file that went away or does not parse is not the
+            // end: the fallbacks below still apply.
+            if let Some(Ok(font)) = loaded {
+                return Ok(font);
+            }
+        }
+        // The game's own file: the face asked for, or, when no font has
+        // that typeface, the closest style of whatever the file holds.
+        if let Some(game) = &game {
+            let choice = match found {
+                Some((FaceOrigin::Game, choice)) => Some(choice),
+                _ => choose_face(game.faces(), None, bold, italic),
+            };
+            if let Some(choice) = choice {
+                let source = def.filename.clone();
+                if let Some(font) = game.with_data(choice.index, |bytes, index| {
+                    TrueTypeFont::from_face(def.clone(), &source, bytes, index, choice)
+                }) {
+                    return font;
                 }
             }
-        };
-        TrueTypeFont::from_bytes(def, &source, &bytes)
+        }
+        for path in SYSTEM_FONTS {
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
+            let set = FaceSet::from_bytes(bytes);
+            let Some(choice) = choose_face(set.faces(), None, bold, italic) else {
+                continue;
+            };
+            if let Some(font) = set.with_data(choice.index, |bytes, index| {
+                TrueTypeFont::from_face(def.clone(), path, bytes, index, choice)
+            }) {
+                return font;
+            }
+        }
+        Err(format!(
+            "Error loading TrueType font '{}': no font '{}' and no system font found",
+            def.filename, def.face
+        ))
     }
 
-    /// A font from the bytes of a `.ttf` file.
+    /// A font from the bytes of a `.ttf` file: its first face, as it is.
     pub fn from_bytes(
         def: TrueTypeFontDef,
         source: &str,
         bytes: &[u8],
     ) -> Result<TrueTypeFont, String> {
+        let plain = FaceChoice {
+            index: 0,
+            embolden: false,
+            slant: false,
+        };
+        TrueTypeFont::from_face(def, source, bytes, 0, plain)
+    }
+
+    /// A font from one face of a font file (`index` in a collection),
+    /// with the bold and the italic the choice says to imitate.
+    pub fn from_face(
+        def: TrueTypeFontDef,
+        source: &str,
+        bytes: &[u8],
+        index: u32,
+        choice: FaceChoice,
+    ) -> Result<TrueTypeFont, String> {
         let px = def.pixel_size();
         let settings = fontdue::FontSettings {
+            collection_index: index,
             scale: px,
             ..fontdue::FontSettings::default()
         };
@@ -433,6 +562,14 @@ impl TrueTypeFont {
             source: source.to_string(),
             font,
             px,
+            // A regular stroke is about a twelfth of the size; a bold
+            // one half as much again.
+            embolden: if choice.embolden {
+                ((px / 24.0).round() as usize).max(1)
+            } else {
+                0
+            },
+            slant: choice.slant,
             line_height,
             ascender,
             descender,
@@ -442,6 +579,17 @@ impl TrueTypeFont {
             rtl: false,
             utf8: false,
         })
+    }
+
+    /// The face drawn with, for the log: the file, and what is imitated.
+    pub fn face_note(&self) -> String {
+        let imitated = match (self.embolden > 0, self.slant) {
+            (true, true) => ", bold and italic imitated",
+            (true, false) => ", bold imitated",
+            (false, true) => ", italic imitated",
+            (false, false) => "",
+        };
+        format!("{}{imitated}", self.source)
     }
 
     /// Reads the text as UTF-8 or as ANSI; the texts rendered so far go
@@ -475,7 +623,7 @@ impl TrueTypeFont {
 
     fn glyph(&mut self, ch: char) -> Option<&Glyph> {
         let font = &self.font;
-        let px = self.px;
+        let (px, embolden, slant) = (self.px, self.embolden, self.slant);
         self.glyphs
             .entry(ch)
             .or_insert_with(|| {
@@ -483,7 +631,14 @@ impl TrueTypeFont {
                     return None;
                 }
                 let (metrics, coverage) = font.rasterize(ch, px);
-                Some(Glyph { metrics, coverage })
+                let mut glyph = Glyph { metrics, coverage };
+                if embolden > 0 {
+                    glyph = glyph.emboldened(embolden);
+                }
+                if slant {
+                    glyph = glyph.slanted(SLANT);
+                }
+                Some(glyph)
             })
             .as_ref()
     }
@@ -812,6 +967,8 @@ fn set_pixel(image: &mut Image, x: i32, y: i32) {
 pub struct FontBank {
     fonts: HashMap<String, Font>,
     missing: Vec<(String, String)>,
+    /// The faces chosen for the TrueType fonts loaded, not yet taken.
+    chosen: Vec<(String, String)>,
     /// Whether text is laid out right to left (`Game.TextRTL`).
     rtl: bool,
     /// Whether text is UTF-8 (`Game.TextEncoding`).
@@ -838,6 +995,9 @@ impl FontBank {
             Ok(mut font) => {
                 font.set_rtl(self.rtl);
                 font.set_utf8(self.utf8);
+                if let Font::TrueType(f) = &font {
+                    self.chosen.push((path.to_string(), f.face_note()));
+                }
                 self.fonts.insert(k, font);
                 true
             }
@@ -897,6 +1057,12 @@ impl FontBank {
         let taken = self.missing.clone();
         self.missing.clear();
         taken
+    }
+
+    /// Takes the faces chosen for the TrueType fonts loaded since the
+    /// last call: each font's path with the file it is drawn with.
+    pub fn take_chosen(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.chosen)
     }
 
     /// Uploads what every font needs.
@@ -1159,6 +1325,116 @@ mod tests {
         assert_eq!(f.texts.len(), 2);
         f.set_utf8(false);
         assert!(f.texts.is_empty());
+    }
+
+    fn glyph(width: usize, height: usize, ymin: i32, coverage: Vec<u8>) -> Glyph {
+        Glyph {
+            metrics: fontdue::Metrics {
+                xmin: 1,
+                ymin,
+                width,
+                height,
+                advance_width: width as f32 + 2.0,
+                ..fontdue::Metrics::default()
+            },
+            coverage,
+        }
+    }
+
+    #[test]
+    fn a_missing_bold_is_imitated_by_thickening_the_glyphs() {
+        // A vertical bar one pixel wide, three high.
+        let bar = glyph(3, 3, 0, vec![0, 255, 0, 0, 200, 0, 0, 255, 0]);
+        let bold = bar.emboldened(2);
+        assert_eq!((bold.metrics.width, bold.metrics.height), (5, 3));
+        assert_eq!(bold.metrics.advance_width, 7.0);
+        assert_eq!(bold.metrics.xmin, 1);
+        assert_eq!(
+            bold.coverage,
+            [
+                0, 255, 255, 255, 0, 0, 200, 200, 200, 0, 0, 255, 255, 255, 0
+            ]
+        );
+        // A glyph without ink only advances further.
+        let space = glyph(0, 0, 0, Vec::new()).emboldened(1);
+        assert_eq!((space.metrics.width, space.metrics.advance_width), (0, 3.0));
+    }
+
+    #[test]
+    fn a_missing_italic_is_imitated_by_slanting_the_glyphs() {
+        // A bar ten pixels high standing on the baseline, and one
+        // hanging five pixels under it.
+        let column = |ymin| glyph(1, 10, ymin, vec![255; 10]);
+        let centre = |g: &Glyph, row: usize| {
+            let w = g.metrics.width;
+            let ink = &g.coverage[row * w..(row + 1) * w];
+            let total: f32 = ink.iter().map(|&a| f32::from(a)).sum();
+            let moment: f32 = ink
+                .iter()
+                .enumerate()
+                .map(|(x, &a)| x as f32 * f32::from(a))
+                .sum();
+            assert!((total - 255.0).abs() < 2.0, "the ink is kept: {total}");
+            g.metrics.xmin as f32 + moment / total
+        };
+        let upright = column(0);
+        let slanted = column(0).slanted(0.2);
+        assert_eq!(slanted.metrics.height, 10);
+        assert_eq!(slanted.metrics.advance_width, upright.metrics.advance_width);
+        let (top, bottom) = (centre(&slanted, 0), centre(&slanted, 9));
+        assert!((top - bottom - 0.2 * 9.0).abs() < 0.05, "{top} {bottom}");
+        // The foot stays where it stood: the slant turns about the
+        // baseline.
+        assert!((bottom - (1.0 + 0.2 * 0.5)).abs() < 0.05, "{bottom}");
+        // Under the baseline the glyph moves to the left.
+        let hanging = column(-5).slanted(0.2);
+        assert!(centre(&hanging, 9) < 1.0);
+        assert!(centre(&hanging, 0) > 1.0);
+        assert_eq!(glyph(0, 0, 0, Vec::new()).slanted(0.2).metrics.width, 0);
+    }
+
+    #[test]
+    fn truetype_fonts_draw_the_face_chosen_and_imitate_the_rest() {
+        let Some((source, bytes)) = system_font() else {
+            eprintln!("skipped: no system font");
+            return;
+        };
+        let FontFile::TrueType(def) = FontFile::parse(
+            b"TTFONT { SIZE=20 FACE=\"Some Face\" BOLD=TRUE ITALIC=TRUE COLOR {255,255,255} ALPHA=255 }",
+        )
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(def.face, "Some Face");
+        let plain = FaceChoice {
+            index: 0,
+            embolden: false,
+            slant: false,
+        };
+        let mut regular = TrueTypeFont::from_face(def.clone(), &source, &bytes, 0, plain).unwrap();
+        let both = FaceChoice {
+            index: 0,
+            embolden: true,
+            slant: true,
+        };
+        let mut imitated = TrueTypeFont::from_face(def, &source, &bytes, 0, both).unwrap();
+        assert_eq!(regular.face_note(), source);
+        assert_eq!(
+            imitated.face_note(),
+            format!("{source}, bold and italic imitated")
+        );
+        // 20 points are 26.67 pixels: one pixel more per glyph.
+        let text = "Main Menu";
+        let glyphs = text.chars().count() as i32;
+        assert_eq!(
+            imitated.measure(text, -1).0,
+            regular.measure(text, -1).0 + glyphs
+        );
+        assert_eq!(imitated.line_height, regular.line_height);
+        let ink = |image: &Image| -> u64 { image.pixels.chunks(4).map(|p| u64::from(p[3])).sum() };
+        let (thin, _) = regular.render(text, -1, TextAlign::Left, -1);
+        let (thick, _) = imitated.render(text, -1, TextAlign::Left, -1);
+        assert!(ink(&thick) > ink(&thin) * 11 / 10, "more ink when bold");
     }
 
     /// Every `.font` of the local test game loads and measures text.

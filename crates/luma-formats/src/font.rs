@@ -413,7 +413,10 @@ pub struct FontLayer {
 pub struct TrueTypeFontDef {
     /// Size in points at 96 dpi.
     pub size: i32,
-    /// The font file.
+    /// `FACE`: the family name of the typeface, `Arial` by default.
+    pub face: String,
+    /// `FILENAME`: a font file of the game, made available to the
+    /// engine; it is the one drawn with when `FACE` names it.
     pub filename: String,
     /// `BOLD`.
     pub bold: bool,
@@ -436,6 +439,7 @@ impl TrueTypeFontDef {
     fn from_node(root: &Node) -> TrueTypeFontDef {
         let mut def = TrueTypeFontDef {
             size: 0,
+            face: "Arial".to_string(),
             filename: "arial.ttf".to_string(),
             bold: false,
             italic: false,
@@ -452,6 +456,11 @@ impl TrueTypeFontDef {
         for child in root.nodes() {
             match child.key.to_ascii_uppercase().as_str() {
                 "SIZE" => def.size = integer(child),
+                "FACE" => {
+                    if let Some(name) = child.as_str() {
+                        def.face = name.to_string();
+                    }
+                }
                 "FILENAME" => {
                     if let Some(name) = child.as_str() {
                         def.filename = name.to_string();
@@ -563,13 +572,14 @@ mod tests {
     #[test]
     fn parses_truetype_fonts() {
         let FontFile::TrueType(def) = FontFile::parse(
-            b"TTFONT { SIZE=20 FACE=\"Arial\" FILENAME=\"a.ttf\" BOLD=TRUE COLOR { 1, 2, 3 } ALPHA=200 LAYER { OFFSET_X=1 OFFSET_Y=-1 COLOR { 0,0,0 } ALPHA=255 } LAYER { COLOR { 255,255,255 } ALPHA = 255 } }",
+            b"TTFONT { SIZE=20 FACE=\"Comic Sans MS\" FILENAME=\"a.ttf\" BOLD=TRUE COLOR { 1, 2, 3 } ALPHA=200 LAYER { OFFSET_X=1 OFFSET_Y=-1 COLOR { 0,0,0 } ALPHA=255 } LAYER { COLOR { 255,255,255 } ALPHA = 255 } }",
         )
         .unwrap() else {
             panic!("truetype expected");
         };
         assert_eq!(def.size, 20);
         assert_eq!(def.filename, "a.ttf");
+        assert_eq!(def.face, "Comic Sans MS");
         assert!(def.bold && !def.italic);
         assert_eq!(def.layers.len(), 2);
         assert_eq!((def.layers[0].offset_x, def.layers[0].offset_y), (1, -1));
@@ -581,6 +591,7 @@ mod tests {
             panic!()
         };
         assert_eq!(plain.filename, "arial.ttf");
+        assert_eq!(plain.face, "Arial", "the typeface without `FACE`");
         assert_eq!(plain.layers.len(), 1);
         assert_eq!(
             plain.layers[0].color,

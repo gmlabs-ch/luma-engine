@@ -100,18 +100,60 @@ TTFONT
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `SIZE` | int | `0` | Size in points, at 96 dpi: the pixel size is `SIZE * 96 / 72`. |
-| `FILENAME` | string | `arial.ttf` | The font file, in the game's files. |
-| `FACE`, `CHARSET` | | | Windows font selection, ignored. |
-| `BOLD`, `ITALIC`, `UNDERLINE`, `STRIKE` | bool | `FALSE` | Styles; the file is expected to carry bold and italic, `UNDERLINE` draws a line, `STRIKE` is read and ignored. |
+| `FACE` | string | `Arial` | The family name of the typeface the text is drawn with (see [Choosing the face](#choosing-the-face)). |
+| `FILENAME` | string | `arial.ttf` | A font file among the game's files, made available to the engine: it is drawn with when `FACE` names its typeface. |
+| `BOLD`, `ITALIC` | bool | `FALSE` | The weight and the slant of the face. |
+| `UNDERLINE`, `STRIKE` | bool | `FALSE` | `UNDERLINE` draws a line under the text; `STRIKE` is read and ignored. |
+| `CHARSET` | int | `0` | The Windows character set of the font, ignored: every face is addressed by Unicode character. |
 | `COLOR` | `r,g,b` | `0,0,0` | Colour of the text when no `LAYER` is given. |
 | `ALPHA` | int | `0` | Opacity of that colour. |
 | `LAYER` | block, repeatable | | A layer: `OFFSET_X`, `OFFSET_Y` (default `0`), `COLOR`, `ALPHA` (default black, transparent). Layers are drawn in file order, each the whole text moved by its offset and tinted with its colour; an outline is four dark layers under a light one. |
 
 Without any `LAYER`, the font has one layer with `COLOR` and `ALPHA`.
 
-When the font file is not among the game's files the engine loads a
-system font instead (it logs which one); Luma Engine looks for the usual
-Liberation Sans, DejaVu Sans and Arial files of the platform.
+### Choosing the face
+
+The original engine registers `FILENAME` with Windows as a private
+font, then asks GDI for a font by name: the typeface `FACE`, the weight
+`FW_BOLD` or `FW_NORMAL`, the italic flag (`CBFontTT::CreateWinFont`).
+The file is therefore not what the text is drawn with unless `FACE` is
+its typeface: a font file that asks for `FACE = "Arial"`, `BOLD = TRUE`
+and ships another typeface as `FILENAME` is drawn in Arial Bold on any
+system that has Arial. Many games rely on it.
+
+Luma Engine does the same in three steps; the rules for choosing among
+the faces found are its own, GDI's font mapper not being documented:
+
+1. **The game's file.** When `FILENAME` is among the game's files and
+   one of its faces has `FACE` as a family name (compared without
+   case), the file is used.
+2. **The system's fonts.** Otherwise the fonts installed on the system
+   are searched for the family `FACE`; when the system lacks it, for
+   the families that stand for it: Liberation Sans, Arimo, Helvetica,
+   Helvetica Neue, Nimbus Sans and DejaVu Sans for Arial (and for
+   Helvetica, Tahoma, Verdana and MS Sans Serif, after Arial itself),
+   Liberation Serif, Tinos, Times, Nimbus Roman and DejaVu Serif for
+   Times New Roman, Liberation Mono, Cousine, Courier, Nimbus Mono PS
+   and DejaVu Sans Mono for Courier New. The system's font directories
+   are listed once, the first time a font needs them.
+3. **Whatever can be drawn with.** When no font has the family, the
+   game's file is used whatever its typeface, and without a file the
+   first of the usual Liberation Sans, DejaVu Sans, Arial and Helvetica
+   files of the platform.
+
+In a family, the face chosen is the one whose weight is nearest to the
+weight asked for (700 with `BOLD`, 400 without), then one with the
+right slant, then the first found. What the face lacks is imitated, as
+Windows imitates it, by amounts that are Luma Engine's own: a bold asked of a face lighter than 600 thickens each glyph
+to the right by a twenty-fourth of the pixel size (at least one pixel)
+and widens its advance as much; an italic asked of an upright face
+slants each glyph by a fifth of its height about the baseline. A bold
+face is never made lighter nor an italic one upright.
+
+The engine logs the file each TrueType font is drawn with, and what it
+imitates. A character the chosen face lacks is skipped: it is not
+looked up in the game's file or in another font, where Windows would
+substitute one.
 
 **Metrics.** The line height is the font's line spacing in pixels,
 rounded up, plus 2. Text is rendered to an image as wide as the box:
@@ -256,3 +298,8 @@ not. `StopTalk` ends it; `IsTalking` says whether one is playing.
   alignment, height limit); the engine keeps 30 such images per font.
 - The `.talk` files that time talk sprites to a sound are not supported
   yet.
+- A text that does not fit the height it is given is not drawn at all,
+  first line included: a window title in a font whose line is higher
+  than the `TITLE_RECT` shows nothing, as in the original engine
+  (`CBFontTT::FormatText` stops before a line that would pass the
+  maximum height; nothing is clipped).

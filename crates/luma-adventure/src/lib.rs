@@ -54,6 +54,7 @@ pub mod capture;
 pub mod draw3d;
 mod error;
 pub mod fader;
+pub mod font_face;
 pub mod input;
 pub mod inventory;
 mod natives;
