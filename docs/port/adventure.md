@@ -72,64 +72,64 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdActor3D::CAdActor3D` | unreviewed |  |
-| `CAdActor3D::~CAdActor3D` | unreviewed |  |
-| `CAdActor3D::Update` | unreviewed |  |
-| `CAdActor3D::Display` | unreviewed |  |
-| `CAdActor3D::TurnTo` | unreviewed |  |
-| `CAdActor3D::GoTo` | unreviewed |  |
-| `CAdActor3D::FollowPath` | unreviewed |  |
-| `CAdActor3D::GetNextStep` | unreviewed |  |
-| `CAdActor3D::InitLine` | unreviewed |  |
-| `CAdActor3D::PrepareTurn` | unreviewed |  |
-| `CAdActor3D::TurnToStep` | unreviewed |  |
-| `CAdActor3D::LoadFile` | unreviewed |  |
-| `CAdActor3D::LoadBuffer` | unreviewed |  |
-| `CAdActor3D::LoadBuffer ACTOR3D` | unreviewed |  |
-| `CAdActor3D::LoadBuffer X` | unreviewed |  |
-| `CAdActor3D::LoadBuffer Y` | unreviewed |  |
-| `CAdActor3D::LoadBuffer Z` | unreviewed |  |
-| `CAdActor3D::LoadBuffer ANGLE` | unreviewed |  |
-| `CAdActor3D::LoadBuffer VELOCITY` | unreviewed |  |
-| `CAdActor3D::LoadBuffer ANGULAR_VELOCITY` | unreviewed |  |
-| `CAdActor3D::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdActor3D::LoadBuffer NAME` | unreviewed |  |
-| `CAdActor3D::LoadBuffer REGISTRABLE` | unreviewed |  |
-| `CAdActor3D::LoadBuffer INTERACTIVE` | unreviewed |  |
-| `CAdActor3D::LoadBuffer ACTIVE` | unreviewed |  |
-| `CAdActor3D::LoadBuffer MODEL` | unreviewed |  |
-| `CAdActor3D::LoadBuffer EVENTS` | unreviewed |  |
-| `CAdActor3D::LoadBuffer FONT` | unreviewed |  |
-| `CAdActor3D::LoadBuffer CURSOR` | unreviewed |  |
-| `CAdActor3D::LoadBuffer DROP_TO_FLOOR` | unreviewed |  |
-| `CAdActor3D::LoadBuffer SCRIPT` | unreviewed |  |
-| `CAdActor3D::LoadBuffer CAPTION` | unreviewed |  |
-| `CAdActor3D::LoadBuffer PROPERTY` | unreviewed |  |
-| `CAdActor3D::LoadBuffer ANIMATION` | unreviewed |  |
-| `CAdActor3D::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdActor3D::LoadBuffer SHADOW_IMAGE` | unreviewed |  |
-| `CAdActor3D::LoadBuffer SHADOW_SIZE` | unreviewed |  |
-| `CAdActor3D::LoadBuffer SIMPLE_SHADOW` | unreviewed |  |
-| `CAdActor3D::LoadBuffer SHADOW_COLOR` | unreviewed |  |
-| `CAdActor3D::LoadBuffer LIGHT_POSITION` | unreviewed |  |
-| `CAdActor3D::LoadBuffer SHADOW` | unreviewed |  |
-| `CAdActor3D::LoadBuffer SCALE` | unreviewed |  |
-| `CAdActor3D::LoadBuffer DRAW_BACKFACES` | unreviewed |  |
-| `CAdActor3D::DirToAngle` | unreviewed |  |
-| `CAdActor3D::AngleToDir` | unreviewed |  |
-| `CAdActor3D::PlayAnim` | unreviewed |  |
-| `CAdActor3D::PlayAnim #2` | unreviewed |  |
-| `CAdActor3D::Talk` | unreviewed |  |
-| `CAdActor3D::GetHeight` | unreviewed |  |
-| `CAdActor3D::ScCallMethod` | unreviewed |  |
-| `CAdActor3D::ScGetProperty` | unreviewed |  |
-| `CAdActor3D::ScSetProperty` | unreviewed |  |
-| `CAdActor3D::ScToString` | unreviewed |  |
-| `CAdActor3D::Persist` | unreviewed |  |
-| `CAdActor3D::CreateFromFile` | unreviewed |  |
-| `CAdActor3D::IsActorX` | unreviewed |  |
-| `CAdActor3D::IsActorX ACTOR3DX` | unreviewed |  |
-| `CAdActor3D::IsActorX ACTOR3D` | unreviewed |  |
+| `CAdActor3D::CAdActor3D` | todo | The legacy Milkshape (`.ms3d`) 3D actor. It is not dead code: `Game.LoadActor3D` and `Scene.LoadActor3D` call `CAdActor3D::CreateFromFile`, which still builds a `CAdActor3D` for any file that is not `ACTOR3DX` (with a deprecation warning in the log). Luma refuses the file on purpose (`luma-3d/src/actor3d.rs` `Actor3dDef::apply_file`, `docs/3d-actors.md` section 13) and has none of this class nor of its model (`C3DModel`, `C3DLoaderMS3D`, `C3DSkelAnim`, `C3DJoint` in `render.md`). The constructor sets: target angle 0, after-walk angle -1, animation names `talk`/`idle`/`walk`, direct control off, and enables shadows. |
+| `CAdActor3D::~CAdActor3D` | todo | Legacy `ACTOR3D` actor, not ported. Frees the animation names, the direct-control names and the path (Rust ownership once the class exists). |
+| `CAdActor3D::Update` | todo | Legacy `ACTOR3D` actor, not ported. The per-frame state machine: as `CAdActor3DX::Update` without transitions, turn animations, talk channel, attachments, 2D path finding or block region: direct control (walk test `DirectPathExists`, idle when blocked), turning and path search play idle, path following plays walk, talking plays the sentence's stances restarted else the talk animation, `PlayAnim` ends when channel 0 is no longer pending; then `CAdObject3D::Update`, `AfterMove`, the particle emitter. |
+| `CAdActor3D::Display` | todo | Legacy `ACTOR3D` actor, not ported. Draws the actor: sounds, lights, the shadow whenever its type is not none (`DisplayShadow` with the light position scaled on Y only; no stencil volume), the model's `Update` and `Render` with the world matrix, the clickable rectangle when registrable, the particle emitter, the accessibility hint rectangle. |
+| `CAdActor3D::TurnTo` | todo | Legacy `ACTOR3D` actor, not ported. Same as `CAdActor3DX::TurnTo` (`Actor3d::turn_to` could serve). |
+| `CAdActor3D::GoTo` | todo | Legacy `ACTOR3D` actor, not ported. Starts a walk to a 3D point with an optional arrival angle, as `CAdActor3DX::GoTo3D` (the call to `CorrectTargetPoint` is commented out). |
+| `CAdActor3D::FollowPath` | todo | Legacy `ACTOR3D` actor, not ported. Same as `CAdActor3DX::FollowPath3D`. |
+| `CAdActor3D::GetNextStep` | todo | Legacy `ACTOR3D` actor, not ported. One walking step, as `CAdActor3DX::GetNextStep3D` but without the guard for a path with no current point. |
+| `CAdActor3D::InitLine` | todo | Legacy `ACTOR3D` actor, not ported. Same as `CAdActor3DX::InitLine3D`. |
+| `CAdActor3D::PrepareTurn` | todo | Legacy `ACTOR3D` actor, not ported. Same as `CAdActor3DX::PrepareTurn`. |
+| `CAdActor3D::TurnToStep` | todo | Legacy `ACTOR3D` actor, not ported. Same as `CAdActor3DX::TurnToStep`. |
+| `CAdActor3D::LoadFile` | todo | Legacy `ACTOR3D` actor, not ported. Reads the file, keeps its name, calls `LoadBuffer`; logs `CAdActor3D::LoadFile failed for file` / `Error parsing ACTOR3D file`. |
+| `CAdActor3D::LoadBuffer` | todo | Legacy `ACTOR3D` actor, not ported. Parses an `ACTOR3D` block; unlike `ACTOR3DX` a file without `MODEL` is accepted, each `MODEL` replaces the previous one, `LoadFinalize` is called on the model at the end, and there are no `SHADOW_MODEL`, `SHADOW_TYPE`, `BLOCKED_REGION`, `WAYPOINTS` or `EFFECT` keys. `Actor3dDef::apply_file` answers `'ACTOR3D' is a legacy Milkshape actor, which is not supported`. |
+| `CAdActor3D::LoadBuffer ACTOR3D` | todo | Legacy `ACTOR3D` actor, not ported. The root keyword; Luma recognises it only to refuse the file. |
+| `CAdActor3D::LoadBuffer X` | todo | Legacy `ACTOR3D` actor, not ported. X of the 3D position. |
+| `CAdActor3D::LoadBuffer Y` | todo | Legacy `ACTOR3D` actor, not ported. Y of the 3D position. |
+| `CAdActor3D::LoadBuffer Z` | todo | Legacy `ACTOR3D` actor, not ported. Z of the 3D position. |
+| `CAdActor3D::LoadBuffer ANGLE` | todo | Legacy `ACTOR3D` actor, not ported. Heading in degrees, kept as written. |
+| `CAdActor3D::LoadBuffer VELOCITY` | todo | Legacy `ACTOR3D` actor, not ported. Walking speed. |
+| `CAdActor3D::LoadBuffer ANGULAR_VELOCITY` | todo | Legacy `ACTOR3D` actor, not ported. Turning speed. |
+| `CAdActor3D::LoadBuffer TEMPLATE` | todo | Legacy `ACTOR3D` actor, not ported. Loads another `ACTOR3D` file in place. |
+| `CAdActor3D::LoadBuffer NAME` | todo | Legacy `ACTOR3D` actor, not ported. Object name. |
+| `CAdActor3D::LoadBuffer REGISTRABLE` | todo | Legacy `ACTOR3D` actor, not ported. Clickable flag, same field as `INTERACTIVE`. |
+| `CAdActor3D::LoadBuffer INTERACTIVE` | todo | Legacy `ACTOR3D` actor, not ported. Clickable flag. |
+| `CAdActor3D::LoadBuffer ACTIVE` | todo | Legacy `ACTOR3D` actor, not ported. Active flag. |
+| `CAdActor3D::LoadBuffer MODEL` | todo | Legacy `ACTOR3D` actor, not ported. Loads the Milkshape model with `C3DModel::LoadFile`, replacing any previous one; a failure fails the actor. |
+| `CAdActor3D::LoadBuffer EVENTS` | todo | Legacy `ACTOR3D` actor, not ported. In the token table without a case: accepted and ignored. |
+| `CAdActor3D::LoadBuffer FONT` | todo | Legacy `ACTOR3D` actor, not ported. Speech font (`SetFont`). |
+| `CAdActor3D::LoadBuffer CURSOR` | todo | Legacy `ACTOR3D` actor, not ported. Cursor sprite; a failure fails the actor. |
+| `CAdActor3D::LoadBuffer DROP_TO_FLOOR` | todo | Legacy `ACTOR3D` actor, not ported. Re-seat on the walk planes at each update. |
+| `CAdActor3D::LoadBuffer SCRIPT` | todo | Legacy `ACTOR3D` actor, not ported. Attaches a script. |
+| `CAdActor3D::LoadBuffer CAPTION` | todo | Legacy `ACTOR3D` actor, not ported. Caption. |
+| `CAdActor3D::LoadBuffer PROPERTY` | todo | Legacy `ACTOR3D` actor, not ported. Script properties. |
+| `CAdActor3D::LoadBuffer ANIMATION` | todo | Legacy `ACTOR3D` actor, not ported. Passes the block to `C3DModel::ParseAnim`; needs a `MODEL` before it. |
+| `CAdActor3D::LoadBuffer EDITOR_PROPERTY` | n/a | `CBBase::ParseEditorProperty` returns at once unless the game runs in editor mode. |
+| `CAdActor3D::LoadBuffer SHADOW_IMAGE` | todo | Legacy `ACTOR3D` actor, not ported. Image of the simple shadow. |
+| `CAdActor3D::LoadBuffer SHADOW_SIZE` | todo | Legacy `ACTOR3D` actor, not ported. Size of the simple shadow, clamped at 0. |
+| `CAdActor3D::LoadBuffer SIMPLE_SHADOW` | todo | Legacy `ACTOR3D` actor, not ported. `TRUE` selects the simple shadow. |
+| `CAdActor3D::LoadBuffer SHADOW_COLOR` | todo | Legacy `ACTOR3D` actor, not ported. Shadow colour `r,g,b,a`. |
+| `CAdActor3D::LoadBuffer LIGHT_POSITION` | todo | Legacy `ACTOR3D` actor, not ported. Position of the shadow light relative to the actor. |
+| `CAdActor3D::LoadBuffer SHADOW` | todo | Legacy `ACTOR3D` actor, not ported. `FALSE` turns the shadow off. |
+| `CAdActor3D::LoadBuffer SCALE` | todo | Legacy `ACTOR3D` actor, not ported. Uniform scale, a percentage. |
+| `CAdActor3D::LoadBuffer DRAW_BACKFACES` | todo | Legacy `ACTOR3D` actor, not ported. Draw both sides of the triangles. |
+| `CAdActor3D::DirToAngle` | todo | Legacy `ACTOR3D` actor, not ported. Same table as `CAdActor3DX::DirToAngle` (`actor3d.rs` `dir_to_angle` could serve). |
+| `CAdActor3D::AngleToDir` | todo | Legacy `ACTOR3D` actor, not ported. Same sectors as `CAdActor3DX::AngleToDir` (`angle_to_dir` could serve). |
+| `CAdActor3D::PlayAnim` | todo | Legacy `ACTOR3D` actor, not ported. `PlayAnim(0, name)`. |
+| `CAdActor3D::PlayAnim #2` | todo | Legacy `ACTOR3D` actor, not ported. `C3DModel::SetAnimation(channel, name, restart)` and, on success on channel 0 only, the state `STATE_PLAYING_ANIM`. |
+| `CAdActor3D::Talk` | todo | Legacy `ACTOR3D` actor, not ported. Stops every animation of the model (`AnimStop`), then `CAdObject::Talk`. |
+| `CAdActor3D::GetHeight` | todo | Legacy `ACTOR3D` actor, not ported. `Y - top of the model's projected rectangle - 5` (no test for a missing model). |
+| `CAdActor3D::ScCallMethod` | todo | Legacy `ACTOR3D` actor, not ported. `PlayAnim`/`Async`, `StopAnim`, `StopAnimChannel`, `PlayAnimChannel`/`Async`, `HideMesh`, `ShowMesh`, `AddMesh(file, mesh, joint)`, `RemoveMesh`, `GoTo3D`/`Async`, `GoTo`/`Async` (tolerant conversion, no tolerance test), `GoToObject`/`Async`, `TurnTo`/`Async` (direction or object), `TurnToAngle`/`Async`, `IsWalking`, `DirectWalk`, `DirectWalkBack`, `DirectWalkStop`, `DirectTurnLeft`, `DirectTurnRight`, `DirectTurnStop`, then `CAdObject3D`. |
+| `CAdActor3D::ScGetProperty` | todo | Legacy `ACTOR3D` actor, not ported. `Type` (`actor3d`), `TalkAnimName`, `WalkAnimName`, `IdleAnimName`, `DirectionAngle`/`DirAngle`, `Direction`, then `CAdObject3D`. |
+| `CAdActor3D::ScSetProperty` | todo | Legacy `ACTOR3D` actor, not ported. `TalkAnimName`, `WalkAnimName`, `IdleAnimName` (null restores the default), `DirectionAngle`/`DirAngle`, `Direction`, then `CAdObject3D`. |
+| `CAdActor3D::ScToString` | todo | Legacy `ACTOR3D` actor, not ported. `[actor3d object]`. |
+| `CAdActor3D::Persist` | todo | Legacy `ACTOR3D` actor, not ported. Saves the path, target angle and point, turning side, after-walk angle, the three animation names and the direct-control state, after `CAdObject3D::Persist`. |
+| `CAdActor3D::CreateFromFile` | partial | `World::load_actor` (behind `Game.LoadActor3D` and `Scene.LoadActor3D`) -> `World::load_actor3d` -> `Actor3d::load` for an `ACTOR3DX` file: same result, null when the load fails. Missing: the other branch, which builds a legacy `CAdActor3D` after logging `Warning: 3D actors in MS3D format are now deprecated...`; in Luma `load_actor` then tries the file as a 2D `ACTOR` and fails with `Error loading ACTOR file` (the clearer `'ACTOR3D' is a legacy Milkshape actor, which is not supported` of `Actor3dDef::apply_file` is not reached on this path). Also different: `load_actor` serves `LoadActor` and `LoadActor3D` alike, so `LoadActor3D` given a 2D `ACTOR` file loads a 2D actor and `LoadActor` given an `ACTOR3DX` file loads a 3D one, where the original fails both. |
+| `CAdActor3D::IsActorX` | done | `luma-3d/src/actor3d.rs` `Actor3dDef::is_actor_x`, used by `World::load_actor`: true when the first keyword of the file is `ACTOR3DX`; false for an unreadable file or any other keyword. |
+| `CAdActor3D::IsActorX ACTOR3DX` | done | The keyword `Actor3dDef::is_actor_x` tests for (`KEYWORD`), without case. |
+| `CAdActor3D::IsActorX ACTOR3D` | done | Any first keyword other than `ACTOR3DX` answers false, `ACTOR3D` included (`LEGACY_KEYWORD` is then reported by `apply_file`). |
 
 ## `wme_ad/AdActor3DX.cpp`
 
