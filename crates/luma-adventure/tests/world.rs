@@ -1404,7 +1404,7 @@ ITEM { NAME=\"gem\" CAPTION=\"Gem\" IMAGE=\"art\\red.png\" }"
     pkg.add_file("game.script", game_script());
     pkg.add_file("win.script", window_script());
     pkg.add_file("intro.ogv", luma_video::synthetic_clip(32, 32, 10, 10));
-    pkg.add_file("intro.sub", b"{2}{5}Hello|intro\n{7}{0}Bye".to_vec());
+    pkg.add_file("intro.sub", b"{2}{5}Hello|intro\r\n{7}{0}/GREET/x".to_vec());
     pkg.add_file(
         "items.items",
         b"ITEM { NAME=\"key\" CAPTION=\"/GREET/x\" IMAGE=\"art\\green.png\" SPRITE_HOVER=\"art\\red.png\" CURSOR=\"art\\red.png\" CURSOR_HOVER=\"art\\green.png\" PROPERTY { NAME=\"weight\" VALUE=\"3\" } }
@@ -6644,5 +6644,103 @@ fn an_actor_file_sets_the_volume_of_its_sounds() {
     );
     let sound = runtime.world.sfx_of(quiet).unwrap().id;
     assert_eq!(runtime.world.audio().private_volume(sound), 40);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// An entity's video as `CVidTheoraPlayer` plays it: its own subtitles
+/// (loaded only while `VideoSubtitles` is on, through the string
+/// table), the zoom fixed when it starts, an alpha image without colour
+/// key.
+#[test]
+fn an_entity_video_has_subtitles_and_a_fixed_zoom() {
+    let dir = game();
+    // A 24-bit image, all in the colour key: no alpha channel.
+    let magenta = Image {
+        width: 32,
+        height: 32,
+        pixels: [255u8, 0, 255, 255].repeat(32 * 32),
+        has_alpha_channel: false,
+    };
+    std::fs::write(dir.join("mask.bmp"), magenta.to_bmp().unwrap()).unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.change_scene("scenes\\room.scene").unwrap();
+    runtime.tick(16);
+    let prop_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    runtime
+        .world
+        .scene_mut()
+        .unwrap()
+        .entity_mut(prop_ref)
+        .unwrap()
+        .active = true;
+    let prop = runtime.world.node_id(prop_ref).unwrap();
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "VideoSubtitles", &Value::Bool(false));
+    // Subtitles are loaded when the video opens, and only while
+    // `VideoSubtitles` is on.
+    assert!(
+        runtime
+            .world
+            .play_entity_theora(prop, "intro.ogv", false, None, 0)
+    );
+    assert!(
+        runtime
+            .world
+            .entity_video(prop)
+            .unwrap()
+            .subtitler
+            .is_none()
+    );
+    runtime
+        .world
+        .set_property(game, "VideoSubtitles", &Value::Bool(true));
+    for _ in 0..25 {
+        runtime.tick(16);
+    }
+    assert_eq!(runtime.world.entity_video_subtitle(prop), None);
+    assert!(runtime.world.stop_entity_video(prop));
+
+    runtime
+        .world
+        .set_property(prop, "Scale", &Value::Float(50.0));
+    assert!(
+        runtime
+            .world
+            .play_entity_theora(prop, "intro.ogv", true, Some("mask.bmp"), 0)
+    );
+    let video = runtime.world.entity_video(prop).unwrap();
+    assert_eq!(video.zoom, 50.0);
+    assert_eq!(video.subtitler.as_ref().unwrap().subtitles.len(), 2);
+    // The mask has no alpha channel: the frames stay opaque, its colour
+    // key is not a transparency.
+    let frame = video.frame.as_ref().unwrap();
+    assert!(frame.rgba.chunks_exact(4).all(|p| p[3] == 255));
+    // A scale changed during the video does not rescale it.
+    runtime
+        .world
+        .set_property(prop, "Scale", &Value::Float(80.0));
+    for _ in 0..20 {
+        runtime.tick(16);
+    }
+    let video = runtime.world.entity_video(prop).unwrap();
+    assert_eq!(video.zoom, 50.0);
+    assert_eq!(video.frame_index(), Some(3), "320 ms at 10 fps");
+    assert_eq!(
+        runtime.world.entity_video_subtitle(prop),
+        Some("Hello\nintro")
+    );
+    for _ in 0..30 {
+        runtime.tick(16);
+    }
+    // The second subtitle went through the string table.
+    assert_eq!(runtime.world.entity_video_subtitle(prop), Some("Hello"));
+    // With `VideoSubtitles` off nothing is shown.
+    runtime
+        .world
+        .set_property(game, "VideoSubtitles", &Value::Bool(false));
+    assert_eq!(runtime.world.entity_video_subtitle(prop), None);
     std::fs::remove_dir_all(&dir).unwrap();
 }

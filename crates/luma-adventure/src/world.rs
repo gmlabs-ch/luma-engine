@@ -1788,6 +1788,7 @@ impl World {
                 &overlays,
                 |i| self.free_entity_stick(i),
             );
+            self.draw_entity_video_subtitles(list);
             // The scene's fader covers the scene viewport, under the
             // windows (`CAdScene::TraverseNodes` displays it last).
             if let Some(white) = white {

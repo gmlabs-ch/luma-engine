@@ -204,14 +204,16 @@ entity.PlayTheora(filename, looping, alphaFile, startTime)
 |----------|---------|---------|
 | `filename` | | The `.ogg` or `.ogv` file. |
 | `looping` | `false` | Whether the video starts again at its end. |
-| `alphaFile` | | An image whose alpha channel masks the frames, pixel by pixel (the frame stays opaque outside the image). |
+| `alphaFile` | | An image whose alpha channel masks the frames, pixel by pixel (the frame stays opaque outside the image). No colour key applies (`SetAlphaImage`): an image without an alpha channel leaves the frames opaque. |
 | `startTime` | `0` | Where to start in the video, in milliseconds. |
 
 The video takes the place of the entity's sprite (`CAdEntity::Display`):
 drawn at the entity's position (its top-left corner there, no hotspot),
-in the entity's layer, scaled by the entity's `Scale` when it has one
-(100 % otherwise, whatever the scene's scale levels), tinted with the
-entity's `AlphaColor`. The entity keeps its hit area, its scripts and
+in the entity's layer, scaled by the `Scale` the entity has when
+`PlayTheora` is called (100 % without one, whatever the scene's scale
+levels; `CVidTheoraPlayer::Play` fixes the zoom, so a `Scale` changed
+during the video does not rescale it), tinted with the entity's
+`AlphaColor`. The entity keeps its hit area, its scripts and
 its events. The game runs on: nothing freezes, the scripts go on and the
 call returns at once (`true`, or `false` with a runtime error logged
 when the file cannot be opened). The sound track plays as the entity's
@@ -220,8 +222,8 @@ sound would, at its `SoundVolume`.
 The video advances on the **game timer**, so it stops while the game is
 frozen by a system window or a cut-scene and resumes after; a paused
 video (`PauseTheora`) holds its frame and its sound. When it ends, a
-looping video starts again from its first frame (the sound with it);
-another one is dropped and the entity shows its sprite again from the
+looping video starts again from its first frame (the sound with it;
+`ResetStream`); another one is dropped and the entity shows its sprite again from the
 next frame. `StopTheora` drops it at once. An entity in a window's
 entity container plays its video the same way, at the container's
 position.
@@ -232,6 +234,13 @@ position.
 | `IsTheoraPlaying()` | Whether a video plays and is not paused. |
 | `PauseTheora()`, `ResumeTheora()` | Hold / release the video and its sound; `true` when the state changed. |
 | `IsTheoraPaused()` | Whether the video is paused. |
+
+A looping video is opened again at each round by the original
+(`ResetStream` calls `Initialize` and `Play` without a volume), with two
+effects Luma reproduces: from the second round on, the sound track's own
+volume is the sound effects' global percentage instead of the entity's
+`SoundVolume`; and the subtitles are loaded again, so they follow the
+state of `VideoSubtitles` at that moment.
 
 Deviations from the original engine: the video is not kept in saved
 games (the engine saves the player and reopens the file on load; after
@@ -252,12 +261,38 @@ breaks the line; a subtitle whose end is `0` stays until the next one.
 As in the engine, a subtitle shows from the end of the previous one
 rather than from its own start (the first one from the start of the
 video); the start frame only decides when the next subtitle takes over.
-Lines without a start, or with `{1}{1}`, are ignored. The subtitles show
-while `Game.VideoSubtitles` is on (`VIDEO_SUBTITLES` of `default.game`),
-centred at the bottom of the screen, five pixels above the edge, with
-the game's `VIDEO_FONT`, or its `SYSTEM_FONT` without one. The text is
-read in the game's encoding like any other text the font draws (see
+
+Every video player has its subtitles (`CVidTheoraPlayer::Initialize`):
+the game's video, from the file given to `PlayTheora` or the video's
+name with `.sub`, and an entity's video, from the video's name with
+`.sub`. They are loaded when the video opens, and only if
+`Game.VideoSubtitles` is on at that moment (`VIDEO_SUBTITLES` of
+`default.game`); turning it on during the video shows nothing, turning
+it off hides them. They are drawn centred at the bottom of the screen,
+five pixels above the edge, with the game's `VIDEO_FONT`, or its
+`SYSTEM_FONT` without one; an entity's too, wherever the entity is
+(Luma draws those after the scene, over it; the engine with the entity,
+so that an object in front could cover them).
+
+Each text goes through the string table (`CVidSubtitle`): a subtitle
+written `/SUB0001/fallback` shows the translation of `SUB0001`. The text
+is read in the game's encoding like any other text the font draws (see
 [formats/font.md](formats/font.md#text-encoding)).
+
+The file is read as the engine reads it (`CVidSubtitler::LoadSubtitles`),
+quirks included, since they decide what a given file shows:
+
+- a line ends at a line feed (or a NUL byte), and the byte before that
+  end is dropped whatever it is: the engine expects Windows line ends.
+  **A `.sub` file with Unix line ends loses the last character of each
+  line**; the last line, when the file does not end with a line feed, is
+  whole;
+- the numbers are read as C's `atoi` reads them: `{12a}` is 12, a number
+  that is not one is 0;
+- text in braces after the second pair is skipped; a `{` inside braces
+  belongs to them; a `}` outside braces is text;
+- a line is ignored when it has no first number, a first number of -1,
+  no text, or `{1}{1}`.
 
 ## Not yet
 
