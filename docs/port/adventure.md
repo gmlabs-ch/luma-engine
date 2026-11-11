@@ -409,30 +409,30 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdGeomExt::CAdGeomExt` | unreviewed |  |
-| `CAdGeomExt::~CAdGeomExt` | unreviewed |  |
-| `CAdGeomExt::LoadFile` | unreviewed |  |
-| `CAdGeomExt::LoadBuffer` | unreviewed |  |
-| `CAdGeomExt::LoadBuffer GEOMETRY` | unreviewed |  |
-| `CAdGeomExt::LoadBuffer NODE` | unreviewed |  |
-| `CAdGeomExt::AddStandardNodes` | unreviewed |  |
-| `CAdGeomExt::MatchName` | unreviewed |  |
+| `CAdGeomExt::CAdGeomExt` | done | `luma-3d/src/node_patterns.rs` `NodePatterns::default`: no node. |
+| `CAdGeomExt::~CAdGeomExt` | replaced | Rust ownership. |
+| `CAdGeomExt::LoadFile` | done | `scene3d.rs` `Scene3d::load_file` reads the `.geometry` file next to the `.3ds` and `NodePatterns::load` parses it; without the file, the built-in nodes. |
+| `CAdGeomExt::LoadBuffer` | partial | `NodePatterns::parse` / `from_document`. A file that fails part-way (syntax error, unknown key): the original keeps the nodes read before the error and appends the built-in ones (`GetGeometryExtension`); `NodePatterns::load` then uses the built-in nodes alone. A `GEOMETRY` key nested in the root is ignored by the original and an error in Luma. |
+| `CAdGeomExt::LoadBuffer GEOMETRY` | done | Root block required. |
+| `CAdGeomExt::LoadBuffer NODE` | done | `NodePattern::from_node`, in file order before the built-in nodes. |
+| `CAdGeomExt::AddStandardNodes` | done | `NodePatterns::add_standard_nodes`: `walk_*` walk plane receiving shadows, `blk_*` blocked, `wpt_*` waypoint. |
+| `CAdGeomExt::MatchName` | done | `NodePatterns::classify`: the first node whose pattern matches; none drops the mesh. |
 
 ## `wme_ad/AdGeomExtNode.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdGeomExtNode::CAdGeomExtNode` | unreviewed |  |
-| `CAdGeomExtNode::~CAdGeomExtNode` | unreviewed |  |
-| `CAdGeomExtNode::LoadBuffer` | unreviewed |  |
-| `CAdGeomExtNode::LoadBuffer NODE` | unreviewed |  |
-| `CAdGeomExtNode::LoadBuffer NAME` | unreviewed |  |
-| `CAdGeomExtNode::LoadBuffer WALKPLANE` | unreviewed |  |
-| `CAdGeomExtNode::LoadBuffer BLOCKED` | unreviewed |  |
-| `CAdGeomExtNode::LoadBuffer WAYPOINT` | unreviewed |  |
-| `CAdGeomExtNode::LoadBuffer RECEIVE_SHADOWS` | unreviewed |  |
-| `CAdGeomExtNode::SetupNode` | unreviewed |  |
-| `CAdGeomExtNode::MatchesName` | unreviewed |  |
+| `CAdGeomExtNode::CAdGeomExtNode` | done | `NodePattern::new("", Generic, false)` in `from_node`. |
+| `CAdGeomExtNode::~CAdGeomExtNode` | replaced | Rust ownership. |
+| `CAdGeomExtNode::LoadBuffer` | done | `NodePattern::from_node`: each role key that is true sets the role (the last wins), an unknown key is an error as in the original. |
+| `CAdGeomExtNode::LoadBuffer NODE` | done | Accepted and ignored inside a node, as in the original. |
+| `CAdGeomExtNode::LoadBuffer NAME` | done | `NodePattern::pattern`. |
+| `CAdGeomExtNode::LoadBuffer WALKPLANE` | done | `NodeKind::Walkplane` when true. |
+| `CAdGeomExtNode::LoadBuffer BLOCKED` | done | `NodeKind::Blocked` when true. |
+| `CAdGeomExtNode::LoadBuffer WAYPOINT` | done | `NodeKind::Waypoint` when true. |
+| `CAdGeomExtNode::LoadBuffer RECEIVE_SHADOWS` | done | `NodePattern::receive_shadows`. |
+| `CAdGeomExtNode::SetupNode` | done | `NodePattern::new`. |
+| `CAdGeomExtNode::MatchesName` | done | `NodePattern::matches` → `matches_pattern` (the matcher itself is the `CBUtils::MatchesPattern` row). |
 
 ## `wme_ad/AdInventory.cpp`
 
@@ -633,16 +633,16 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdPath3D::CAdPath3D` | unreviewed |  |
-| `CAdPath3D::~CAdPath3D` | unreviewed |  |
-| `CAdPath3D::Reset` | unreviewed |  |
-| `CAdPath3D::AddPoint` | unreviewed |  |
-| `CAdPath3D::AddPoint #2` | unreviewed |  |
-| `CAdPath3D::SetReady` | unreviewed |  |
-| `CAdPath3D::GetFirst` | unreviewed |  |
-| `CAdPath3D::GetNext` | unreviewed |  |
-| `CAdPath3D::GetCurrent` | unreviewed |  |
-| `CAdPath3D::Persist` | unreviewed |  |
+| `CAdPath3D::CAdPath3D` | done | `luma-3d/src/path3d.rs` `Path3D::new`: no point, cursor before the first, not ready. |
+| `CAdPath3D::~CAdPath3D` | replaced | Rust ownership. |
+| `CAdPath3D::Reset` | done | `Path3D::reset`. |
+| `CAdPath3D::AddPoint` | done | `Path3D::add_point`. |
+| `CAdPath3D::AddPoint #2` | done | `Path3D::add_point` with a `Vec3`. |
+| `CAdPath3D::SetReady` | done | `Path3D::set_ready`: returns the previous value. |
+| `CAdPath3D::GetFirst` | done | `Path3D::first`: cursor untouched for an empty path. |
+| `CAdPath3D::GetNext` | done | `Path3D::advance`: keeps advancing past the end. |
+| `CAdPath3D::GetCurrent` | done | `Path3D::current`. |
+| `CAdPath3D::Persist` | replaced | serde derive on `Path3D` (points, cursor, ready), saved with the `Actor3d`. |
 
 ## `wme_ad/AdPathPoint.cpp`
 
@@ -657,10 +657,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdPathPoint3D::CAdPathPoint3D` | unreviewed |  |
-| `CAdPathPoint3D::CAdPathPoint3D #2` | unreviewed |  |
-| `CAdPathPoint3D::~CAdPathPoint3D` | unreviewed |  |
-| `CAdPathPoint3D::Persist` | unreviewed |  |
+| `CAdPathPoint3D::CAdPathPoint3D` | done | `path3d.rs` `Node::new`. |
+| `CAdPathPoint3D::CAdPathPoint3D #2` | done | `path3d.rs` `Node::new(pos, distance)`: unmarked, no origin. |
+| `CAdPathPoint3D::~CAdPathPoint3D` | replaced | Rust ownership. |
+| `CAdPathPoint3D::Persist` | partial | The search nodes and the finder's state are not saved (`scene3d.rs` `From<Saved>` makes a new `PathFinder`) and the actor's `ticket` is `#[serde(skip)]`. The finder runs each request to the end at the start of the next frame, so only a game saved in that one frame is affected: the 3D actor comes back in `WaitingPath` without ticket and never gets its path (it waits for ever). The original saves the open request with the scene geometry. |
 
 ## `wme_ad/AdRegion.cpp`
 
@@ -1067,9 +1067,9 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdWalkplane::CAdWalkplane` | unreviewed |  |
-| `CAdWalkplane::~CAdWalkplane` | unreviewed |  |
-| `CAdWalkplane::Persist` | unreviewed |  |
+| `CAdWalkplane::CAdWalkplane` | done | `luma-3d/src/scene_geometry.rs` `MeshNode`: active; `receive_shadows` comes from the node pattern. |
+| `CAdWalkplane::~CAdWalkplane` | replaced | Rust ownership. |
+| `CAdWalkplane::Persist` | replaced | `scene3d.rs` `Saved::nodes` keeps each node's `active` by name and `Scene3d::reload` puts it back. |
 
 ## `wme_ad/AdWaypointGroup.cpp`
 
@@ -1098,9 +1098,9 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdWaypointGroup3D::CAdWaypointGroup3D` | unreviewed |  |
-| `CAdWaypointGroup3D::~CAdWaypointGroup3D` | unreviewed |  |
-| `CAdWaypointGroup3D::AddFromMesh` | unreviewed |  |
+| `CAdWaypointGroup3D::CAdWaypointGroup3D` | done | `scene_geometry.rs` `WaypointGroup`: active, created with the first waypoint mesh. |
+| `CAdWaypointGroup3D::~CAdWaypointGroup3D` | replaced | Rust ownership. |
+| `CAdWaypointGroup3D::AddFromMesh` | done | `TriangleMesh::center`: the centre of the mesh's bounding box (the origin for an empty mesh), pushed in `SceneGeometry::from_file`. |
 
 ## `wme_ad/UIEntity.cpp`
 
