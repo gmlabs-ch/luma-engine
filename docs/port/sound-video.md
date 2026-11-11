@@ -141,99 +141,99 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CVidPlayer::CVidPlayer` | unreviewed |  |
-| `CVidPlayer::SetDefaults` | unreviewed |  |
-| `CVidPlayer::~CVidPlayer` | unreviewed |  |
-| `CVidPlayer::Cleanup` | unreviewed |  |
-| `CVidPlayer::Initialize` | unreviewed |  |
-| `CVidPlayer::Update` | unreviewed |  |
-| `CVidPlayer::Display` | unreviewed |  |
-| `CVidPlayer::Play` | unreviewed |  |
-| `CVidPlayer::Stop` | unreviewed |  |
-| `CVidPlayer::IsPlaying` | unreviewed |  |
-| `CVidPlayer::LoadSubtitles` | unreviewed |  |
+| `CVidPlayer::CVidPlayer` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): the player `Game.PlayVideo` uses. |
+| `CVidPlayer::SetDefaults` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): not playing, zoom 0, no subtitle shown. |
+| `CVidPlayer::~CVidPlayer` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): see `Cleanup`. |
+| `CVidPlayer::Cleanup` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): stops the sound and frees the streams and subtitles. |
+| `CVidPlayer::Initialize` | todo | Opens an AVI file (Video for Windows and the codecs installed on the machine), its video stream and, with a sound device, its audio stream, and loads the subtitles when `VideoSubtitles` is on. Luma has no AVI player: `Game.PlayVideo` with an `.avi` logs and returns false (`crates/luma-adventure/src/natives.rs`), a decision recorded in `docs/video.md`; with an Ogg file it runs the Theora player, whose rules differ from this one (see `Update`, `Play`, `LoadSubtitles`). A game that calls `PlayVideo` on AVI files shows no video. |
+| `CVidPlayer::Update` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): the movie time is the wall clock since `Play` (never the sound), the frame is the AVI sample of that time, the video stops when the time passes the stream's length, and the subtitle of the frame is chosen as in `CVidSubtitler::Update`. |
+| `CVidPlayer::Display` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): the frame at the play position and zoom, then the subtitle centred at the bottom (screen height - text height - 5) in the video font or the system font. |
+| `CVidPlayer::Play` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): placement by type (position at 100 %, stretched keeping the aspect and centred, centred at 100 %; the default here is centred), `Game->Freeze(FreezeMusic)`, the sound started, the start time taken from the wall clock. |
+| `CVidPlayer::Stop` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): cleans up and unfreezes the game. |
+| `CVidPlayer::IsPlaying` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): read by `CBGame::IsVideoPlaying` and the draw loop. |
+| `CVidPlayer::LoadSubtitles` | todo | Part of the AVI player, which Luma does not have (see `CVidPlayer::Initialize`): the same `.sub` parser as `CVidSubtitler::LoadSubtitles` (`parse_subtitles` in `crates/luma-adventure/src/video.rs`) except that a line with start 1 and end 1 is kept here. |
 
 ## `wme_base/VidRenderer.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CVidRenderer::CVidRenderer` | unreviewed |  |
-| `CVidRenderer::~CVidRenderer` | unreviewed |  |
-| `CVidRenderer::Display` | unreviewed |  |
-| `CVidRenderer::Initialize` | unreviewed |  |
-| `CVidRenderer::ProcessFrame` | unreviewed |  |
-| `CVidRenderer::ProcessFrameSlow` | unreviewed |  |
-| `CVidRenderer::GetTargetFormat` | unreviewed |  |
-| `CVidRenderer::RenderFrame` | unreviewed |  |
+| `CVidRenderer::CVidRenderer` | n/a | Plumbing of the AVI player (`todo`, see `CVidPlayer::Initialize`): the surface an AVI frame is copied to. A port would upload RGBA through `luma-render` as `upload_frame` does for Theora. |
+| `CVidRenderer::~CVidRenderer` | n/a | As the constructor. |
+| `CVidRenderer::Display` | n/a | Draws the AVI frame's surface at a position, zoomed unless the zoom is 100; the rule is listed at `CVidPlayer::Display`. |
+| `CVidRenderer::Initialize` | n/a | Creates the DirectDraw or Direct3D surface for AVI frames. |
+| `CVidRenderer::ProcessFrame` | n/a | Base stub. |
+| `CVidRenderer::ProcessFrameSlow` | n/a | Base stub. |
+| `CVidRenderer::GetTargetFormat` | n/a | Base stub. |
+| `CVidRenderer::RenderFrame` | n/a | x86 assembly copy of a bottom-up bitmap into a surface. |
 
 ## `wme_base/VidRendererD3D.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CVidRendererD3D::CVidRendererD3D` | unreviewed |  |
-| `CVidRendererD3D::~CVidRendererD3D` | unreviewed |  |
-| `CVidRendererD3D::ProcessFrame` | unreviewed |  |
-| `CVidRendererD3D::ProcessFrameSlow` | unreviewed |  |
-| `CVidRendererD3D::ProcessFrameDivTex` | unreviewed |  |
-| `CVidRendererD3D::GetTargetFormat` | unreviewed |  |
+| `CVidRendererD3D::CVidRendererD3D` | n/a | Direct3D side of the AVI frame copy. |
+| `CVidRendererD3D::~CVidRendererD3D` | n/a | As the constructor. |
+| `CVidRendererD3D::ProcessFrame` | n/a | Copies an AVI bitmap into a locked Direct3D texture. |
+| `CVidRendererD3D::ProcessFrameSlow` | n/a | The same by pixel format, RGB24 source to the texture's format, opaque. |
+| `CVidRendererD3D::ProcessFrameDivTex` | n/a | The same for a surface split over several textures. |
+| `CVidRendererD3D::GetTargetFormat` | n/a | Chooses the bitmap format asked from the AVI codec for the Direct3D texture format. |
 
 ## `wme_base/VidRendererDD.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CVidRendererDD::CVidRendererDD` | unreviewed |  |
-| `CVidRendererDD::~CVidRendererDD` | unreviewed |  |
-| `CVidRendererDD::ProcessFrame` | unreviewed |  |
-| `CVidRendererDD::ProcessFrameSlow` | unreviewed |  |
-| `CVidRendererDD::GetTargetFormat` | unreviewed |  |
+| `CVidRendererDD::CVidRendererDD` | n/a | DirectDraw side of the AVI frame copy. |
+| `CVidRendererDD::~CVidRendererDD` | n/a | As the constructor. |
+| `CVidRendererDD::ProcessFrame` | n/a | Copies an AVI bitmap into a locked DirectDraw surface. |
+| `CVidRendererDD::ProcessFrameSlow` | n/a | The same through GDI. |
+| `CVidRendererDD::GetTargetFormat` | n/a | Chooses the bitmap format asked from the AVI codec for the DirectDraw surface. |
 
 ## `wme_base/VidSubtitle.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CVidSubtitle::CVidSubtitle` | unreviewed |  |
-| `CVidSubtitle::CVidSubtitle #2` | unreviewed |  |
-| `CVidSubtitle::~CVidSubtitle` | unreviewed |  |
+| `CVidSubtitle::CVidSubtitle` | done | Default constructor, never used; `Subtitle` in `crates/luma-adventure/src/video.rs` has no default. |
+| `CVidSubtitle::CVidSubtitle #2` | partial | `Subtitle` built by `parse_subtitles` in `crates/luma-adventure/src/video.rs`. Missing: the original passes the text through the string table (`Game->m_StringTable->Expand`), so a subtitle written `/SUB0001/text` shows its translation; Luma shows the line as the file holds it, identifier included (`World::expand` exists and is not called here). |
+| `CVidSubtitle::~CVidSubtitle` | replaced | Ownership. |
 
 ## `wme_base/VidSubtitler.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CVidSubtitler::CVidSubtitler` | unreviewed |  |
-| `CVidSubtitler::~CVidSubtitler` | unreviewed |  |
-| `CVidSubtitler::LoadSubtitles` | unreviewed |  |
-| `CVidSubtitler::Display` | unreviewed |  |
-| `CVidSubtitler::Update` | unreviewed |  |
+| `CVidSubtitler::CVidSubtitler` | done | `Subtitler::new` in `crates/luma-adventure/src/video.rs`: last frame -1, first subtitle, nothing shown. |
+| `CVidSubtitler::~CVidSubtitler` | replaced | Ownership. |
+| `CVidSubtitler::LoadSubtitles` | partial | `parse_subtitles` + `subtitle_path_of` in `crates/luma-adventure/src/video.rs`, called from `World::play_theora`: the given file or the video's name with `.sub`, read through the packages, no file meaning no subtitles; a start and an end frame in braces then the text, a vertical bar as a line break, lines without a start, without text or with start 1 and end 1 dropped. Differences: (1) the original drops the last byte of every line that ends with a line feed, assuming a carriage return; Luma strips only a carriage return, so a file with Unix line ends keeps a last character the original cuts; (2) numbers are read with `atoi` (`12a` is 12, a start of -1 drops the line), Luma parses the whole token and takes 0 when it is not a number; (3) the original loads only when `VideoSubtitles` is on at that moment, Luma always loads and tests the flag when drawing; (4) only the game's video loads subtitles, see `CVidTheoraPlayer::Initialize`. |
+| `CVidSubtitler::Display` | done | `World::prepare_video_subtitle` and `draw_video` in `crates/luma-adventure/src/video.rs`: the video font, else the system font, the full screen width, centred, at screen height - text height - 5. |
+| `CVidSubtitler::Update` | done | `Subtitler::update` in `crates/luma-adventure/src/video.rs`: same loop, same rule for an end of 0, only when the frame changes. |
 
 ## `wme_base/VidTheoraPlayer.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CVidTheoraPlayer::CVidTheoraPlayer` | unreviewed |  |
-| `CVidTheoraPlayer::SetDefaults` | unreviewed |  |
-| `CVidTheoraPlayer::~CVidTheoraPlayer` | unreviewed |  |
-| `CVidTheoraPlayer::Cleanup` | unreviewed |  |
-| `CVidTheoraPlayer::BufferData` | unreviewed |  |
-| `CVidTheoraPlayer::Initialize` | unreviewed |  |
-| `CVidTheoraPlayer::ResetStream` | unreviewed |  |
-| `CVidTheoraPlayer::Play` | unreviewed |  |
-| `CVidTheoraPlayer::Stop` | unreviewed |  |
-| `CVidTheoraPlayer::Update` | unreviewed |  |
-| `CVidTheoraPlayer::StreamInData` | unreviewed |  |
-| `CVidTheoraPlayer::DecodeVorbis` | unreviewed |  |
-| `CVidTheoraPlayer::DecodeTheora` | unreviewed |  |
-| `CVidTheoraPlayer::GetMovieTime` | unreviewed |  |
-| `CVidTheoraPlayer::GetMovieFrame` | unreviewed |  |
-| `CVidTheoraPlayer::WriteAudio` | unreviewed |  |
-| `CVidTheoraPlayer::WriteVideo` | unreviewed |  |
-| `CVidTheoraPlayer::Display` | unreviewed |  |
-| `CVidTheoraPlayer::GenLookupTables` | unreviewed |  |
-| `CVidTheoraPlayer::RenderFrame` | unreviewed |  |
-| `CVidTheoraPlayer::SetAlphaImage` | unreviewed |  |
-| `CVidTheoraPlayer::GetAlphaAt` | unreviewed |  |
-| `CVidTheoraPlayer::SeekToTime` | unreviewed |  |
-| `CVidTheoraPlayer::Pause` | unreviewed |  |
-| `CVidTheoraPlayer::Resume` | unreviewed |  |
-| `CVidTheoraPlayer::Persist` | unreviewed |  |
-| `CVidTheoraPlayer::InitializeSimple` | unreviewed |  |
-| `CVidTheoraPlayer::GetTexture` | unreviewed |  |
+| `CVidTheoraPlayer::CVidTheoraPlayer` | done | No default-constructed player: `play_theora`, `play_entity_theora` and `VideoPlayer::texture_loop` in `crates/luma-adventure/src/video.rs` give every field; see `SetDefaults`. |
+| `CVidTheoraPlayer::SetDefaults` | done | The fields of `VideoPlayer` in `crates/luma-adventure/src/video.rs` as the three constructors set them: not started, not looping, frames dropped unless asked (`m_DontDropFrames` false), no alpha image, time offset 0. The defaults `VID_PLAY_CENTER`, zoom 0 and volume 100 are always overwritten by `Play` in the original too. |
+| `CVidTheoraPlayer::~CVidTheoraPlayer` | replaced | Ownership; the texture is handed to `dropped_textures` / `renderer.forget` (`crates/luma-adventure/src/video.rs`). |
+| `CVidTheoraPlayer::Cleanup` | replaced | Ownership; the sound track is stopped and removed in `stop_video`, `update_video` and `stop_entity_video` (`crates/luma-adventure/src/video.rs`). |
+| `CVidTheoraPlayer::BufferData` | replaced | The file is read whole into memory and demuxed by the `ogg` crate (`Video::open` in `crates/luma-video/src/lib.rs`). |
+| `CVidTheoraPlayer::Initialize` | partial | `World::open_video` in `crates/luma-adventure/src/video.rs` + `Video::open` in `crates/luma-video/src/lib.rs`. Differences: (1) picture size: the original creates its texture with `theora_info.width` x `height`, the coded frame (multiples of 16), and `Play` places and zooms that; Luma uses the picture region (`picw` x `pich`). A 640x360 video is 640x368 for the original: stretched on a 1280x720 screen it is zoomed 195.65 % with the 8 padding rows visible, where Luma zooms 200 % and shows no padding. (2) An Ogg file with a Vorbis stream and no Theora stream is accepted by the original (the sound plays, nothing is drawn, the game stays frozen until it ends); Luma refuses it (`Error::NoVideoStream`, `PlayTheora` returns false). (3) The original creates a subtitler and loads `<video>.sub` for every player, an entity's video included; Luma only for the game's video (`subtitler: None` in `play_entity_theora`). (4) Without a sound device the original has no sound track and times the video on the clock; Luma plays the track on the silent backend (see `CBSoundMgr::Initialize`). Corrupt headers fail in both. |
+| `CVidTheoraPlayer::ResetStream` | partial | `update_entity_video` in `crates/luma-adventure/src/video.rs` (and `VideoPlayer::restart` for a texture): rewinds the stream, stops the sound, time offset 0, starts again. The original reopens the file and calls `Play` without a volume, so from the second loop on the track's own volume is the global sound-effects percentage instead of the entity's `SoundVolume` (and subtitles are reloaded); Luma keeps the entity's volume. Probably an oversight of the original; listed so the choice is explicit. |
+| `CVidTheoraPlayer::Play` | partial | `World::play_theora` and `play_entity_theora` in `crates/luma-adventure/src/video.rs`: volume (the sound effects' global percentage for the game's video, the entity's `SoundVolume` for an entity's), freeze with the music flag, the three placements with the same arithmetic and truncation, start time, first `Update` at once. Differences: (1) an entity's zoom is fixed here from its `Scale` at the call; Luma reads the entity's `Scale` every frame (`video_overlays`), so a scale changed during the video rescales it; (2) the sizes used are the picture region, not the coded frame (see `Initialize`). |
+| `CVidTheoraPlayer::Stop` | done | `World::stop_video` and `stop_entity_video` in `crates/luma-adventure/src/video.rs`: the sound stops, the player is finished, the game unfreezes when the video froze it. |
+| `CVidTheoraPlayer::Update` | partial | `step_player`, `World::update_video` and `update_entity_video` in `crates/luma-adventure/src/video.rs`: the live clock for a video that froze the game and the game timer otherwise, nothing done while paused or (entity) while the game is frozen, late frames dropped unless asked not to, the first frame shown at once and the next ones when their time is reached, playback and sound started together, the end of the stream finishing the video (sound stopped, game unfrozen) or restarting a looping one, the subtitle of the movie frame updated each step. Differences: (1) frame times, see `DecodeTheora`; (2) after a load the original shows one frame and then pauses a video that was saved paused (`m_SavedState`): no saved videos in Luma, see `Persist`; (3) the original holds the video whenever its sound is not playing; Luma holds it for a freeze-paused sound and otherwise goes on on the clock from the last position heard, its own rule for a track shorter than the pictures (`docs/video.md`), where the original's buffer plays silence and the sound position keeps advancing: same result. |
+| `CVidTheoraPlayer::StreamInData` | replaced | The `ogg` crate's packet reader over the file in memory (`Video::next_frame` in `crates/luma-video/src/lib.rs`). |
+| `CVidTheoraPlayer::DecodeVorbis` | replaced | `luma_video::sound_track` (`crates/luma-video/src/lib.rs`) + `luma_audio::decode`: the whole Vorbis stream decoded before playback instead of block by block; no end-of-stream mark needed, as here. After `SeekToTime` the original feeds sound from the seek point; Luma seeks the decoded track to the start time (`step_player`). |
+| `CVidTheoraPlayer::DecodeTheora` | partial | `Video::next_frame` in `crates/luma-video/src/lib.rs` + the loop of `step_player` in `crates/luma-adventure/src/video.rs`: one packet one frame, a frame is ready when its time is not before the movie time or when frames are not dropped. Difference in the frame's time: the original uses `theora_granule_time` of the decoder's granule position; Luma uses frame number x period, the start of the frame's interval. In libtheora (BSD, not part of the engine sources) that function gives (frame number + 1) x period for streams of bitstream 3.2.1 and later, the end of the interval; if the version WME linked does so, every frame after the first appears one frame period earlier in Luma and the video ends one period earlier (the last frame is on screen for one step in both). `docs/video.md` records this as unchecked; it needs a decision or a measurement against the original. The key-frame search after a seek is at `SeekToTime`. |
+| `CVidTheoraPlayer::GetMovieTime` | done | `VideoPlayer::movie_time_ms` in `crates/luma-adventure/src/video.rs`: before the start the start offset (0 in the original, where the offset is added once started: same frames chosen), then the sound's position when there is a track, else the clock since the start plus the offset. Luma seeks the track to the offset, so its position already includes it. |
+| `CVidTheoraPlayer::GetMovieFrame` | done | `VideoInfo::frame_at_ms` in `crates/luma-video/src/lib.rs`: time / frame period, truncated; on whole milliseconds instead of a float. |
+| `CVidTheoraPlayer::WriteAudio` | replaced | No block writing; see `CBSoundTheora::WriteBlock`. |
+| `CVidTheoraPlayer::WriteVideo` | replaced | `Video::next_frame` converts to RGBA (`crates/luma-video/src/lib.rs`) and `upload_frame` in `crates/luma-adventure/src/video.rs` writes the texture when the frame shown changes. |
+| `CVidTheoraPlayer::Display` | partial | `World::draw_video` (game), `video_overlays` and `ui_video_quad` (entity) in `crates/luma-adventure/src/video.rs`: the texture at the position, zoomed, tinted with the given colour, then the game video's subtitle. Missing: an entity's video shows no subtitles (the original calls the subtitler for every player; see `Initialize`). |
+| `CVidTheoraPlayer::GenLookupTables` | done | `tables` in `crates/luma-video/src/lib.rs`: the same 13-bit BT.601 tables. Luma truncates each coefficient to an integer before multiplying, the original multiplies as a double and truncates the product, so a channel can differ by 1 on a few values. The original's Y table for values under 16 overflows (unsigned arithmetic); Luma clamps those to black. |
+| `CVidTheoraPlayer::RenderFrame` | done | `yuv_to_rgba` in `crates/luma-video/src/lib.rs`: same formulas and clamping, the chroma shared by each 2x2 block, the alpha from the alpha image. Luma converts the picture region only (see `Initialize`), also handles 4:2:2 and 4:4:4 streams (the original assumes 4:2:0) and writes the last odd row and column, which the original leaves unwritten. |
+| `CVidTheoraPlayer::SetAlphaImage` | partial | `World::play_entity_theora` in `crates/luma-adventure/src/video.rs`: the image is loaded once, a failure leaves the video opaque (logged). Difference: Luma decodes it with `luma_formats::image::decode`, which makes the colour-key pixels (magenta) of an image without an alpha channel transparent and ignores the alpha of a BMP; the original takes the alpha of the image converted to true colour, with no colour key. |
+| `CVidTheoraPlayer::GetAlphaAt` | done | `apply_alpha` in `crates/luma-adventure/src/video.rs`: the mask's alpha at the pixel, opaque outside the mask or without one. |
+| `CVidTheoraPlayer::SeekToTime` | partial | `step_player` in `crates/luma-adventure/src/video.rs` (`seeking`): Luma decodes from the first frame, shows the first one whose time reaches the start time and seeks the sound track to that time: exact. The original reads pages up to the first Theora page whose granule time reaches the target, restarts the decoders there, waits for the next key frame and takes that key frame's time as the offset: playback starts at a key frame at or after the target, up to a key-frame interval later, and the sound from the same place in the file. |
+| `CVidTheoraPlayer::Pause` | done | `World::pause_entity_video` in `crates/luma-adventure/src/video.rs`: only a playing video, the sound paused with it. |
+| `CVidTheoraPlayer::Resume` | done | `World::resume_entity_video` in `crates/luma-adventure/src/video.rs`: only a paused video, the sound resumed, the clock shifted by the pause. |
+| `CVidTheoraPlayer::Persist` | todo | Saves a player (the game's and each entity's): position, state (playing or paused), file, alpha file, position, zoom, placement type, looping, volume. Luma keeps no video in a saved game (`after_restore` in `crates/luma-adventure/src/save.rs` drops it; `docs/video.md`, Deviations): after a load an entity that was playing a video shows its sprite. |
+| `CVidTheoraPlayer::InitializeSimple` | todo | After a load: reopens the saved file, sets the alpha image again and plays from the saved position with the saved placement, zoom and looping (then pauses after one frame if it was paused; a file that no longer opens leaves the player finished). Goes with `Persist`. |
+| `CVidTheoraPlayer::GetTexture` | done | The video as a material's texture (`C3DMaterial`, `SetTheoraTexture`): `VideoPlayer::texture_loop` and its stepping and upload in `crates/luma-adventure/src/draw3d.rs`. |
