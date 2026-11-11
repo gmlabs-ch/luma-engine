@@ -347,7 +347,7 @@ and a front-end can set them through `World::accessibility_mut`.
 Scripts read them as `Game.AccTTSEnabled`, `AccTTSTalk`,
 `AccTTSCaptions`, `AccTTSKeypress`, `AccKeyboardEnabled`,
 `AccKeyboardCursorSkip` and `AccKeyboardPause`, read only, as in the
-original. A game whose `default.game` says `ALLOW_ACCESSIBILITY_TAB =
+original. A game whose `startup.settings` says `ALLOW_ACCESSIBILITY_TAB =
 FALSE` keeps speech, keyboard play and the pause off whatever the file
 says, as the original forces them off.
 

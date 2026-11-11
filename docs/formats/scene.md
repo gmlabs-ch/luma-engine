@@ -108,9 +108,21 @@ SCENE {
 ```
 
 A `.scene` file is a [definition file](definition-files.md) with one
-`SCENE` root block. Everything the engine does not know is ignored; the
-tables below list the keys it reads, with the defaults it uses when a key
-is absent.
+`SCENE` root block, which must be the first statement of the file. The
+tables below list the keys the engine knows, with the defaults it uses
+when a key is absent. **A key that is not in a block's table is a syntax
+error** ([definition files](definition-files.md#syntax)):
+
+- in the `SCENE` block it fails the scene (`Syntax error in SCENE
+  definition`);
+- in a `LAYER`, `WAYPOINTS`, `SCALE_LEVEL`, `ROTATION_LEVEL` or free
+  `ENTITY` block of the scene, in a `REGION` or `ENTITY` of a layer, and
+  in a `REGION`, `BLOCKED_REGION` or `WAYPOINTS` of an entity, it fails
+  that block only: the part is left out and the rest of the file is read
+  (the engine sets an error code that the next statement overwrites);
+- in a `PROPERTY` block it leaves the property unset.
+
+A cursor or a sprite that cannot be loaded is left out the same way.
 
 ## `SCENE`
 
@@ -118,13 +130,13 @@ is absent.
 |-----|------|---------|---------|
 | `NAME` | string | `""` | Name used by scripts. |
 | `CAPTION` | string | `""` | Caption shown by the interface. |
-| `TEMPLATE` | string | | Another scene file loaded first; this file then overrides it. Not written by the editor. |
+| `TEMPLATE` | string | | Another scene file, loaded [where the key stands](definition-files.md#template). Loading a scene file starts by emptying the scene (`Cleanup`), so everything read before the key is dropped except the name and the script properties; the keys that follow apply over the template. A template that cannot be loaded is skipped. Not written by the editor. |
 | `SCRIPT` | string, repeatable | | Scripts attached to the scene, run in order. |
 | `PROPERTY` | block, repeatable | | A script property set on the scene, see [`PROPERTY`](#property). |
 | `PERSISTENT_STATE` | bool | false | Remember the state of the scene's named nodes (active, caption, sprite, cursor, alpha colour) when the player leaves, and put it back when they come back; see [game-loop.md](../game-loop.md#scene-state-between-visits). Positions and script variables are not kept. |
 | `PERSISTENT_STATE_SPRITES` | bool | true | With `PERSISTENT_STATE`, also keep the sprites objects were switched to. |
 | `CURSOR` | string | | Sprite used as the mouse cursor over the scene instead of the game's cursor. |
-| `VIEWPORT` | `left,top,right,bottom` | the game's `SCENE_VIEWPORT`, else the whole window | Part of the window the scene is drawn in and scrolled for; the scene's own viewport comes before the game's. `Scene.SetViewport(x, y, width, height)` sets it at run time (a width or height of 0 or less means the window's; the rectangle is kept inside the window), and it goes with the scene. Not written by the editor. |
+| `VIEWPORT` | `left,top,right,bottom` | the game's `SCENE_VIEWPORT`, else the whole window | Part of the window the scene is drawn in and scrolled for; the scene's own viewport comes before the game's. `Scene.SetViewport(x, y, width, height)` sets it at run time (a width or height of 0 or less means the window's; the rectangle is kept inside the window), and it goes with the scene. Not written by the editor. The engine's `case` for this key has no `break`: the text of the viewport is then read as `PERSISTENT_STATE`, which is true only when it starts with `1`. A scene with a viewport is therefore persistent only when the viewport's left is 1, or when `PERSISTENT_STATE=TRUE` is written **after** `VIEWPORT` (the scene editor writes it before). |
 | `GEOMETRY` | string | | The `.3ds` scene geometry of a 3D scene, see [geometry.md](geometry.md) and [3D keys](#3d-keys). A 2D scene has none. |
 | `CAMERA` | string | the geometry's first | Name of the active camera of the scene geometry (case-insensitive); an unknown name keeps the first camera. |
 | `FOV_OVERRIDE` | float | | Vertical field of view in **radians** (SceneEdit shows degrees and writes radians) replacing the camera's. Absent or negative keeps the camera's. |
@@ -159,7 +171,7 @@ A scene with no main layer loads, with a warning, and has a size of
 | `REGION` | block, repeatable | | A region node, see [`REGION`](#region). |
 | `SCRIPT` | string, repeatable | | Scripts attached to the layer. |
 | `PROPERTY` | block, repeatable | | Script properties. |
-| `TEMPLATE` | string | | Another layer file loaded first. |
+| `TEMPLATE` | string | | Another layer file (a `LAYER` root block), loaded where the key stands: its keys go over those read so far and its nodes come after them. |
 | `EDITOR_SELECTED`, `EDITOR_PROPERTY` | | | Editor state, ignored. |
 
 The entities and regions of a layer form one ordered list of **nodes**;
@@ -192,7 +204,7 @@ scene and the root block of an `.entity` file.
 | `ALPHA_COLOR` | `r,g,b` | none | Fixed tint, overriding the scene's. |
 | `ALPHA` | int 0–255 | none | Fixed opacity. `ALPHA` without `ALPHA_COLOR` means `255,255,255` with that alpha. |
 | `CURSOR` | string | | Sprite used as the mouse cursor over the entity. |
-| `REGION` | block | | Clickable area as a polygon, see [`REGION`](#region); only the base keys are read. Without it, the sprite's pixels are the clickable area. |
+| `REGION` | block | | Clickable area as a polygon, see [`REGION`](#region). It is a base region: only `NAME`, `CAPTION`, `ACTIVE`, `POINT`, `SCRIPT`, `PROPERTY`, `TEMPLATE` and `EDITOR_SELECTED_POINT` are keys there, and any other (`BLOCKED`, `SCALE`, `ALPHA`...) is a syntax error that leaves the entity without region. Without it, the sprite's pixels are the clickable area. |
 | `BLOCKED_REGION` | block | | Polygon that blocks actors while the entity is there (a crate on the floor). |
 | `WAYPOINTS` | block | | Waypoints that become available while the entity is there (a ladder). |
 | `WALK_TO_X`, `WALK_TO_Y` | int | 0 | Where the actor walks before interacting with the entity. |
@@ -206,11 +218,11 @@ scene and the root block of an `.entity` file.
 | `TALK` | string, repeatable | | Sprites played while the entity talks. |
 | `TALK_SPECIAL` | string, repeatable | | Alternative talk sprites, chosen by the script. |
 | `SUBTYPE` | string | normal | `"sound"` makes a sound source instead of a visible entity: no sprite, not clickable, not scalable. |
-| `SOUND` | string | | Sound started when the entity loads (a sound entity's sound, or an ambience). |
-| `SOUND_START_TIME` | int | 0 | Start offset of the sound, in milliseconds. |
-| `SOUND_VOLUME` | int | 100 | Volume of the sound in percent. |
+| `SOUND` | string | | Sound loaded (not started) where the key stands, with the volume and the start offset read **before** it (a sound entity's sound, or an ambience). |
+| `SOUND_START_TIME` | int | 0 | Start offset of the sound, in milliseconds. Written after `SOUND`, as the scene editor does, it does not reach the loaded sound: it is kept for the next `PlaySound()` without a file. |
+| `SOUND_VOLUME` | int | 100 | Volume of the sound in percent. Written after `SOUND`, it applies at the next `PlaySound()` without a file, and only when the start offset is not 0. |
 | `SOUND_PANNING` | bool | true | Pan the sound according to the entity's position on screen. |
-| `TEMPLATE` | string | | Another entity file loaded first. |
+| `TEMPLATE` | string | | Another entity file, loaded where the key stands: the keys before it are overridden, the keys after it override. The entity's `Filename` is then the template's, and the template's `ALPHA_COLOR`/`ALPHA` are replaced by this block's (none when it has none). |
 | `EDITOR_SELECTED`, `EDITOR_PROPERTY` | | | Editor state, ignored. |
 | `EVENTS` | | | Reserved, ignored. |
 
@@ -240,7 +252,7 @@ joined to the first. A region in a layer carries the extra keys marked
 | `SCALE` (or `ZOOM`) | int | 0 | *scene.* Scale in percent applied to whoever stands inside; `0` means "use the scale levels". |
 | `ALPHA_COLOR` | `r,g,b` | `255,255,255` | *scene.* Tint applied to whoever stands inside (with `COLORABLE`). |
 | `ALPHA` | int 0–255 | 255 | *scene.* Opacity applied the same way. |
-| `TEMPLATE` | string | | Another region file loaded first. |
+| `TEMPLATE` | string | | Another region file (a `REGION` root block), loaded where the key stands. Loading a region drops its points first, so the template's points replace those read before the key; its `ALPHA_COLOR`/`ALPHA` are replaced by this block's. |
 | `EDITOR_SELECTED`, `EDITOR_SELECTED_POINT`, `EDITOR_PROPERTY` | | | Editor state, ignored. |
 
 Scripts edit a polygon at run time with `AddPoint(x, y)`,
@@ -271,7 +283,7 @@ counted consistently.
 | `NAME` | string | `""` | Name used by scripts. |
 | `POINT` | `x,y`, repeatable | | The waypoints. |
 | `PROPERTY` | block, repeatable | | Script properties. |
-| `TEMPLATE` | string | | Another file loaded first. |
+| `TEMPLATE` | string | | Another file (a `WAYPOINTS` root block), loaded where the key stands; its points are added to those read so far. |
 | `EDITOR_SELECTED`, `EDITOR_SELECTED_POINT`, `EDITOR_PROPERTY` | | | Editor state, ignored. |
 
 Waypoints are the vertices of the path-finding graph. An actor walks in a
@@ -296,9 +308,14 @@ PROPERTY {
 }
 ```
 
-Sets the script property `NAME` of the object to the string `VALUE`.
-Both keys are required; a block missing one fails to load. Scripts read
-it as `this.xSurface`.
+Sets the script property `NAME` of the object to the string `VALUE`, the
+way a script's assignment would (`CBScriptHolder::ParseProperty` calls
+the object's `ScSetProperty`): a name the object knows as one of its own
+properties sets that property from the string. Both keys are required,
+and the last of each counts. A block missing one, or holding any other
+key, sets nothing: the engine logs `Error loading PROPERTY definition`
+and the block that holds it goes on loading. Scripts read the property as
+`this.xSurface`.
 
 `EDITOR_PROPERTY` has the same shape and is ignored outside the editors.
 
@@ -391,8 +408,7 @@ engine's `CAdScene` and `CAdLayer` allow:
 - `Scene.CreateEntity(name)` makes an empty free entity (scalable, no
   sprite) and `Scene.LoadEntity(file)` loads an `.entity` file as a free
   entity (its sprites, sound, region, properties and scripts set up as
-  for the scene's own; its `TEMPLATE` is not followed, as for entity
-  containers). `Scene.UnloadObject(entity)` removes a free entity, the
+  for the scene's own, its `TEMPLATE` files loaded in place). `Scene.UnloadObject(entity)` removes a free entity, the
   file's as well as a created one, ending its scripts.
 - `layer.AddEntity(name)`, `AddRegion(name)`, `InsertEntity(index,
   name)` and `InsertRegion(index, name)` add a node to a layer, at the
@@ -442,8 +458,8 @@ object (`GetAttachment(index)`, those drawn before first, or
 sprite or play an animation on it. `RemoveAttachment(object)` or
 `RemoveAttachment(name)` removes it; the attachments of an object go
 with the object, so a scene entity's are removed when the scene
-changes while a game entity's or an actor's stay. The file's `TEMPLATE`
-is not followed. An attachment's own attachments are not drawn.
+changes while a game entity's or an actor's stay. An attachment's own
+attachments are not drawn.
 
 `StickToRegion(region)` on an actor or a free entity (the region of the
 main layer by object or by name, `null` to unstick) draws the object
@@ -525,8 +541,8 @@ effect with the Direct3D renderer: the software renderer ignores
 - Scene entities default to `SCALABLE=FALSE`, `.entity` files and free
   entities to `TRUE`; the editor writes the key every time, but hand-made
   files may rely on the default.
-- `TEMPLATE` needs the file system; a parser working on bytes should
-  record the name and let the caller load and merge it.
+- `TEMPLATE` needs the file system: `luma-formats` takes a file reader
+  (`Files`) and applies the template where the key stands.
 - Sprite, cursor and script paths are relative to the game root with `\`
   separators; resolve them through the virtual file system.
 - A missing sprite is not fatal for the engine (the entity draws nothing);

@@ -133,14 +133,14 @@ pub enum TalkSkipButton {
 }
 
 impl TalkSkipButton {
-    /// The setting of a `default.game` value.
+    /// The setting of a `default.game` value (`TALK_SKIP_BUTTON`,
+    /// `VIDEO_SKIP_BUTTON`): `right`, `both`, and the left button for
+    /// anything else, `none` included. Only a script turns skipping off.
     pub fn parse(text: &str) -> TalkSkipButton {
         if text.eq_ignore_ascii_case("right") {
             TalkSkipButton::Right
         } else if text.eq_ignore_ascii_case("both") {
             TalkSkipButton::Both
-        } else if text.eq_ignore_ascii_case("none") {
-            TalkSkipButton::None
         } else {
             TalkSkipButton::Left
         }
@@ -255,6 +255,7 @@ mod tests {
         assert_eq!((d.x, d.y), (220, 40), "clamped to the screen");
         assert_eq!(TalkSkipButton::parse("Both"), TalkSkipButton::Both);
         assert!(TalkSkipButton::parse("x").skips_on_left());
+        assert_eq!(TalkSkipButton::parse("none"), TalkSkipButton::Left);
         assert_eq!(TalkSkipButton::from_code(1).code(), 1);
     }
 }

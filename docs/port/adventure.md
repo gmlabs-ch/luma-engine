@@ -341,12 +341,12 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdGame::LoadBuffer RESPONSE_BOX` | done | `responses.rs` `load_response_box`, from `Runtime::start` (failure: see `LoadBuffer`). |
 | `CAdGame::LoadBuffer INVENTORY_BOX` | done | `inventory.rs` `load_inventory_box`, from `Runtime::start` (failure: see `LoadBuffer`). |
 | `CAdGame::LoadBuffer ITEMS` | done | `inventory.rs` `load_items`, from `Runtime::start`; the file name is kept (`game_file.items`) for `Game.Reset`. |
-| `CAdGame::LoadBuffer TALK_SKIP_BUTTON` | partial | `talk.rs` `TalkSkipButton::parse`: `right`, `both`, else left as the original, but Luma also reads `none` as none where the original reads it as left. |
-| `CAdGame::LoadBuffer VIDEO_SKIP_BUTTON` | partial | Same parser as `TALK_SKIP_BUTTON`: `none` is read as none, the original reads it as left. |
-| `CAdGame::LoadBuffer SCENE_VIEWPORT` | partial | The original reads `left,top,right,bottom` (`SetRect(rc.left, rc.top, rc.right, rc.bottom)`); `game.rs` and `World::with_audio` take the four numbers as `x, y, width, height` (so does `docs/formats/game.md`). Same result only when left and top are 0. |
+| `CAdGame::LoadBuffer TALK_SKIP_BUTTON` | done | `talk.rs` `TalkSkipButton::parse`: `right`, `both`, anything else (also `none`) the left button; applied by `World::with_audio`. |
+| `CAdGame::LoadBuffer VIDEO_SKIP_BUTTON` | done | `talk.rs` `TalkSkipButton::parse`, the same parser: `right`, `both`, anything else the left button. |
+| `CAdGame::LoadBuffer SCENE_VIEWPORT` | done | `luma-formats/src/game.rs` reads `left,top,right,bottom` (`GameFile::scene_viewport`); `World::with_audio` keeps it inside the screen as `CBViewport::SetRect` does (left and top not below 0, right and bottom not beyond the screen) and turns it into its `x, y, width, height`. |
 | `CAdGame::LoadBuffer EDITOR_PROPERTY` | n/a | `CBBase::ParseEditorProperty` returns at once when the game is not in editor mode. |
 | `CAdGame::LoadBuffer STARTUP_SCENE` | partial | Read (`game.rs`) and exposed as `Game.StartupScene`. Different: `Runtime::start` also schedules it itself with a fade-in; the original engine never loads it (only scripts do, `Game.ChangeScene(Game.StartupScene)`), so in Luma the scene is loaded, and its scripts start, even when the game script opens another scene first, and it is loaded twice when the script asks for it. |
-| `CAdGame::LoadBuffer DEBUG_STARTUP_SCENE` | todo | Not read. In debug mode the first `ChangeScene` loads this scene instead of the one asked; Luma has no debug mode (`Game.DebugMode` is always false). |
+| `CAdGame::LoadBuffer DEBUG_STARTUP_SCENE` | partial | Read (`GameFile::debug_startup_scene`). Remaining: Luma has no debug mode (`Game.DebugMode` is always false), so the first `ChangeScene` never swaps the scene. |
 | `CAdGame::Persist` | replaced | serde: `save.rs` `world_state!` saves the dialogue branches and used responses, the inventories and the box, the objects, the previous scene, the scene and its remembered states, the scheduled scene, the selected item, the skip buttons, the scene viewport, the waiting response state, `temp_disable_save_state`, the items, the speech directories, the smart item cursor and the startup scene. Not saved: `m_DebugStartupScene` and `m_InitialScene` (no debug mode); the items file name comes from the game file again. |
 | `CAdGame::LoadGame` | replaced | `save.rs` `load_game`; the regions need no `AfterLoadRegion` pass, their shapes are data. |
 | `CAdGame::InitAfterLoad` | replaced | `save.rs` `after_restore` and `reload_assets` load the files the restored state names. |
@@ -356,7 +356,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdGame::ScheduleChangeScene` | partial | `luma-adventure/src/world.rs` `schedule_scene` always waits for the next frame. The original changes the scene at once when the current scene is not initialised yet (`!m_Scene->m_Initialized`, the first `Game.ChangeScene` of a game): the calling script goes on with the scene loaded, in Luma `Scene` is still empty until the next frame. |
 | `CAdGame::GetVersion` | replaced | Only used for the saved-game version; Luma's saves carry their own (`save.rs` `VERSION`). |
 | `CAdGame::LoadItemsFile` | done | `inventory.rs` `load_items_from`. |
-| `CAdGame::LoadItemsBuffer` | partial | `inventory.rs` `load_items_from` with `ItemDef::parse_all`: without merge the old items go first, with merge an item replaces the one of the same name. Different on error only: Luma parses the whole file before touching the items, so a bad file leaves the old items; the original has already deleted them and keeps the items read before the bad one. |
+| `CAdGame::LoadItemsBuffer` | done | `luma-formats/src/window.rs` `ItemDef::parse_all_with` and `inventory.rs` `load_items_from`: without merge the old items go first, with merge an item replaces the one of the same name; an item that fails is left out; a statement that is not an `ITEM` ends the file with a syntax error after the items before it were added, and the load answers false. |
 | `CAdGame::LoadItemsBuffer ITEM` | done | `luma-formats` `ItemDef::parse_all`, one item per `ITEM` block (keys: `CAdItem::LoadBuffer`). |
 | `CAdGame::GetSceneState` | done | `scene_state.rs` `state_key` (slashes and case folded), `save_scene_state` creates, `restore_scene_state` only looks up. |
 | `CAdGame::WindowLoadHook` | done | `luma-formats/src/window.rs` reads `ENTITY_CONTAINER` among a window's widgets; `ui.rs` creates the control. |
@@ -456,7 +456,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdInventoryBox::LoadFile` | done | `luma-adventure/src/inventory.rs` `load_inventory_box_from`: a missing or unparsable file is logged and leaves the game without a box. |
 | `CAdInventoryBox::LoadBuffer` | partial | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with` and `luma-adventure/src/inventory.rs` `load_inventory_box_from`: `INVENTORY_BOX` root, the close button of an exclusive box, visible when `ALWAYS_VISIBLE`, the box listening to its window's buttons. Different: `TEMPLATE` is not loaded; only buttons get the box as listener and all of them do (the original gives it to every widget that has no listener yet); unknown keys are skipped where the original fails. |
 | `CAdInventoryBox::LoadBuffer INVENTORY_BOX` | done | `InventoryBoxDef::parse_with`: the root block is required. |
-| `CAdInventoryBox::LoadBuffer TEMPLATE` | partial | Parsed into `InventoryBoxDef::template`, which nothing reads: the template file is never loaded. The original loads it where the key stands (`LoadFile`). |
+| `CAdInventoryBox::LoadBuffer TEMPLATE` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`, read by `inventory.rs` `load_inventory_box_from`: the named file is loaded where the key stands; one that cannot be loaded fails the box. `EXCLUSIVE` starts false in every file read and `ALWAYS_VISIBLE` is the outer file's own. |
 | `CAdInventoryBox::LoadBuffer WINDOW` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with` (`WindowDef::apply_with`), created by `load_inventory_box_from` (`apply_window_def`). |
 | `CAdInventoryBox::LoadBuffer EXCLUSIVE` | partial | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`; a full-screen `close` button under the window. Luma creates it only when the box has a `WINDOW`; the original creates it for any exclusive box. |
 | `CAdInventoryBox::LoadBuffer ALWAYS_VISIBLE` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`; `Inventory::visible` starts from it. |
@@ -478,10 +478,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CAdItem::CAdItem` | partial | `luma-formats/src/window.rs` `ItemDef::default`: combined cursor, no amount shown, amount 0, offsets 0, right-aligned amount, no amount string. Different: the original sets `m_Movable = false` for items; `natives_item.rs` `item_get` answers `Movable` true (and `objects.rs` `ObjectState::default` has `movable` true). |
 | `CAdItem::~CAdItem` | replaced | Rust ownership. |
-| `CAdItem::LoadFile` | todo | Reads an item file with an `ITEM` root; only reached through the `TEMPLATE` key, which Luma does not follow. |
+| `CAdItem::LoadFile` | done | `luma-formats/src/window.rs` `ItemDef::apply_with`: an item file with an `ITEM` root block, read through the `TEMPLATE` key. |
 | `CAdItem::LoadBuffer` | partial | `luma-formats/src/window.rs` `ItemDef::apply` from `ItemDef::parse_all`, applied by `luma-adventure/src/inventory.rs` `add_item`. Different: `TEMPLATE` is not loaded; the tint rule (see `ALPHA`, `ALPHA_COLOR`); unknown keys are skipped where the original fails with a syntax error; a sprite or cursor that does not load does not fail the item. |
 | `CAdItem::LoadBuffer ITEM` | done | `ItemDef::parse_all`: one item per top-level `ITEM` block (`CAdGame::LoadItemsBuffer` passes the block's content). |
-| `CAdItem::LoadBuffer TEMPLATE` | partial | Parsed into `ItemDef::template`, which nothing reads: the template file is never loaded. The original loads it where the key stands (`LoadFile`). |
+| `CAdItem::LoadBuffer TEMPLATE` | done | `luma-formats/src/window.rs` `ItemDef::apply_with`, read by `inventory.rs` `load_items_from`: the named item file is loaded into the item where the key stands; one that cannot be loaded fails the item. |
 | `CAdItem::LoadBuffer CURSOR_HOVER` | done | `luma-formats/src/window.rs` `ItemDef::apply`; loaded by `add_item`, shown by `update_item_cursor`. |
 | `CAdItem::LoadBuffer CURSOR_COMBINED` | done | `luma-formats/src/window.rs` `ItemDef::apply` (true by default); `update_item_cursor`. |
 | `CAdItem::LoadBuffer CURSOR` | done | `luma-formats/src/window.rs` `ItemDef::apply`; loaded by `add_item`, shown by `update_item_cursor`. |
@@ -494,8 +494,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdItem::LoadBuffer PROPERTY` | done | `luma-formats/src/window.rs` `ItemDef::apply`; set as script properties by `add_item`. |
 | `CAdItem::LoadBuffer EDITOR_PROPERTY` | n/a | `CBBase::ParseEditorProperty` returns at once when the game is not in editor mode. |
 | `CAdItem::LoadBuffer FONT` | done | `luma-formats/src/window.rs` `ItemDef::apply`; loaded by `add_item`, used for the amount (`draw_inventory`). |
-| `CAdItem::LoadBuffer ALPHA_COLOR` | partial | `luma-formats/src/window.rs` `ItemDef::apply` makes the tint with `ALPHA` (255 by default). Different: the original turns a black colour with a non-zero alpha into white (`ALPHA_COLOR {0,0,0}` means no tint); Luma keeps black and draws the item black. |
-| `CAdItem::LoadBuffer ALPHA` | partial | Read only together with `ALPHA_COLOR`: `ItemDef::apply` builds a tint only when a colour was given. In the original `ALPHA` alone gives white with that alpha (a translucent item), since the colour defaults to 0,0,0 and is then made white. |
+| `CAdItem::LoadBuffer ALPHA_COLOR` | done | `luma-formats/src/window.rs` `ItemDef::apply_with`: 0,0,0 by default, combined with `ALPHA` at the end of the block; black with a non-zero alpha becomes white. `ItemDef::alpha_color`, drawn by `inventory.rs`. |
+| `CAdItem::LoadBuffer ALPHA` | done | `luma-formats/src/window.rs` `ItemDef::apply_with`: 255 by default; alone it gives white with that alpha (a translucent item). |
 | `CAdItem::LoadBuffer TALK_SPECIAL` | partial | Parsed into `ItemDef::talk_special`, not used: items cannot talk in Luma (`natives_item.rs`: `Talk` is a stub). |
 | `CAdItem::LoadBuffer TALK` | partial | Parsed into `ItemDef::talk`, not used: items cannot talk in Luma. |
 | `CAdItem::LoadBuffer SPRITE_HOVER` | done | `luma-formats/src/window.rs` `ItemDef::apply`; shown while the item is under the mouse (`update_inventory`). |
@@ -521,10 +521,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CAdLayer::CAdLayer` | done | `luma-formats/src/scene.rs` `Layer::default`: not main, size 0, active, not close-up. |
 | `CAdLayer::~CAdLayer` | replaced | Rust ownership; `scene_edit.rs` `delete_layer` drops the nodes and their natives. |
-| `CAdLayer::LoadFile` | todo | Loads a layer from its own file (root `LAYER`); only reached through the `TEMPLATE` key, which Luma does not follow. |
-| `CAdLayer::LoadBuffer` | partial | `Layer::from_node`. Unknown keys are ignored (original: `Syntax error in LAYER definition`, the scene's parsing stops); a region or entity that fails to load stops the parsing of the layer's remaining keys in the original. |
+| `CAdLayer::LoadFile` | done | `Layer::parse_with` (`luma-formats/src/scene.rs`): a `LAYER` root block; reached through `TEMPLATE`, loaded in place. |
+| `CAdLayer::LoadBuffer` | done | `Layer::load` (`luma-formats/src/scene.rs`): the original's table (a key outside it is a syntax error; the scene then drops the layer and goes on, as the original's error code is overwritten by the next statement); a region or an entity that fails is dropped alone; a layer's entities are not scalable unless they say so. |
 | `CAdLayer::LoadBuffer LAYER` | done | Root block of a layer file; inside a scene the block is read directly. |
-| `CAdLayer::LoadBuffer TEMPLATE` | partial | Parsed into `Layer::template`, never followed. Original: loads that layer file at this point, the following keys override and its nodes come first. |
+| `CAdLayer::LoadBuffer TEMPLATE` | done | `Layer::load` (`luma-formats/src/scene.rs`): the named layer file is loaded into the layer where the key stands, its nodes after those read so far; one that cannot be loaded is skipped. |
 | `CAdLayer::LoadBuffer NAME` | done | `Layer::name`, `Scene.GetLayer(name)`. |
 | `CAdLayer::LoadBuffer WIDTH` | done | `Layer::width`: parallax and, for the main layer, the scene's size. |
 | `CAdLayer::LoadBuffer HEIGHT` | done | `Layer::height`. |
@@ -668,10 +668,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CAdRegion::CAdRegion` | done | `Region::default`: active, not blocked, not decoration, no scale, opaque white. |
 | `CAdRegion::~CAdRegion` | replaced | Rust ownership. |
-| `CAdRegion::LoadFile` | todo | Loads a region from its own file (root `REGION`); only reached through the `TEMPLATE` key, which Luma does not follow. |
-| `CAdRegion::LoadBuffer` | partial | `Region::from_node(.., scene=true)`. Unknown keys are ignored (original: syntax error). The bounding rectangle (`CreateRegion`) is computed on demand by `Region::bounds`. |
+| `CAdRegion::LoadFile` | done | `Region::parse_with(bytes, true, files)` (`luma-formats/src/scene.rs`): a `REGION` root block; reached through `TEMPLATE`, loaded in place. |
+| `CAdRegion::LoadBuffer` | done | `Region::load(.., scene = true, ..)` (`luma-formats/src/scene.rs`): the points are dropped first, the keys of the original's table apply in order (a key outside it is a syntax error; the layer then drops the region and goes on), the tint is that of this block alone. The bounding rectangle (`CreateRegion`) is computed on demand by `Region::bounds`. |
 | `CAdRegion::LoadBuffer REGION` | done | Root block of a region file; inside a layer the block is read directly. |
-| `CAdRegion::LoadBuffer TEMPLATE` | partial | Parsed into `Region::template`, never followed. Original: loads that region file at this point (its points replace those read so far), the following keys override. |
+| `CAdRegion::LoadBuffer TEMPLATE` | done | `Region::load` (`luma-formats/src/scene.rs`): the named region file is loaded into the region where the key stands (its points replace those read so far, its tint is replaced at the end of the outer block); one that cannot be loaded is skipped. |
 | `CAdRegion::LoadBuffer NAME` | done | `Region::name`. |
 | `CAdRegion::LoadBuffer ACTIVE` | done | `Region::active`. |
 | `CAdRegion::LoadBuffer ZOOM` | done | Same as `SCALE`. |
@@ -720,7 +720,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdResponseBox::LoadFile` | done | `World::load_response_box_from`: a missing file or a parse error is logged and the box not loaded. |
 | `CAdResponseBox::LoadBuffer` | partial | `ResponseBoxDef::apply_with` + `load_response_box_from`. Unknown keys are ignored (original: syntax error); a font, cursor or window that fails stops the parsing of the remaining keys in the original. The widgets of the window without listener get the box as listener (buttons, as the original only reacts to buttons). |
 | `CAdResponseBox::LoadBuffer RESPONSE_BOX` | done | Root block required. |
-| `CAdResponseBox::LoadBuffer TEMPLATE` | partial | Parsed into `ResponseBoxDef::template`, never followed. Original: loads that file's keys at this point (no reset first), the following keys override. |
+| `CAdResponseBox::LoadBuffer TEMPLATE` | done | `luma-formats/src/window.rs` `ResponseBoxDef::apply_with`, read by `responses.rs` `load_response_box_from`: the named file's keys are loaded where the key stands (no reset first), the following keys override; one that cannot be loaded is skipped. |
 | `CAdResponseBox::LoadBuffer FONT_HOVER` | partial | Read and used for the hover and pressed states; without the key the original falls back to the system font, Luma to the choice's normal font. |
 | `CAdResponseBox::LoadBuffer FONT` | done | Font of the text choices, the system font without it; a response's own font replaces it. |
 | `CAdResponseBox::LoadBuffer AREA` | partial | Read and used by `layout_responses`, relative to the window. The original enlarges the area at run time for a choice higher than it (see `CreateButtons`). |
@@ -728,8 +728,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdResponseBox::LoadBuffer SPACING` | done | `ResponseBoxDef::spacing`. |
 | `CAdResponseBox::LoadBuffer WINDOW` | partial | `WindowDef` applied to a window control. A box without `WINDOW` works in the original (the buttons are placed in `AREA` on the screen, under the shield); in Luma `get_response` then logs `response box is not defined` and returns null. |
 | `CAdResponseBox::LoadBuffer CURSOR` | partial | Read; given to every response button. Original: only to icon choices, text choices keep the default cursor logic. |
-| `CAdResponseBox::LoadBuffer TEXT_ALIGN` | partial | `window.rs` `text_align(name, Left)` only knows `left` and `right`: `center` gives left. Original: `center` → centred, `right` → right, anything else left. |
-| `CAdResponseBox::LoadBuffer VERTICAL_ALIGN` | partial | `VerticalAlign::from_name`: `top`, `bottom`, anything else centre. Original: `top`, `center`, anything else bottom (differs for an unknown value). |
+| `CAdResponseBox::LoadBuffer TEXT_ALIGN` | done | `luma-formats/src/window.rs` `ResponseBoxDef::apply_with`: `center` centred, `right` right, anything else left. |
+| `CAdResponseBox::LoadBuffer VERTICAL_ALIGN` | done | `luma-formats/src/window.rs` `ResponseBoxDef::apply_with`: `top`, `center`, anything else bottom; bottom by default. |
 | `CAdResponseBox::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
 | `CAdResponseBox::SaveAsText` | n/a | Only reachable from the editor tools. |
 | `CAdResponseBox::Display` | partial | `responses.rs` `layout_responses` + `draw_responses`: same total height over all buttons, vertical alignment, placement from the scroll offset while they fit, `prev`/`next` shown when there is more, shield then window then buttons, drawn before the normal windows. Needs a window (see `WINDOW`) and the enlarged area (see `CreateButtons`). |
@@ -757,10 +757,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CAdRotLevel::CAdRotLevel` | done | `RotationLevel::from_node`: `X` 0 and rotation 0 by default. |
 | `CAdRotLevel::~CAdRotLevel` | replaced | Rust ownership. |
-| `CAdRotLevel::LoadFile` | todo | Loads a level from its own file (root `ROTATION_LEVEL`); only reached through the `TEMPLATE` key. |
-| `CAdRotLevel::LoadBuffer` | partial | `luma-formats/src/scene.rs` `RotationLevel::from_node`; unknown keys are ignored (original: syntax error). |
+| `CAdRotLevel::LoadFile` | done | `RotationLevel::parse_with` (`luma-formats/src/scene.rs`): a `ROTATION_LEVEL` root block; reached through `TEMPLATE`. |
+| `CAdRotLevel::LoadBuffer` | done | `RotationLevel::load` (`luma-formats/src/scene.rs`): the original's table; a key outside it is a syntax error and the scene drops the level. |
 | `CAdRotLevel::LoadBuffer ROTATION_LEVEL` | done | Root block of a level file; inside a scene the block is read directly. |
-| `CAdRotLevel::LoadBuffer TEMPLATE` | todo | Not read at all. Original: loads the level from that file. |
+| `CAdRotLevel::LoadBuffer TEMPLATE` | done | `RotationLevel::load` (`luma-formats/src/scene.rs`): the named file is loaded into the level where the key stands. |
 | `CAdRotLevel::LoadBuffer X` | done | `RotationLevel::x`. |
 | `CAdRotLevel::LoadBuffer ROTATION` | done | `RotationLevel::rotation`, an integer of degrees. |
 | `CAdRotLevel::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
@@ -773,10 +773,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CAdScaleLevel::CAdScaleLevel` | done | `ScaleLevel::from_node`: `Y` 0 and scale 100 by default. |
 | `CAdScaleLevel::~CAdScaleLevel` | replaced | Rust ownership. |
-| `CAdScaleLevel::LoadFile` | todo | Loads a level from its own file (root `SCALE_LEVEL`); only reached through the `TEMPLATE` key. |
-| `CAdScaleLevel::LoadBuffer` | partial | `luma-formats/src/scene.rs` `ScaleLevel::from_node`; unknown keys are ignored (original: syntax error). |
+| `CAdScaleLevel::LoadFile` | done | `ScaleLevel::parse_with` (`luma-formats/src/scene.rs`): a `SCALE_LEVEL` root block; reached through `TEMPLATE`. |
+| `CAdScaleLevel::LoadBuffer` | done | `ScaleLevel::load` (`luma-formats/src/scene.rs`): the original's table; a key outside it is a syntax error and the scene drops the level. |
 | `CAdScaleLevel::LoadBuffer SCALE_LEVEL` | done | Root block of a level file; inside a scene the block is read directly. |
-| `CAdScaleLevel::LoadBuffer TEMPLATE` | todo | Not read at all. Original: loads the level from that file. |
+| `CAdScaleLevel::LoadBuffer TEMPLATE` | done | `ScaleLevel::load` (`luma-formats/src/scene.rs`): the named file is loaded into the level where the key stands. |
 | `CAdScaleLevel::LoadBuffer Y` | done | `ScaleLevel::y`. |
 | `CAdScaleLevel::LoadBuffer SCALE` | done | `ScaleLevel::scale`, an integer of percent. |
 | `CAdScaleLevel::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
@@ -988,8 +988,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CAdSpriteSet::CAdSpriteSet` | done | `luma-formats/src/actor.rs` `SpriteSet::default`: no sprite in any direction. |
 | `CAdSpriteSet::~CAdSpriteSet` | replaced | Rust ownership. |
-| `CAdSpriteSet::LoadFile` | partial | `SpriteSet::parse` reads a `.spriteset` file, but nothing in `luma-adventure` calls it: the original reaches it through `TEMPLATE` and through the `.talk` files (`DEFAULT_SPRITESET_FILE`, `SPRITESET_FILE`). |
-| `CAdSpriteSet::LoadBuffer` | partial | `SpriteSet::apply`. In the original a sprite that fails to load fails the whole set (`Error loading SPRITESET definition`) and with it the actor; Luma keeps the set and records the sprite as missing. Unknown keys are ignored (original: syntax error). |
+| `CAdSpriteSet::LoadFile` | done | `SpriteSet::parse_with` (`luma-formats/src/actor.rs`): a `SPRITESET` root block; reached through the `TEMPLATE` of a set (the `.talk` files that also use it are not ported: `AdTalkDef`). |
+| `CAdSpriteSet::LoadBuffer` | done | `SpriteSet::apply_with` (`luma-formats/src/actor.rs`): the original's table (a key outside it is a syntax error; the actor then leaves the set out and goes on). A sprite that cannot be loaded leaves its direction empty, the set and the actor load (the original's error code is overwritten by the next statement): `SpriteBank` records it as missing. |
 | `CAdSpriteSet::LoadBuffer SPRITESET` | done | Root block, also required inside `WALK`, `STAND`, `TALK`... (`SpriteSet::from_wrapper`). |
 | `CAdSpriteSet::LoadBuffer NAME` | done | `SpriteSet::name`, used for talk stances and animations. |
 | `CAdSpriteSet::LoadBuffer UP_LEFT` | done | `sprites[7]`. |
@@ -1000,7 +1000,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdSpriteSet::LoadBuffer RIGHT` | done | `sprites[2]`. |
 | `CAdSpriteSet::LoadBuffer UP` | done | `sprites[0]`. |
 | `CAdSpriteSet::LoadBuffer DOWN` | done | `sprites[4]`. |
-| `CAdSpriteSet::LoadBuffer TEMPLATE` | partial | Parsed into `SpriteSet::template`, never followed. Original: loads that `.spriteset` file into the same set at this point, the following keys override. |
+| `CAdSpriteSet::LoadBuffer TEMPLATE` | done | `SpriteSet::apply_with` (`luma-formats/src/actor.rs`): the named `.spriteset` file is loaded into the same set where the key stands; one that cannot be loaded is skipped. |
 | `CAdSpriteSet::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` returns at once outside the editor mode. |
 | `CAdSpriteSet::Persist` | replaced | serde: the sets are part of the actor definition saved with the `Actor`. |
 | `CAdSpriteSet::GetSprite` | done | `SpriteSet::sprite`: the direction's sprite, else the nearer of the first set below and the first above, the lower on a tie. |
@@ -1078,10 +1078,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdWaypointGroup::CAdWaypointGroup` | done | `WaypointGroup::default`: active, no points. |
 | `CAdWaypointGroup::~CAdWaypointGroup` | replaced | Rust ownership. |
 | `CAdWaypointGroup::Cleanup` | replaced | Rust ownership; `mimic` builds a new vector. |
-| `CAdWaypointGroup::LoadFile` | todo | Loads a group from its own file (root `WAYPOINTS`); only reached through the `TEMPLATE` key, which Luma does not follow. |
-| `CAdWaypointGroup::LoadBuffer` | partial | `luma-formats/src/scene.rs` `WaypointGroup::from_node`; unknown keys are ignored (original: syntax error). |
+| `CAdWaypointGroup::LoadFile` | done | `WaypointGroup::parse_with` (`luma-formats/src/scene.rs`): a `WAYPOINTS` root block; reached through `TEMPLATE`. |
+| `CAdWaypointGroup::LoadBuffer` | done | `WaypointGroup::load` (`luma-formats/src/scene.rs`): the original's table; a key outside it is a syntax error and the scene (or the entity, the actor) is left without that group. |
 | `CAdWaypointGroup::LoadBuffer WAYPOINTS` | done | Root block of a waypoints file; inside a scene, entity or actor the block is read directly. |
-| `CAdWaypointGroup::LoadBuffer TEMPLATE` | partial | Parsed into `WaypointGroup::template`, never followed. Original: loads that file's points and name at this point. |
+| `CAdWaypointGroup::LoadBuffer TEMPLATE` | done | `WaypointGroup::load` (`luma-formats/src/scene.rs`): the named file's points and name are loaded into the group where the key stands. |
 | `CAdWaypointGroup::LoadBuffer NAME` | done | `WaypointGroup::name`. |
 | `CAdWaypointGroup::LoadBuffer POINT` | done | `WaypointGroup::points`. |
 | `CAdWaypointGroup::LoadBuffer EDITOR_SELECTED_POINT` | n/a | SceneEdit selection state, no runtime reader. |
@@ -1108,10 +1108,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CUIEntity::CUIEntity` | done | `luma-adventure/src/ui.rs` `ControlKind::EntityContainer(None)`: a control without an entity. |
 | `CUIEntity::~CUIEntity` | partial | The original unregisters the entity with its container, which ends the entity's scripts. `luma-adventure/src/ui.rs` `set_container_entity` does it for a replaced entity, but `unload_control` (a window deleted or unloaded) removes the controls only: the container's entity keeps its handle, its `World::ui_entities` entry and its running scripts. |
-| `CUIEntity::LoadFile` | todo | Reads a container file with an `ENTITY_CONTAINER` root; only reached through the `TEMPLATE` key, which Luma does not read. |
+| `CUIEntity::LoadFile` | done | `luma-formats/src/window.rs` `EntityContainerDef::parse_with`: a container file with an `ENTITY_CONTAINER` root block; reached through `TEMPLATE`, loaded in place. |
 | `CUIEntity::LoadBuffer` | partial | `luma-formats/src/window.rs` `EntityContainerDef::apply`, created by `luma-adventure/src/ui.rs` (`WidgetDef::EntityContainer`). Different: `TEMPLATE` is not read; an `ENTITY` file that does not load is logged and leaves an empty container (the original fails the window); the common control keys (`WIDTH`, `IMAGE`, `CAPTION`...) are accepted where the original has a syntax error; `CorrectSize()` is not applied. |
 | `CUIEntity::LoadBuffer ENTITY_CONTAINER` | done | `window.rs` `WindowDef::apply_with`: an `ENTITY_CONTAINER` block among a window's widgets. |
-| `CUIEntity::LoadBuffer TEMPLATE` | todo | Not read: `EntityContainerDef` has no template and `ControlDef::apply_key` skips the key. The original loads the named container file where the key stands. |
+| `CUIEntity::LoadBuffer TEMPLATE` | done | `luma-formats/src/window.rs` `EntityContainerDef::apply_with`: the named container file is loaded where the key stands; one that cannot be loaded fails the container and its window. |
 | `CUIEntity::LoadBuffer DISABLED` | done | `window.rs` `ControlDef::apply_key`; a disabled container's entity is not registered for the mouse (`luma-adventure/src/ui.rs` window hits). |
 | `CUIEntity::LoadBuffer VISIBLE` | done | `ControlDef::apply_key`; `draw_ui_entity` draws nothing when not visible. |
 | `CUIEntity::LoadBuffer X` | done | `ControlDef::apply_key`. |

@@ -5,7 +5,7 @@
 //! `BSubFrame.cpp`, Copyright (c) 2011 Jan Nedoma). See `NOTICE` at the
 //! root of the repository.
 
-use crate::def::{Document, Node, Nodes};
+use crate::def::{Document, Node, keys};
 use crate::error::{Error, Result};
 use crate::image::{Rgb, Rgba};
 
@@ -216,27 +216,31 @@ impl Sprite {
         Self::from_document(&Document::parse(bytes)?)
     }
 
-    /// Builds a sprite from a parsed definition file.
+    /// Builds a sprite from a parsed definition file
+    /// (`CBSprite::LoadBuffer`): the first statement must be the `SPRITE`
+    /// block; a key the engine does not know, or a frame that cannot be
+    /// read, fails the sprite.
     pub fn from_document(doc: &Document) -> Result<Sprite> {
-        let root = doc.get("SPRITE").ok_or_else(|| Error::Invalid {
+        let root = doc.root("SPRITE").ok_or_else(|| Error::Invalid {
             reason: "'SPRITE' keyword expected".into(),
         })?;
         let mut sprite = Sprite {
             precise: true,
             ..Sprite::default()
         };
-        for node in root.nodes() {
-            match node.key.to_ascii_uppercase().as_str() {
-                "NAME" => sprite.name = node.as_str().unwrap_or("").to_string(),
-                "LOOPING" => sprite.looping = node.as_bool().unwrap_or(false),
-                "CONTINUOUS" => sprite.continuous = node.as_bool().unwrap_or(false),
-                "PRECISE" => sprite.precise = node.as_bool().unwrap_or(false),
-                "STREAMED" => sprite.streamed = node.as_bool().unwrap_or(false),
-                "STREAMED_KEEP_LOADED" => {
-                    sprite.streamed_keep_loaded = node.as_bool().unwrap_or(false);
-                }
-                "SCRIPT" => sprite.scripts.extend(node.as_str().map(str::to_string)),
+        for item in keys(root, SPRITE_KEYS, "SPRITE") {
+            let (key, node) = item?;
+            match key {
+                "NAME" => sprite.name = node.text(),
+                "LOOPING" => node.read_bool(&mut sprite.looping),
+                "CONTINUOUS" => node.read_bool(&mut sprite.continuous),
+                "PRECISE" => node.read_bool(&mut sprite.precise),
+                "STREAMED" => node.read_bool(&mut sprite.streamed),
+                "STREAMED_KEEP_LOADED" => node.read_bool(&mut sprite.streamed_keep_loaded),
+                "SCRIPT" => sprite.scripts.push(node.text()),
                 "FRAME" => sprite.frames.push(Frame::from_node(node)?),
+                // The editor's keys, and `SPRITE` itself, are accepted
+                // and mean nothing to the engine.
                 _ => {}
             }
         }
@@ -244,108 +248,210 @@ impl Sprite {
     }
 }
 
+/// The keys of `CBSprite::LoadBuffer`, in the order of its table.
+const SPRITE_KEYS: &[&str] = &[
+    "CONTINUOUS",
+    "SPRITE",
+    "LOOPING",
+    "FRAME",
+    "NAME",
+    "PRECISE",
+    "EDITOR_MUTED",
+    "STREAMED_KEEP_LOADED",
+    "STREAMED",
+    "SCRIPT",
+    "EDITOR_BG_FILE",
+    "EDITOR_BG_OFFSET_X",
+    "EDITOR_BG_OFFSET_Y",
+    "EDITOR_BG_ALPHA",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CBFrame::LoadBuffer`, in the order of its table.
+const FRAME_KEYS: &[&str] = &[
+    "DELAY",
+    "IMAGE",
+    "TRANSPARENT",
+    "RECT",
+    "HOTSPOT",
+    "2D_ONLY",
+    "3D_ONLY",
+    "MIRROR_X",
+    "MIRROR_Y",
+    "MOVE",
+    "ALPHA_COLOR",
+    "ALPHA",
+    "SUBFRAME",
+    "SOUND",
+    "KEYFRAME",
+    "DECORATION",
+    "APPLY_EVENT",
+    "EDITOR_SELECTED",
+    "EDITOR_EXPANDED",
+    "EDITOR_PROPERTY",
+    "KILL_SOUND",
+];
+
+/// The keys of `CBSubFrame::LoadBuffer`, in the order of its table.
+const SUBFRAME_KEYS: &[&str] = &[
+    "IMAGE",
+    "TRANSPARENT",
+    "RECT",
+    "HOTSPOT",
+    "2D_ONLY",
+    "3D_ONLY",
+    "DECORATION",
+    "ALPHA_COLOR",
+    "ALPHA",
+    "MIRROR_X",
+    "MIRROR_Y",
+    "EDITOR_SELECTED",
+    "EDITOR_PROPERTY",
+];
+
+/// What a frame or a sub-frame block says about its image, read into
+/// locals first and put together after the block, as the original does.
+struct ImageKeys {
+    image: Option<String>,
+    key: (i32, i32, i32),
+    custom_key: bool,
+    rect: Rect,
+    tint: (i32, i32, i32, i32),
+}
+
+impl ImageKeys {
+    fn new() -> ImageKeys {
+        ImageKeys {
+            image: None,
+            key: (255, 255, 255),
+            custom_key: false,
+            rect: Rect::default(),
+            tint: (255, 255, 255, 255),
+        }
+    }
+
+    /// Reads one of the image keys; `false` when the key is another one.
+    fn read(&mut self, key: &str, node: &Node) -> bool {
+        match key {
+            "IMAGE" => self.image = Some(node.text()),
+            "TRANSPARENT" => {
+                let (r, g, b) = &mut self.key;
+                node.read_ints(&mut [r, g, b]);
+                self.custom_key = true;
+            }
+            "RECT" => {
+                let rect = &mut self.rect;
+                node.read_ints(&mut [
+                    &mut rect.left,
+                    &mut rect.top,
+                    &mut rect.right,
+                    &mut rect.bottom,
+                ]);
+            }
+            "ALPHA_COLOR" => {
+                let (r, g, b, _) = &mut self.tint;
+                node.read_ints(&mut [r, g, b]);
+            }
+            "ALPHA" => node.read_int(&mut self.tint.3),
+            _ => return false,
+        }
+        true
+    }
+
+    fn rect(&self) -> Option<Rect> {
+        (!self.rect.is_empty()).then_some(self.rect)
+    }
+
+    fn tint(&self) -> Rgba {
+        let (r, g, b, a) = self.tint;
+        Rgba::from_ints(r, g, b, a)
+    }
+
+    fn color_key(&self) -> Rgb {
+        let (r, g, b) = self.key;
+        Rgb::from_ints(r, g, b)
+    }
+}
+
 impl Frame {
+    /// `CBFrame::LoadBuffer`: the frame's keys, then its own sub-frame
+    /// built from them and put before the `SUBFRAME`s. A `SUBFRAME` block
+    /// that cannot be read is dropped and the frame goes on (the
+    /// original's error code is overwritten by the next statement).
     fn from_node(node: &Node) -> Result<Frame> {
         let mut frame = Frame::default();
         let mut own = SubFrame::default();
-        let mut extra = Vec::new();
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "DELAY" => frame.delay_ms = child.as_int().unwrap_or(0).max(0) as u32,
-                "KEYFRAME" => frame.keyframe = child.as_bool().unwrap_or(false),
-                "MOVE" => {
-                    let v = ints(child);
-                    frame.move_x = get(&v, 0, 0);
-                    frame.move_y = get(&v, 1, 0);
-                }
-                "SOUND" => frame.sound = child.as_str().map(str::to_string),
-                "KILL_SOUND" => frame.kill_sound = child.as_bool().unwrap_or(false),
-                "APPLY_EVENT" => frame
-                    .apply_events
-                    .extend(child.as_str().map(str::to_string)),
-                "SUBFRAME" => extra.push(SubFrame::from_node(child)),
-                _ => own.apply(child),
+        let mut image = ImageKeys::new();
+        let mut delay = 0;
+        for item in keys(node, FRAME_KEYS, "FRAME") {
+            let (key, child) = item?;
+            if image.read(key, child) {
+                continue;
+            }
+            match key {
+                "DELAY" => child.read_int(&mut delay),
+                "KEYFRAME" => child.read_bool(&mut frame.keyframe),
+                "MOVE" => child.read_ints(&mut [&mut frame.move_x, &mut frame.move_y]),
+                "SOUND" => frame.sound = Some(child.text()),
+                "KILL_SOUND" => child.read_bool(&mut frame.kill_sound),
+                "APPLY_EVENT" => frame.apply_events.push(child.text()),
+                "SUBFRAME" => frame.subframes.extend(SubFrame::from_node(child).ok()),
+                "HOTSPOT" => child.read_ints(&mut [&mut own.hotspot_x, &mut own.hotspot_y]),
+                "2D_ONLY" => child.read_bool(&mut own.only_2d),
+                "3D_ONLY" => child.read_bool(&mut own.only_3d),
+                "MIRROR_X" => child.read_bool(&mut own.mirror_x),
+                "MIRROR_Y" => child.read_bool(&mut own.mirror_y),
+                "DECORATION" => child.read_bool(&mut own.decoration),
+                _ => {}
             }
         }
-        frame.subframes.push(own);
-        frame.subframes.extend(extra);
+        frame.delay_ms = delay.max(0) as u32;
+        // The colour key and the tint of the frame only reach its own
+        // sub-frame when it has an image.
+        if image.image.is_some() {
+            own.tint = image.tint();
+            if image.custom_key {
+                own.color_key = image.color_key();
+                own.custom_color_key = true;
+            }
+        }
+        own.image = image.image.take();
+        own.rect = image.rect();
+        frame.subframes.insert(0, own);
         Ok(frame)
     }
 }
 
 impl SubFrame {
-    fn from_node(node: &Node) -> SubFrame {
+    /// `CBSubFrame::LoadBuffer`. A sub-frame without image is allowed.
+    fn from_node(node: &Node) -> Result<SubFrame> {
         let mut sub = SubFrame::default();
-        for child in node.nodes() {
-            sub.apply(child);
+        let mut image = ImageKeys::new();
+        for item in keys(node, SUBFRAME_KEYS, "SUBFRAME") {
+            let (key, child) = item?;
+            if image.read(key, child) {
+                continue;
+            }
+            match key {
+                "HOTSPOT" => child.read_ints(&mut [&mut sub.hotspot_x, &mut sub.hotspot_y]),
+                "2D_ONLY" => child.read_bool(&mut sub.only_2d),
+                "3D_ONLY" => child.read_bool(&mut sub.only_3d),
+                "MIRROR_X" => child.read_bool(&mut sub.mirror_x),
+                "MIRROR_Y" => child.read_bool(&mut sub.mirror_y),
+                "DECORATION" => child.read_bool(&mut sub.decoration),
+                _ => {}
+            }
         }
-        sub
-    }
-
-    /// Applies one sub-frame key; unknown keys are ignored like the engine
-    /// does.
-    fn apply(&mut self, node: &Node) {
-        match node.key.to_ascii_uppercase().as_str() {
-            "IMAGE" => self.image = node.as_str().map(str::to_string),
-            "TRANSPARENT" => {
-                let v = ints(node);
-                self.color_key = Rgb {
-                    r: channel(&v, 0, 255),
-                    g: channel(&v, 1, 255),
-                    b: channel(&v, 2, 255),
-                };
-                self.custom_color_key = true;
-            }
-            "RECT" => {
-                let v = ints(node);
-                let rect = Rect {
-                    left: get(&v, 0, 0),
-                    top: get(&v, 1, 0),
-                    right: get(&v, 2, 0),
-                    bottom: get(&v, 3, 0),
-                };
-                self.rect = (!rect.is_empty()).then_some(rect);
-            }
-            "HOTSPOT" => {
-                let v = ints(node);
-                self.hotspot_x = get(&v, 0, 0);
-                self.hotspot_y = get(&v, 1, 0);
-            }
-            "ALPHA" => self.tint.a = node.as_int().map_or(255, clamp_channel),
-            "ALPHA_COLOR" => {
-                let v = ints(node);
-                self.tint.r = channel(&v, 0, 255);
-                self.tint.g = channel(&v, 1, 255);
-                self.tint.b = channel(&v, 2, 255);
-            }
-            "MIRROR_X" => self.mirror_x = node.as_bool().unwrap_or(false),
-            "MIRROR_Y" => self.mirror_y = node.as_bool().unwrap_or(false),
-            "DECORATION" => self.decoration = node.as_bool().unwrap_or(false),
-            "2D_ONLY" => self.only_2d = node.as_bool().unwrap_or(false),
-            "3D_ONLY" => self.only_3d = node.as_bool().unwrap_or(false),
-            _ => {}
+        sub.tint = image.tint();
+        if image.custom_key {
+            sub.color_key = image.color_key();
+            sub.custom_color_key = true;
         }
+        sub.rect = image.rect();
+        sub.image = image.image;
+        Ok(sub)
     }
 }
-
-fn ints(node: &Node) -> Vec<i64> {
-    node.as_ints().unwrap_or_default()
-}
-
-fn get(values: &[i64], index: usize, default: i32) -> i32 {
-    values.get(index).map_or(default, |&v| {
-        v.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
-    })
-}
-
-fn channel(values: &[i64], index: usize, default: u8) -> u8 {
-    values.get(index).map_or(default, |&v| clamp_channel(v))
-}
-
-fn clamp_channel(v: i64) -> u8 {
-    v.clamp(0, 255) as u8
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,8 +623,55 @@ SPRITE {
     fn rejects_files_without_a_sprite_block() {
         let err = Sprite::parse(b"SCENE { }").unwrap_err();
         assert!(matches!(err, Error::Invalid { .. }), "{err}");
-        let err = Sprite::parse(b"SPRITE { FRAME {").unwrap_err();
+        // The root block must be the first statement.
+        let err = Sprite::parse(b"NAME=\"x\"\nSPRITE { }").unwrap_err();
+        assert!(matches!(err, Error::Invalid { .. }), "{err}");
+    }
+
+    /// `CBSprite::LoadBuffer`, `CBFrame::LoadBuffer`: a key that is not
+    /// in the loader's table is a syntax error that fails the sprite; a
+    /// `SUBFRAME` that cannot be read is dropped alone.
+    #[test]
+    fn an_unknown_key_fails_the_sprite_or_drops_the_subframe() {
+        let err = Sprite::parse(b"SPRITE { LOOPING=TRUE\n BOGUS=1 }").unwrap_err();
         assert!(matches!(err, Error::Syntax(_)), "{err}");
+        let err = Sprite::parse(b"SPRITE { FRAME { DELAY=1\n BOGUS=1 } }").unwrap_err();
+        assert!(matches!(err, Error::Syntax(_)), "{err}");
+        // The editor's keys are in the table.
+        let s = Sprite::parse(
+            b"SPRITE { EDITOR_MUTED=TRUE\n EDITOR_BG_ALPHA=3\n FRAME { EDITOR_EXPANDED=TRUE\n SUBFRAME { IMAGE=\"a.png\"\n MOVE {1,2} }\n SUBFRAME { IMAGE=\"b.png\" } } }",
+        )
+        .unwrap();
+        // `MOVE` is a frame key, not a sub-frame key: that sub-frame goes.
+        let images: Vec<_> = s.frames[0]
+            .subframes
+            .iter()
+            .map(|sub| sub.image.as_deref())
+            .collect();
+        assert_eq!(images, [None, Some("b.png")]);
+    }
+
+    /// Values read as the original's `ScanStr` and `DRGBA` do.
+    #[test]
+    fn frame_values_follow_the_original() {
+        let s = Sprite::parse(
+            b"SPRITE { LOOPING { TRUE }\n PRECISE=\"\"\n FRAME { IMAGE=\"a.png\"\n ALPHA { 300 }\n TRANSPARENT = 300,-1\n HOTSPOT=3,4\n MIRROR_X=T } }",
+        )
+        .unwrap();
+        assert!(s.looping, "a scalar in braces");
+        assert!(s.precise, "an empty value keeps the default");
+        let sub = &s.frames[0].subframes[0];
+        assert_eq!(sub.tint.a, 44, "300 cut to its low byte");
+        assert_eq!(
+            sub.color_key,
+            Rgb {
+                r: 44,
+                g: 255,
+                b: 255
+            }
+        );
+        assert_eq!((sub.hotspot_x, sub.hotspot_y), (3, 4));
+        assert!(sub.mirror_x, "a prefix of TRUE is true");
     }
 
     /// Parses every sprite of the local reference game and decodes every

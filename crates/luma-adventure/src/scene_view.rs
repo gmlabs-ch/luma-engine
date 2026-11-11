@@ -684,10 +684,15 @@ impl SceneView {
     /// [`SceneView::upload`].
     pub fn load(vfs: &Vfs, path: &str) -> Result<SceneView> {
         let bytes = vfs.read(path)?;
-        let scene = Scene::parse(&bytes).map_err(|source| Error::Format {
-            path: path.to_string(),
-            source,
-        })?;
+        // The `TEMPLATE` files of the scene and of its parts are read
+        // where the keys stand (`CAdScene::LoadBuffer`).
+        let mut read = |file: &str| vfs.read(file).ok();
+        let scene = Scene::parse_with(&bytes, &mut luma_formats::Files::new(&mut read)).map_err(
+            |source| Error::Format {
+                path: path.to_string(),
+                source,
+            },
+        )?;
         let mut view = SceneView {
             scene,
             path: path.to_string(),

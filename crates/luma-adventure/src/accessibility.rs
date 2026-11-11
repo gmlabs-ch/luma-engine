@@ -391,7 +391,7 @@ impl World {
         let ini = std::fs::read_to_string(path)
             .map(|text| Ini::parse(&text))
             .unwrap_or_default();
-        let allow_tab = self.game_file.allow_accessibility_tab;
+        let allow_tab = self.settings.allow_accessibility_tab;
         self.access.read_settings(&ini, allow_tab);
         if self.access.tts_enabled && self.access.speech.is_none() {
             self.access

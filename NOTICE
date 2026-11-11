@@ -31,6 +31,7 @@ no code copied):
   crates/luma-archive/src/vfs.rs
   docs/formats/definition-files.md
   crates/luma-formats/src/def.rs
+  crates/luma-formats/src/template.rs
   docs/formats/sprite.md
   crates/luma-formats/src/sprite.rs
   crates/luma-formats/src/image.rs

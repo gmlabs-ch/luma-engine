@@ -1371,11 +1371,12 @@ fn game() -> std::path::PathBuf {
     let mut pkg = PackageBuilder::new("data");
     pkg.add_file(
         "startup.settings",
-        b"SETTINGS { GAME=\"default.game\" RESOLUTION { 32,32 } }".to_vec(),
+        b"SETTINGS { GAME=\"default.game\" STRING_TABLE=\"string.tab\" RESOLUTION { 32,32 } }"
+            .to_vec(),
     );
     pkg.add_file(
         "default.game",
-        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" THUMBNAIL_WIDTH=8 THUMBNAIL_HEIGHT=4 } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" RESPONSE_BOX=\"responses.def\" }"
+        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" THUMBNAIL_WIDTH=8 THUMBNAIL_HEIGHT=4 } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" RESPONSE_BOX=\"responses.def\" }"
             .to_vec(),
     );
     pkg.add_file("art\\font.png", png(128, 128, [255, 255, 255, 255]));
@@ -5951,8 +5952,12 @@ fn button_templates_are_read_from_the_game() {
         dir.join("t.window"),
         b"WINDOW { NAME=\"tw\" WIDTH=20 HEIGHT=16
   BUTTON { TEMPLATE=\"t.button\" NAME=\"yes\" WIDTH=7 }
-  BUTTON { TEMPLATE=\"gone.button\" NAME=\"lost\" }
 }",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("lost.window"),
+        b"WINDOW { NAME=\"lw\" BUTTON { TEMPLATE=\"gone.button\" NAME=\"lost\" } }",
     )
     .unwrap();
     std::fs::write(
@@ -5980,20 +5985,126 @@ fn button_templates_are_read_from_the_game() {
     assert_eq!(c.height, 9);
     assert_eq!(c.font.as_deref(), Some("fonts\\test.font"));
     assert!(c.back.is_some());
-    let lost = runtime.world.widget(win, "lost").unwrap();
-    assert!(runtime.world.control(lost).unwrap().font.is_none());
-    let log = runtime.world.take_log();
-    assert_eq!(
-        log.iter()
-            .filter(|l| l.contains("Error opening template file 'gone.button'"))
-            .count(),
-        1,
-        "{log:?}"
-    );
+    assert!(runtime.world.take_log().is_empty());
+    // A template that cannot be loaded fails the button, and the button
+    // fails its window (`CUIButton::LoadBuffer`, `CUIWindow::LoadBuffer`).
+    let windows = runtime.world.window_ids().len();
     assert!(
-        !log.iter().any(|l| l.contains("template file 't.button'")),
+        runtime
+            .world
+            .load_window(&mut runtime.engine, "lost.window")
+            .is_none()
+    );
+    assert_eq!(runtime.world.window_ids().len(), windows);
+    let log = runtime.world.take_log();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Error parsing WINDOW file 'lost.window'")
+                && l.contains("gone.button")),
         "{log:?}"
     );
+}
+
+/// `CBGame::LoadSettings`: `SAVED_GAME_EXT` names the extension of the
+/// slot files, and `ALLOW_ACCESSIBILITY_TAB` is read from the settings.
+#[test]
+fn the_settings_name_the_saved_game_extension() {
+    let dir = game();
+    std::fs::write(
+        dir.join("startup.settings"),
+        b"SETTINGS { GAME=\"default.game\" RESOLUTION { 32,32 } SAVED_GAME_EXT=\"sav\" ALLOW_ACCESSIBILITY_TAB=FALSE }",
+    )
+    .unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    let path = runtime.world.save_slot_path(7);
+    assert_eq!(path.file_name().unwrap(), "save007.sav");
+    assert!(!runtime.world.settings().allow_accessibility_tab);
+}
+
+/// `TEMPLATE` keys are followed where they stand, through the game's
+/// files: in a scene and its entities, in a window, a tiled image and
+/// the items.
+#[test]
+fn templates_are_loaded_in_place_from_the_game() {
+    let dir = game();
+    let write = |name: &str, body: &str| {
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    };
+    write(
+        "tpl/base.scene",
+        "SCENE { NAME=\"base\" LAYER { NAME=\"main\" MAIN=TRUE WIDTH=32 HEIGHT=32 ENTITY { NAME=\"from_base\" } } }",
+    );
+    write(
+        "tpl/prop.entity",
+        "ENTITY { NAME=\"tpl\" X=3 Y=4 SPRITE=\"art\\red.png\" }",
+    );
+    write(
+        "tpl/room.scene",
+        "SCENE {\n TEMPLATE=\"tpl\\base.scene\"\n NAME=\"mine\"\n ENTITY { NAME=\"free\" TEMPLATE=\"tpl\\prop.entity\" Y=9 }\n}",
+    );
+    write(
+        "tpl/base.window",
+        "WINDOW { NAME=\"base\" WIDTH=20 HEIGHT=16 BUTTON { NAME=\"from_base\" WIDTH=4 HEIGHT=4 } }",
+    );
+    write(
+        "tpl/top.window",
+        "WINDOW {\n BUTTON { NAME=\"first\" WIDTH=4 HEIGHT=4 }\n TEMPLATE=\"tpl\\base.window\"\n NAME=\"top\"\n BUTTON { NAME=\"last\" WIDTH=4 HEIGHT=4 }\n}",
+    );
+    write(
+        "tpl/base.item",
+        "ITEM { NAME=\"base\" CAPTION=\"From the template\" SPRITE=\"art\\red.png\" }",
+    );
+    write(
+        "tpl/more.items",
+        "ITEM { TEMPLATE=\"tpl\\base.item\" NAME=\"templated\" }",
+    );
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+
+    runtime.change_scene("tpl\\room.scene").unwrap();
+    runtime.tick(16);
+    let view = runtime.world.scene().unwrap();
+    assert_eq!(view.scene.name, "mine");
+    assert_eq!(view.scene.layers.len(), 1);
+    assert_eq!(view.scene.layers[0].entities().count(), 1);
+    let free = &view.scene.free_entities[0];
+    assert_eq!(
+        free.name, "tpl",
+        "the template's name comes after the entity's"
+    );
+    assert_eq!((free.x, free.y), (3, 9));
+    assert_eq!(free.sprite.as_deref(), Some("art\\red.png"));
+    assert_eq!(free.filename.as_deref(), Some("tpl\\prop.entity"));
+
+    let win = runtime
+        .world
+        .load_window(&mut runtime.engine, "tpl\\top.window")
+        .expect("the window loads");
+    let names: Vec<String> = runtime
+        .world
+        .widgets_of(win)
+        .into_iter()
+        .map(|id| runtime.world.control(id).unwrap().name.clone())
+        .collect();
+    assert_eq!(names, ["first", "from_base", "last"]);
+    let window = runtime.world.control(win).unwrap();
+    assert_eq!(window.name, "top");
+    assert_eq!((window.width, window.height), (20, 16));
+
+    assert!(
+        runtime
+            .world
+            .load_items_from(&mut runtime.engine, "tpl\\more.items", true)
+    );
+    let item = runtime.world.item_by_name("templated").unwrap();
+    let def = &runtime.world.item(item).unwrap().def;
+    assert_eq!(def.caption, "From the template");
+    assert_eq!(def.sprite.as_deref(), Some("art\\red.png"));
 }
 
 /// The fixture game plus loose files: a font only some objects name, a

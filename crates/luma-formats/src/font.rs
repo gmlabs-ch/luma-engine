@@ -6,7 +6,7 @@
 //! `BFontBitmap.cpp`, `BFontTT.cpp`, Copyright (c) 2011 Jan Nedoma). See
 //! `NOTICE` at the root of the repository.
 
-use crate::def::{Document, Node, Nodes};
+use crate::def::{Document, Node, keys, scan_int_list, token};
 use crate::error::{Error, Result};
 use crate::image::{Image, Rgb, Rgba};
 
@@ -58,18 +58,66 @@ pub enum FontFile {
 }
 
 impl FontFile {
-    /// Parses a `.font` file.
+    /// Parses a `.font` file. The first statement decides the kind
+    /// (`CBFont::IsTrueType`): `TTFONT` is a TrueType font, anything else
+    /// must be `FONT`.
     pub fn parse(bytes: &[u8]) -> Result<FontFile> {
         let doc = Document::parse(bytes)?;
-        if let Some(root) = doc.get("TTFONT") {
-            return Ok(FontFile::TrueType(TrueTypeFontDef::from_node(root)));
+        let first = doc.nodes.first().map(|node| node.key.as_str());
+        let kind = first.and_then(|key| token(&["FONT", "TTFONT"], key));
+        if kind == Some("TTFONT") {
+            return Ok(FontFile::TrueType(TrueTypeFontDef::from_node(
+                &doc.nodes[0],
+            )?));
         }
-        let root = doc.get("FONT").ok_or_else(|| Error::Invalid {
+        let root = doc.root("FONT").ok_or_else(|| Error::Invalid {
             reason: "'FONT' keyword expected".into(),
         })?;
         Ok(FontFile::Bitmap(BitmapFontDef::from_node(root)?))
     }
 }
+
+/// The keys of `CBFontBitmap::LoadBuffer`. The original lists `WIDTHS`
+/// before `WIDTHS_FRAME`, so that `WIDTHS_FRAME` is read as `WIDTHS`
+/// followed by garbage and crashes the engine; here the longer key comes
+/// first and is read as it was meant to be.
+const BITMAP_FONT_KEYS: &[&str] = &[
+    "FONTEXT_FIX",
+    "FONT",
+    "IMAGE",
+    "TRANSPARENT",
+    "COLUMNS",
+    "TILE_WIDTH",
+    "TILE_HEIGHT",
+    "DEFAULT_WIDTH",
+    "WIDTHS_FRAME",
+    "WIDTHS",
+    "AUTO_WIDTH",
+    "SPACE_WIDTH",
+    "EXPAND_WIDTH",
+    "EDITOR_PROPERTY",
+    "SPRITE",
+    "PAINT_WHOLE_CELL",
+];
+
+/// The keys of `CBFontTT::LoadBuffer`, in the order of its table.
+const TRUETYPE_FONT_KEYS: &[&str] = &[
+    "TTFONT",
+    "SIZE",
+    "FACE",
+    "FILENAME",
+    "BOLD",
+    "ITALIC",
+    "UNDERLINE",
+    "STRIKE",
+    "CHARSET",
+    "COLOR",
+    "ALPHA",
+    "LAYER",
+];
+
+/// The keys of `CBFontTT::ParseLayer`, in the order of its table.
+const FONT_LAYER_KEYS: &[&str] = &["OFFSET_X", "OFFSET_Y", "COLOR", "ALPHA"];
 
 /// A bitmap font definition (`FONT`).
 #[derive(Debug, Clone, PartialEq)]
@@ -126,39 +174,42 @@ impl Default for BitmapFontDef {
 }
 
 impl BitmapFontDef {
+    /// `CBFontBitmap::LoadBuffer`: the keys of the `FONT` block. A key
+    /// that is not in the table is a syntax error that fails the font.
+    /// Whether the image or the sprite can be loaded is the caller's
+    /// part of the 'Incomplete font definition' test.
     fn from_node(root: &Node) -> Result<BitmapFontDef> {
         let mut def = BitmapFontDef::default();
-        for child in root.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "IMAGE" => def.image = child.as_str().map(str::to_string),
-                "SPRITE" => def.sprite = child.as_str().map(str::to_string),
+        let (mut r, mut g, mut b) = (255, 255, 255);
+        for item in keys(root, BITMAP_FONT_KEYS, "FONT") {
+            let (key, child) = item?;
+            match key {
+                "IMAGE" => def.image = Some(child.text()),
+                "SPRITE" => def.sprite = Some(child.text()),
                 "TRANSPARENT" => {
-                    let v = child.as_ints().unwrap_or_default();
-                    def.transparent = Some(Rgb {
-                        r: channel(&v, 0),
-                        g: channel(&v, 1),
-                        b: channel(&v, 2),
-                    });
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    def.transparent = Some(Rgb::from_ints(r, g, b));
                 }
                 "WIDTHS" => {
-                    let v = child.as_ints().unwrap_or_default();
-                    for w in v {
+                    // The original writes past its 256 widths when the
+                    // lists are longer; the extra ones are dropped here.
+                    for w in scan_int_list(child.as_str().unwrap_or_default()) {
                         if def.widths.len() >= 256 {
                             break;
                         }
-                        def.widths.push(w.clamp(0, 255) as u8);
+                        def.widths.push((w & 0xff) as u8);
                     }
                 }
-                "DEFAULT_WIDTH" => def.default_width = integer(child),
-                "WIDTHS_FRAME" => def.widths_frame = integer(child),
-                "COLUMNS" => def.columns = integer(child),
-                "TILE_WIDTH" => def.tile_width = integer(child),
-                "TILE_HEIGHT" => def.tile_height = integer(child),
-                "AUTO_WIDTH" => def.auto_width = boolean(child),
-                "FONTEXT_FIX" => def.fontext_fix = boolean(child),
-                "PAINT_WHOLE_CELL" => def.paint_whole_cell = boolean(child),
-                "SPACE_WIDTH" => def.space_width = integer(child),
-                "EXPAND_WIDTH" => def.expand_width = integer(child),
+                "DEFAULT_WIDTH" => child.read_int(&mut def.default_width),
+                "WIDTHS_FRAME" => child.read_int(&mut def.widths_frame),
+                "COLUMNS" => child.read_int(&mut def.columns),
+                "TILE_WIDTH" => child.read_int(&mut def.tile_width),
+                "TILE_HEIGHT" => child.read_int(&mut def.tile_height),
+                "AUTO_WIDTH" => child.read_bool(&mut def.auto_width),
+                "FONTEXT_FIX" => child.read_bool(&mut def.fontext_fix),
+                "PAINT_WHOLE_CELL" => child.read_bool(&mut def.paint_whole_cell),
+                "SPACE_WIDTH" => child.read_int(&mut def.space_width),
+                "EXPAND_WIDTH" => child.read_int(&mut def.expand_width),
                 _ => {}
             }
         }
@@ -185,14 +236,16 @@ impl BitmapFontDef {
                     *width = self.measure_tile(image, i as i32) as u8;
                 }
             }
+            // The original stores every width in a byte: a value over 255
+            // keeps its low byte.
             if self.expand_width != 0 {
                 for width in &mut widths {
-                    *width = (i32::from(*width) + self.expand_width).clamp(0, 255) as u8;
+                    *width = ((i32::from(*width) + self.expand_width).max(0) & 0xff) as u8;
                 }
             }
             let space = if self.fontext_fix { b' ' - 1 } else { b' ' } as usize;
             if self.space_width != 0 {
-                widths[space] = self.space_width.clamp(0, 255) as u8;
+                widths[space] = (self.space_width & 0xff) as u8;
             } else if i32::from(widths[space]) == self.expand_width || widths[space] == 0 {
                 widths[space] = ((u16::from(widths[usize::from(b'm')])
                     + u16::from(widths[usize::from(b'i')]))
@@ -202,7 +255,7 @@ impl BitmapFontDef {
             for (i, width) in widths.iter_mut().enumerate() {
                 *width = match self.widths.get(i) {
                     Some(w) => *w,
-                    None => self.default_width.clamp(0, 255) as u8,
+                    None => (self.default_width & 0xff) as u8,
                 };
             }
         }
@@ -426,74 +479,58 @@ pub struct TrueTypeFontDef {
     pub underline: bool,
     /// `STRIKE`.
     pub strike: bool,
+    /// `CHARSET`: the character set the text's bytes are read in when the
+    /// game is not UTF-8 (0 and 1: the system's, read as Windows-1252;
+    /// see `charset_code_page`).
+    pub charset: i32,
     /// The layers, in drawing order; at least one.
     pub layers: Vec<FontLayer>,
 }
 
 impl TrueTypeFontDef {
-    /// The pixel size of the font.
+    /// The pixel size of the font: the point size at 96 dots per inch,
+    /// rounded to a whole pixel (`MulDiv(size, 96, 72)`).
     pub fn pixel_size(&self) -> f32 {
-        self.size as f32 * 96.0 / 72.0
+        let scaled = i64::from(self.size) * 96;
+        let rounded = if scaled >= 0 {
+            (scaled + 36) / 72
+        } else {
+            (scaled - 36) / 72
+        };
+        rounded as f32
     }
 
-    fn from_node(root: &Node) -> TrueTypeFontDef {
+    /// `CBFontTT::LoadBuffer`: the keys of the `TTFONT` block. A key that
+    /// is not in the table is a syntax error that fails the font; a
+    /// `LAYER` that cannot be read is dropped alone (the original's error
+    /// code is overwritten by the next statement).
+    fn from_node(root: &Node) -> Result<TrueTypeFontDef> {
         let mut def = TrueTypeFontDef {
-            size: 0,
+            size: 12,
             face: "Arial".to_string(),
             filename: "arial.ttf".to_string(),
             bold: false,
             italic: false,
             underline: false,
             strike: false,
+            charset: 0,
             layers: Vec::new(),
         };
-        let mut base = Rgba {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: 0,
-        };
-        for child in root.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "SIZE" => def.size = integer(child),
-                "FACE" => {
-                    if let Some(name) = child.as_str() {
-                        def.face = name.to_string();
-                    }
-                }
-                "FILENAME" => {
-                    if let Some(name) = child.as_str() {
-                        def.filename = name.to_string();
-                    }
-                }
-                "BOLD" => def.bold = boolean(child),
-                "ITALIC" => def.italic = boolean(child),
-                "UNDERLINE" => def.underline = boolean(child),
-                "STRIKE" => def.strike = boolean(child),
+        let mut base = Rgba::from_ints(0, 0, 0, 0);
+        for item in keys(root, TRUETYPE_FONT_KEYS, "TTFONT") {
+            let (key, child) = item?;
+            match key {
+                "SIZE" => child.read_int(&mut def.size),
+                "FACE" => def.face = child.text(),
+                "FILENAME" => def.filename = child.text(),
+                "BOLD" => child.read_bool(&mut def.bold),
+                "ITALIC" => child.read_bool(&mut def.italic),
+                "UNDERLINE" => child.read_bool(&mut def.underline),
+                "STRIKE" => child.read_bool(&mut def.strike),
+                "CHARSET" => child.read_int(&mut def.charset),
                 "COLOR" => color_of(child, &mut base),
-                "ALPHA" => base.a = integer(child).clamp(0, 255) as u8,
-                "LAYER" => {
-                    let mut layer = FontLayer {
-                        offset_x: 0,
-                        offset_y: 0,
-                        color: Rgba {
-                            r: 0,
-                            g: 0,
-                            b: 0,
-                            a: 0,
-                        },
-                    };
-                    for key in child.nodes() {
-                        match key.key.to_ascii_uppercase().as_str() {
-                            "OFFSET_X" => layer.offset_x = integer(key),
-                            "OFFSET_Y" => layer.offset_y = integer(key),
-                            "COLOR" => color_of(key, &mut layer.color),
-                            "ALPHA" => layer.color.a = integer(key).clamp(0, 255) as u8,
-                            _ => {}
-                        }
-                    }
-                    def.layers.push(layer);
-                }
+                "ALPHA" => alpha_of(child, &mut base),
+                "LAYER" => def.layers.extend(FontLayer::from_node(child).ok()),
                 _ => {}
             }
         }
@@ -504,27 +541,45 @@ impl TrueTypeFontDef {
                 color: base,
             });
         }
-        def
+        Ok(def)
     }
 }
 
+impl FontLayer {
+    /// `CBFontTT::ParseLayer`: any key outside its table fails the layer.
+    fn from_node(node: &Node) -> Result<FontLayer> {
+        let mut layer = FontLayer {
+            offset_x: 0,
+            offset_y: 0,
+            color: Rgba::from_ints(0, 0, 0, 0),
+        };
+        for item in keys(node, FONT_LAYER_KEYS, "LAYER") {
+            let (key, child) = item?;
+            match key {
+                "OFFSET_X" => child.read_int(&mut layer.offset_x),
+                "OFFSET_Y" => child.read_int(&mut layer.offset_y),
+                "COLOR" => color_of(child, &mut layer.color),
+                "ALPHA" => alpha_of(child, &mut layer.color),
+                _ => {}
+            }
+        }
+        Ok(layer)
+    }
+}
+
+/// `COLOR { r, g, b }` over a colour, whose alpha stays. The original's
+/// three integers are uninitialised; a short list leaves the others at 0.
 fn color_of(node: &Node, color: &mut Rgba) {
-    let v = node.as_ints().unwrap_or_default();
-    color.r = channel(&v, 0);
-    color.g = channel(&v, 1);
-    color.b = channel(&v, 2);
+    let (mut r, mut g, mut b) = (0, 0, 0);
+    node.read_ints(&mut [&mut r, &mut g, &mut b]);
+    *color = Rgba::from_ints(r, g, b, i32::from(color.a));
 }
 
-fn channel(v: &[i64], i: usize) -> u8 {
-    v.get(i).copied().unwrap_or(0).clamp(0, 255) as u8
-}
-
-fn boolean(node: &Node) -> bool {
-    node.as_bool().unwrap_or(false)
-}
-
-fn integer(node: &Node) -> i32 {
-    node.as_int().unwrap_or(0) as i32
+/// `ALPHA = a` over a colour, whose red, green and blue stay.
+fn alpha_of(node: &Node, color: &mut Rgba) {
+    let mut a = 0;
+    node.read_int(&mut a);
+    color.a = (a & 0xff) as u8;
 }
 
 #[cfg(test)]
@@ -584,7 +639,7 @@ mod tests {
         assert_eq!(def.layers.len(), 2);
         assert_eq!((def.layers[0].offset_x, def.layers[0].offset_y), (1, -1));
         assert_eq!(def.layers[1].color.r, 255);
-        assert_eq!(def.pixel_size(), 20.0 * 96.0 / 72.0);
+        assert_eq!(def.pixel_size(), 27.0, "20 points at 96 dpi, rounded");
         let FontFile::TrueType(plain) =
             FontFile::parse(b"TTFONT { SIZE=12 COLOR { 9, 8, 7 } ALPHA=100 }").unwrap()
         else {

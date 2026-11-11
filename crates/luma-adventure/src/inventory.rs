@@ -207,12 +207,12 @@ impl World {
                 return false;
             }
         };
-        let defs = match ItemDef::parse_all(&bytes) {
-            Ok(defs) => defs,
-            Err(err) => {
-                self.log(format!("Error parsing ITEMS file '{path}': {err}"));
-                return false;
-            }
+        // `CAdGame::LoadItemsBuffer`: the items that load are added even
+        // when the file ends on a syntax error, which fails the load.
+        let (defs, error) = {
+            let vfs = &self.vfs;
+            let mut read = |file: &str| vfs.read(file).ok();
+            ItemDef::parse_all_with(&bytes, &mut luma_formats::Files::new(&mut read))
         };
         if !merge {
             let ids: Vec<NativeId> = self.inventory.items.iter().map(|(id, _)| *id).collect();
@@ -227,6 +227,10 @@ impl World {
                 }
             }
             self.add_item(engine, def);
+        }
+        if let Some(err) = error {
+            self.log(format!("Error parsing ITEMS file '{path}': {err}"));
+            return false;
         }
         true
     }
@@ -338,7 +342,8 @@ impl World {
             }
         };
         let vfs = &self.vfs;
-        let parsed = InventoryBoxDef::parse_with(&bytes, &mut |file| vfs.read(file).ok());
+        let mut read = |file: &str| vfs.read(file).ok();
+        let parsed = InventoryBoxDef::parse_with(&bytes, &mut luma_formats::Files::new(&mut read));
         let mut def = match parsed {
             Ok(def) => def,
             Err(err) => {
@@ -670,7 +675,7 @@ impl World {
                 continue;
             };
             let frame = item.anim.as_ref().map_or(0, |a| a.current_frame);
-            let tint = item.def.alpha_color.unwrap_or(Rgba::OPAQUE_WHITE);
+            let tint = item.def.alpha_color;
             self.draw_ui_image(list, path, frame, x, y, tint);
             if item.def.display_amount {
                 let width = self.sprite_size_loaded(path).map_or(0, |(w, _)| w);

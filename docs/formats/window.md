@@ -57,9 +57,17 @@ adds its own. Texts (`TEXT`, `TITLE`) go through the string table
 
 ## Keys common to every control
 
+Each kind of control has its own table of keys, and a key outside it is a
+syntax error that fails the control: `FOCUSABLE` is a button key,
+`VERTICAL_ALIGN` a static key, and an `ENTITY_CONTAINER` only knows
+`NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, `ENTITY` and
+`TEMPLATE`. The loaders of windows and controls stop at the first error:
+a control that fails makes its window fail, and `Game.LoadWindow` then
+returns null.
+
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `TEMPLATE` | string | | Another file of the same kind (`.button`, `.static`, `.edit`, `.window`), loaded in place where the key stands: the keys that follow override it, the keys before it are overridden. Templates chain, up to 8 deep and 32 files per control in Luma. A window's own template is loaded first and the window's controls are added to the template's. A template that cannot be read is logged and skipped. The controls of the window inside a `.def` response box or inventory box file take their templates the same way. |
+| `TEMPLATE` | string | | Another file of the same kind (`.button`, `.static`, `.edit`, `.window`), loaded in place where the key stands: the keys that follow override it, the keys before it are overridden. A window's template (a root window's or a nested one's) brings its controls where the key stands, after the controls declared before it. Templates chain, up to 8 deep and 1024 files per load in Luma. **A template that cannot be loaded fails the control, and a control that fails makes its window fail.** The controls of the window inside a `.def` response box or inventory box file take their templates the same way. |
 | `NAME` | string | `""` | Name used by scripts (`GetWidget`, `PARENT_NOTIFY`). |
 | `CAPTION` | string | `""` | Free caption. |
 | `X`, `Y` | int | `0` | Position, relative to the parent window. |
@@ -93,10 +101,10 @@ height. A `BACK` tiled image then rounds the size down to whole tiles.
 | `IN_GAME` | bool | `FALSE` | Drawn with the scene, under the sentences and the other windows. |
 | `CLIP_CONTENTS` | bool | `FALSE` | The controls are clipped to the window. |
 | `PAUSE_MUSIC` | bool | `TRUE` | `GoSystemExclusive` pauses the music too. |
-| `FADE_COLOR` | `r, g, b` | | The screen is tinted with this colour under the window. |
-| `FADE_ALPHA` | int | `255` | The tint's opacity. |
-| `ALPHA_COLOR` | `r, g, b` | | A colour multiplied with the window and its controls. |
-| `ALPHA` | int | `255` | Its opacity. |
+| `FADE_COLOR` | `r, g, b` | `0, 0, 0` | The screen is tinted with this colour under the window. Either `FADE_COLOR` or `FADE_ALPHA` turns the fade on. |
+| `FADE_ALPHA` | int | `0` | The tint's opacity: `FADE_COLOR` alone shows nothing, `FADE_ALPHA` alone darkens with black. |
+| `ALPHA_COLOR` | `r, g, b` | `0, 0, 0` | A colour multiplied with the window and its controls. |
+| `ALPHA` | int | `0` | Its opacity. `ALPHA` alone (or with a black colour) means white at that alpha, the way to make a window translucent; `ALPHA_COLOR` alone has alpha 0, which hides the window's images. With neither key there is no tint. |
 | `BUTTON`, `STATIC`, `EDIT`, `WINDOW` | block | | A control, in drawing order. |
 | `ENTITY_CONTAINER` | block | | A control showing an entity: `NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, and `ENTITY`, an `.entity` file (an `ENTITY` block as in a scene). The entity is drawn at the container's position with its own sprite and animation, takes the mouse through its sprite when it is active and registrable and the container is enabled, and its own scripts get the mouse events; `GetEntity` hands it to scripts, `SetEntity` loads another file. OpenQuest's verb bar is made of them. The entity's scripts do not pause when the game freezes unless a script sets the container's `Freezable` to `true`; `CreateEntityContainer(name)` on a window makes an empty one at runtime. |
 
@@ -184,7 +192,7 @@ that the image fills any size.
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `TEMPLATE` | string | Another `.tiled` file loaded first. |
+| `TEMPLATE` | string | Another `.tiled` file, loaded where the key stands: it overrides the keys before it. One that cannot be loaded is skipped. |
 | `IMAGE` | string | The image. |
 | `UP_LEFT`, `UP_MIDDLE`, `UP_RIGHT`, `MIDDLE_LEFT`, `MIDDLE_MIDDLE`, `MIDDLE_RIGHT`, `DOWN_LEFT`, `DOWN_MIDDLE`, `DOWN_RIGHT` | `left, top, right, bottom` | The tiles in the image. |
 | `HORIZONTAL_TILES` | `w1, w2, w3` | With `VERTICAL_TILES`, the widths of the three columns, from which the nine tiles follow. |
@@ -279,7 +287,7 @@ INVENTORY_BOX
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `TEMPLATE` | string | | Another `.def` file loaded first. |
+| `TEMPLATE` | string | | Another `.def` file, loaded where the key stands. One that cannot be loaded fails the box. `EXCLUSIVE` starts again at `FALSE` in every file read, and `ALWAYS_VISIBLE` is that of the outer file alone. |
 | `WINDOW` | block | | The box's window, drawn under the items; its `prev` and `next` buttons scroll, its `close` button hides the box. |
 | `AREA` | `left, top, right, bottom` | empty | Where the items are laid out, relative to the window. |
 | `ITEM_WIDTH`, `ITEM_HEIGHT` | int | `50` | The cell of one item. |
@@ -295,7 +303,10 @@ columns by the same count of rows of the area, from the scroll offset;
 remain after the page. Each item is drawn at its cell's top-left corner
 (its sprite's hotspot there) and is an active object through its sprite.
 
-The items file is a list of `ITEM` blocks:
+The items file is a list of `ITEM` blocks. An item that cannot be read (a
+key outside the table, a template that does not load) is left out and the
+file goes on; a top-level statement that is not an `ITEM` ends the file
+with an error, after the items before it were added:
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
@@ -311,7 +322,8 @@ The items file is a list of `ITEM` blocks:
 | `TALK`, `TALK_SPECIAL` | string | | Talk sprites, as for entities. |
 | `SCRIPT` | string | | A script attached to the item; repeatable. |
 | `PROPERTY` | block | | A script property. |
-| `ALPHA_COLOR`, `ALPHA` | | | Tint and opacity. |
+| `ALPHA_COLOR`, `ALPHA` | | `0, 0, 0` and `255` | Tint and opacity. A black colour with an alpha means white: `ALPHA` alone makes the item translucent, and `ALPHA_COLOR { 0,0,0 }` is no tint. |
+| `TEMPLATE` | string | | An item file (an `ITEM` root block), loaded where the key stands. One that cannot be loaded fails the item. |
 
 `Game.TakeItem(name, after)` puts the item in the inventory (again, if
 it was there, after the named item or at the end); `DropItem` takes it

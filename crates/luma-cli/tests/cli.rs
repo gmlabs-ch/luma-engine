@@ -319,7 +319,7 @@ fn dump_prints_canonical_form_from_disk_and_from_packages() {
         "SPRITE {\n  LOOPING = TRUE\n  FRAME {\n    HOTSPOT { 1, 2 }\n  }\n}\n"
     );
 
-    fs::write(&file, "SPRITE {\n  BROKEN = \"\n").unwrap();
+    fs::write(&file, "SPRITE {\n  = \"broken\"\n}").unwrap();
     let out = luma(&["dump", file.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("line 2"));

@@ -138,7 +138,9 @@ with an error in the log and leaves the game as it was.
 ## Slots and the save directory
 
 Slots are files `save000.dsv` to `save999.dsv` (`Game.SaveGame` takes
-any integer, formatted on three digits as `GetSaveSlotFilename` does)
+any integer, formatted on three digits as `GetSaveSlotFilename` does;
+`SAVED_GAME_EXT` in `startup.settings` names another extension than
+`dsv`)
 in the **save directory**, which `Game.SaveDirectory` reads:
 
 - the game's own, `LOCAL_SAVE_DIR` of `default.game` under the game's

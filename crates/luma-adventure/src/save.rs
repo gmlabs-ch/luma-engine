@@ -444,8 +444,10 @@ impl World {
 
     /// The file of a slot (`GetSaveSlotFilename`).
     pub fn save_slot_path(&mut self, slot: i32) -> PathBuf {
+        // `SAVED_GAME_EXT` of the settings, `dsv` by default.
+        let extension = self.settings.save_extension().to_string();
         self.checked_save_directory()
-            .join(format!("save{slot:03}.{SAVE_EXTENSION}"))
+            .join(format!("save{slot:03}.{extension}"))
     }
 
     /// Whether a slot holds a saved game (`IsSaveSlotUsed`).

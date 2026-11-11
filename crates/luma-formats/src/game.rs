@@ -1,12 +1,16 @@
 //! The game definition (`default.game`): the game's name, its scripts,
 //! fonts, cursors and interface files.
 //!
-//! Written with reference to `BGame.cpp` and `AdGame.cpp` of WME Lite
-//! (MIT License, Copyright (c) 2011 Jan Nedoma); see `NOTICE`.
+//! Written with reference to `BGame.cpp` and `AdGame.cpp` of the
+//! Wintermute Engine (MIT License, Copyright (c) 2011 Jan Nedoma); see
+//! `NOTICE`.
 
-use crate::def::{Document, Node, Nodes};
-use crate::error::{Error, Result};
+use crate::def::{Document, Node, document_keys, keys};
+use crate::error::Result;
+use crate::image::Rgba;
 use crate::scene::Property;
+use crate::sprite::Rect;
+use crate::template::Files;
 
 /// The `GAME` and `AD_GAME` blocks of `default.game`.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,8 +21,9 @@ pub struct GameFile {
     pub caption: String,
     /// `SCRIPT`: scripts attached to the game object, in order.
     pub scripts: Vec<String>,
-    /// `STRING_TABLE`: a string table loaded at startup.
-    pub string_table: Option<String>,
+    /// The last `TEMPLATE` file named; it was applied where the key
+    /// stands.
+    pub template: Option<String>,
     /// `SYSTEM_FONT`: the font of system messages.
     pub system_font: Option<String>,
     /// `VIDEO_FONT`: the font of video subtitles.
@@ -37,10 +42,6 @@ pub struct GameFile {
     pub video_subtitles: bool,
     /// `PERSONAL_SAVEGAMES`: saved games per user profile.
     pub personal_savegames: bool,
-    /// `ALLOW_ACCESSIBILITY_TAB`: whether the player may turn the
-    /// accessibility features on (text-to-speech, keyboard play); true
-    /// by default.
-    pub allow_accessibility_tab: bool,
     /// `LOCAL_SAVE_DIR`: where saved games go.
     pub local_save_dir: Option<String>,
     /// `THUMBNAIL_WIDTH`: width of the thumbnail stored in saved games;
@@ -68,16 +69,44 @@ pub struct GameFile {
     pub inventory_box: Option<String>,
     /// `AD_GAME`'s `ITEMS`: the inventory items definition.
     pub items: Option<String>,
-    /// `AD_GAME`'s `SCENE_VIEWPORT { x, y, width, height }`: the part of
-    /// the screen the scene is shown in; the whole screen when absent.
-    pub scene_viewport: Option<[i32; 4]>,
-    /// `AD_GAME`'s `TALK_SKIP_BUTTON`: `left`, `right`, `both` or `none`.
+    /// `AD_GAME`'s `SCENE_VIEWPORT { left, top, right, bottom }`: the
+    /// part of the screen the scene is shown in, as written (the engine
+    /// then keeps it inside the screen); the whole screen when absent.
+    pub scene_viewport: Option<Rect>,
+    /// `AD_GAME`'s `TALK_SKIP_BUTTON`: `right`, `both`, anything else is
+    /// the left button.
     pub talk_skip_button: Option<String>,
-    /// `AD_GAME`'s `VIDEO_SKIP_BUTTON`: `left`, `right` or `both`.
+    /// `AD_GAME`'s `VIDEO_SKIP_BUTTON`: `right`, `both`, anything else is
+    /// the left button.
     pub video_skip_button: Option<String>,
-    /// `AD_GAME`'s `STARTUP_SCENE`: the first scene, when the script does
-    /// not pick one.
+    /// `AD_GAME`'s `STARTUP_SCENE`: a scene name for the game's scripts
+    /// (`Game.StartupScene`); the engine itself never loads it.
     pub startup_scene: Option<String>,
+    /// `AD_GAME`'s `DEBUG_STARTUP_SCENE`: in debug mode, the scene the
+    /// first `ChangeScene` loads instead of the one asked for.
+    pub debug_startup_scene: Option<String>,
+    /// `SHADOW_IMAGE`: the image of the 3D actors' simple shadows; the
+    /// built-in `shadow.png` when absent.
+    pub shadow_image: Option<String>,
+    /// `INDICATOR_X`: left edge of the save and load progress bar; `-1`
+    /// (the default) for the left edge of the screen.
+    pub indicator_x: i32,
+    /// `INDICATOR_Y`: top of the progress bar; `-1` (the default) for the
+    /// bottom of the screen.
+    pub indicator_y: i32,
+    /// `INDICATOR_WIDTH`: full width of the progress bar; `-1` (the
+    /// default) for the width of the screen.
+    pub indicator_width: i32,
+    /// `INDICATOR_HEIGHT`: height of the progress bar, 8 by default; 0 or
+    /// less hides it.
+    pub indicator_height: i32,
+    /// `INDICATOR_COLOR { r, g, b, a }`: colour of the progress bar,
+    /// translucent red by default.
+    pub indicator_color: Rgba,
+    /// `COMPAT_KILL_METHOD_THREADS`: scripts waiting for an object are
+    /// not reset when the object's scripts are finished (the behaviour
+    /// before version 1.9).
+    pub compat_kill_method_threads: bool,
 }
 
 impl Default for GameFile {
@@ -86,7 +115,7 @@ impl Default for GameFile {
             name: String::new(),
             caption: String::new(),
             scripts: Vec::new(),
-            string_table: None,
+            template: None,
             system_font: None,
             video_font: None,
             cursor: None,
@@ -94,9 +123,8 @@ impl Default for GameFile {
             noninteractive_cursor: None,
             subtitles: true,
             subtitles_speed: 70,
-            video_subtitles: false,
+            video_subtitles: true,
             personal_savegames: false,
-            allow_accessibility_tab: true,
             local_save_dir: None,
             thumbnail_width: 0,
             thumbnail_height: 0,
@@ -114,85 +142,200 @@ impl Default for GameFile {
             talk_skip_button: None,
             video_skip_button: None,
             startup_scene: None,
+            debug_startup_scene: None,
+            shadow_image: None,
+            indicator_x: -1,
+            indicator_y: -1,
+            indicator_width: -1,
+            indicator_height: 8,
+            indicator_color: Rgba {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 128,
+            },
+            compat_kill_method_threads: false,
         }
     }
 }
 
-fn text(node: &Node) -> Option<String> {
-    node.as_str().map(str::to_string)
-}
+/// The keys of `CBGame::LoadBuffer`, in the order of its table.
+const GAME_KEYS: &[&str] = &[
+    "GAME",
+    "TEMPLATE",
+    "NAME",
+    "SYSTEM_FONT",
+    "VIDEO_FONT",
+    "EVENTS",
+    "CURSOR",
+    "ACTIVE_CURSOR",
+    "NONINTERACTIVE_CURSOR",
+    "PERSONAL_SAVEGAMES",
+    "SCRIPT",
+    "CAPTION",
+    "PROPERTY",
+    "SUBTITLES_SPEED",
+    "SUBTITLES",
+    "VIDEO_SUBTITLES",
+    "EDITOR_PROPERTY",
+    "THUMBNAIL_WIDTH",
+    "THUMBNAIL_HEIGHT",
+    "INDICATOR_X",
+    "INDICATOR_Y",
+    "INDICATOR_WIDTH",
+    "INDICATOR_HEIGHT",
+    "INDICATOR_COLOR",
+    "SAVE_IMAGE_X",
+    "SAVE_IMAGE_Y",
+    "SAVE_IMAGE",
+    "LOAD_IMAGE_X",
+    "LOAD_IMAGE_Y",
+    "LOAD_IMAGE",
+    "SHADOW_IMAGE",
+    "LOCAL_SAVE_DIR",
+    "COMPAT_KILL_METHOD_THREADS",
+];
+
+/// The keys of `CAdGame::LoadBuffer`, in the order of its table: the top
+/// level of the file and the `AD_GAME` block are read with the same one.
+const AD_GAME_KEYS: &[&str] = &[
+    "GAME",
+    "AD_GAME",
+    "RESPONSE_BOX",
+    "INVENTORY_BOX",
+    "ITEMS",
+    "TALK_SKIP_BUTTON",
+    "VIDEO_SKIP_BUTTON",
+    "SCENE_VIEWPORT",
+    "EDITOR_PROPERTY",
+    "STARTUP_SCENE",
+    "DEBUG_STARTUP_SCENE",
+];
 
 impl GameFile {
-    /// Parses a `default.game` file.
+    /// Parses a `default.game` file. No other file is read: a `TEMPLATE`
+    /// key fails to load, which the original ignores.
     pub fn parse(bytes: &[u8]) -> Result<GameFile> {
-        GameFile::from_document(&Document::parse(bytes)?)
+        GameFile::parse_with(bytes, &mut Files::none())
     }
 
-    /// Builds the definition from a parsed document with a `GAME` block.
+    /// Parses a `default.game` file, reading the `TEMPLATE` files it
+    /// names through `files`.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<GameFile> {
+        GameFile::from_document_with(&Document::parse(bytes)?, files)
+    }
+
+    /// Builds the definition from a parsed document.
     pub fn from_document(doc: &Document) -> Result<GameFile> {
-        let root = doc.get("GAME").ok_or_else(|| Error::Invalid {
-            reason: "'GAME' keyword expected".into(),
-        })?;
+        GameFile::from_document_with(doc, &mut Files::none())
+    }
+
+    /// Builds the definition from a parsed document, reading the
+    /// `TEMPLATE` files it names through `files`.
+    pub fn from_document_with(doc: &Document, files: &mut Files<'_>) -> Result<GameFile> {
         let mut game = GameFile::default();
-        for node in root.nodes() {
-            match node.key.to_ascii_uppercase().as_str() {
-                "NAME" => game.name = text(node).unwrap_or_default(),
-                "CAPTION" => game.caption = text(node).unwrap_or_default(),
-                "SCRIPT" => game.scripts.extend(text(node)),
-                "STRING_TABLE" => game.string_table = text(node),
-                "SYSTEM_FONT" => game.system_font = text(node),
-                "VIDEO_FONT" => game.video_font = text(node),
-                "CURSOR" => game.cursor = text(node),
-                "ACTIVE_CURSOR" => game.active_cursor = text(node),
-                "NONINTERACTIVE_CURSOR" => game.noninteractive_cursor = text(node),
-                "SUBTITLES" => game.subtitles = node.as_bool().unwrap_or(true),
-                "SUBTITLES_SPEED" => {
-                    game.subtitles_speed = node.as_int().unwrap_or(70) as i32;
+        game.load(doc, files)?;
+        Ok(game)
+    }
+
+    /// `CAdGame::LoadBuffer`: every top-level statement in order. `GAME`
+    /// blocks are read by `CBGame::LoadBuffer`, `AD_GAME` blocks here; any
+    /// other key of the table is accepted and ignored, and a key outside
+    /// the table is a syntax error that fails the load, at the top level
+    /// and in the blocks.
+    fn load(&mut self, doc: &Document, files: &mut Files<'_>) -> Result<()> {
+        for item in document_keys(doc, AD_GAME_KEYS, "GAME") {
+            let (key, node) = item?;
+            match key {
+                "GAME" => self.load_game(node, files)?,
+                "AD_GAME" => {
+                    for item in keys(node, AD_GAME_KEYS, "GAME") {
+                        let (key, child) = item?;
+                        match key {
+                            "RESPONSE_BOX" => self.response_box = Some(child.text()),
+                            "INVENTORY_BOX" => self.inventory_box = Some(child.text()),
+                            "ITEMS" => self.items = Some(child.text()),
+                            "SCENE_VIEWPORT" => {
+                                let mut rect = self.scene_viewport.unwrap_or_default();
+                                child.read_ints(&mut [
+                                    &mut rect.left,
+                                    &mut rect.top,
+                                    &mut rect.right,
+                                    &mut rect.bottom,
+                                ]);
+                                self.scene_viewport = Some(rect);
+                            }
+                            "TALK_SKIP_BUTTON" => self.talk_skip_button = Some(child.text()),
+                            "VIDEO_SKIP_BUTTON" => self.video_skip_button = Some(child.text()),
+                            "STARTUP_SCENE" => self.startup_scene = Some(child.text()),
+                            "DEBUG_STARTUP_SCENE" => {
+                                self.debug_startup_scene = Some(child.text());
+                            }
+                            _ => {}
+                        }
+                    }
                 }
-                "VIDEO_SUBTITLES" => game.video_subtitles = node.as_bool().unwrap_or(false),
-                "PERSONAL_SAVEGAMES" => {
-                    game.personal_savegames = node.as_bool().unwrap_or(false);
-                }
-                "ALLOW_ACCESSIBILITY_TAB" => {
-                    game.allow_accessibility_tab = node.as_bool().unwrap_or(true);
-                }
-                "LOCAL_SAVE_DIR" => game.local_save_dir = text(node),
-                "THUMBNAIL_WIDTH" => {
-                    game.thumbnail_width = node.as_int().unwrap_or(0) as i32;
-                }
-                "THUMBNAIL_HEIGHT" => {
-                    game.thumbnail_height = node.as_int().unwrap_or(0) as i32;
-                }
-                "SAVE_IMAGE" => game.save_image = text(node),
-                "SAVE_IMAGE_X" => game.save_image_x = node.as_int().unwrap_or(0) as i32,
-                "SAVE_IMAGE_Y" => game.save_image_y = node.as_int().unwrap_or(0) as i32,
-                "LOAD_IMAGE" => game.load_image = text(node),
-                "LOAD_IMAGE_X" => game.load_image_x = node.as_int().unwrap_or(0) as i32,
-                "LOAD_IMAGE_Y" => game.load_image_y = node.as_int().unwrap_or(0) as i32,
-                "PROPERTY" => game.properties.extend(Property::from_node(node)?),
                 _ => {}
             }
         }
-        if let Some(ad) = doc.get("AD_GAME") {
-            for node in ad.nodes() {
-                match node.key.to_ascii_uppercase().as_str() {
-                    "RESPONSE_BOX" => game.response_box = text(node),
-                    "INVENTORY_BOX" => game.inventory_box = text(node),
-                    "ITEMS" => game.items = text(node),
-                    "SCENE_VIEWPORT" => {
-                        game.scene_viewport = node.as_ints().and_then(|v| match v[..] {
-                            [x, y, w, h, ..] => Some([x as i32, y as i32, w as i32, h as i32]),
-                            _ => None,
-                        })
-                    }
-                    "TALK_SKIP_BUTTON" => game.talk_skip_button = text(node),
-                    "VIDEO_SKIP_BUTTON" => game.video_skip_button = text(node),
-                    "STARTUP_SCENE" => game.startup_scene = text(node),
-                    _ => {}
+        Ok(())
+    }
+
+    /// `CBGame::LoadBuffer`: the keys of a `GAME` block in order.
+    fn load_game(&mut self, root: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(root, GAME_KEYS, "GAME") {
+            let (key, node) = item?;
+            match key {
+                "TEMPLATE" => {
+                    // `LoadFile` on the game itself: the whole file named
+                    // is read here, `AD_GAME` blocks included. A template
+                    // that cannot be loaded is skipped (the original's
+                    // error code is overwritten by the next statement).
+                    let name = node.text();
+                    let _ = files.template(&name, |doc, files| self.load(doc, files));
+                    self.template = Some(name);
                 }
+                "NAME" => self.name = node.text(),
+                "CAPTION" => self.caption = node.text(),
+                "SCRIPT" => self.scripts.push(node.text()),
+                "SYSTEM_FONT" => self.system_font = Some(node.text()),
+                "VIDEO_FONT" => self.video_font = Some(node.text()),
+                "SHADOW_IMAGE" => self.shadow_image = Some(node.text()),
+                "CURSOR" => self.cursor = Some(node.text()),
+                "ACTIVE_CURSOR" => self.active_cursor = Some(node.text()),
+                "NONINTERACTIVE_CURSOR" => self.noninteractive_cursor = Some(node.text()),
+                "SUBTITLES" => node.read_bool(&mut self.subtitles),
+                "SUBTITLES_SPEED" => node.read_int(&mut self.subtitles_speed),
+                "VIDEO_SUBTITLES" => node.read_bool(&mut self.video_subtitles),
+                "PERSONAL_SAVEGAMES" => node.read_bool(&mut self.personal_savegames),
+                "LOCAL_SAVE_DIR" => self.local_save_dir = Some(node.text()),
+                "THUMBNAIL_WIDTH" => node.read_int(&mut self.thumbnail_width),
+                "THUMBNAIL_HEIGHT" => node.read_int(&mut self.thumbnail_height),
+                "INDICATOR_X" => node.read_int(&mut self.indicator_x),
+                "INDICATOR_Y" => node.read_int(&mut self.indicator_y),
+                "INDICATOR_WIDTH" => node.read_int(&mut self.indicator_width),
+                "INDICATOR_HEIGHT" => node.read_int(&mut self.indicator_height),
+                "INDICATOR_COLOR" => {
+                    // The original's four integers are uninitialised; a
+                    // short list leaves the others at 0 here.
+                    let (mut r, mut g, mut b, mut a) = (0, 0, 0, 0);
+                    node.read_ints(&mut [&mut r, &mut g, &mut b, &mut a]);
+                    self.indicator_color = Rgba::from_ints(r, g, b, a);
+                }
+                "SAVE_IMAGE" => self.save_image = Some(node.text()),
+                "SAVE_IMAGE_X" => node.read_int(&mut self.save_image_x),
+                "SAVE_IMAGE_Y" => node.read_int(&mut self.save_image_y),
+                "LOAD_IMAGE" => self.load_image = Some(node.text()),
+                "LOAD_IMAGE_X" => node.read_int(&mut self.load_image_x),
+                "LOAD_IMAGE_Y" => node.read_int(&mut self.load_image_y),
+                "PROPERTY" => self.properties.extend(Property::from_node(node)),
+                "COMPAT_KILL_METHOD_THREADS" => {
+                    node.read_bool(&mut self.compat_kill_method_threads);
+                }
+                _ => {}
             }
         }
-        Ok(game)
+        Ok(())
     }
 }
 
@@ -217,7 +360,6 @@ GAME {
   SUBTITLES=TRUE
   VIDEO_SUBTITLES=TRUE
   SUBTITLES_SPEED=100
-  STRING_TABLE="string.tab"
   THUMBNAIL_WIDTH=200
   THUMBNAIL_HEIGHT=150
   SAVE_IMAGE="interface\saving.png"
@@ -243,7 +385,6 @@ AD_GAME {
             game.scripts,
             ["scripts\\game.script", "scripts\\extra.script"]
         );
-        assert_eq!(game.string_table.as_deref(), Some("string.tab"));
         assert_eq!(
             game.system_font.as_deref(),
             Some("fonts\\outline_green.font")
@@ -267,7 +408,15 @@ AD_GAME {
             Some("interface\\responses.def")
         );
         assert_eq!(game.items.as_deref(), Some("items\\items.items"));
-        assert_eq!(game.scene_viewport, Some([0, 0, 320, 189]));
+        assert_eq!(
+            game.scene_viewport,
+            Some(Rect {
+                left: 0,
+                top: 0,
+                right: 320,
+                bottom: 189
+            })
+        );
         assert_eq!(game.talk_skip_button.as_deref(), Some("left"));
         assert_eq!(
             game.startup_scene.as_deref(),
@@ -281,6 +430,97 @@ AD_GAME {
         assert_eq!(game, GameFile::default());
         assert!(game.subtitles);
         assert_eq!(game.subtitles_speed, 70);
+        assert!(game.video_subtitles, "the original's default is true");
         assert!(GameFile::parse(b"SCENE { }").is_err());
+    }
+
+    /// `CBGame::LoadBuffer`, `CAdGame::LoadBuffer`: a key outside the
+    /// table is a syntax error, at the top level and in both blocks.
+    #[test]
+    fn an_unknown_key_fails_the_game_file() {
+        // `STRING_TABLE` belongs to `startup.settings`, not to `GAME`.
+        assert!(GameFile::parse(b"GAME { STRING_TABLE=\"string.tab\" }").is_err());
+        assert!(GameFile::parse(b"GAME { }\nAD_GAME { BOGUS=1 }").is_err());
+        assert!(GameFile::parse(b"GAME { }\nBOGUS { }").is_err());
+        // The table's other keys are accepted anywhere and ignored.
+        let game = GameFile::parse(
+            b"STARTUP_SCENE=\"ignored\"\nGAME { EVENTS=\"x\" }\nAD_GAME { GAME=\"x\" }",
+        )
+        .unwrap();
+        assert_eq!(game.startup_scene, None);
+    }
+
+    /// Every `GAME` and `AD_GAME` block is read, in order; a `TEMPLATE`
+    /// loads a whole game file where it stands.
+    #[test]
+    fn blocks_and_templates_apply_in_order() {
+        let mut read = |name: &str| {
+            (name == "base.game").then(|| {
+                b"GAME { NAME=\"base\"\n CAPTION=\"Base\"\n SUBTITLES=FALSE }\nAD_GAME { ITEMS=\"base.items\"\n STARTUP_SCENE=\"a.scene\" }"
+                    .to_vec()
+            })
+        };
+        let game = GameFile::parse_with(
+            b"GAME { CAPTION=\"Before\"\n SUBTITLES_SPEED=5\n TEMPLATE=\"base.game\"\n NAME=\"mine\" }\nAD_GAME { ITEMS=\"my.items\" }\nGAME { VIDEO_SUBTITLES=FALSE }\nAD_GAME { DEBUG_STARTUP_SCENE=\"d.scene\" }",
+            &mut Files::new(&mut read),
+        )
+        .unwrap();
+        assert_eq!(
+            game.caption, "Base",
+            "the template overrides what was before"
+        );
+        assert_eq!(game.name, "mine", "what follows overrides the template");
+        assert_eq!(game.subtitles_speed, 5);
+        assert!(!game.subtitles && !game.video_subtitles);
+        assert_eq!(game.items.as_deref(), Some("my.items"));
+        assert_eq!(game.startup_scene.as_deref(), Some("a.scene"));
+        assert_eq!(game.debug_startup_scene.as_deref(), Some("d.scene"));
+
+        // A template that cannot be read is skipped.
+        let game = GameFile::parse(b"GAME { TEMPLATE=\"none.game\"\n NAME=\"n\" }").unwrap();
+        assert_eq!(game.name, "n");
+    }
+
+    #[test]
+    fn reads_the_remaining_game_keys() {
+        let game = GameFile::parse(
+            b"GAME {\n SHADOW_IMAGE=\"s.png\"\n INDICATOR_X=1\n INDICATOR_Y=2\n INDICATOR_WIDTH=300\n INDICATOR_HEIGHT=4\n INDICATOR_COLOR { 1,2,3,4 }\n COMPAT_KILL_METHOD_THREADS=TRUE\n}\nAD_GAME { SCENE_VIEWPORT { 10, 20, 310, 180 } }",
+        )
+        .unwrap();
+        assert_eq!(game.shadow_image.as_deref(), Some("s.png"));
+        assert_eq!(
+            (
+                game.indicator_x,
+                game.indicator_y,
+                game.indicator_width,
+                game.indicator_height
+            ),
+            (1, 2, 300, 4)
+        );
+        assert_eq!(
+            game.indicator_color,
+            Rgba {
+                r: 1,
+                g: 2,
+                b: 3,
+                a: 4
+            }
+        );
+        assert!(game.compat_kill_method_threads);
+        let rect = game.scene_viewport.unwrap();
+        assert_eq!(
+            (rect.left, rect.top, rect.right, rect.bottom),
+            (10, 20, 310, 180)
+        );
+        let defaults = GameFile::default();
+        assert_eq!(
+            (
+                defaults.indicator_x,
+                defaults.indicator_y,
+                defaults.indicator_width,
+                defaults.indicator_height
+            ),
+            (-1, -1, -1, 8)
+        );
     }
 }

@@ -45,8 +45,14 @@ FONT
 | `EXPAND_WIDTH` | int | `0` | With `AUTO_WIDTH`, added to every measured width. |
 | `FONTEXT_FIX` | bool | `FALSE` | The tiles are shifted by one: character `c` is in tile `c - 1`. |
 | `PAINT_WHOLE_CELL` | bool | `FALSE` | Draw the full tile instead of the measured width. |
-| `WIDTHS_FRAME` | int | `0` | With `SPRITE`, the frame measured by `AUTO_WIDTH`. |
+| `WIDTHS_FRAME` | int | `0` | With `SPRITE`, the frame measured by `AUTO_WIDTH`. The original lists `WIDTHS` before `WIDTHS_FRAME` in its table, so that it reads this key as `WIDTHS` followed by garbage and crashes; Luma reads it as it was meant. |
 | `EDITOR_PROPERTY` | block | | Editor state, ignored. |
+
+A key outside these tables is a syntax error that fails the font; so is
+one in a `TTFONT` block, while a `LAYER` with a key of its own that is
+not `OFFSET_X`, `OFFSET_Y`, `COLOR` or `ALPHA` is left out alone. The
+first statement of the file decides the kind: `TTFONT`, else `FONT`.
+Widths are bytes: a value over 255 keeps its low byte.
 
 Character `c` (a code from 0 to 255) is tile number `c`, row `c /
 COLUMNS`, column `c % COLUMNS`, drawn from the image at `(column *
@@ -99,7 +105,7 @@ TTFONT
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `SIZE` | int | `0` | Size in points, at 96 dpi: the pixel size is `SIZE * 96 / 72`. |
+| `SIZE` | int | `12` | Size in points, at 96 dpi: the pixel size is `SIZE * 96 / 72` rounded to a whole pixel (`MulDiv`). |
 | `FACE` | string | `Arial` | The family name of the typeface the text is drawn with (see [Choosing the face](#choosing-the-face)). |
 | `FILENAME` | string | `arial.ttf` | A font file among the game's files, made available to the engine: it is drawn with when `FACE` names its typeface. |
 | `BOLD`, `ITALIC` | bool | `FALSE` | The weight and the slant of the face. |

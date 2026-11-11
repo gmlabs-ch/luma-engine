@@ -94,7 +94,8 @@ impl World {
             }
         };
         let vfs = &self.vfs;
-        let parsed = ResponseBoxDef::parse_with(&bytes, &mut |file| vfs.read(file).ok());
+        let mut read = |file: &str| vfs.read(file).ok();
+        let parsed = ResponseBoxDef::parse_with(&bytes, &mut luma_formats::Files::new(&mut read));
         let mut def = match parsed {
             Ok(def) => def,
             Err(err) => {

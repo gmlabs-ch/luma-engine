@@ -256,10 +256,17 @@ impl World {
     pub fn with_audio(vfs: Vfs, audio: Audio) -> Result<World> {
         let settings = GameSettings::load(&vfs)?;
         let bytes = vfs.read(&settings.game_file)?;
-        let game_file = GameFile::parse(&bytes).map_err(|source| Error::Format {
-            path: settings.game_file.clone(),
-            source,
-        })?;
+        let game_file = {
+            // A `TEMPLATE` of the game file is another game file, read
+            // where the key stands.
+            let mut read = |file: &str| vfs.read(file).ok();
+            GameFile::parse_with(&bytes, &mut luma_formats::Files::new(&mut read)).map_err(
+                |source| Error::Format {
+                    path: settings.game_file.clone(),
+                    source,
+                },
+            )?
+        };
         let mut objects = Objects::new();
         let game_id = objects.insert(Kind::Game);
         let keyboard_id = objects.insert(Kind::Keyboard);
@@ -271,7 +278,15 @@ impl World {
         let scene_fader_id = objects.insert(Kind::SceneFader);
         let personal_savegames = game_file.personal_savegames;
         let startup_scene = game_file.startup_scene.clone();
-        let scene_viewport = game_file.scene_viewport.map(|[x, y, w, h]| (x, y, w, h));
+        // `SCENE_VIEWPORT { left, top, right, bottom }`, kept inside the
+        // screen (`CBViewport::SetRect`).
+        let scene_viewport = game_file.scene_viewport.map(|rect| {
+            let left = rect.left.max(0);
+            let top = rect.top.max(0);
+            let right = rect.right.min(settings.width as i32);
+            let bottom = rect.bottom.min(settings.height as i32);
+            (left, top, right - left, bottom - top)
+        });
         let mut world = World {
             vfs,
             settings,
@@ -372,15 +387,11 @@ impl World {
             save_dir_checked: false,
             access: Accessibility::new(),
         };
-        // The settings' table first, then the game file's on top, as the
-        // original engine loads them.
-        let mut first = true;
-        if let Some(path) = world.settings.string_table.clone() {
+        // Each `STRING_TABLE` of the settings is loaded as the original
+        // does (`LoadFile(file)`, which empties the table first): the
+        // last one is the game's table.
+        for path in world.settings.string_tables.clone() {
             world.load_string_table(&path, true);
-            first = false;
-        }
-        if let Some(path) = world.game_file.string_table.clone() {
-            world.load_string_table(&path, first);
         }
         world.subtitles = world.game_file.subtitles;
         world.subtitles_speed = world.game_file.subtitles_speed;
@@ -952,7 +963,14 @@ impl World {
                 true
             }
             Err(err) => {
-                self.log(format!("cannot load string table '{path}': {err}"));
+                // The original empties the table before it finds that
+                // the file is missing.
+                if clear_old {
+                    self.strings.clear();
+                }
+                self.log(format!(
+                    "CBStringTable::LoadFile failed for file '{path}': {err}"
+                ));
                 false
             }
         }

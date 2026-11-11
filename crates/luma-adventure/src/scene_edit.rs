@@ -173,18 +173,29 @@ impl World {
         }
     }
 
-    /// Reads an `.entity` file (`CAdEntity::LoadFile`); `None`, logged,
-    /// when it cannot be read or parsed.
+    /// Reads an `.entity` file (`CAdEntity::LoadFile`), with the
+    /// `TEMPLATE` files it names loaded where the keys stand; `None`,
+    /// logged, when it cannot be read or parsed. The entity keeps the
+    /// name of its file (`Filename`): this one, or its last template's.
     pub(crate) fn read_entity_def(&mut self, path: &str) -> Option<Entity> {
-        match self
-            .vfs
-            .read(path)
-            .map_err(|e| e.to_string())
-            .and_then(|bytes| Entity::parse(&bytes).map_err(|e| e.to_string()))
-        {
-            Ok(def) => Some(def),
-            Err(reason) => {
-                self.log(format!("Error loading ENTITY file '{path}': {reason}"));
+        let bytes = match self.vfs.read(path) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                self.log(format!(
+                    "CAdEntity::LoadFile failed for file '{path}': {err}"
+                ));
+                return None;
+            }
+        };
+        let vfs = &self.vfs;
+        let mut read = |file: &str| vfs.read(file).ok();
+        match Entity::parse_with(&bytes, &mut luma_formats::Files::new(&mut read)) {
+            Ok(mut def) => {
+                def.filename.get_or_insert_with(|| path.to_string());
+                Some(def)
+            }
+            Err(err) => {
+                self.log(format!("Error parsing ENTITY file '{path}': {err}"));
                 None
             }
         }

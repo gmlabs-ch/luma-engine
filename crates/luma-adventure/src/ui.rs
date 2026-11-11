@@ -635,56 +635,36 @@ impl World {
     // Loading
     // ----------------------------------------------------------------
 
-    /// Reads a `.window` file with its `TEMPLATE` chain.
-    fn read_window_def(&mut self, path: &str, depth: u32) -> Option<WindowDef> {
-        if depth > 8 {
-            self.log(format!("window template chain too deep at '{path}'"));
-            return None;
-        }
+    /// Reads a `.window` file (`CUIWindow::LoadFile`), with the `TEMPLATE`
+    /// files it names, of the window and of its controls, loaded where
+    /// the keys stand. A file that cannot be read, a key the original
+    /// does not know or a template that cannot be loaded gives no
+    /// window.
+    fn read_window_def(&mut self, path: &str) -> Option<WindowDef> {
         let bytes = match self.vfs.read(path) {
             Ok(bytes) => bytes,
             Err(err) => {
-                self.log(format!("Error opening window file '{path}': {err}"));
+                self.log(format!(
+                    "CUIWindow::LoadFile failed for file '{path}': {err}"
+                ));
                 return None;
             }
-        };
-        let doc = match luma_formats::Document::parse(&bytes) {
-            Ok(doc) => doc,
-            Err(err) => {
-                self.log(format!("Error parsing window file '{path}': {err}"));
-                return None;
-            }
-        };
-        use luma_formats::Nodes;
-        let Some(root) = doc.get("WINDOW") else {
-            self.log(format!("'WINDOW' keyword expected in '{path}'"));
-            return None;
-        };
-        // The controls' own templates (`TEMPLATE` in a `BUTTON`, `STATIC`
-        // or `EDIT` block) are read from the game where they stand.
-        let mut missing = Vec::new();
-        let mut def = match WindowDef::template_of(root) {
-            Some(template) => self.read_window_def(&template, depth + 1)?,
-            None => WindowDef::default(),
         };
         let vfs = &self.vfs;
-        def.apply_with(root, &mut |file| match vfs.read(file) {
-            Ok(bytes) => Some(bytes),
+        let mut read = |file: &str| vfs.read(file).ok();
+        match WindowDef::parse_with(&bytes, &mut luma_formats::Files::new(&mut read)) {
+            Ok(def) => Some(def),
             Err(err) => {
-                missing.push(format!("Error opening template file '{file}': {err}"));
+                self.log(format!("Error parsing WINDOW file '{path}': {err}"));
                 None
             }
-        });
-        for line in missing {
-            self.log(line);
         }
-        Some(def)
     }
 
     /// Loads a window file and adds the window to the game
     /// (`Game.LoadWindow`); `None` when the file cannot be read.
     pub fn load_window(&mut self, engine: &mut Engine, path: &str) -> Option<NativeId> {
-        let def = self.read_window_def(path, 0)?;
+        let def = self.read_window_def(path)?;
         let id = self.new_control(ControlKind::Window(Box::default()), None);
         self.ui.windows.push(id);
         self.apply_window_def(engine, id, def, Some(path));
@@ -703,7 +683,7 @@ impl World {
 
     /// Reads a window file into an existing window (`LoadFromFile`).
     pub fn load_window_into(&mut self, engine: &mut Engine, id: NativeId, path: &str) -> bool {
-        let Some(def) = self.read_window_def(path, 0) else {
+        let Some(def) = self.read_window_def(path) else {
             return false;
         };
         if self.control(id).and_then(Control::window).is_none() {
@@ -766,26 +746,20 @@ impl World {
                 return None;
             }
         };
-        let mut tiled = match TiledImage::parse(&bytes) {
+        // A `TEMPLATE` is another `.tiled` file, loaded where the key
+        // stands (`CUITiledImage::LoadBuffer`).
+        let parsed = {
+            let vfs = &self.vfs;
+            let mut read = |file: &str| vfs.read(file).ok();
+            TiledImage::parse_with(&bytes, &mut luma_formats::Files::new(&mut read))
+        };
+        let mut tiled = match parsed {
             Ok(tiled) => tiled,
             Err(err) => {
-                self.log(format!("Error parsing tiled image '{path}': {err}"));
+                self.log(format!("Error parsing TILED_IMAGE file '{path}': {err}"));
                 return None;
             }
         };
-        if let Some(template) = tiled.template.clone() {
-            if let Some(mut base) = self.load_tiled(&template) {
-                base.image = tiled.image.clone().or(base.image);
-                for (row, tiles) in tiled.tiles.iter().enumerate() {
-                    for (col, tile) in tiles.iter().enumerate() {
-                        if !tile.is_empty() {
-                            base.tiles[row][col] = *tile;
-                        }
-                    }
-                }
-                tiled = base;
-            }
-        }
         if let Some(image) = tiled.image.clone() {
             if self.load_ui_image(&image) {
                 if let Some(mask) = self.ui.bank.mask(&self.vfs, &image, DEFAULT_COLOR_KEY) {
@@ -1744,17 +1718,8 @@ impl World {
     /// cannot be frozen and gets mouse events while the game is not
     /// interactive, as the original engine sets it up.
     pub fn set_container_entity(&mut self, engine: &mut Engine, id: NativeId, path: &str) -> bool {
-        let def = match self
-            .vfs
-            .read(path)
-            .map_err(|e| e.to_string())
-            .and_then(|bytes| Entity::parse(&bytes).map_err(|e| e.to_string()))
-        {
-            Ok(def) => def,
-            Err(reason) => {
-                self.log(format!("Error parsing ENTITY file '{path}': {reason}"));
-                return false;
-            }
+        let Some(def) = self.read_entity_def(path) else {
+            return false;
         };
         let Some(ControlKind::EntityContainer(previous)) = self.control(id).map(|c| c.kind.clone())
         else {

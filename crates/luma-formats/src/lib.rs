@@ -38,6 +38,7 @@ pub mod image;
 pub mod scene;
 pub mod sprite;
 pub mod strings;
+pub mod template;
 pub mod window;
 
 pub use actor::{Actor, SpriteSet};
@@ -54,6 +55,7 @@ pub use scene::{
 };
 pub use sprite::{Frame, Rect, Sprite, SubFrame};
 pub use strings::StringTable;
+pub use template::Files;
 pub use window::{
     ButtonDef, ControlDef, EditDef, InventoryBoxDef, ItemDef, ResponseBoxDef, StaticDef,
     TiledImage, VerticalAlign, WidgetDef, WindowDef,

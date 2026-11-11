@@ -52,7 +52,7 @@ ACTOR {
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `TEMPLATE` | string | | Another `.actor` file loaded first; the keys that follow override it. |
+| `TEMPLATE` | string | | Another `.actor` file, loaded [where the key stands](definition-files.md#template): the keys before it are overridden by the template, the keys after it override it. The actor's `Filename` is then the template's, and the template's `ALPHA_COLOR`/`ALPHA` are replaced by this file's (none when it has none). A template that cannot be loaded is skipped. |
 | `NAME` | string | `""` | Name used by scripts. |
 | `CAPTION` | string | `""` | Caption shown when the mouse is over the actor. |
 | `X`, `Y` | int | `0` | Position: where the hotspot of the current sprite is placed. |
@@ -66,7 +66,6 @@ ACTOR {
 | `ALPHA_COLOR` | `r,g,b` | | Fixed tint; with `ALPHA` as opacity. Like entities, `ALPHA` alone means white. |
 | `ALPHA` | int | `0` | Opacity of the fixed tint. |
 | `IGNORE_ITEMS` | bool | `FALSE` | Not clickable while an inventory item is selected. |
-| `STOP_ON_BLOCKED` | bool | `FALSE` | Stop when something blocks the way instead of looking for another path. |
 | `WALK` | block | | The walking sprites, one `SPRITESET`. |
 | `STAND` | block | | The standing sprites. |
 | `TURN_LEFT`, `TURN_RIGHT` | block | | The sprites shown while turning, one per direction passed. |
@@ -83,6 +82,12 @@ ACTOR {
 | `SOUND_PANNING` | bool | `TRUE` | Pan the actor's sounds with its position on screen. |
 | `EDITOR_PROPERTY` | block | | Editor state, ignored. |
 
+A key that is not in this table is a syntax error that fails the actor
+(`Syntax error in ACTOR definition`). A sprite set, a blocked region, a
+waypoint group or a cursor that cannot be read is left out and the rest
+of the file is loaded; a set block (`WALK`, `STAND`, `TALK`...) must
+start with its `SPRITESET` block.
+
 The blocked region and the waypoints are stored relative to the actor's
 position and scaled with it: the polygon used at a given moment is the
 file's polygon scaled by the scene's scale level at the actor's `y`
@@ -94,7 +99,7 @@ file's polygon scaled by the scene's scale level at the actor's `y`
 |-----|------|---------|
 | `NAME` | string | Name of the set (talk stances, animations). |
 | `UP`, `UP_RIGHT`, `RIGHT`, `DOWN_RIGHT`, `DOWN`, `DOWN_LEFT`, `LEFT`, `UP_LEFT` | string | The sprite for each direction. |
-| `TEMPLATE` | string | A `.spriteset` file loaded first. |
+| `TEMPLATE` | string | A `.spriteset` file, loaded into the set where the key stands. |
 
 Directions are numbered clockwise from `UP`: `0` up, `1` up-right, `2`
 right, `3` down-right, `4` down, `5` down-left, `6` left, `7` up-left.
@@ -140,7 +145,7 @@ each time the walking sprite shows a new frame, advances
 frame's key, see [sprite.md](sprite.md)). A step that lands on a point
 blocked by another object (the floor regions do not count here) raises
 `ActorIsBlocked` on the actor; the actor then looks for a new path, or
-stops with `ActorIsBlocked` set when `STOP_ON_BLOCKED` is on. At the
+stops with `ActorIsBlocked` set when `SetStopOnBlocked(true)` was called. At the
 end of the last segment the actor is placed exactly on the target and,
 when the walk came from `GoToObject`, turns to the entity's
 `WALK_TO_DIR`.
@@ -206,7 +211,7 @@ The actor object has every property and method of entities, plus:
 | `PlayAnim(name)`, `PlayAnimAsync(name)` | See above. |
 | `SetSprite(file)`, `GetSprite()` | Replace the standing sprite. |
 | `HasAnim(name)`, `MergeAnims(file)`, `UnloadAnim(name)` | Query, add from a file of `ANIMATION` blocks, remove named animations. |
-| `SetStopOnBlocked(bool)`, `GetStopOnBlocked()` | See `STOP_ON_BLOCKED`. |
+| `SetStopOnBlocked(bool)`, `GetStopOnBlocked()` | Stop when something blocks the way instead of looking for another path. Not a key of the file. |
 
 `Scene.SkipTo(actor)` and `ScrollTo(actor)` centre the view on the
 actor's position raised by half its height; with `Game.MainObject` set
