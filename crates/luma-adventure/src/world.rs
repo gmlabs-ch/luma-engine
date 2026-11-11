@@ -3154,6 +3154,8 @@ pub struct Runtime {
     pub world: World,
     /// What the mouse did since the last frame.
     input: FrameInput,
+    /// Whether the game's window is active (`CBRenderer::m_Active`).
+    active: bool,
 }
 
 /// What the mouse did since the last frame. The windows' buttons work
@@ -3190,6 +3192,7 @@ impl Runtime {
             engine,
             world,
             input: FrameInput::default(),
+            active: true,
         })
     }
 
@@ -3593,6 +3596,36 @@ impl Runtime {
         };
         let game = self.world.game_id;
         self.engine.apply_event(&mut self.world, game, event, false);
+    }
+
+    /// The game's window became active or inactive (`CBGame::
+    /// OnActivate`): it lost or got the focus, or was minimised or
+    /// restored. Going inactive pauses every playing sound, music
+    /// included; coming back resumes them. While inactive the front-end
+    /// runs no frame ([`Runtime::is_active`]): the game's time stands
+    /// still, as the original's message loop sleeps until the window is
+    /// active again. With `refresh_mouse` (the window was activated by
+    /// a click) the object under the mouse is found again.
+    ///
+    /// As in the original, coming back also resumes the sounds a
+    /// system-exclusive window froze: both pauses share one mark
+    /// (`m_FreezePaused`).
+    pub fn activate(&mut self, active: bool, refresh_mouse: bool) {
+        self.active = active;
+        if refresh_mouse {
+            self.world.update_active_object();
+        }
+        if active {
+            self.world.sounds.audio.resume_all();
+        } else {
+            self.world.sounds.audio.pause_all(true);
+        }
+    }
+
+    /// Whether the game's window is active (see [`Runtime::activate`]);
+    /// a front-end calls [`Runtime::tick`] only while it is.
+    pub fn is_active(&self) -> bool {
+        self.active
     }
 
     /// The player asked to close the game's window (`CBGame::

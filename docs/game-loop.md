@@ -55,6 +55,29 @@ any frame saw the press waits for the end of the next frame: the
 `LeftRelease` event is raised then, and the button fires on the frame
 after. This is Luma's own; the original engine lost such clicks.
 
+### When the window is not active
+
+The game runs only while its window is active: focused and neither
+minimised nor wholly hidden. When the window loses that
+(`CBGame::OnActivate`, called by `WM_ACTIVATE`, `WM_SIZE` and the menu
+loop of the original), `Runtime::activate(false, ..)` pauses every
+playing sound, music included, and the front-end stops calling
+`Runtime::tick`: no frame runs, the game's time stands still, as the
+original's message loop sleeps in `WaitMessage`. `luma-player` then
+asks for no redraw and its event loop waits for the next event
+(`App::active` in `luma-render`); a repaint the system asks for shows
+the frame as it is, without running the game (`OnPaint`). When the
+window is active again the sounds resume, and the first frame advances
+the timer by the time elapsed, at most a second, like any frame.
+
+One quirk of the original is kept: the pause shares its mark with the
+freeze of a system-exclusive window (`m_FreezePaused`), so coming back
+to the window resumes the sounds such a window had frozen.
+
+In `luma-player` the focus comes from the window system's focus events
+and "hidden" from its occlusion events (inferred: winit has no event
+for the minimised state itself). Headless runs are always active.
+
 The frame is then drawn: the scene with the actors (each object's
 particles right after it; a 3D actor takes its place in the order at
 its projected position, where its shadow, its model and its attachments

@@ -93,6 +93,11 @@ on "MouseWheelDown"
   result.wheel = "game down";
 }
 
+on "Music"
+{
+  Game.PlayMusic("audio\long.wav");
+}
+
 on "Reorder"
 {
   var name = win.GetWidget("name");
@@ -152,6 +157,7 @@ fn game() -> std::path::PathBuf {
     pkg.add_file("w.script", compile(WINDOW_SCRIPT, "w.script"));
     pkg.add_file("w.window", WINDOW.to_vec());
     pkg.add_file("note.window", NOTE_WINDOW.to_vec());
+    pkg.add_file("audio\\long.wav", luma_audio::silent_wav(8000, 1, 5000));
     std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
     dir
 }
@@ -596,5 +602,38 @@ fn move_to_top_puts_a_control_last() {
     runtime.tick(16);
     assert_eq!(result(&runtime, "moved"), Value::Bool(true));
     assert_eq!(runtime.world.widgets_of(window), [code, ok, name]);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_inactive_window_pauses_the_sounds() {
+    let (mut runtime, dir, _, _) = start();
+    let game = runtime.world.game_id();
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "Music", false);
+    runtime.tick(16);
+    runtime.tick(16);
+    let music = runtime.world.music(0).expect("the music started").id;
+    assert!(runtime.is_active());
+    assert!(runtime.world.is_music_playing(0));
+    assert!(!runtime.world.audio().is_freeze_paused(music));
+    // The window loses the focus: every playing sound is paused, and
+    // the front-end runs no frame while `is_active` is false.
+    runtime.activate(false, false);
+    assert!(!runtime.is_active());
+    assert!(runtime.world.audio().is_freeze_paused(music));
+    // Back: the sounds go on, and the object under the mouse is found
+    // again when a click activated the window.
+    runtime.world.set_mouse(5, 24);
+    runtime.activate(true, true);
+    assert!(runtime.is_active());
+    assert!(!runtime.world.audio().is_freeze_paused(music));
+    assert!(runtime.world.is_music_playing(0));
+    let window = runtime.world.window_ids()[0];
+    assert_eq!(
+        runtime.world.active_object(),
+        runtime.world.widget(window, "ok")
+    );
     std::fs::remove_dir_all(&dir).ok();
 }

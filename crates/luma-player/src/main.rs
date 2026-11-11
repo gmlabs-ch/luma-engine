@@ -1098,6 +1098,8 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         size: PhysicalSize::new(settings.width, settings.height),
         modifiers: ModifiersState::empty(),
         started: false,
+        focused: true,
+        occluded: false,
     };
     luma::render::window::run(
         WindowConfig {
@@ -1134,9 +1136,25 @@ struct GamePlayer {
     size: PhysicalSize<u32>,
     modifiers: ModifiersState,
     started: bool,
+    /// Whether the window has the keyboard focus.
+    focused: bool,
+    /// Whether the window is minimised or wholly hidden.
+    occluded: bool,
 }
 
 impl GamePlayer {
+    /// The window got or lost the focus, was hidden or shown again:
+    /// the game is active while its window is focused and visible
+    /// (`WM_ACTIVATE`, `WM_SIZE` in `CBPlatform::WindowProc`).
+    fn set_window_state(&mut self, focused: bool, occluded: bool) {
+        self.focused = focused;
+        self.occluded = occluded;
+        let active = focused && !occluded;
+        if active != self.runtime.is_active() {
+            self.runtime.activate(active, false);
+        }
+    }
+
     /// A window position in game pixels, through the letterbox.
     fn to_game(&self, x: f64, y: f64) -> (i32, i32) {
         let settings = self.runtime.world.settings();
@@ -1183,6 +1201,8 @@ impl App for GamePlayer {
                 }
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+            WindowEvent::Focused(focused) => self.set_window_state(*focused, self.occluded),
+            WindowEvent::Occluded(occluded) => self.set_window_state(self.focused, *occluded),
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -1238,6 +1258,10 @@ impl App for GamePlayer {
         Flow::Continue
     }
 
+    fn active(&self) -> bool {
+        self.runtime.is_active()
+    }
+
     fn close_requested(&mut self) -> Flow {
         // A game script handling `QuitGame` decides; the window stays
         // open while it runs.
@@ -1254,7 +1278,18 @@ impl App for GamePlayer {
             self.started = true;
             self.runtime.start();
         }
-        // The engine advances its timer by at most a second per frame.
+        if !self.runtime.is_active() {
+            // The system asked for a repaint while the game sleeps: the
+            // frame as it is, without running the game (`OnPaint`).
+            let settings = self.runtime.world.settings();
+            list.width = settings.width as f32;
+            list.height = settings.height as f32;
+            list.letterbox = true;
+            self.runtime.draw(list, Some(frame.renderer.white()));
+            return Flow::Continue;
+        }
+        // The engine advances its timer by at most a second per frame
+        // (also for the first frame after the window was inactive).
         let dt = (frame.dt.as_millis() as u64).clamp(1, 1000);
         for line in self.runtime.tick(dt) {
             eprintln!("{line}");

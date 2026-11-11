@@ -90,6 +90,14 @@ pub trait App {
         Flow::Continue
     }
 
+    /// Whether the application wants frames. While `false` the window
+    /// asks for no redraw and the event loop sleeps until the next
+    /// event (a game whose window is not active); a redraw the system
+    /// asks for still calls [`App::draw`].
+    fn active(&self) -> bool {
+        true
+    }
+
     /// Called when the user asks to close the window. [`Flow::Exit`],
     /// the default, closes it; [`Flow::Continue`] keeps it open, for an
     /// app that asks the user first.
@@ -307,7 +315,13 @@ impl<A: App> ApplicationHandler for Runner<A> {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.app.active() {
+            // Nothing to do until an event wakes the loop.
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        }
+        event_loop.set_control_flow(ControlFlow::Poll);
         if let Some(state) = &self.state {
             state.window.request_redraw();
         }
