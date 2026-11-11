@@ -318,84 +318,84 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdGame::CAdGame` | unreviewed |  |
-| `CAdGame::~CAdGame` | unreviewed |  |
-| `CAdGame::Cleanup` | unreviewed |  |
-| `CAdGame::InitLoop` | unreviewed |  |
-| `CAdGame::AddObject` | unreviewed |  |
-| `CAdGame::RemoveObject` | unreviewed |  |
-| `CAdGame::ChangeScene` | unreviewed |  |
-| `CAdGame::AddSentence` | unreviewed |  |
-| `CAdGame::DisplaySentences` | unreviewed |  |
-| `CAdGame::FinishSentences` | unreviewed |  |
-| `CAdGame::ScCallMethod` | unreviewed |  |
-| `CAdGame::ScGetProperty` | unreviewed |  |
-| `CAdGame::ScSetProperty` | unreviewed |  |
-| `CAdGame::PublishNatives` | unreviewed |  |
-| `CAdGame::ExternalCall` | unreviewed |  |
-| `CAdGame::ShowCursor` | unreviewed |  |
-| `CAdGame::LoadFile` | unreviewed |  |
-| `CAdGame::LoadBuffer` | unreviewed |  |
-| `CAdGame::LoadBuffer GAME` | unreviewed |  |
-| `CAdGame::LoadBuffer AD_GAME` | unreviewed |  |
-| `CAdGame::LoadBuffer RESPONSE_BOX` | unreviewed |  |
-| `CAdGame::LoadBuffer INVENTORY_BOX` | unreviewed |  |
-| `CAdGame::LoadBuffer ITEMS` | unreviewed |  |
-| `CAdGame::LoadBuffer TALK_SKIP_BUTTON` | unreviewed |  |
-| `CAdGame::LoadBuffer VIDEO_SKIP_BUTTON` | unreviewed |  |
-| `CAdGame::LoadBuffer SCENE_VIEWPORT` | unreviewed |  |
-| `CAdGame::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdGame::LoadBuffer STARTUP_SCENE` | unreviewed |  |
-| `CAdGame::LoadBuffer DEBUG_STARTUP_SCENE` | unreviewed |  |
-| `CAdGame::Persist` | unreviewed |  |
-| `CAdGame::LoadGame` | unreviewed |  |
-| `CAdGame::InitAfterLoad` | unreviewed |  |
-| `CAdGame::AfterLoadScene` | unreviewed |  |
-| `CAdGame::SetPrevSceneName` | unreviewed |  |
-| `CAdGame::SetPrevSceneFilename` | unreviewed |  |
-| `CAdGame::ScheduleChangeScene` | unreviewed |  |
-| `CAdGame::GetVersion` | unreviewed |  |
-| `CAdGame::LoadItemsFile` | unreviewed |  |
-| `CAdGame::LoadItemsBuffer` | unreviewed |  |
-| `CAdGame::LoadItemsBuffer ITEM` | unreviewed |  |
-| `CAdGame::GetSceneState` | unreviewed |  |
-| `CAdGame::WindowLoadHook` | unreviewed |  |
-| `CAdGame::WindowLoadHook ENTITY_CONTAINER` | unreviewed |  |
-| `CAdGame::WindowScriptMethodHook` | unreviewed |  |
-| `CAdGame::StartDlgBranch` | unreviewed |  |
-| `CAdGame::EndDlgBranch` | unreviewed |  |
-| `CAdGame::ClearBranchResponses` | unreviewed |  |
-| `CAdGame::AddBranchResponse` | unreviewed |  |
-| `CAdGame::BranchResponseUsed` | unreviewed |  |
-| `CAdGame::AddGameResponse` | unreviewed |  |
-| `CAdGame::GameResponseUsed` | unreviewed |  |
-| `CAdGame::ResetResponse` | unreviewed |  |
-| `CAdGame::DisplayContent` | unreviewed |  |
-| `CAdGame::RegisterInventory` | unreviewed |  |
-| `CAdGame::UnregisterInventory` | unreviewed |  |
-| `CAdGame::IsItemTaken` | unreviewed |  |
-| `CAdGame::GetItemByName` | unreviewed |  |
-| `CAdGame::AddItem` | unreviewed |  |
-| `CAdGame::ResetContent` | unreviewed |  |
-| `CAdGame::DeleteItem` | unreviewed |  |
-| `CAdGame::AddSpeechDir` | unreviewed |  |
-| `CAdGame::RemoveSpeechDir` | unreviewed |  |
-| `CAdGame::FindSpeechFile` | unreviewed |  |
-| `CAdGame::RenderShadowGeometry` | unreviewed |  |
-| `CAdGame::GetNextAccessObject` | unreviewed |  |
-| `CAdGame::GetPrevAccessObject` | unreviewed |  |
-| `CAdGame::ValidMouse` | unreviewed |  |
-| `CAdGame::OnMouseLeftDown` | unreviewed |  |
-| `CAdGame::OnMouseLeftUp` | unreviewed |  |
-| `CAdGame::OnMouseLeftDblClick` | unreviewed |  |
-| `CAdGame::OnMouseRightDown` | unreviewed |  |
-| `CAdGame::OnMouseRightUp` | unreviewed |  |
-| `CAdGame::DisplayDebugInfo` | unreviewed |  |
-| `CAdGame::GetMaxShadowType` | unreviewed |  |
-| `CAdGame::GetLayerSize` | unreviewed |  |
-| `CAdGame::GetAmbientLightColor` | unreviewed |  |
-| `CAdGame::GetFogParams` | unreviewed |  |
-| `CAdGame::OnScriptShutdown` | unreviewed |  |
+| `CAdGame::CAdGame` | done | `luma-adventure/src/world.rs` `World::with_audio`: talk and video skip button left, smart item cursor off, speech directory `speech\`, normal state, the game's own inventory. The texture lifetimes (`m_Tex*LifeTime`) are not used by Luma's texture banks; `m_InitialScene` exists only for `DEBUG_STARTUP_SCENE` (see that row). |
+| `CAdGame::~CAdGame` | replaced | Rust ownership (`World` is dropped). |
+| `CAdGame::Cleanup` | replaced | Rust ownership; on a load `save.rs` `WorldState::apply` replaces every field instead of cleaning up first. |
+| `CAdGame::InitLoop` | partial | `luma-adventure/src/world.rs` `Runtime::tick`: the scheduled scene loads at the start of the next frame and the active object is cleared, the sentences are gathered again each frame (`collect_sentences`). Missing: it does not wait for the transition manager (`m_TransMgr->IsReady()`), because `Game.ChangeScene` starts no fade-out (see `ScCallMethod`). |
+| `CAdGame::AddObject` | done | `luma-adventure/src/world.rs` `load_actor`/`new_actor` (`World::actors`) and `scene_edit.rs` `add_game_entity` (`World::game_view`), each with `objects.insert`. |
+| `CAdGame::RemoveObject` | partial | `luma-adventure/src/world.rs` `unload_object`: a scene's free entity or actor first, then the game's. Different: when the object owned the inventory shown, Luma goes back to the game's own inventory (`set_inventory_owner(None)`), the original leaves `m_InventoryOwner` NULL (`Game.InventoryObject` then reads null). A layer node entity is refused in Luma; the original unregisters (deletes) it. |
+| `CAdGame::ChangeScene` | partial | `luma-adventure/src/world.rs` `load_scene` (SceneShutdown, previous name and file, `SaveState` unless `m_TempDisableSaveState`, game objects reset, scene properties cleared, regions and stick regions invalidated, `LoadState`) and `Runtime::tick` (fade-in). Missing or different: (1) `DEBUG_STARTUP_SCENE` replacing the first scene in debug mode; (2) the scene's `m_SFXVolume` is not reset to 100 (the scene handle and its sound entry outlive the scene); (3) the fade-in is played on the game's script fader (`World::fader`) instead of a separate transition manager: a colour left on screen by `Game.FadeOut` is replaced by the 200 ms black fade-in and a script waiting on the fader is released by it, where the original keeps `m_Fader` untouched and draws the transition over it; (4) when the file fails to load the fade-in is not started (the original starts it anyway) and the old scene view stays with its objects already removed. Plugin events: n/a. |
+| `CAdGame::AddSentence` | replaced | `luma-adventure/src/world.rs` `collect_sentences` gathers the sentences of the actors and entities each frame instead of a list they register in. |
+| `CAdGame::DisplaySentences` | partial | `luma-adventure/src/world.rs` `World::draw`: Luma draws no sentence at all while the game is frozen. The original skips only the sentences whose owner is freezable (`m_Freezable`), so a non-freezable object's sentence stays, and it draws every sentence while the accessibility pause is on (`m_AccessGlobalPaused`), which in Luma is a system-exclusive window and so hides them. |
+| `CAdGame::FinishSentences` | done | `luma-adventure/src/world.rs` `skip_sentences`: every sentence past its first 300 ms gets duration 0 and its speech stops (`sound.rs` `stop_speech`), then the text-to-speech stops. |
+| `CAdGame::ScCallMethod` | partial | `luma-adventure/src/natives.rs` `game_call`, `inventory_call`, `natives_sound.rs`. Different: `ChangeScene`: the fade-out argument is ignored (the original starts a 200 ms non-interactive `TRANSITION_FADE_OUT` and changes the scene when it ends) and the very first call, while no scene is initialised, is not immediate (see `ScheduleChangeScene`); `SetSceneViewport`: a width or height of 0 or less should mean the screen's, Luma stores 0; `UnloadObject` and its aliases do not set the script variable passed to null; `IsItemTaken` with an item object (not a name) answers false; `AddResponse*` adds the response even without a response box (the original raises a runtime error and adds nothing), `GetResponse` and `GetNumResponses` then answer instead of erroring; `ResetResponse(null)` should use id -1; `LoadResponseBox`: on a failure the old box is kept (the original leaves no box) and on success the old box's window is not removed; `LoadActor3D` has no compatibility-mode error (n/a). The rest agrees: LoadActor, LoadEntity, CreateEntity, CreateItem, DeleteItem, QueryItem, ClearResponses, StartDlgBranch, EndDlgBranch, GetCurrentDlgBranch, TakeItem, DropItem, GetItem, HasItem, GetInventoryWindow, GetResponsesWindow, LoadInventoryBox, LoadItems, AddSpeechDir, RemoveSpeechDir. |
+| `CAdGame::ScGetProperty` | partial | `natives.rs` `game_get`. Different: `LastResponse` and `LastResponseOrig` are null before any response was chosen (the original gives an empty string); `InventoryObject` gives the game when the owner object is gone (the original gives null). Type, Scene, SelectedItem, NumItems, SmartItemCursor, InventoryVisible, InventoryScrollOffset, ResponsesVisible, PrevScene, PrevSceneFilename, TotalNumItems, TalkSkipButton, VideoSkipButton, ChangingScene, StartupScene agree. |
+| `CAdGame::ScSetProperty` | partial | `natives.rs` `game_set`, `inventory.rs` `select_item` and `set_inventory_owner` (the scroll offset kept per inventory). Different: `TalkSkipButton` and `VideoSkipButton` should clamp to 0..3, `TalkSkipButton::from_code` turns 4 and up into left (0) instead of none (3); `InventoryObject` set to an invalid object goes back to the game's inventory, the original leaves the owner unchanged. SelectedItem, SmartItemCursor, InventoryVisible, InventoryScrollOffset, StartupScene agree. |
+| `CAdGame::PublishNatives` | done | `luma-compiler/src/lib.rs`: `Actor` and `Entity` are among the external functions the compiler knows. |
+| `CAdGame::ExternalCall` | partial | `luma-adventure/src/world.rs` `Host::call_function`. Deliberately different: the original `new Actor()` / `new Entity()` object belongs to no list (never updated, drawn or saved with the game's objects) and its arguments are discarded; Luma adds it to the game's objects, so it is drawn, and loads a file given as argument. |
+| `CAdGame::ShowCursor` | partial | `luma-adventure/src/inventory.rs` `update_item_cursor`: combined cursor, hover cursor over a usable object, `SmartItemCursor`. Different: the original shows the selected item's cursor only when `m_State==GAME_RUNNING && m_StateEx==GAME_NORMAL && m_Interactive`; Luma tests `!frozen && interactive`, so the item cursor stays while the response box waits (`GAME_SEMI_FROZEN` / `GAME_WAITING_RESPONSE`), where the original shows the plain game cursor. Luma also hides it with `Game.HideCursor`, which this source has not. |
+| `CAdGame::LoadFile` | done | `luma-adventure/src/world.rs` `World::with_audio` reads the game file named by the settings; a missing or unparsable file is an error. |
+| `CAdGame::LoadBuffer` | partial | `luma-formats/src/game.rs` `GameFile::from_document`, applied by `World::with_audio` and `Runtime::start`. Different: a `RESPONSE_BOX`, `INVENTORY_BOX` or `ITEMS` file that does not load is logged and the game starts without it; the original fails the whole game load. Only the first `GAME` and the first `AD_GAME` block are read. |
+| `CAdGame::LoadBuffer GAME` | done | `game.rs` `GameFile::from_document` (the keys are `CBGame::LoadBuffer`'s rows). |
+| `CAdGame::LoadBuffer AD_GAME` | done | `game.rs` `GameFile::from_document`. |
+| `CAdGame::LoadBuffer RESPONSE_BOX` | done | `responses.rs` `load_response_box`, from `Runtime::start` (failure: see `LoadBuffer`). |
+| `CAdGame::LoadBuffer INVENTORY_BOX` | done | `inventory.rs` `load_inventory_box`, from `Runtime::start` (failure: see `LoadBuffer`). |
+| `CAdGame::LoadBuffer ITEMS` | done | `inventory.rs` `load_items`, from `Runtime::start`; the file name is kept (`game_file.items`) for `Game.Reset`. |
+| `CAdGame::LoadBuffer TALK_SKIP_BUTTON` | partial | `talk.rs` `TalkSkipButton::parse`: `right`, `both`, else left as the original, but Luma also reads `none` as none where the original reads it as left. |
+| `CAdGame::LoadBuffer VIDEO_SKIP_BUTTON` | partial | Same parser as `TALK_SKIP_BUTTON`: `none` is read as none, the original reads it as left. |
+| `CAdGame::LoadBuffer SCENE_VIEWPORT` | partial | The original reads `left,top,right,bottom` (`SetRect(rc.left, rc.top, rc.right, rc.bottom)`); `game.rs` and `World::with_audio` take the four numbers as `x, y, width, height` (so does `docs/formats/game.md`). Same result only when left and top are 0. |
+| `CAdGame::LoadBuffer EDITOR_PROPERTY` | n/a | `CBBase::ParseEditorProperty` returns at once when the game is not in editor mode. |
+| `CAdGame::LoadBuffer STARTUP_SCENE` | partial | Read (`game.rs`) and exposed as `Game.StartupScene`. Different: `Runtime::start` also schedules it itself with a fade-in; the original engine never loads it (only scripts do, `Game.ChangeScene(Game.StartupScene)`), so in Luma the scene is loaded, and its scripts start, even when the game script opens another scene first, and it is loaded twice when the script asks for it. |
+| `CAdGame::LoadBuffer DEBUG_STARTUP_SCENE` | todo | Not read. In debug mode the first `ChangeScene` loads this scene instead of the one asked; Luma has no debug mode (`Game.DebugMode` is always false). |
+| `CAdGame::Persist` | replaced | serde: `save.rs` `world_state!` saves the dialogue branches and used responses, the inventories and the box, the objects, the previous scene, the scene and its remembered states, the scheduled scene, the selected item, the skip buttons, the scene viewport, the waiting response state, `temp_disable_save_state`, the items, the speech directories, the smart item cursor and the startup scene. Not saved: `m_DebugStartupScene` and `m_InitialScene` (no debug mode); the items file name comes from the game file again. |
+| `CAdGame::LoadGame` | replaced | `save.rs` `load_game`; the regions need no `AfterLoadRegion` pass, their shapes are data. |
+| `CAdGame::InitAfterLoad` | replaced | `save.rs` `after_restore` and `reload_assets` load the files the restored state names. |
+| `CAdGame::AfterLoadScene` | replaced | See `InitAfterLoad`: `SceneView::reload_sprites`, `reload_3d`. |
+| `CAdGame::SetPrevSceneName` | done | `luma-adventure/src/world.rs` `load_scene` sets `prev_scene_name`. |
+| `CAdGame::SetPrevSceneFilename` | done | `luma-adventure/src/world.rs` `load_scene` sets `prev_scene_filename`. |
+| `CAdGame::ScheduleChangeScene` | partial | `luma-adventure/src/world.rs` `schedule_scene` always waits for the next frame. The original changes the scene at once when the current scene is not initialised yet (`!m_Scene->m_Initialized`, the first `Game.ChangeScene` of a game): the calling script goes on with the scene loaded, in Luma `Scene` is still empty until the next frame. |
+| `CAdGame::GetVersion` | replaced | Only used for the saved-game version; Luma's saves carry their own (`save.rs` `VERSION`). |
+| `CAdGame::LoadItemsFile` | done | `inventory.rs` `load_items_from`. |
+| `CAdGame::LoadItemsBuffer` | partial | `inventory.rs` `load_items_from` with `ItemDef::parse_all`: without merge the old items go first, with merge an item replaces the one of the same name. Different on error only: Luma parses the whole file before touching the items, so a bad file leaves the old items; the original has already deleted them and keeps the items read before the bad one. |
+| `CAdGame::LoadItemsBuffer ITEM` | done | `luma-formats` `ItemDef::parse_all`, one item per `ITEM` block (keys: `CAdItem::LoadBuffer`). |
+| `CAdGame::GetSceneState` | done | `scene_state.rs` `state_key` (slashes and case folded), `save_scene_state` creates, `restore_scene_state` only looks up. |
+| `CAdGame::WindowLoadHook` | done | `luma-formats/src/window.rs` reads `ENTITY_CONTAINER` among a window's widgets; `ui.rs` creates the control. |
+| `CAdGame::WindowLoadHook ENTITY_CONTAINER` | done | `window.rs` `WidgetDef::EntityContainer`, `ui.rs` `ControlKind::EntityContainer` (keys: `CUIEntity::LoadBuffer`). |
+| `CAdGame::WindowScriptMethodHook` | done | `natives_ui.rs` `CreateEntityContainer` on a window: a named, empty container added to the window's widgets. |
+| `CAdGame::StartDlgBranch` | done | `responses.rs` `start_dlg_branch`: `name.script.event`, `line<N>` without a name. |
+| `CAdGame::EndDlgBranch` | done | `responses.rs` `end_dlg_branch`: the last matching branch and those after it go; the once-responses are forgotten when none is left. |
+| `CAdGame::ClearBranchResponses` | n/a | Dead code in the original: its only call (in `EndDlgBranch`) is commented out. |
+| `CAdGame::AddBranchResponse` | done | `responses.rs` `handle_response` (`ResponseKind::Once`): id and current branch, once. |
+| `CAdGame::BranchResponseUsed` | partial | `responses.rs` `branch_response_used`: the branch names are compared exactly; the original ignores case (`stricmp`). |
+| `CAdGame::AddGameResponse` | partial | `responses.rs` `handle_response` (`ResponseKind::OnceGame`) keeps the id only; the original keeps the id with the current dialogue branch as context. |
+| `CAdGame::GameResponseUsed` | partial | `responses.rs` `weed_responses`: Luma drops a once-per-game response whose id was used anywhere; the original only when it was used in the same dialogue branch context (or both without a branch), so the same id may be offered again from another branch. |
+| `CAdGame::ResetResponse` | partial | `responses.rs` `reset_response` forgets every use of the id; the original removes one entry of each list (game, branch), and only one whose context is the current dialogue branch. |
+| `CAdGame::DisplayContent` | partial | `luma-adventure/src/world.rs` `Runtime::tick` (update) and `World::draw`: only the video while one plays; else scripts, scene, in-game windows, inventory box, response box, normal windows, active object, sentences, cursor, fader, loading icon, in the original's order. Different: the sentence rule of `DisplaySentences`; the loading icon is not drawn over a playing video; the scene-change transition is not a layer of its own (see `ChangeScene`); the save/load indicator is `CBGame::DisplayIndicator`'s row. AVI player (`m_VideoPlayer`), plugin events, editor mode: n/a. |
+| `CAdGame::RegisterInventory` | replaced | An object's inventory is a field of its state (`objects.rs` `ObjectState::inventory`), created on first use (`inventory.rs` `object_inventory_mut`); the game's is `Inventory::taken`. |
+| `CAdGame::UnregisterInventory` | replaced | The inventory goes with its object (`objects.remove`). |
+| `CAdGame::IsItemTaken` | done | `inventory.rs` `is_item_taken`: the game's and every object's inventory, by name without case. |
+| `CAdGame::GetItemByName` | done | `inventory.rs` `item_by_name`. |
+| `CAdGame::AddItem` | done | `inventory.rs` `add_item`. |
+| `CAdGame::ResetContent` | partial | `luma-adventure/src/world.rs` `reset_content`: branches, scene states, used responses cleared, items file loaded again, next scene state not saved, script globals cleared. Different: only the game's own inventory is emptied directly; the objects' inventories are emptied only through the items reload, so they keep their items when the game has no `ITEMS` file. Luma also always clears the selected item (the original only through the reload). |
+| `CAdGame::DeleteItem` | done | `inventory.rs` `delete_item`: deselected, the scene entities tied to it hidden, removed from every inventory, scripts ended. |
+| `CAdGame::AddSpeechDir` | done | `sound.rs` `Sounds::add_speech_dir`: trailing separator added, once, empty refused. |
+| `CAdGame::RemoveSpeechDir` | done | `sound.rs` `Sounds::remove_speech_dir`. |
+| `CAdGame::FindSpeechFile` | done | `sound.rs` `find_speech_file`: each directory in order, `.ogg` then `.wav`. |
+| `CAdGame::RenderShadowGeometry` | done | `draw3d.rs` and `luma-render/src/draw.rs`: the scene geometry is drawn to the depth buffer for the stencil shadows. |
+| `CAdGame::GetNextAccessObject` | done | `accessibility.rs` `access_objects` / `next_access_object`: the focused window's controls, else the response buttons while the box waits, else the scene's objects. |
+| `CAdGame::GetPrevAccessObject` | done | `accessibility.rs` `next_access_object(_, false)`. |
+| `CAdGame::ValidMouse` | partial | No equivalent check: `luma-player` passes every click, also one in the letterbox bars outside the game frame; the original ignores a button press when the cursor is outside the screen viewport. |
+| `CAdGame::OnMouseLeftDown` | partial | `luma-adventure/src/world.rs` `Runtime::mouse_left_down` / `mouse_event`. Different: (1) no `ValidMouse`; (2) a playing video is tested before the non-interactive rule, so a left click stops a video while the game is not interactive (the original only finishes the sentences then); (3) `semi_frozen()` lets clicks through for any exclusive window while not interactive, the original only when `m_State != GAME_RUNNING` (response box, system-exclusive window); (4) the game's own `LeftClick` handler and the scene's are tried while the response box waits (`GAME_SEMI_FROZEN`), the original tries them only in `GAME_RUNNING`; (5) a second click within 400 ms raises `LeftDoubleClick` through this path (see `OnMouseLeftDblClick`). The active object's press (`ui_mouse_down`), the capture and the dispatch order game, active object, scene agree. |
+| `CAdGame::OnMouseLeftUp` | partial | `luma-adventure/src/world.rs` `Runtime::release_left`: release to the UI, capture dropped, `LeftRelease` to the game, else the active object, else the scene. Missing: the original does nothing while a video plays; same `GAME_RUNNING` difference as `OnMouseLeftDown` (4). |
+| `CAdGame::OnMouseLeftDblClick` | partial | `luma-adventure/src/world.rs` `Runtime::mouse_left_down` with `note_click` (400 ms, 4 pixels). Different: in the original a double click does not stop a video, does not skip sentences while not interactive, does not set `m_MouseLeftDown` or the captured object, and no `LeftClick` is raised for it; Luma runs the whole left-down path (video skip, sentence skip, UI press) and only swaps the event name. |
+| `CAdGame::OnMouseRightDown` | partial | `luma-adventure/src/world.rs` `Runtime::mouse_right_down`. Different: (1) no `ValidMouse`; (2) video tested before the non-interactive rule (as left); (3) missing `m_StateEx == GAME_WAITING_RESPONSE` return: a right click while the response box waits reaches the active object in Luma; (4) Luma returns whenever the game is not interactive, the original only in `GAME_RUNNING` (a frozen, non-interactive game still passes the click to the active object); (5) the active object gets no `HandleMouse(MOUSE_CLICK, right)`. |
+| `CAdGame::OnMouseRightUp` | partial | `luma-adventure/src/world.rs` `Runtime::mouse_right_up`: `RightRelease` to the game, else the active object, else the scene. Missing: nothing should happen while a video plays; no `HandleMouse(MOUSE_RELEASE, right)` on the active object. |
+| `CAdGame::DisplayDebugInfo` | todo | In debug mode draws the mouse position (screen and scene) and the scene and previous scene names in the system font, right-aligned at y 90 and 110, then the base debug info. Luma has no debug mode. |
+| `CAdGame::GetMaxShadowType` | done | `actor3d.rs` `three_d_draws`: the minimum of the game's, the scene's and the actor's shadow type. |
+| `CAdGame::GetLayerSize` | done | `scene3d.rs` `projection` and `luma-3d/src/camera.rs` `ViewSetup::for_scene`: the main layer's size, or the resolution with `SCROLL_3D_COMPATIBILITY`, and the scene viewport (`m_EditorResolutionWidth` of the game is never set). |
+| `CAdGame::GetAmbientLightColor` | done | `actor3d.rs` `three_d_draws` takes the scene's `ambient_light_color`. |
+| `CAdGame::GetFogParams` | done | `actor3d.rs` `three_d_draws` takes the scene's fog (`scene3d.rs` `Fog`). |
+| `CAdGame::OnScriptShutdown` | replaced | The waiting script is held by id (`responses.rs` `Responses::waiting`); a finished script's id is not resumed. |
 
 ## `wme_ad/AdGeneric.cpp`
 
