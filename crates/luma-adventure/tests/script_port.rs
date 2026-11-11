@@ -732,3 +732,22 @@ result.spriteFile = s.Filename;
     assert_eq!(text("custom"), Value::from("7"));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_profiler_left_on_writes_its_table_when_the_game_ends() {
+    let (dir, mut runtime, log) = start(
+        r#"
+Game.EnableScriptProfiling();
+Sleep(1);
+"#,
+        &[],
+    );
+    no_errors(&log);
+    assert!(runtime.engine.is_profiling());
+    let lines = runtime.shutdown();
+    assert_eq!(lines[0], "***** Script profiling information: *****");
+    assert!(lines[1].starts_with("  Total execution time "), "{lines:?}");
+    assert!(lines[2].starts_with("  game.script "), "{lines:?}");
+    assert!(runtime.shutdown().is_empty(), "the profiler is off now");
+    std::fs::remove_dir_all(&dir).ok();
+}

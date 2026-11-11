@@ -170,7 +170,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CScEngine::LoadBreakpoints` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client (breakpoints kept in the Windows registry) |
 | `CScEngine::AddScriptTime` | done | `engine.rs` `add_script_time`: the time of a turn added to the total of the script's path in lower case while profiling is on; `execute` measures the turn |
 | `CScEngine::EnableProfiling` | done | `engine.rs` `Engine::enable_profiling`: clears the totals and records the start time, nothing when already on; `Game.EnableScriptProfiling` in `luma-adventure/src/natives.rs` |
-| `CScEngine::DisableProfiling` | partial | `engine.rs` `Engine::disable_profiling`: dumps the statistics to the log and stops, nothing when off; `Game.DisableScriptProfiling`. Not done: the original also runs it when the engine shuts down, so a game that never turns the profiler off still gets its table; Luma's engine is dropped without a host to log to |
+| `CScEngine::DisableProfiling` | done | `engine.rs` `Engine::disable_profiling`: dumps the statistics to the log and stops, nothing when off; `Game.DisableScriptProfiling`, and `luma-adventure/src/world.rs` `Runtime::shutdown` for the call the original makes when the engine is destroyed (`luma-player` calls it when the game ends) |
 | `CScEngine::DumpStats` | done | `engine.rs` `Engine::dump_stats`: `***** Script profiling information: *****`, the total time and each script file with its seconds and percentage in `%f` form, longest first |
 
 ## `wme_base/ScScript.cpp`

@@ -670,6 +670,9 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
             break;
         }
     }
+    for line in runtime.shutdown() {
+        println!("[{}] {line}", options.ticks);
+    }
     let counts = runtime.engine.counts();
     println!(
         "after {} ms: scene {:?}, offset {:?}, {} script(s) ({} running, {} waiting, {} persistent), {} native object(s)",
@@ -1114,6 +1117,16 @@ impl GamePlayer {
             },
             _ => return None,
         })
+    }
+}
+
+/// The game ends with its window: a script profiler still on writes its
+/// table, as the original engine does when it shuts down.
+impl Drop for GamePlayer {
+    fn drop(&mut self) {
+        for line in self.runtime.shutdown() {
+            eprintln!("{line}");
+        }
     }
 }
 

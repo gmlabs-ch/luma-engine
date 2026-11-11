@@ -3334,6 +3334,15 @@ impl Runtime {
         self.world.load_scene(&mut self.engine, path)
     }
 
+    /// Ends the script engine as the original's destructor does
+    /// (`CScEngine::~CScEngine`): a script profiler still on writes its
+    /// table. Returns the log lines this produced, for the front-end to
+    /// show before it drops the runtime.
+    pub fn shutdown(&mut self) -> Vec<String> {
+        self.engine.disable_profiling(&mut self.world);
+        self.world.take_log()
+    }
+
     /// Saves the game to a slot now (`Game.SaveGame` outside a script):
     /// `BeforeSave` runs first. Returns the file written.
     pub fn save_game(

@@ -167,8 +167,9 @@ the table to the log, as the original's `DumpStats` does: a line
 started, then one line per file with its seconds and its share of that
 time, longest first. A turn is counted when profiling was on as the turn
 started (as it ends, for a time-sliced turn), so the turn that turns the
-profiler on is not. The table is not written when the engine shuts down
-with the profiler still on, which the original does.
+profiler on is not. A profiler still on when the game ends writes its
+table then (`Runtime::shutdown`, which `luma-player` calls), as the
+original's engine does when it is destroyed.
 
 ## Programs
 
