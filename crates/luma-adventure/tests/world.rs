@@ -1824,13 +1824,10 @@ fn frames_and_subframes_are_script_objects_and_survive_a_saved_game() {
         Value::Int(40),
         "a handle follows its frame when one before it is deleted"
     );
-    let Value::Native(inserted) = result(&runtime, "inserted") else {
-        panic!("InsertFrame returned {:?}", result(&runtime, "inserted"));
-    };
     assert_eq!(
-        runtime.world.get_property(inserted, "Type"),
-        None,
-        "the handle of a deleted frame is invalid"
+        result(&runtime, "inserted"),
+        Value::Null,
+        "the value that held a deleted frame is null"
     );
     assert_eq!(result(&runtime, "numAfterInsert"), Value::Int(3));
     assert_eq!(result(&runtime, "fDelay"), Value::Int(30));
@@ -5668,8 +5665,14 @@ fn quick_messages_mouse_lock_reset_and_inventory_box_reload() {
     );
     runtime.tick(16);
 
-    // Msg: on screen for three seconds of the game timer.
-    let messages = runtime.world.quick_messages();
+    // Msg: on screen for three seconds of the game timer. The game's
+    // own scripts made runtime errors on purpose, which show too.
+    let messages: Vec<_> = runtime
+        .world
+        .quick_messages()
+        .iter()
+        .filter(|m| m.text != "Script runtime error. View log for details.")
+        .collect();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].text, "Hello there");
     assert_eq!(

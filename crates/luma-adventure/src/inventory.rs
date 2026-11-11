@@ -283,13 +283,7 @@ impl World {
             self.load_font(font);
         }
         let id = self.objects.insert(Kind::Item);
-        if let Some(native) = self.objects.get_mut(id) {
-            for property in &def.properties {
-                native
-                    .props
-                    .insert(property.name.clone(), Value::from(property.value.clone()));
-            }
-        }
+        let properties = def.properties.clone();
         let scripts = def.scripts.clone();
         self.inventory.items.push((
             id,
@@ -301,6 +295,7 @@ impl World {
                 y: 0,
             },
         ));
+        self.apply_properties(id, &properties);
         for script in scripts {
             self.attach(engine, id, &script);
         }

@@ -56,15 +56,17 @@ Luma Engine reads the same game data with a new engine built for today:
 | `luma-render` | 2D/2.5D renderer on wgpu | `luma-formats`, `wgpu`, `winit` |
 | `luma-audio` | Music, sound effects and voice | `kira` (Symphonia for decoding, `cpal` with the `device` feature) |
 | `luma-video` | Ogg Theora videos decoded to frames | `ogg`, `oxideav-theora`, `oxideav-core` |
-| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves; 3D actors on scene geometry with its `3d` feature | the six run-time core crates, `fontdue`, `fontdb`, `serde`, `postcard`, `flate2`, `luma-3d` with the `3d` feature (`luma-compiler` for its tests) |
+| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves; 3D actors on scene geometry with its `3d` feature | the six run-time core crates, `fontdue`, `fontdb`, `serde`, `postcard`, `flate2`, `luma-3d` with the `3d` feature, `luma-compiler` with the `compiler` feature (and for its tests) |
 | `luma-lumen` | Lumen, the scenario format for games made for Luma: parser, checker, text runner | nothing |
 | `luma-3d` | 3D characters on painted backgrounds: `.3ds` scene geometry, the camera mapping, `.x` models with their skin and animations, the Direct3D maths conventions | `luma-formats`, `flate2`, `serde` with the `serde` feature |
-| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen`, `luma-3d` and `luma-adventure/3d` with `3d` |
+| `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen`, `luma-3d` and `luma-adventure/3d` with `3d`, `luma-adventure/compiler` with `compiler` |
 | `luma-cli` | The `luma` command-line tool | `luma-archive`, `luma-formats`, `luma-script`, `luma-compiler`, `luma` (feature `lumen`) |
-| `luma-player` | The desktop player | `luma` (features `adventure`, `audio-device`, `3d`) |
+| `luma-player` | The desktop player | `luma` (features `adventure`, `audio-device`, `3d`, `compiler`) |
 
 The first six are the run-time core and `luma-compiler` a build tool (games
-ship compiled scripts, so `luma` does not re-export it); `luma-adventure`,
+ship compiled scripts, so `luma` does not re-export it; its `compiler`
+feature lets the adventure module compile a script shipped as source text
+when it is loaded, as the original does); `luma-adventure`,
 `luma-lumen` and `luma-3d` are the optional modules. A game or a front-end depends on `luma` and
 enables the modules it needs through its features (`adventure` is on by
 default, `lumen` and `3d` are off, `audio-device` plays the sounds,
@@ -224,8 +226,8 @@ luma-player path/to/game --headless --load 5 --entities
 
 Luma implements the whole scripting interface of Wintermute Engine 1.x, as
 inventoried in [docs/compatibility.md](docs/compatibility.md): every method,
-property, function, constructor and event. Of the 1153 members, 1076 are
-implemented and 77 are deliberately without effect, because they are
+property, function, constructor and event. Of the 1153 members, 1084 are
+implemented and 69 are deliberately without effect, because they are
 Windows-, debugger- or editor-only, belong to unfinished stubs of WME itself,
 or belong to the legacy WME 1.0 3D actors with MS3D models, which Luma refuses
 with a clear message. The behaviour follows the MIT-licensed WME 1.x sources,

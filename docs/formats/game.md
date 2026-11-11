@@ -42,7 +42,7 @@ AD_GAME {
 
 | Block | Key | Meaning |
 |-------|-----|---------|
-| `GAME` | `NAME`, `CAPTION` | The game's name (`Game.Name`) and window title. |
+| `GAME` | `NAME`, `CAPTION` | The game's name (`Game.Name`, `<unnamed>` without the key) and window title. |
 | | `SCRIPT` | A script attached to the game object when it starts; repeatable. The game's logic starts there: the first script picks the first scene with `Game.ChangeScene`. |
 | | `STRING_TABLE` | A string table loaded at startup (see below). |
 | | `SYSTEM_FONT` | The font of engine messages. |
@@ -50,6 +50,7 @@ AD_GAME {
 | | `CURSOR`, `ACTIVE_CURSOR`, `NONINTERACTIVE_CURSOR` | The mouse cursor sprites: normal, over an interactive object, while the game is not interactive. |
 | | `SUBTITLES`, `SUBTITLES_SPEED`, `VIDEO_SUBTITLES` | Whether speech and videos are subtitled, and how long a subtitle stays per character (default 70 ms). |
 | | `PERSONAL_SAVEGAMES`, `LOCAL_SAVE_DIR` | Where saved games go. |
+| | `COMPAT_KILL_METHOD_THREADS` | The script engine's behaviour before WME 1.9 (false by default): when a new order to an object (`GoTo`, `Talk`...) ends the scripts that waited for it, the scripts that were waiting for one of those to return from a method are no longer ended with it; they receive `null` for the call and go on (see [../scripting.md](../scripting.md#states-and-threads)). |
 | | `ALLOW_ACCESSIBILITY_TAB` | Whether the player may turn the accessibility features on (true by default); when false, text-to-speech, keyboard play and the pause stay off whatever the settings say (see [../game-loop.md](../game-loop.md#accessibility)). |
 | | `SAVE_IMAGE`, `SAVE_IMAGE_X`, `SAVE_IMAGE_Y`, `LOAD_IMAGE`, `LOAD_IMAGE_X`, `LOAD_IMAGE_Y` | The images shown while the game saves or loads, and where (see [../saving.md](../saving.md#loading-and-saving-screens-loading-icon)). |
 | | `THUMBNAIL_WIDTH`, `THUMBNAIL_HEIGHT` | The size of the picture `Game.StoreSaveThumbnail` keeps for the next saved game; none when absent (see [../saving.md](../saving.md#thumbnails)). |

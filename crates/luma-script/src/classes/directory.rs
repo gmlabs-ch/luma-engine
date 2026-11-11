@@ -85,15 +85,21 @@ impl DirectoryObject {
     ) -> Option<Return> {
         Some(match name {
             // `CBUtils::CreatePath` then `mkdir`: every level is created.
-            // The original answers `mkdir`'s result, which fails on the
-            // directory `CreatePath` just made unless the path ends with
-            // a separator; the answer here is whether the directory
-            // exists afterwards.
+            // `CreatePath` makes the directories up to each separator
+            // and the answer is the result of the final `mkdir` on the
+            // whole path: true when that call made the directory, false
+            // when it existed already, and false for a path ending with
+            // a separator, whose last level `CreatePath` has just made.
             "Create" => {
                 let path = arg(args, 0).get_string(host);
-                let created = host
-                    .writable_dir(&path)
-                    .is_some_and(|dir| fs::create_dir_all(&dir).is_ok() && dir.is_dir());
+                let made_by_create_path = path.ends_with(['\\', '/']);
+                let created = host.writable_dir(&path).is_some_and(|dir| {
+                    let existed = dir.is_dir();
+                    fs::create_dir_all(&dir).is_ok()
+                        && dir.is_dir()
+                        && !existed
+                        && !made_by_create_path
+                });
                 Return::value(created)
             }
             // `rmdir`: only an empty directory goes.

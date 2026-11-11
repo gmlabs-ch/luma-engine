@@ -23,6 +23,9 @@ use crate::lexer::{Includes, Keyword, Lexer, Punct, Token};
 pub fn parse(source: Vec<u8>, name: &str, includes: &mut dyn Includes) -> Result<Script> {
     let mut parser = Parser {
         lexer: Lexer::new(source, name, includes),
+        statements: 0,
+        expressions: 0,
+        operators: 0,
     };
     let items = parser.script()?;
     // `scriptcollection: toplevels` reduces after the end of input has
@@ -37,7 +40,22 @@ pub fn parse(source: Vec<u8>, name: &str, includes: &mut dyn Includes) -> Result
 
 struct Parser<'a> {
     lexer: Lexer<'a>,
+    /// How many statements enclose the one being parsed.
+    statements: u32,
+    /// How many expressions and unary operators enclose the one being
+    /// parsed.
+    expressions: u32,
+    /// The binary operators of the statement so far.
+    operators: u32,
 }
+
+// A script may come from a game's files and be compiled as the game
+// runs. The parser, the code generator and the release of the tree all
+// recurse on the nesting, so the nesting is bounded: far above anything a
+// person writes, far below what the stack holds.
+const MAX_STATEMENT_DEPTH: u32 = 100;
+const MAX_EXPRESSION_DEPTH: u32 = 64;
+const MAX_OPERATORS: u32 = 1000;
 
 impl Parser<'_> {
     fn line(&self) -> u32 {
@@ -263,6 +281,22 @@ impl Parser<'_> {
 
     // `stm`
     fn statement(&mut self) -> Result<Stmt> {
+        if self.statements >= MAX_STATEMENT_DEPTH {
+            return Err(self.too_deep("statements"));
+        }
+        self.statements += 1;
+        self.operators = 0;
+        let statement = self.statement_body();
+        self.statements -= 1;
+        statement
+    }
+
+    fn too_deep(&self, what: &str) -> crate::Error {
+        self.lexer
+            .error(&self.lexer.last_pos(), format!("{what} nested too deeply"))
+    }
+
+    fn statement_body(&mut self) -> Result<Stmt> {
         match self.peek()? {
             Token::Punct(Punct::Semi) => {
                 self.advance()?;
@@ -508,7 +542,13 @@ impl Parser<'_> {
     // share a level, as do all comparisons; `%` binds tighter than `*`
     // and `/`.
     fn expression(&mut self) -> Result<Expr> {
-        self.binary(Level::Logical)
+        if self.expressions >= MAX_EXPRESSION_DEPTH {
+            return Err(self.too_deep("expressions"));
+        }
+        self.expressions += 1;
+        let expression = self.binary(Level::Logical);
+        self.expressions -= 1;
+        expression
     }
 
     fn binary(&mut self, level: Level) -> Result<Expr> {
@@ -521,6 +561,10 @@ impl Parser<'_> {
                 return Ok(left);
             };
             self.advance()?;
+            self.operators += 1;
+            if self.operators > MAX_OPERATORS {
+                return Err(self.too_deep("operators"));
+            }
             let right = match level.tighter() {
                 Some(tighter) => self.binary(tighter)?,
                 None => self.operand()?,
@@ -577,6 +621,16 @@ impl Parser<'_> {
     /// such (rule `unarypostfixexp: lvalue`), the only thing `=` accepts
     /// on its left.
     fn unary(&mut self) -> Result<(Expr, bool)> {
+        if self.expressions >= MAX_EXPRESSION_DEPTH {
+            return Err(self.too_deep("expressions"));
+        }
+        self.expressions += 1;
+        let unary = self.unary_body();
+        self.expressions -= 1;
+        unary
+    }
+
+    fn unary_body(&mut self) -> Result<(Expr, bool)> {
         match self.peek()? {
             Token::Punct(Punct::Minus) => {
                 self.advance()?;
@@ -922,6 +976,53 @@ mod tests {
             ExprKind::Binary { left, right, .. } => (left, right),
             other => panic!("{other:?}"),
         }
+    }
+
+    fn too_deep(source: &str) {
+        let error = parse_str(source).expect_err("too deep");
+        assert!(
+            error.message.contains("nested too deeply"),
+            "{}",
+            error.message
+        );
+    }
+
+    // Hostile sources must end in an error, not in a stack overflow.
+    #[test]
+    fn unary_nesting_is_bounded() {
+        too_deep(&format!("var a = {}1;", "!".repeat(100_000)));
+        too_deep(&format!("var a = {}1;", "-".repeat(100_000)));
+    }
+
+    #[test]
+    fn parenthesis_nesting_is_bounded() {
+        too_deep(&format!("var a = {}1;", "(".repeat(100_000)));
+    }
+
+    #[test]
+    fn block_nesting_is_bounded() {
+        too_deep(&format!("on \"e\" {}", "{".repeat(100_000)));
+    }
+
+    #[test]
+    fn operator_chains_are_bounded() {
+        too_deep(&format!("var a = 1{};", " + 1".repeat(100_000)));
+    }
+
+    #[test]
+    fn else_chains_are_bounded() {
+        too_deep(&format!(
+            "on \"e\" {{ if (a) a = 1; {} }}",
+            "else if (a) a = 1; ".repeat(100_000)
+        ));
+    }
+
+    #[test]
+    fn what_a_person_writes_is_inside_the_bounds() {
+        let chain = format!("if (a) a = 1; {}", "else if (a) a = 1; ".repeat(80));
+        assert!(parse_str(&format!("on \"e\" {{ {chain} }}")).is_ok());
+        let sum = format!("on \"e\" {{ var a = 1{}; }}", " + 1".repeat(500));
+        assert!(parse_str(&sum).is_ok());
     }
 
     #[test]

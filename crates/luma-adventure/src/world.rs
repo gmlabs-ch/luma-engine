@@ -164,6 +164,10 @@ pub struct World {
     /// The fonts of talking objects that could not be loaded, so that
     /// each is tried and reported once.
     failed_fonts: std::collections::HashSet<String>,
+    /// The source scripts that did not compile, so that each is compiled
+    /// and reported once.
+    #[cfg(feature = "compiler")]
+    failed_scripts: std::collections::HashSet<String>,
     pub(crate) mouse: Mouse,
     /// Where the front-end last reported the pointer, in game pixels,
     /// before the mouse lock; it may lie outside the screen.
@@ -221,6 +225,9 @@ pub struct World {
     /// true the front-end keeps the last frame on screen instead of
     /// presenting new ones; the game runs on.
     pub(crate) suspended_rendering: bool,
+    /// `Game.SuppressScriptErrors`: script runtime errors only go to the
+    /// log, without the on-screen message.
+    pub(crate) suppress_script_errors: bool,
     /// Frames drawn in the last whole second (`Game.FPS`), and the
     /// counters behind it (`m_Fps`, `m_FpsTime`, `m_FramesRendered`).
     pub(crate) fps: i32,
@@ -343,6 +350,8 @@ impl World {
             talk_skip_button: TalkSkipButton::Left,
             sentences: Vec::new(),
             failed_fonts: std::collections::HashSet::new(),
+            #[cfg(feature = "compiler")]
+            failed_scripts: std::collections::HashSet::new(),
             mouse: Mouse::default(),
             pointer: (0, 0),
             cursor_warp: None,
@@ -376,6 +385,7 @@ impl World {
             startup_scene,
             windowed: false,
             suspended_rendering: false,
+            suppress_script_errors: false,
             fps: 0,
             fps_time: 0,
             fps_frames: 0,
@@ -966,6 +976,57 @@ impl World {
         self.log.push(message.into());
     }
 
+    /// Sets every script value that holds an object destroyed since the
+    /// last call to `null` (`CBGame::InvalidateValues`, which the
+    /// original runs from `UnregisterObject` and from the destructor of
+    /// a window or a control): the variables and stacks of every script,
+    /// the engine's globals, the properties scripts set on the objects
+    /// and the elements of the `Array` objects. A script that unloaded
+    /// an object then finds `obj == null` true.
+    pub(crate) fn flush_removed_objects(&mut self, engine: &mut Engine) {
+        let removed = self.objects.take_removed();
+        if removed.is_empty() {
+            return;
+        }
+        let removed: std::collections::HashSet<NativeId> = removed.into_iter().collect();
+        let gone = |id: NativeId| removed.contains(&id);
+        engine.invalidate_natives(&gone);
+        for (_, native) in self.objects.iter_mut() {
+            for value in native.props.values_mut() {
+                value.invalidate_natives(&gone);
+            }
+            if let Kind::Class(object) = &mut native.kind {
+                object.invalidate_natives(&gone);
+            }
+        }
+    }
+
+    /// Sets the `PROPERTY { NAME VALUE }` blocks of a definition file on
+    /// an object (`CBScriptHolder::ParseProperty`): each value, a string,
+    /// goes through the same path as an assignment by a script
+    /// (`ScSetProperty`), so a block naming a built-in property (`Active`,
+    /// `X`...) sets it, and any other name becomes a script property.
+    pub(crate) fn apply_properties(
+        &mut self,
+        id: NativeId,
+        properties: &[luma_formats::scene::Property],
+    ) {
+        for property in properties {
+            let value = Value::from(property.value.clone());
+            Natives::set_property(self, id, &property.name, &value);
+        }
+    }
+
+    /// Reports a script runtime error, already worded
+    /// (`CScScript::RuntimeError`): to the log, and to the player as a
+    /// quick message unless the game set `Game.SuppressScriptErrors`.
+    pub(crate) fn report_script_error(&mut self, message: &str) {
+        self.log.push(message.to_string());
+        if !self.suppress_script_errors {
+            self.quick_message("Script runtime error. View log for details.");
+        }
+    }
+
     /// Logs once that a feature is not implemented yet.
     pub(crate) fn stub(&mut self, what: &str) {
         if self.stubs.insert(what.to_string()) {
@@ -1015,12 +1076,14 @@ impl World {
         self.scheduled_scene = Some((path.to_string(), fade_in));
     }
 
-    /// Attaches a script to an object (`AttachScript`, `SCRIPT=`): the
-    /// same file is not attached twice while it runs.
+    /// Attaches a script to an object (`AttachScript`, `SCRIPT=`,
+    /// `CBScriptHolder::AddScript`): the same file is not attached twice
+    /// while it runs. The file is the path as given, compared without
+    /// case with the paths the object's scripts were attached with.
     pub fn attach(&mut self, engine: &mut Engine, owner: NativeId, path: &str) -> bool {
         let running = engine.scripts_of(owner).into_iter().any(|id| {
             engine.script(id).is_some_and(|s| {
-                s.filename().eq_ignore_ascii_case(path) && s.state() != State::Finished
+                s.source().eq_ignore_ascii_case(path) && s.state() != State::Finished
             })
         });
         if running {
@@ -1033,15 +1096,12 @@ impl World {
         let Some(script) = engine.run_script(self, path, Some(owner)) else {
             return false;
         };
-        // A new script takes its owner's freezability (`AddScript`); only
-        // a container's entity can be non-freezable in Luma.
-        if let Some(Kind::Entity(crate::scene_view::EntityRef::Ui(index))) =
-            self.objects.get(owner).map(|n| &n.kind)
-        {
-            let freezable = self.ui_entities.get(*index).is_none_or(|e| e.freezable);
-            if let Some(script) = engine.script_mut(script) {
-                script.set_freezable(freezable);
-            }
+        // A new script takes its owner's freezable flag (`AddScript`):
+        // false for a window that went system-exclusive, its controls and
+        // a container's entity.
+        let freezable = self.objects.get(owner).is_none_or(|n| n.state.freezable);
+        if let Some(script) = engine.script_mut(script) {
+            script.set_freezable(freezable);
         }
         true
     }
@@ -1191,13 +1251,7 @@ impl World {
             self.log(format!("  missing: {file}: {reason}"));
         }
         let id = self.objects.insert(Kind::Actor);
-        if let Some(native) = self.objects.get_mut(id) {
-            for property in &actor.def.properties {
-                native
-                    .props
-                    .insert(property.name.clone(), Value::from(property.value.clone()));
-            }
-        }
+        let properties = actor.def.properties.clone();
         let scripts = actor.def.scripts.clone();
         // `SOUND_VOLUME` is the volume of the actor's sounds
         // (`m_SFXVolume`).
@@ -1206,6 +1260,7 @@ impl World {
         if sound_volume != 100 {
             self.set_sfx_volume(id, sound_volume);
         }
+        self.apply_properties(id, &properties);
         for script in scripts {
             self.attach(engine, id, &script);
         }
@@ -2005,6 +2060,12 @@ impl World {
         engine.remove_finished();
 
         let mut view = SceneView::load(&self.vfs, path)?;
+        // The scene object is the same across scenes and only `NAME`
+        // changes its name: a file without one keeps the name of the
+        // scene left behind (empty before the first scene).
+        if view.scene.name.is_empty() {
+            view.scene.name = self.prev_scene_name.clone();
+        }
         // Captions go through the string table when the objects load
         // (`CBObject::SetCaption`).
         for layer in &mut view.scene.layers {
@@ -2896,37 +2957,68 @@ impl Natives for World {
         }
     }
 
+    /// `ScToString` of the object's class: the text of the most derived
+    /// class that overrides it in the original.
     fn to_string(&self, id: NativeId) -> String {
-        match self.objects.get(id).map(|n| &n.kind) {
-            Some(Kind::Game) => "[game]".to_string(),
-            Some(Kind::Class(object)) => object.to_string(self),
-            Some(Kind::Entity(_) | Kind::Region { .. } | Kind::Layer(_) | Kind::Scene) => {
-                format!("[{}]", self.describe(id))
-            }
-            Some(Kind::Actor) => "[actor object]".to_string(),
-            Some(Kind::Actor3D) => "[actor3dx object]".to_string(),
-            Some(Kind::Attachment3D(_)) => "[attachment object]".to_string(),
-            Some(Kind::Control | Kind::Item) => format!("[{}]", self.describe(id)),
-            Some(Kind::Sprite(_) | Kind::HoverSprite(_) | Kind::ControlImage { .. }) => {
-                "[sprite]".to_string()
-            }
-            Some(Kind::Frame { .. }) => "[frame]".to_string(),
-            Some(Kind::SubFrame { .. }) => "[subframe]".to_string(),
-            Some(Kind::Object) => "[object]".to_string(),
-            Some(Kind::Keyboard) => "[keyboard state]".to_string(),
-            Some(Kind::Emitter(_)) => "[particle emitter]".to_string(),
-            Some(_) => "[native object]".to_string(),
-            None => "[invalid object]".to_string(),
-        }
+        let text = match self.objects.get(id).map(|n| &n.kind) {
+            Some(Kind::Class(object)) => return object.to_string(self),
+            // `CBGame`.
+            Some(Kind::Game) => "[game object]",
+            // `CBKeyboardState`.
+            Some(Kind::Keyboard) => "[keyboard state]",
+            // `CAdScene`, `CAdLayer`.
+            Some(Kind::Scene) => "[scene object]",
+            Some(Kind::Layer(_)) => "[layer]",
+            // `CAdEntity`, also the entity inside an entity container.
+            Some(Kind::Entity(_)) => "[entity object]",
+            // A region of a layer is a `CAdRegion`, the clickable region
+            // of an entity a plain `CBRegion`.
+            Some(Kind::Region { .. }) => "[ad region]",
+            Some(Kind::EntityRegion(_)) => "[region]",
+            Some(Kind::Actor) => "[actor object]",
+            Some(Kind::Actor3D) => "[actor3dx object]",
+            Some(Kind::Attachment3D(_)) => "[attachment object]",
+            // `CUIWindow`, `CUIButton`, `CUIEdit`, `CUIText`, `CUIEntity`.
+            Some(Kind::Control) => match self.control(id).map(|c| &c.kind) {
+                Some(crate::ui::ControlKind::Window(_)) => "[window]",
+                Some(crate::ui::ControlKind::Button(_)) => "[button]",
+                Some(crate::ui::ControlKind::Edit(_)) => "[edit]",
+                Some(crate::ui::ControlKind::Static(_)) => "[static]",
+                Some(crate::ui::ControlKind::EntityContainer(_)) => "[entity container]",
+                None => "[ui_object]",
+            },
+            Some(Kind::Item) => "[item]",
+            Some(
+                Kind::Sprite(_)
+                | Kind::HoverSprite(_)
+                | Kind::CursorSprite { .. }
+                | Kind::ControlImage { .. },
+            ) => "[sprite]",
+            Some(Kind::Frame { .. }) => "[frame]",
+            Some(Kind::SubFrame { .. }) => "[subframe]",
+            Some(Kind::Emitter(_)) => "[particle emitter]",
+            // Classes that keep `CBObject`'s text: `new Object()`, the
+            // response box, the faders and the waypoint groups.
+            Some(
+                Kind::Object
+                | Kind::ResponseBox
+                | Kind::Fader
+                | Kind::SceneFader
+                | Kind::WaypointGroup(_),
+            ) => "[object]",
+            // `CSXMath` keeps the base class's text.
+            Some(Kind::Math | Kind::Inert(_)) => "[native object]",
+            None => "[invalid object]",
+        };
+        text.to_string()
     }
 
-    fn to_bool(&self, id: NativeId) -> bool {
-        match self.objects.get(id).map(|n| &n.kind) {
-            // The library classes keep the base class's `false`.
-            Some(Kind::Class(_)) => false,
-            Some(_) => true,
-            None => false,
-        }
+    /// `CBScriptable::ScToBool`, which no class of the original
+    /// overrides: every native object is false in a condition, so
+    /// `if(obj)` does not run and `!obj` is true for a live object
+    /// (scripts test `obj != null`).
+    fn to_bool(&self, _id: NativeId) -> bool {
+        false
     }
 
     fn compare(&self, a: NativeId, b: NativeId) -> Ordering {
@@ -2983,6 +3075,18 @@ impl ClassHost for World {
             }
         }
         self.vfs.read(name).ok()
+    }
+
+    /// A file a script wrote, else a loose file of the game; not a file
+    /// inside a package, which the system cannot copy.
+    fn read_disk_file(&mut self, name: &str) -> Option<Vec<u8>> {
+        if let Some(path) = self.writable_path(name) {
+            if path.is_file() {
+                return std::fs::read(path).ok();
+            }
+        }
+        let path = self.vfs.find_loose(name)?;
+        std::fs::read(path).ok()
     }
 
     /// Under the save directory (the game's, or the user's own when the
@@ -3059,6 +3163,10 @@ impl ClassHost for World {
     fn log(&mut self, message: &str) {
         self.log.push(message.to_string());
     }
+
+    fn script_error(&mut self, message: &str) {
+        self.report_script_error(message);
+    }
 }
 
 impl Host for World {
@@ -3068,6 +3176,63 @@ impl Host for World {
 
     fn log(&mut self, message: &str) {
         self.log.push(message.to_string());
+    }
+
+    fn script_error(&mut self, message: &str) {
+        self.report_script_error(message);
+    }
+
+    /// `Game->m_State == GAME_FROZEN`: a `Sleep` started now runs on the
+    /// wall clock (`CScScript::Sleep`).
+    fn is_frozen(&self) -> bool {
+        World::is_frozen(self)
+    }
+
+    /// The real time since the engine started, which goes on during a
+    /// tick: what time slices and the script profiler measure with.
+    fn ticks(&self) -> u64 {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_millis() as u64
+    }
+
+    /// A script file that is still source text is compiled when it is
+    /// loaded (`CScEngine::GetCompiledScript`), with the natives the
+    /// engine publishes and the game's files for its `#include`s. A
+    /// compiler error goes to the log as the original writes it and the
+    /// player is told. Without the `compiler` feature there is no
+    /// compiler, as the original without its compiler library.
+    #[cfg(feature = "compiler")]
+    fn compile_script(&mut self, filename: &str, source: &[u8]) -> Option<Vec<u8>> {
+        // A source script comes from the game's files: bound what the
+        // compiler is given, and try a file that failed only once.
+        const MAX_SOURCE: usize = 4 * 1024 * 1024;
+        let key = filename.to_ascii_lowercase();
+        if self.failed_scripts.contains(&key) {
+            return None;
+        }
+        if source.len() > MAX_SOURCE {
+            self.failed_scripts.insert(key);
+            self.log(format!("Compiling script '{filename}'..."));
+            self.log("  Error: the script is too large".to_string());
+            self.quick_message("Script compiler error. View log for details.");
+            return None;
+        }
+        let compiler = luma_compiler::Compiler::new(luma_compiler::Natives::wme());
+        let vfs = &self.vfs;
+        let mut includes = |name: &[u8]| vfs.read(&String::from_utf8_lossy(name)).ok();
+        match compiler.compile(source, filename, &mut includes) {
+            Ok(compiled) => Some(compiled),
+            Err(err) => {
+                self.failed_scripts.insert(key);
+                self.log(format!("Compiling script '{filename}'..."));
+                self.log(format!("  Error@line {}: {}", err.line, err.message));
+                self.quick_message("Script compiler error. View log for details.");
+                None
+            }
+        }
     }
 
     fn timer(&self) -> u64 {
@@ -3112,7 +3277,7 @@ impl Host for World {
     fn call_function(&mut self, name: &str, args: &[Value], ctx: Context<'_>) -> Option<Return> {
         match name {
             // The script library classes.
-            "String" | "Array" | "Date" | "File" | "MemBuffer" => {
+            "String" | "Array" | "Date" | "File" | "MemBuffer" | "TcpClient" => {
                 let object = ClassObject::construct(name, args, self)?;
                 let id = self.objects.insert(Kind::Class(object));
                 Some(Return::constructed(Value::Native(id)))
@@ -3171,6 +3336,10 @@ impl Host for World {
     /// caller's stack, so that the script resumes after the call when the
     /// game loads; a failure turns the result into `false`.
     fn after_call(&mut self, engine: &mut Engine, script: luma_script::ScriptId) {
+        // A call that destroyed objects (`Game.UnloadObject`,
+        // `DeleteItem`, `window.Close`...): the values that held them
+        // are null from the next instruction on.
+        self.flush_removed_objects(engine);
         if let Some((slot, description, quick)) = self.pending_save.take() {
             if let Err(err) = crate::save::save_game(self, engine, slot, &description, quick) {
                 self.log(format!("Error saving game to slot {slot}: {err}"));
@@ -3218,6 +3387,7 @@ impl Runtime {
     pub fn with_audio(vfs: Vfs, audio: Audio) -> Result<Runtime> {
         let world = World::with_audio(vfs, audio)?;
         let mut engine = Engine::new();
+        engine.set_compat_kill_method_threads(world.game_file.compat_kill_method_threads);
         // The engine publishes the game object to every script.
         engine.set_global("Game", Value::Native(world.game_id));
         engine.set_global("Math", Value::Native(world.math_id));
@@ -3252,6 +3422,15 @@ impl Runtime {
     pub fn change_scene(&mut self, path: &str) -> Result<()> {
         self.world.scheduled_scene = None;
         self.world.load_scene(&mut self.engine, path)
+    }
+
+    /// Ends the script engine as the original's destructor does
+    /// (`CScEngine::~CScEngine`): a script profiler still on writes its
+    /// table. Returns the log lines this produced, for the front-end to
+    /// show before it drops the runtime.
+    pub fn shutdown(&mut self) -> Vec<String> {
+        self.engine.disable_profiling(&mut self.world);
+        self.world.take_log()
     }
 
     /// Saves the game to a slot now (`Game.SaveGame` outside a script):
@@ -3327,7 +3506,11 @@ impl Runtime {
         let (timer, clock) = (self.world.timer, self.world.clock);
         self.world.fader.update(timer, clock);
         self.world.scene_fader.update(timer, clock);
+        // Objects destroyed outside a script call (a scene change, the
+        // end of an animation): the script values that held them go null.
+        self.world.flush_removed_objects(&mut self.engine);
         self.engine.tick(&mut self.world);
+        self.world.flush_removed_objects(&mut self.engine);
         self.world.update_scene();
         self.world.update_entity_videos();
         self.world.update_actors();

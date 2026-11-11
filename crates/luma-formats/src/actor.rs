@@ -193,7 +193,7 @@ pub struct Actor {
 impl Default for Actor {
     fn default() -> Self {
         Actor {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             caption: String::new(),
             template: None,
             x: 0,

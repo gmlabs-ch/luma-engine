@@ -53,7 +53,7 @@ ACTOR {
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `TEMPLATE` | string | | Another `.actor` file loaded first; the keys that follow override it. |
-| `NAME` | string | `""` | Name used by scripts. |
+| `NAME` | string | `<unnamed>` | Name used by scripts. |
 | `CAPTION` | string | `""` | Caption shown when the mouse is over the actor. |
 | `X`, `Y` | int | `0` | Position: where the hotspot of the current sprite is placed. |
 | `ACTIVE` | bool | `TRUE` | Drawn, updated and clickable. |

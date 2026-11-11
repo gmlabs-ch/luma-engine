@@ -144,13 +144,16 @@ impl Script {
         &self.program
     }
 
-    /// The script's path in the game, as recorded by the compiler.
+    /// The script's path in the game, as recorded by the compiler; the
+    /// engine itself never uses it (see [`Script::source`]).
     pub fn filename(&self) -> &str {
         self.program.filename()
     }
 
-    /// The path the program was loaded from, which a saved game names
-    /// it by.
+    /// The path the script was loaded by (`CScScript::m_Filename`): the
+    /// name the engine's messages give, the one `AttachScript`,
+    /// `DetachScript` and `IsScriptRunning` compare, and the one a saved
+    /// game names the script by.
     pub fn source(&self) -> &str {
         &self.source
     }

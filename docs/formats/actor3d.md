@@ -71,7 +71,7 @@ token), and Luma does the same.
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `TEMPLATE` | path | | Another `ACTOR3DX` file loaded **in place**: the models, shadow model, `ANIMATION` and `EFFECT` blocks collected so far are dropped, then the template's keys are applied over the current values, then the rest of this file. Put it first: a `MODEL` before it is lost, a `MODEL` after it merges into the template's model. |
-| `NAME`, `CAPTION` | string | empty | As for 2D actors. |
+| `NAME`, `CAPTION` | string | `<unnamed>`, empty | As for 2D actors. |
 | `FONT`, `CURSOR` | path | none | Speech font, cursor sprite. |
 | `SCRIPT` | path, repeatable | | Scripts attached to the actor. |
 | `PROPERTY` | block, repeatable | | `{ NAME  VALUE }`, a script property. |

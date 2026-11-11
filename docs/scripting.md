@@ -126,7 +126,10 @@ sleep, wait or call script methods.
 
 `WaitForExclusive`, used by walking and talking, first ends every script
 already waiting for the object (and the scripts waiting for those), so a
-new order cancels the previous one.
+new order cancels the previous one. A game file with
+`COMPAT_KILL_METHOD_THREADS=TRUE` keeps the rule of engines before 1.9:
+the scripts waiting for the ended ones are left alone, receive `null`
+for their call at the next tick and go on.
 
 ## A tick
 
@@ -136,26 +139,120 @@ Once per frame the host calls `Engine::tick`:
    passed, thread returned) is set to `Running`;
 2. every runnable script executes instructions until it blocks or ends;
    threads spawned during the tick run in the same tick; a script that
-   asked for a **time slice** (`SetScriptTimeSlice`) is interrupted when
-   its slice is used, and continues next tick;
+   has a **time slice** (`SetScriptTimeSlice`) when its turn comes is
+   interrupted when the slice is used, and continues next tick;
 3. finished scripts are removed and returned to the host, which forgets
    them on their owners.
+
+Whether a turn is time-sliced is decided once, when the turn starts, as
+in the original (`CScEngine::Tick`): a script that calls
+`SetScriptTimeSlice` runs on unsliced until it next sleeps or waits, and
+only its later turns are cut; a script that sets its slice to 0 in a
+sliced turn stops at once and goes on, unsliced, next tick. Threads take
+the slice of the script they come from. The slice is measured with
+`Host::ticks`, a real-time clock that goes on during the tick.
+
+`Engine::counts` groups the scripts as the original's debug line does
+(`GetNumScripts`): the total leaves the finished scripts out, sleeping
+and paused scripts count as running, and only the scripts waiting for an
+object as waiting.
+
+### The profiler
+
+`Game.EnableScriptProfiling()` starts adding up, per script file (the
+path the script was attached with, in lower case), the real time each
+turn of a script takes; `Game.DisableScriptProfiling()` stops and writes
+the table to the log, as the original's `DumpStats` does: a line
+`***** Script profiling information: *****`, the time since profiling
+started, then one line per file with its seconds and its share of that
+time, longest first. A turn is counted when profiling was on as the turn
+started (as it ends, for a time-sliced turn), so the turn that turns the
+profiler on is not. A profiler still on when the game ends writes its
+table then (`Runtime::shutdown`, which `luma-player` calls), as the
+original's engine does when it is destroyed.
+
+## Programs
+
+A script file is loaded once and its program kept in a cache, by the
+path it was asked for without regard to case; the threads and the later
+runs of the file share it. `Game.ClearScriptCache()` empties the cache
+(`EmptyScriptCache`): running scripts keep their program, and the next
+script started from a file reads the file again. Loading a saved game
+empties it too. The original keeps a fixed number of files and replaces
+the least recently used one; Luma keeps them all, which no script can
+tell.
+
+A file that does not start with the magic of a compiled script is
+**source text**, which the original compiles as it loads it. The engine
+hands such a file to `Host::compile_script` and runs what comes back;
+`luma-script` itself never depends on the compiler. The adventure layer
+answers with `luma-compiler` when it is built with its `compiler`
+feature (`luma`'s feature of the same name, on in `luma-player`): the
+natives are the ones the engine publishes and `#include`s are read from
+the game's files. A file that does not compile is not run: the log gets
+`Compiling script '<file>'...` and `  Error@line N: <message>` (one
+error, where the original's compiler may report several), and the
+player sees the quick message `Script compiler error. View log for
+details.` Without the feature the log says `script '<file>' needs to be
+compiled but compiler is not available`, as the original without its
+compiler library.
 
 ## Errors
 
 The engine never stops the game: a runtime error (division by zero,
 undefined method or function, stack corruption) is logged with the
 script's path and source line, and the operation yields `null` or
-`false`. A corrupt program (an instruction that cannot be decoded, a
-symbol index past the table) is fatal for that script only.
+`false`. The path is the one the script was attached with, not the one
+the compiler recorded in the file. The log line is `Runtime error.
+Script '<path>', line N: <message>` (the original writes the message on
+a second line). The host is told through `Host::script_error`; the
+adventure layer then shows the player the quick message `Script runtime
+error. View log for details.`, as the original does, unless the game
+set `Game.SuppressScriptErrors` (saved with the game). A corrupt program
+(an instruction that cannot be decoded, a symbol index past the table)
+is fatal for that script only.
 
 ## Native objects
 
 The adventure layer (`luma-adventure`) implements the `Host` trait: its
 `World` owns the game, the current scene and their parts, and answers
 property reads, writes and method calls for them. Scripts hold these
-objects by handle; a handle to an object of a previous scene is simply
-invalid, so `Game.ValidObject` says no and its properties read as `null`.
+objects by handle. When an object is destroyed (`Game.UnloadObject`,
+`DeleteItem`, a window unloaded, the objects of the scene left behind),
+every script value that held it becomes `null`, as the original's
+`CBGame::InvalidateValues` does: variables and stacks of every script,
+the engine's globals, the properties scripts set on other objects and
+the elements of `Array` objects, so `obj == null` is true from the next
+instruction on (`Engine::invalidate_natives`, called by the adventure
+layer after each native call and around each tick). The original does
+this for the objects it registers and for windows and controls; Luma
+does it for every native object that goes, sprite, frame and region
+objects included, where the original leaves a dangling pointer.
+
+Every native object converts to `false`, `0` and `0.0`
+(`CBScriptable::ScToBool`, `ScToInt`, `ScToFloat`, which no class of the
+original overrides): `if (obj)` does not run and `!obj` is true for a
+live object, so scripts test `obj != null`, and `ToBool(obj)` is false.
+Its string form (`"" + obj`, `ToString(obj)`) is the text of its class
+in the original (`ScToString`):
+
+| Object | Text |
+|--------|------|
+| `Game` | `[game object]` |
+| `Game.Keyboard` | `[keyboard state]` |
+| `Scene` | `[scene object]` |
+| a layer | `[layer]` |
+| an entity (also the one inside an entity container) | `[entity object]` |
+| a region of a layer | `[ad region]` |
+| the region of an entity | `[region]` |
+| an actor, a 3D actor, an attachment of a 3D actor | `[actor object]`, `[actor3dx object]`, `[attachment object]` |
+| an inventory item | `[item]` |
+| a window, a button, an editor, a static, an entity container | `[window]`, `[button]`, `[edit]`, `[static]`, `[entity container]` |
+| a sprite, a frame, a sub-frame | `[sprite]`, `[frame]`, `[subframe]` |
+| a particle emitter | `[particle emitter]` |
+| `new Object()`, a waypoint group, a fader, the response box | `[object]` (`CBObject`) |
+| `Math`, `Directory` | `[native object]` (the base class) |
+| a handle whose object is gone and that no variable was told about | `[invalid object]` (Luma only; the original would read freed memory) |
 
 | Object | Properties | Methods |
 |--------|------------|---------|
@@ -171,7 +268,7 @@ invalid, so `Game.ValidObject` says no and its properties read as `null`.
 | Actors and entities, speech | `SubtitlesWidth`, `SubtitlesPosX`, `SubtitlesPosY`, `SubtitlesPosRelative`, `SubtitlesPosXCenter` | `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`, `SetFont`, `GetFont`, `ForceTalkAnim`, `AddTalkSprite`, `RemoveTalkSprite`, `SetTalkSprite` (see [formats/font.md](formats/font.md#speech)); `GetSpriteObject` on entities, actors (the sprite `SetSprite` gave) and items (their image) |
 | `Game`, actors and entities, sound | `SoundPanning` | `LoadSound`, `PlaySound`, `PlaySoundEvent`, `StopSound`, `PauseSound`, `ResumeSound`, `IsSoundPlaying`, `SetSoundPosition`, `GetSoundPosition`, `SetSoundVolume`, `GetSoundVolume`, `SoundFXEcho`, `SoundFXReverb`, `SoundFXNone` (see [docs/audio.md](audio.md#sound-effects)) |
 | `Game`, input and fades | `Keyboard.KeyCode`, `Key`, `Printable`, `IsShift`, `IsAlt`, `IsControl` | `Keyboard.IsKeyDown`, `SetMousePos`, `FadeOut`, `FadeIn` (and their `Async` and `System` forms), `GetFadeColor`, `SetActiveCursor`, `RemoveActiveCursor`, `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`, `GetActiveCursor`, `GetWaitCursor`, `HideCursor`, `ShowCursor` |
-| `Math` (a global) | `PI` | `Abs`, `Acos`, `Asin`, `Atan`, `Atan2`, `Ceil`, `Cos`, `Cosh`, `Exp`, `Floor`, `Log`, `Log10`, `Pow`, `Sin`, `Sinh`, `Tan`, `Tanh`, `Sqrt`, `DegToRad`, `RadToDeg`; every one returns a float, `Floor` and `Ceil` included, as in the original engine |
+| `Math` (a global) | `PI` | `Abs`, `Acos`, `Asin`, `Atan`, `Atan2`, `Ceil`, `Cos`, `Cosh`, `Exp`, `Floor`, `Log`, `Log10`, `Pow`, `Sin`, `Sinh`, `Tan`, `Tanh`, `Sqrt`, `DegToRad`, `RadToDeg`; every one returns a float, `Floor` and `Ceil` included, as in the original engine. `Sin`, `Cos`, `Tan`, `Sinh`, `Cosh` and `Tanh` take **degrees** (the original converts the argument first: `Math.Sin(90)` is 1); `Acos`, `Asin`, `Atan` and `Atan2` return radians. A string argument is read like C's `atof`. `PI` and the factors of `DegToRad` and `RadToDeg` are single-precision constants, so `Math.PI` is 3.1415927410125732 |
 | `Directory` (a global) | see [Script library classes](#script-library-classes) | |
 | `Game`, music and volumes | | `PlayMusic`, `PlayMusicChannel`, `StopMusic`, `StopMusicChannel`, `PauseMusic`, `ResumeMusic`, `GetMusic`, `SetMusicPosition`, `GetMusicPosition`, `IsMusicPlaying`, `SetMusicVolume`, `GetMusicVolume` (and their `...Channel` forms), `MusicCrossfade`, `GetSoundLength`, `SetGlobalSFXVolume`, `SetGlobalSpeechVolume`, `SetGlobalMusicVolume`, `SetGlobalMasterVolume` and their getters, `AddSpeechDir`, `RemoveSpeechDir` |
 | Windows (`Game.LoadWindow`, `Game.CreateWindow`) | `Name`, `X`, `Y`, `Width`, `Height`, `Visible`, `Disabled`, `Text`, `Parent`, `ParentNotify`, `NumControls`, `Exclusive`, `SystemExclusive` (writable: `true` opens the window modally without making the script wait, `false` closes it and leaves it visible), `Menu`, `InGame`, `PauseMusic`, `Transparent`, `FadeColor`, `NextSibling`, `PrevSibling` | `GetWidget`, `GetControl`, `Close`, `GoExclusive`, `GoSystemExclusive`, `Center`, `Focus`, `LoadFromFile`, `SetImage`, `GetImage`, `GetImageObject`, `SetFont`, `SetInactiveImage`, `SetInactiveFont`, `GetInactiveImage`, `GetInactiveImageObject`, `CreateButton`, `CreateStatic`, `CreateEditor`, `CreateWindow`, `CreateEntityContainer`, `DeleteControl`, `MoveAfter`, `MoveBefore`, `MoveToTop`, `MoveToBottom` |
@@ -234,6 +331,32 @@ Luma, so an edit through one entity's sprite object shows on all of them,
 where the engine gives each object its own copy; and
 `DeleteFrame(index)` / `DeleteSubframe(index)` delete, where WME 1.x only
 checks the index and deletes with a frame or sub-frame object.
+
+Every object scripts can attach scripts to (a script holder: the game,
+the scene, layers, regions, entities, actors, items, windows and
+controls, sprites, particle emitters, `new Object()`) has a `Name` and a
+`Filename`. The name is `<unnamed>` until the object's file gives one
+with `NAME` or a script sets it (`CBScriptHolder`'s constructor); a
+sprite starts with an empty name and so does the scene object, as in
+the original. Setting `Name` stores the value as a string. `Filename`
+is the file the object itself was loaded from: the game file for
+`Game`, the scene, actor, window, sprite or response box file, the file
+of an entity loaded by `LoadEntity`, `AddAttachment` or an entity
+container; it is `null` for an object written inside another file (an
+entity or a region of a scene, a control of a window, an item) or
+created empty.
+
+A script is known on its object by the path it was attached with
+(`CScScript::m_Filename`), compared without case: attaching a file that
+is already attached and not finished is logged and does nothing,
+`IsScriptRunning(file)` and `DetachScript(file, killThreads)` look for
+that path, and finishing a script with its threads ends the threads
+started from the same path on the same object. Another spelling of the
+same file (`/` for `\`, a leading `.\`) is another script. A new script
+takes its object's freezable flag (`CBScriptHolder::m_Freezable`): a
+window that went system-exclusive, its controls and the entity of an
+entity container are not freezable, so the scripts attached to them
+later run while the game is frozen too.
 
 Scripts are attached by the `SCRIPT` keys of `default.game`, `.scene`,
 `.entity`, layers and regions, and by `AttachScript`. Changing scene
@@ -352,30 +475,38 @@ themselves.
 
 | Class | Properties | Methods | Notes |
 |-------|------------|---------|-------|
-| `String` | `Type` (`string`), `Length`, `Capacity` (settable, never below the text and its terminator: a warning is logged) | `Substring(start, end)` (inclusive positions, swapped when reversed, clamped to the text), `Substr(start, length)` (to the end without a length; empty for a length of 0 or less), `ToUpperCase`, `ToLowerCase`, `IndexOf(text, from)` (-1 when absent; an empty text is found at `from`), `Split(separators)` (every character of the argument separates, `,` by default; an empty text gives one empty part; returns an `Array`) | `new String(text)`; `new String()` holds `[null]`, the string form of its missing argument; `new String(n)` is empty with a capacity of `n`. The string form is the text, and two `String` objects compare by text. Unknown properties read `null` and are not kept. |
-| `Array` | `Type` (`array`), `Length` (settable: truncates, or grows with unset elements), `[index]` (a name of digits only: `a["007"]` is `a[7]`; `a[1.0]` or `a[-1]` is nothing) | `Push(...)` (returns the new length), `Pop()` (`null` when empty) | `new Array()`; `new Array(n)`, `n` unset elements, any single argument being a length; `new Array(a, b, ...)` holds the arguments. Elements are copies. The string form joins the elements with commas, an unset element printing nothing and a `null` one `[null]`. Unknown properties are not kept. |
+| `String` | `Type` (`string`), `Length`, `Capacity` (settable, never below the text and its terminator: a warning is logged) | `Substring(start, end)` (inclusive positions, swapped when reversed, clamped to the text), `Substr(start, length)` (to the end without a length; empty for a length of 0 or less), `ToUpperCase`, `ToLowerCase` (in an ANSI game only the letters A to Z change, as `_strupr` and `_strlwr` do in the C locale the engine runs in; in a UTF-8 game every letter that has another case), `IndexOf(text, from)` (-1 when absent; an empty text is found at `from`), `Split(separators)` (every character of the argument separates, `,` by default; an empty text gives one empty part; returns an `Array`.) | `new String(text)`; `new String()` holds `[null]`, the string form of its missing argument; `new String(n)` is empty with a capacity of `n`. The string form is the text, and two `String` objects compare by text. Unknown properties read `null` and are not kept. |
+| `Array` | `Type` (`array`), `Length` (settable: truncates, or grows with unset elements), `[index]` (a name of digits only: `a["007"]` is `a[7]`, an empty name is `a[0]`; `a[1.0]` or `a[-1]` is nothing) | `Push(...)` (returns the new length), `Pop()` (`null` when empty) | `new Array()`; `new Array(n)`, `n` unset elements, any single argument being a length; `new Array(a, b, ...)` holds the arguments. Elements are copies. The string form joins the elements with commas, an unset element printing nothing and a `null` one `[null]`. Unknown properties are not kept. |
 | `Date` | `Type` (`date`) | `GetYear`, `GetMonth` (1 to 12), `GetDate`, `GetHours`, `GetMinutes`, `GetSeconds`, `GetWeekday` (0 is Sunday), the matching setters, `SetCurrentTime` | `new Date(y, m, d, h, mi, s)`, a missing field being 0 and every field normalised as `mktime` does, so `new Date(2020)` is 30 November 2019 and `SetMonth(13)` moves to January of the next year; `new Date()` is the host's clock. Dates compare by time. The string form is `asctime`'s, trailing newline included: `Wed Dec 31 13:30:25 2003\n`. |
-| `File` | `Type` (`file`), `Filename`, `Position`, `Length`, `TextMode`, `AccessMode` (0 closed, 1 read, 2 write, 3 append); other properties are kept | `SetFilename`, `OpenAsText(mode)`, `OpenAsBinary(mode)` (mode 1 when missing; another value logs an error and reads), `Close`, `SetPosition`, `Delete`, `Copy(dest, overwrite = true)`, `ReadLine`, `ReadText(n)`, `WriteLine`, `WriteText`, `ReadBool`, `ReadByte`, `ReadShort`, `ReadInt`, `ReadLong`, `ReadFloat`, `ReadDouble`, `ReadString` and the matching `Write...` | Reading finds a file a script wrote first, then the game's files (packages and loose files); writing, deleting and copying happen under the save directory, whose sub-directories are created as needed, and a name leaving it (`..`, an absolute path) fails. A method used in the wrong mode logs a runtime error and yields `null` (reads) or `false` (writes); reading past the end yields `null`. Text is Latin-1, `\r` is dropped when reading and lines are written with `\n`; binary values are little-endian, `ReadString`/`WriteString` a 32-bit length then the bytes, and `ReadShort` is 65536 plus the signed value, as in the original. The string form is the file name, `[file object]` without one. |
-| `Directory` | `Type` (`directory`), `PathSeparator` (`\`, which every file name in the engine accepts along with `/`), `CurrentDirectory` (the save directory; the set is accepted and ignored), `TempDirectory` (`temp` under the save directory, created on demand, with a trailing separator as `GetTempPath` gives); other properties are kept | `Create(path)` (every level; true when the directory exists afterwards), `Delete(path)` (an empty directory only, as `rmdir`), `GetFiles(path, mask)`, `GetDirectories(path, mask)` (an `Array` of names, not paths, sorted without regard to case; the mask is a Windows wildcard, `*.*` by default, compared without case; directories whose name starts with `.` are skipped, as the original skips `.` and `..`), `GetDrives` (an empty `Array`: no drive letters outside Windows) | Paths resolve under the save directory, an empty path or the save directory's own path naming it, and a path leaving it fails or lists nothing. A listing gives what the save directory holds, then the game's own files and directories under the same path (packages and loose files), a name once. The string form is `[native object]`. |
+| `File` | `Type` (`file`), `Filename` (`null` without a name), `Position`, `Length`, `TextMode`, `AccessMode` (0 closed, 1 read, 2 write, 3 append); other properties are kept | `SetFilename`, `OpenAsText(mode)`, `OpenAsBinary(mode)` (mode 1 when missing; another value logs an error and reads), `Close`, `SetPosition`, `Delete`, `Copy(dest, overwrite = true)`, `ReadLine`, `ReadText(n)`, `WriteLine`, `WriteText`, `ReadBool`, `ReadByte`, `ReadShort`, `ReadInt`, `ReadLong`, `ReadFloat`, `ReadDouble`, `ReadString` and the matching `Write...` | Reading finds a file a script wrote first, then the game's files (packages and loose files); writing, deleting and copying happen under the save directory, whose sub-directories are created as needed, and a name leaving it (`..`, an absolute path) fails. A method used in the wrong mode logs a runtime error and yields `null` (reads) or `false` (writes); reading past the end yields `null`. Text is Latin-1, `\r` is dropped when reading, and a file open as text is written with `\r\n` for every `\n` (the line end of `WriteLine` and those inside the text), as the original's text-mode stream does on Windows; `Copy` takes its source from the disk (a file a script wrote or a loose file of the game), not from a package; binary values are little-endian, `ReadString`/`WriteString` a 32-bit length then the bytes, and `ReadShort` is 65536 plus the signed value, as in the original. The string form is the file name, `[file object]` without one. |
+| `Directory` | `Type` (`directory`), `PathSeparator` (`\`, which every file name in the engine accepts along with `/`), `CurrentDirectory` (the save directory; the set is accepted and ignored), `TempDirectory` (`temp` under the save directory, created on demand, with a trailing separator as `GetTempPath` gives); other properties are kept | `Create(path)` (every level; true when the call made the directory, false when it was there already or when the path ends with a separator, as the original's final `mkdir` answers), `Delete(path)` (an empty directory only, as `rmdir`), `GetFiles(path, mask)`, `GetDirectories(path, mask)` (an `Array` of names, not paths, sorted without regard to case; the mask is a Windows wildcard, `*.*` by default, compared without case; directories whose name starts with `.` are skipped, as the original skips `.` and `..`), `GetDrives` (an empty `Array`: no drive letters outside Windows) | Paths resolve under the save directory, an empty path or the save directory's own path naming it, and a path leaving it fails or lists nothing. A listing gives what the save directory holds, then the game's own files and directories under the same path (packages and loose files), a name once. The string form is `[native object]`. |
 | `MemBuffer` | `Type` (`membuffer`), `Size`; other properties are kept | `SetSize`, `GetBool`, `GetByte`, `GetShort` (65536 plus the signed value, as in the original), `GetInt`, `GetLong`, `GetFloat`, `GetDouble`, `GetString(pos, length)` (to the terminating zero without a length; the text stops at a zero either way), the matching setters (`SetString` writes the zero too), `GetPointer`, `SetPointer`, `DEBUG_Dump` | `new MemBuffer(n)` is `n` zero bytes, little-endian. An access outside the buffer logs `Set/Get method call is out of bounds` and yields `null` or `false`; an empty buffer has room for nothing (the original reads past its zero-length allocation). `GetPointer` and `SetPointer` deal in raw addresses for DLL plugins: they log a runtime error and yield `null` and `false`. `DEBUG_Dump` does nothing. |
 
 Deliberate differences from the original:
 
 - `new Date()` and `SetCurrentTime` take the host's clock, which the
   adventure layer gives in UTC: the engine carries no time-zone data.
-- `ToUpperCase` and `ToLowerCase` use Unicode's simple case mapping and
-  keep a character whose mapping is several characters (`ß`); the
-  original uses the C library's locale.
-- Files are written with `\n` line ends; the original, on Windows, wrote
-  `\r\n` in text mode. Writes stay under the save directory, and a name
-  spelled from `Game.SaveDirectory` or `Directory.TempDirectory` is
-  taken relative to it.
+- A date is normalised with the plain Gregorian calendar: the original
+  runs C's `mktime`, which in a zone with summer time moves a date given
+  during summer time one hour later (its daylight-saving flag starts at
+  0), and fails before 1970, leaving the fields as given. In UTC, the
+  zone Luma's clock is in, the two agree from 1970 on.
+- In a UTF-8 game `Split` separates at whole characters; the original
+  compares the low byte of each character with the UTF-8 bytes of the
+  separators, so that a separator outside ASCII does not split at
+  itself and `Ĭ` (U+012C) splits like a comma: a defect, not reproduced.
+- In a UTF-8 game `ToUpperCase` and `ToLowerCase` use Unicode's simple
+  case mapping and keep a character whose mapping is several characters
+  (`ß`); the original uses the wide-character functions of the C library
+  in the user's locale.
+- File writes stay under the save directory, and a name spelled from
+  `Game.SaveDirectory` or `Directory.TempDirectory` is taken relative to
+  it. A file open for writing when a game was saved is closed after the
+  load and left as it is; the original reopens it first, which empties a
+  file that was open in mode 2.
 - `Directory` works inside the save directory, where the original works
   on the whole file system: `CurrentDirectory` is that directory and
-  cannot be changed, `TempDirectory` is a sub-directory of it, and
-  `Create` answers whether the directory exists afterwards, where the
-  original's second `mkdir` of a path it just created answers false
-  unless the path ends with a separator.
+  cannot be changed, `TempDirectory` is a sub-directory of it.
 - An array's string form is not capped at 32 KB, and `new Array(n)` with
   a negative `n` is empty where the original keeps the negative length.
 

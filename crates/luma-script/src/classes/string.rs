@@ -146,6 +146,12 @@ impl StringObject {
                 };
                 Return::value(encode(Self::slice(&chars, start, (end - start + 1).max(0))))
             }
+            // An ANSI game converts with `_strupr` and `_strlwr` in the C
+            // locale the engine runs in: only the letters A to Z change,
+            // accented letters stay as they are. A UTF-8 game converts
+            // wide characters, every letter that has another case.
+            "ToUpperCase" if !utf8 => Return::value(self.text.to_ascii_uppercase()),
+            "ToLowerCase" if !utf8 => Return::value(self.text.to_ascii_lowercase()),
             "ToUpperCase" => Return::value(encode(
                 chars
                     .iter()
@@ -181,6 +187,11 @@ impl StringObject {
             }
             // Every character of the argument separates; a missing
             // argument means a comma. An empty text gives one empty part.
+            // Each character of the argument is a separator, in a UTF-8
+            // game as in an ANSI one. The original, in a UTF-8 game,
+            // looks the low byte of each character up among the UTF-8
+            // bytes of the separators (`strchr` on a wide character), a
+            // defect that is not reproduced.
             "Split" => {
                 let separators_arg = arg(args, 0);
                 let separators: Vec<char> = if separators_arg.is_null() {

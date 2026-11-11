@@ -835,6 +835,9 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
             break;
         }
     }
+    for line in runtime.shutdown() {
+        println!("[{}] {line}", options.ticks);
+    }
     let counts = runtime.engine.counts();
     println!(
         "after {} ms: scene {:?}, offset {:?}, {} script(s) ({} running, {} waiting, {} persistent), {} native object(s)",
@@ -1310,9 +1313,10 @@ impl GamePlayer {
 
 impl Drop for GamePlayer {
     /// The game ends: the four volumes go to the settings file for the
-    /// next run (`CBSoundMgr::~CBSoundMgr`), and the window's position
-    /// too (`CBPlatform::MessageLoop` on exit), unless the game ran
-    /// full screen.
+    /// next run (`CBSoundMgr::~CBSoundMgr`), the window's position too
+    /// (`CBPlatform::MessageLoop` on exit) unless the game ran full
+    /// screen, and a script profiler still on writes its table, as the
+    /// original engine does when it shuts down.
     fn drop(&mut self) {
         if let (true, Some((x, y))) = (self.windowed, self.window_position) {
             let world = &mut self.runtime.world;
@@ -1322,7 +1326,7 @@ impl Drop for GamePlayer {
         if self.started {
             self.runtime.world.save_volume_settings();
         }
-        for line in self.runtime.world.take_log() {
+        for line in self.runtime.shutdown() {
             eprintln!("{line}");
         }
     }

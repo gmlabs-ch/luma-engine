@@ -1057,8 +1057,10 @@ fn natives_can_raise_events_during_a_call() {
 
 #[test]
 fn time_slices_interrupt_a_busy_script() {
-    // SetScriptTimeSlice(50); while (true) { result = result + 1 }
-    // The mock clock advances by a millisecond at every look.
+    // SetScriptTimeSlice(50); Sleep(0); while (true) { result = result + 1 }
+    // The mock clock advances by a millisecond at every look. The turn in
+    // which the slice is set runs unsliced, as in the original, so the
+    // script gives the turn up first.
     let mut a = Assembler::new("main.script");
     a.def_glob_var("result");
     a.push_int(0);
@@ -1067,6 +1069,10 @@ fn time_slices_interrupt_a_busy_script() {
     a.push_int(1);
     a.external_call("SetScriptTimeSlice");
     a.emit(Instruction::PopEmpty);
+    a.push_int(0);
+    a.push_int(1);
+    a.external_call("Sleep");
+    a.emit(Instruction::PopEmpty);
     let top = a.label();
     a.bind(top);
     a.push_var("result");
@@ -1074,10 +1080,375 @@ fn time_slices_interrupt_a_busy_script() {
     a.emit(Instruction::Add);
     a.pop_var("result");
     a.jmp(top);
-    let (engine, _, id) = run(a.build());
+    let (mut engine, mut host, id) = run(a.build());
+    assert_eq!(engine.script(id).unwrap().state(), State::Sleeping);
+    assert_eq!(result(&engine).get_int(&()), 0);
+    engine.tick(&mut host);
     assert_eq!(engine.script(id).unwrap().state(), State::Running);
-    let after_one_tick = result(&engine).get_int(&());
-    assert!(after_one_tick > 0);
+    let after_one_slice = result(&engine).get_int(&());
+    assert!(after_one_slice > 0);
+    engine.tick(&mut host);
+    assert!(result(&engine).get_int(&()) > after_one_slice);
+}
+
+#[test]
+fn a_slice_set_to_zero_ends_the_sliced_turn_at_once() {
+    // SetScriptTimeSlice(0); result = 1; in a turn that started sliced:
+    // the original's `elapsed < slice` is false from then on, so the
+    // rest waits for the next tick, which runs unsliced.
+    let mut a = Assembler::new("main.script");
+    a.def_glob_var("result");
+    a.push_int(0);
+    a.push_int(1);
+    a.external_call("SetScriptTimeSlice");
+    a.emit(Instruction::PopEmpty);
+    a.push_int(1);
+    a.pop_var("result");
+    a.emit(Instruction::Ret);
+    let mut host = MockHost::with_script(a.build());
+    let mut engine = Engine::new();
+    let id = engine.run_script(&mut host, "main.script", None).unwrap();
+    engine.script_mut(id).unwrap().set_time_slice(1000);
+    engine.tick(&mut host);
+    assert_eq!(engine.script(id).unwrap().state(), State::Running);
+    assert_eq!(result(&engine), Value::Null);
+    engine.tick(&mut host);
+    assert_eq!(result(&engine), Value::Int(1));
+    assert!(engine.script(id).is_none());
+}
+
+#[test]
+fn counts_group_the_states_as_the_debug_line_does() {
+    // One script sleeps, one waits for an object, one is persistent, one
+    // waits for a method thread that sleeps.
+    let mut sleeper = Assembler::new("sleeper.script");
+    sleeper.push_int(1000);
+    sleeper.push_int(1);
+    sleeper.external_call("Sleep");
+    sleeper.emit(Instruction::PopEmpty);
+    sleeper.emit(Instruction::Ret);
+    let mut walker = Assembler::new("walker.script");
+    walker.push_int(0);
+    walker.push_var("self");
+    walker.push_string("GoTo");
+    walker.emit(Instruction::CallByExp);
+    walker.emit(Instruction::PopEmpty);
+    walker.emit(Instruction::Ret);
+    let mut keeper = Assembler::new("keeper.script");
+    let end = keeper.label();
+    keeper.jmp(end);
+    keeper.event("Ping");
+    keeper.emit(Instruction::RetEvent);
+    keeper.bind(end);
+    keeper.emit(Instruction::Ret);
+    let mut host = MockHost::default();
+    host.add_file("sleeper.script", sleeper.build());
+    host.add_file("walker.script", walker.build());
+    host.add_file("keeper.script", keeper.build());
+    let obj = host.add_object(1, "Actor", "molly");
+    let mut engine = Engine::new();
+    engine
+        .run_script(&mut host, "sleeper.script", None)
+        .unwrap();
+    engine
+        .run_script(&mut host, "walker.script", Some(obj))
+        .unwrap();
+    engine
+        .run_script(&mut host, "keeper.script", Some(obj))
+        .unwrap();
+    engine.tick(&mut host);
+    let counts = engine.counts();
+    assert_eq!(counts.total, 3);
+    assert_eq!(counts.running, 1, "a sleeping script counts as running");
+    assert_eq!(counts.waiting, 1, "only the script waiting for an object");
+    assert_eq!(counts.persistent, 1);
+    // Paused scripts count as running too; finished ones not at all.
+    engine.pause_all(&mut host);
+    assert_eq!(engine.counts().running, 2, "the sleeper and the walker");
+    assert_eq!(engine.counts().waiting, 0);
+    engine.resume_all();
+    let walker = engine.scripts_of(obj)[0];
+    engine.finish(walker, false);
+    assert_eq!(engine.counts().total, 2);
+    assert_eq!(
+        engine.scripts().len(),
+        3,
+        "still listed until the tick ends"
+    );
+}
+
+#[test]
+fn the_profiler_adds_up_the_time_of_each_file() {
+    // Two runs of the same file under two spellings, and one other file.
+    let mut busy = Assembler::new("busy.script");
+    busy.def_glob_var("result");
+    for _ in 0..8 {
+        busy.push_int(1);
+        busy.pop_var("result");
+    }
+    busy.emit(Instruction::Ret);
+    let mut quick = Assembler::new("quick.script");
+    quick.emit(Instruction::Ret);
+    let mut host = MockHost::default();
+    host.add_file("Scripts\\Busy.script", busy.build());
+    host.add_file(
+        "scripts\\busy.script",
+        host.files["Scripts\\Busy.script"].clone(),
+    );
+    host.add_file("quick.script", quick.build());
+    let mut engine = Engine::new();
+    // Off: nothing is measured.
+    engine.run_script(&mut host, "quick.script", None).unwrap();
+    engine.tick(&mut host);
+    assert!(engine.script_times().is_empty());
+    engine.disable_profiling(&mut host);
+    assert!(host.log.is_empty(), "nothing to dump when it is off");
+
+    engine.enable_profiling(&host);
+    assert!(engine.is_profiling());
+    engine
+        .run_script(&mut host, "Scripts\\Busy.script", None)
+        .unwrap();
+    engine
+        .run_script(&mut host, "scripts\\busy.script", None)
+        .unwrap();
+    engine.run_script(&mut host, "quick.script", None).unwrap();
+    engine.tick(&mut host);
+    // The mock clock advances at every look: each run costs something,
+    // and the two spellings add up under the lower-case name.
+    let times = engine.script_times().clone();
+    assert_eq!(
+        times.keys().collect::<Vec<_>>(),
+        ["quick.script", "scripts\\busy.script"]
+    );
+    assert!(times["scripts\\busy.script"] >= 2);
+    // Enabling again keeps the totals.
+    engine.enable_profiling(&host);
+    assert_eq!(engine.script_times(), &times);
+
+    engine.disable_profiling(&mut host);
+    assert!(!engine.is_profiling());
+    assert_eq!(host.log[0], "***** Script profiling information: *****");
+    assert!(
+        host.log[1].starts_with(&format!("  {:<40} ", "Total execution time"))
+            && host.log[1].ends_with('s'),
+        "{:?}",
+        host.log
+    );
+    // Longest first, with seconds and a percentage in `%f` form.
+    let rows: Vec<&String> = host.log[2..].iter().collect();
+    assert_eq!(rows.len(), 2);
+    let seconds = |row: &str| -> f64 { row[43..row.find("s (").unwrap()].parse().unwrap() };
+    assert!(
+        rows[0].starts_with(&format!("  {:<40} ", "scripts\\busy.script"))
+            || seconds(rows[0]) >= seconds(rows[1])
+    );
+    assert!(seconds(rows[0]) >= seconds(rows[1]));
+    assert!(rows[0].ends_with("%)"), "{rows:?}");
+    let decimals = rows[0][43..].split('s').next().unwrap();
+    assert_eq!(
+        decimals.split('.').nth(1).map(str::len),
+        Some(6),
+        "{rows:?}"
+    );
+    // A new session starts from zero.
+    engine.enable_profiling(&host);
+    assert!(engine.script_times().is_empty());
+}
+
+/// Two scripts: `caller.script` calls the method `Walk` of its owner,
+/// defined by `walker.script`, which waits for the owner (`GoTo`).
+fn method_waiting_for_an_object(compat: bool) -> (Engine, MockHost, ScriptId) {
+    let mut walker = Assembler::new("walker.script");
+    let end = walker.label();
+    walker.jmp(end);
+    walker.method("Walk");
+    walker.emit(Instruction::Scope);
+    walker.push_int(0);
+    walker.emit(Instruction::CorrectStack(0));
+    walker.push_int(0);
+    walker.push_var("self");
+    walker.push_string("GoTo");
+    walker.emit(Instruction::CallByExp);
+    walker.emit(Instruction::PopEmpty);
+    walker.push_int(7);
+    walker.emit(Instruction::Ret);
+    walker.bind(end);
+    walker.emit(Instruction::Ret);
+    let mut caller = Assembler::new("caller.script");
+    caller.def_glob_var("result");
+    caller.push_int(0);
+    caller.push_var("self");
+    caller.push_string("Walk");
+    caller.emit(Instruction::CallByExp);
+    caller.emit(Instruction::PopEmpty);
+    caller.push_string("went on");
+    caller.pop_var("result");
+    caller.emit(Instruction::Ret);
+    let mut host = MockHost::default();
+    host.add_file("walker.script", walker.build());
+    host.add_file("caller.script", caller.build());
+    let obj = host.add_object(1, "Actor", "molly");
+    let mut engine = Engine::new();
+    engine.set_compat_kill_method_threads(compat);
+    engine
+        .run_script(&mut host, "walker.script", Some(obj))
+        .unwrap();
+    let caller = engine
+        .run_script(&mut host, "caller.script", Some(obj))
+        .unwrap();
+    engine.tick(&mut host);
+    engine.tick(&mut host);
+    assert_eq!(
+        engine.script(caller).unwrap().state(),
+        State::WaitingScript,
+        "{:?}",
+        host.log
+    );
+    // A new order to the object ends the method thread waiting for it.
+    engine.reset_object(obj);
+    engine.tick(&mut host);
+    (engine, host, caller)
+}
+
+#[test]
+fn a_reset_object_ends_the_callers_of_the_waiting_method() {
+    let (engine, _, caller) = method_waiting_for_an_object(false);
+    assert!(engine.script(caller).is_none(), "ended with the thread");
+    assert_eq!(result(&engine), Value::Null);
+}
+
+#[test]
+fn compat_kill_method_threads_lets_the_callers_go_on() {
+    let (mut engine, mut host, caller) = method_waiting_for_an_object(true);
+    // The ended thread is still listed during the tick that follows the
+    // reset; the tick after, the caller gets null for the call and runs
+    // to its end.
+    assert_eq!(engine.script(caller).unwrap().state(), State::WaitingScript);
+    engine.tick(&mut host);
+    assert!(engine.script(caller).is_none());
+    assert_eq!(result(&engine), Value::from("went on"), "{:?}", host.log);
+}
+
+#[test]
+fn a_source_file_goes_to_the_hosts_compiler() {
+    // Without a compiler the script does not run and the log says why.
+    let mut host = MockHost::default();
+    host.add_file("text.script", b"var a = 1;\r\n".to_vec());
+    let mut engine = Engine::new();
+    assert!(engine.run_script(&mut host, "text.script", None).is_none());
+    assert_eq!(
+        host.log,
+        [
+            "CScEngine::GetCompiledScript - script 'text.script' needs to be compiled but compiler is not available"
+        ]
+    );
+    // A host with a compiler hands back the compiled file, which is
+    // what the cache keeps.
+    struct Compiling(MockHost, u32);
+    impl Natives for Compiling {
+        fn class_name(&self, id: NativeId) -> String {
+            self.0.class_name(id)
+        }
+        fn get_property(&self, id: NativeId, name: &str) -> Option<Value> {
+            self.0.get_property(id, name)
+        }
+        fn set_property(&mut self, id: NativeId, name: &str, value: &Value) -> bool {
+            self.0.set_property(id, name, value)
+        }
+    }
+    impl Host for Compiling {
+        fn read_script(&mut self, filename: &str) -> Option<Vec<u8>> {
+            self.0.read_script(filename)
+        }
+        fn log(&mut self, message: &str) {
+            Host::log(&mut self.0, message);
+        }
+        fn timer(&self) -> u64 {
+            0
+        }
+        fn clock(&self) -> u64 {
+            0
+        }
+        fn valid_object(&self, _: NativeId) -> bool {
+            false
+        }
+        fn is_ready(&self, _: NativeId) -> bool {
+            true
+        }
+        fn random(&mut self, from: i32, _: i32) -> i32 {
+            from
+        }
+        fn call_function(&mut self, _: &str, _: &[Value], _: Context<'_>) -> Option<Return> {
+            None
+        }
+        fn call_method(
+            &mut self,
+            _: NativeId,
+            _: &str,
+            _: &[Value],
+            _: Context<'_>,
+        ) -> Option<Return> {
+            None
+        }
+        fn compile_script(&mut self, filename: &str, source: &[u8]) -> Option<Vec<u8>> {
+            assert_eq!(source, b"result = 5;");
+            self.1 += 1;
+            let mut a = Assembler::new(filename);
+            a.push_int(5);
+            store_result(&mut a);
+            Some(a.build())
+        }
+    }
+    let mut host = Compiling(MockHost::default(), 0);
+    host.0.add_file("text.script", b"result = 5;".to_vec());
+    let mut engine = Engine::new();
+    engine.run_script(&mut host, "text.script", None).unwrap();
+    engine.run_script(&mut host, "TEXT.script", None).unwrap();
+    engine.tick(&mut host);
+    assert_eq!(result(&engine), Value::Int(5));
+    assert_eq!(host.1, 1, "compiled once, then cached");
+    // An emptied cache reads and compiles the file again.
+    engine.clear_cache();
+    engine.run_script(&mut host, "text.script", None).unwrap();
+    assert_eq!(host.1, 2);
+}
+
+#[test]
+fn threads_end_with_the_script_attached_under_the_same_path() {
+    // The same file attached under two spellings: finishing one with its
+    // threads leaves the threads of the other alone, since the path the
+    // script was attached with is what is compared.
+    let mut a = Assembler::new("recorded\\name.script");
+    let end = a.label();
+    a.jmp(end);
+    a.event("Wait");
+    a.emit(Instruction::Scope);
+    a.push_int(1000);
+    a.push_int(1);
+    a.external_call("Sleep");
+    a.emit(Instruction::PopEmpty);
+    a.emit(Instruction::RetEvent);
+    a.bind(end);
+    a.emit(Instruction::Ret);
+    let bytes = a.build();
+    let mut host = MockHost::default();
+    host.add_file("a.script", bytes.clone());
+    host.add_file("b.script", bytes);
+    let obj = host.add_object(1, "Entity", "door");
+    let mut engine = Engine::new();
+    let first = engine.run_script(&mut host, "a.script", Some(obj)).unwrap();
+    let second = engine.run_script(&mut host, "b.script", Some(obj)).unwrap();
+    engine.tick(&mut host);
+    assert_eq!(engine.script(first).unwrap().source(), "a.script");
+    engine.apply_event(&mut host, obj, "Wait", false);
+    engine.tick(&mut host);
+    assert_eq!(engine.scripts().len(), 4);
+    engine.finish(first, true);
+    engine.tick(&mut host);
+    let left: Vec<&str> = engine.scripts().iter().map(|s| s.source()).collect();
+    assert_eq!(left, ["b.script", "b.script"]);
+    assert!(engine.script(second).is_some());
 }
 
 #[test]
@@ -1128,12 +1499,14 @@ fn a_corrupt_program_stops_fatally() {
 #[test]
 fn missing_and_invalid_files_are_reported() {
     let mut host = MockHost::default();
-    host.add_file("text.script", b"var x = 1;".to_vec());
+    // The magic of a compiled script, and nothing a header can be read
+    // from behind it.
+    host.add_file("cut.script", vec![0xDE, 0xAD, 0xC0, 0xDE, 1, 2]);
     let mut engine = Engine::new();
     assert!(engine.run_script(&mut host, "nope.script", None).is_none());
-    assert!(engine.run_script(&mut host, "text.script", None).is_none());
+    assert!(engine.run_script(&mut host, "cut.script", None).is_none());
     assert_eq!(host.log.len(), 2);
-    assert!(host.log[0].contains("Error opening script 'nope.script'"));
+    assert!(host.log[0].contains("error opening script 'nope.script'"));
     assert!(host.log[1].contains("not a valid compiled script"));
 }
 

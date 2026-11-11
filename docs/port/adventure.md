@@ -306,7 +306,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdEntity::ScCallMethod` | done | `natives.rs` `entity_call`, `natives_sound.rs`, `natives_region.rs`: StopSound (the sound is kept), PlayTheora (file, looping, alpha file, start time; a failure is logged), StopTheora, IsTheoraPlaying, PauseTheora, ResumeTheora, IsTheoraPaused, CreateRegion, DeleteRegion. |
 | `CAdEntity::ScGetProperty` | partial | `natives.rs` `entity_get`: Type, Item, Subtype, WalkToX, WalkToY, Region agree. `WalkToDirection` without a direction gives 8; the original gives 9 (`DI_NONE`, after `NUM_DIRECTIONS`). |
 | `CAdEntity::ScSetProperty` | partial | `natives.rs` `entity_set`: Item, WalkToX, WalkToY agree. `WalkToDirection` outside 0..7 should leave the direction as it is; Luma turns a negative number into up and 8 or more into none. |
-| `CAdEntity::ScToString` | partial | `world.rs` `Natives::to_string` gives `[<the entity's name>]`; the original gives `[entity object]`. |
+| `CAdEntity::ScToString` | done | `luma-adventure/src/world.rs` `Natives::to_string`: `[entity object]`. |
 | `CAdEntity::SaveAsText` | n/a | Only reached from the scene editor's save (`CAdScene::SaveAsText`, `CAdLayer::SaveAsText`); no script method or engine path calls it. |
 | `CAdEntity::GetHeight` | partial | `natives.rs` `entity_height`: the sprite's frame height. Missing: an entity with a region and no sprite should return the height of the region's bounding rectangle; Luma returns 0. |
 | `CAdEntity::UpdatePosition` | todo | After loading, an entity with a region and no sprite is placed at the bottom centre of the region's bounding rectangle (X = left + width / 2, Y = bottom). Luma keeps the X and Y of the file (0,0 by default), which `Talk` (subtitle place), `GoToObject` without a walk-to point, `TurnTo(entity)`, sound panning and the `X`/`Y` properties then use. |
@@ -511,7 +511,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdItem::ScCallMethod` | done | `natives_item.rs` `item_call`: SetHoverSprite, GetHoverSprite, GetHoverSpriteObject, SetNormalCursor, GetNormalCursor, GetNormalCursorObject, SetHoverCursor, GetHoverCursor, GetHoverCursorObject; a file that does not load leaves the slot empty and returns false. (The inherited members: see `CAdObject::ScCallMethod`.) |
 | `CAdItem::ScGetProperty` | done | `natives_item.rs` `item_get`: Type, Name, DisplayAmount, Amount, AmountOffsetX, AmountOffsetY, AmountAlign, AmountString, CursorCombined. (The inherited properties: see `CAdObject::ScGetProperty`.) |
 | `CAdItem::ScSetProperty` | done | `natives_item.rs` `item_set`: Name, DisplayAmount, Amount, AmountOffsetX, AmountOffsetY, AmountAlign (clamped to 0..2, the original stores the number as is), AmountString (null removes it), CursorCombined. |
-| `CAdItem::ScToString` | partial | `world.rs` `Natives::to_string` gives `[<the item's name>]`; the original gives `[item]`. |
+| `CAdItem::ScToString` | done | `luma-adventure/src/world.rs` `Natives::to_string`: `[item]`. |
 | `CAdItem::Persist` | replaced | serde: `luma-adventure/src/inventory.rs` `Item` (the definition with its cursors, hover sprite, amount fields; the sprite shown and its animation). |
 | `CAdItem::GetExtendedFlag` | done | `input.rs` `cursor_to_show` and `luma-adventure/src/inventory.rs` `update_item_cursor`: an item is `usable`. |
 
@@ -541,7 +541,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdLayer::ScCallMethod` | partial | `natives.rs` `layer_call`: `GetNode`, `AddRegion`, `AddEntity`, `InsertRegion`, `InsertEntity`, `DeleteNode` agree on indexes, names and return values. Difference: an entity made by `AddEntity`/`InsertEntity` is not scalable in Luma (`scene_edit.rs` `add_entity_node`); in the original only entities read from a `LAYER` block get `Scalable=false`, a script-made one keeps the default true. |
 | `CAdLayer::ScGetProperty` | done | `natives.rs` `layer_get`: `Type`, `NumNodes`, `Width`, `Height`, `Main`, `CloseUp`, `Active`, plus `Name` and `Caption`. |
 | `CAdLayer::ScSetProperty` | partial | `layer_set`. Missing: `Width`/`Height` below 0 are stored as given (original: 0); `Active=false` on the main layer is accepted (original: refused with `Warning: cannot deactivate scene's main layer`). |
-| `CAdLayer::ScToString` | partial | `world.rs` `to_string` answers `[<layer name>]`; the original always `[layer]`. |
+| `CAdLayer::ScToString` | done | `luma-adventure/src/world.rs` `Natives::to_string`: `[layer]`. |
 | `CAdLayer::SaveAsText` | n/a | Only reachable from the editor tools. |
 | `CAdLayer::Persist` | replaced | serde: the layer is part of the `Scene` saved with the `SceneView`. |
 
@@ -690,7 +690,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdRegion::ScCallMethod` | done | Passes everything to `CBRegion` (`natives_region.rs` `region_call`). |
 | `CAdRegion::ScGetProperty` | done | `natives_region.rs` `region_get`: `Type` (`ad region`), `Name`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`. (The inherited `X`/`Y` answer the bounds' corner in Luma: a `BRegion`/`BObject` matter.) |
 | `CAdRegion::ScSetProperty` | done | `region_set`: `Name`, `Blocked`, `Decoration`, `Scale`, `AlphaColor`. |
-| `CAdRegion::ScToString` | partial | `world.rs` `to_string` answers `[<region name>]`; the original always `[ad region]`. |
+| `CAdRegion::ScToString` | done | `luma-adventure/src/world.rs` `Natives::to_string`: `[ad region]` for a region of a layer. |
 | `CAdRegion::SaveAsText` | n/a | Only reachable from the editor tools. |
 | `CAdRegion::Persist` | replaced | serde: the region is part of the `Scene` saved with the `SceneView`. |
 
@@ -866,7 +866,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdScene::ScCallMethod` | partial | `natives.rs` `scene_call`, `scene3d.rs` `scene3d_call`. Differences: `GetNode` does not look among the waypoint groups (third lookup of `GetNodeByName`); `GetFreeNode` only sees free entities, not the actors loaded with `Scene.LoadActor`/`LoadActor3D` (they are in `m_Objects`); `IsPointInViewport` excludes the right and bottom edges (original `<=`); `SetActiveCamera` returns null (original: true/false); `GetLightColor`/`GetLightPosition` without geometry return null (original 0); `UnloadObject` also removes an object that is not the scene's (original: only from the scene's list, else nothing); `SkipTo`/`ScrollTo` with an object: see `ScrollToObject`; fade colours are clamped (original: truncated to a byte). Present and equal: `LoadActor`, `LoadActor3D`, `LoadEntity`, `CreateEntity`, `DeleteEntity`, `GetLayer`, `GetWaypointGroup`, `GetRegionAt`, `IsBlockedAt`, `IsWalkableAt`, `GetScaleAt`, `GetRotationAt`, `IsScrolling`, `FadeOut/In(Async)`, `GetFadeColor`, `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled`, `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `SetViewport`, `AddLayer`, `InsertLayer`, `DeleteLayer`, `EnableFog`, `DisableFog`. |
 | `CAdScene::ScGetProperty` | partial | `scene_get`, `scene3d_get`. Missing: `ShowGeometry` (no built-in: reads null until a script sets it); `NumFreeNodes` does not count the actors loaded into the scene. The rest agrees (`Type`, `NumLayers`, `NumWaypointGroups`, `MainLayer`, `MouseX/Y`, `AutoScroll`, `PersistentState(Sprites)`, `ScrollPixelsX/Y`, `ScrollSpeedX/Y`, `OffsetX/Y`, `GeometryFile`, `WaypointsHeight`, `Width`, `Height`, `MaxShadowType`, `AmbientLightColor`, `NumLights`). |
 | `CAdScene::ScSetProperty` | partial | `scene_set`, `scene3d_set`. `OffsetX`/`OffsetY`: the original treats the value as a point to centre on and clamps it (`max(0, v - viewport/2)`, then `min(.., scene - viewport)`); Luma stores the raw value. `ShowGeometry` has no effect (the geometry overlay is not drawn). The rest agrees. |
-| `CAdScene::ScToString` | partial | `world.rs` `to_string` answers `[<scene name>]`; the original always `[scene object]`. |
+| `CAdScene::ScToString` | done | `luma-adventure/src/world.rs` `Natives::to_string`: `[scene object]`. |
 | `CAdScene::AddObject` | done | `scene_edit.rs` `add_free_entity`, `World::load_actor(.., scene_bound=true)`. |
 | `CAdScene::RemoveObject` | done | `scene_edit.rs` `remove_free_entity`, `World::unload_object`. |
 | `CAdScene::SaveAsText` | n/a | Only reachable from the editor tools: no caller in the engine and no script method. |
@@ -1126,5 +1126,5 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CUIEntity::ScCallMethod` | done | `natives_ui.rs` `control_call`: `GetEntity` (null without one), `SetEntity(file)` returning whether it loaded. |
 | `CUIEntity::ScGetProperty` | done | `natives_ui.rs` `control_get`: Type `entity container`, `Freezable` (false without an entity). |
 | `CUIEntity::ScSetProperty` | done | `natives_ui.rs` `control_set`: `Freezable` makes the entity and its scripts freezable or not (applied at the next window update). |
-| `CUIEntity::ScToString` | partial | `world.rs` `Natives::to_string` gives `[<the control's name>]`; the original gives `[entity container]`. |
+| `CUIEntity::ScToString` | done | `luma-adventure/src/world.rs` `Natives::to_string`: `[entity container]`. |
 | `CUIEntity::Persist` | replaced | serde: the control (`luma-adventure/src/ui.rs` `Control`) and `World::ui_entities` (`UiEntity`: definition, file, animation, freezable). |

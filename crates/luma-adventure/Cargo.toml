@@ -16,6 +16,7 @@ luma-video.workspace = true
 luma-formats = { workspace = true, features = ["serde"] }
 luma-render.workspace = true
 luma-3d = { workspace = true, optional = true, features = ["serde"] }
+luma-compiler = { workspace = true, optional = true }
 luma-script = { workspace = true, features = ["serde"] }
 crc32fast.workspace = true
 fontdue.workspace = true
@@ -28,6 +29,9 @@ serde.workspace = true
 ## 3D actors on painted backgrounds: the scene geometry, the 3D actor
 ## type and its scripting, through `luma-3d`.
 3d = ["dep:luma-3d"]
+## Script files shipped as source text are compiled when they are loaded,
+## through `luma-compiler`. Without it such a file does not run.
+compiler = ["dep:luma-compiler"]
 
 [dev-dependencies]
 luma-compiler.workspace = true

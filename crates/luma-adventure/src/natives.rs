@@ -48,13 +48,7 @@ fn native_or_null(id: Option<NativeId>) -> Value {
 }
 
 /// Methods the engine has that later milestones implement.
-const GAME_STUBS: &[&str] = &[
-    "ShowStatusLine",
-    "HideStatusLine",
-    "DumpTextureStats",
-    "EnableScriptProfiling",
-    "DisableScriptProfiling",
-];
+const GAME_STUBS: &[&str] = &["ShowStatusLine", "HideStatusLine", "DumpTextureStats"];
 
 impl World {
     /// A built-in property of a native, if the native defines it.
@@ -66,6 +60,9 @@ impl World {
         let kind = self.native(id)?.kind.clone();
         if let Some(value) = self.object_get(id, name) {
             return Some(value);
+        }
+        if name == "Name" && Self::name_is_a_property(&kind) {
+            return Some(self.holder_name(id, &kind));
         }
         match kind {
             Kind::Game => self.game_get(name),
@@ -81,11 +78,12 @@ impl World {
             },
             Kind::ResponseBox => match name {
                 "Type" => Some(Value::from("responses")),
+                "Filename" => Some(self.holder_filename(id)),
                 _ => None,
             },
             Kind::Math => match name {
                 "Type" => Some(Value::from("math")),
-                "PI" => Some(Value::Float(std::f64::consts::PI)),
+                "PI" => Some(Value::Float(f64::from(MATH_PI))),
                 _ => None,
             },
             Kind::Fader => match name {
@@ -128,15 +126,6 @@ impl World {
             },
             Kind::Object => match name {
                 "Type" => Some(Value::from("object")),
-                // `CBScriptHolder` names a fresh object `<unnamed>`; a
-                // name scripts give is kept as a property.
-                "Name" => Some(
-                    self.native(id)?
-                        .props
-                        .get("Name")
-                        .cloned()
-                        .unwrap_or(Value::from("<unnamed>")),
-                ),
                 _ => None,
             },
             Kind::Class(_) => None,
@@ -156,6 +145,14 @@ impl World {
             None => return false,
         };
         if self.object_set(id, name, value) {
+            return true;
+        }
+        if name == "Name" && Self::name_is_a_property(&kind) {
+            // `SetName(Value->GetString())`.
+            let text = Value::from(value.get_string(self));
+            if let Some(native) = self.objects.get_mut(id) {
+                native.props.insert("Name".to_string(), text);
+            }
             return true;
         }
         // `SoundPanning` turned off centres the sounds
@@ -260,7 +257,7 @@ impl World {
                 }
                 _ => None,
             },
-            Kind::Math => math_call(name, args).map(Return::value),
+            Kind::Math => math_call(name, args, self).map(Return::value),
             Kind::ResponseBox => None,
             Kind::Fader | Kind::SceneFader => None,
             Kind::Scene => self.scene_call(name, args, ctx),
@@ -301,6 +298,62 @@ impl World {
         }
     }
 
+    /// Whether the object's `Name` (`CBScriptHolder::m_Name`) is kept
+    /// among its properties: the script holders that have no name of
+    /// their own in Luma's data, which are sprites, particle emitters,
+    /// the faders, the response box and `new Object()`.
+    fn name_is_a_property(kind: &Kind) -> bool {
+        matches!(
+            kind,
+            Kind::Sprite(_)
+                | Kind::HoverSprite(_)
+                | Kind::CursorSprite { .. }
+                | Kind::ControlImage { .. }
+                | Kind::Emitter(_)
+                | Kind::Fader
+                | Kind::SceneFader
+                | Kind::ResponseBox
+                | Kind::Object
+        )
+    }
+
+    /// `Name` of such a holder: what a script set, else the name its
+    /// class starts with: the `NAME` of a sprite's file, empty without
+    /// one (`CBSprite`'s constructor), `<unnamed>` for the others
+    /// (`CBScriptHolder`'s).
+    fn holder_name(&self, id: NativeId, kind: &Kind) -> Value {
+        if let Some(name) = self.native(id).and_then(|n| n.props.get("Name")) {
+            return name.clone();
+        }
+        match kind {
+            Kind::Sprite(_)
+            | Kind::HoverSprite(_)
+            | Kind::CursorSprite { .. }
+            | Kind::ControlImage { .. } => Value::from(
+                self.sprite_def(id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default(),
+            ),
+            _ => Value::from(luma_formats::UNNAMED),
+        }
+    }
+
+    /// `Filename` of a holder that keeps it in its object state
+    /// (`CBScriptHolder::m_Filename`): `null` when it was not loaded
+    /// from a file of its own.
+    pub(crate) fn holder_filename(&self, id: NativeId) -> Value {
+        self.object_state(id)
+            .and_then(|s| s.filename.clone())
+            .map_or(Value::Null, Value::from)
+    }
+
+    /// Records the file a holder was loaded from (`SetFilename`).
+    pub(crate) fn set_holder_filename(&mut self, id: NativeId, path: &str) {
+        if let Some(state) = self.object_state_mut(id) {
+            state.filename = Some(path.to_string());
+        }
+    }
+
     /// The methods every script holder has (`CBScriptHolder`).
     fn holder_call(
         &mut self,
@@ -335,7 +388,7 @@ impl World {
                 let found = ctx.engine.scripts_of(id).into_iter().find(|s| {
                     ctx.engine
                         .script(*s)
-                        .is_some_and(|s| s.filename().eq_ignore_ascii_case(&path))
+                        .is_some_and(|s| s.source().eq_ignore_ascii_case(&path))
                 });
                 match found {
                     Some(script) => {
@@ -349,7 +402,7 @@ impl World {
                 let path = arg(0).get_string(self);
                 let running = ctx.engine.scripts_of(id).into_iter().any(|s| {
                     ctx.engine.script(s).is_some_and(|s| {
-                        s.filename().eq_ignore_ascii_case(&path)
+                        s.source().eq_ignore_ascii_case(&path)
                             && !matches!(s.state(), State::Finished | State::Error)
                     })
                 });
@@ -430,6 +483,8 @@ impl World {
         Some(match name {
             "Type" => Value::from("game"),
             "Name" => Value::from(self.name.clone()),
+            // The game file (`CBGame::LoadFile`).
+            "Filename" => Value::from(self.settings().game_file.clone()),
             "Caption" => Value::from(self.caption.clone()),
             "CurrentTime" => Value::Int(self.timer() as i32),
             // `timeGetTime`: a clock that runs while the game is frozen.
@@ -464,11 +519,10 @@ impl World {
             "WindowedMode" => Value::Bool(self.windowed),
             "SuspendedRendering" => Value::Bool(self.suspended_rendering),
             "SoundAvailable" => Value::Bool(self.sounds.audio.device().is_some()),
-            "DebugMode"
-            | "SuppressScriptErrors"
-            | "AutorunDisabled"
-            | "AutoSaveOnExit"
-            | "CursorHidden" => Value::Bool(false),
+            "SuppressScriptErrors" => Value::Bool(self.suppress_script_errors),
+            "DebugMode" | "AutorunDisabled" | "AutoSaveOnExit" | "CursorHidden" => {
+                Value::Bool(false)
+            }
             "AcceleratedMode" | "Accelerated" => Value::Bool(true),
             "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => {
                 return Some(self.volume_property(name));
@@ -481,6 +535,9 @@ impl World {
             "SimpleShadows" => Value::Bool(self.max_shadow_type == 1),
             "SupportsRealTimeShadows" => Value::Bool(true),
             "MaxActiveLights" => Value::Int(8),
+            // `CBUtils::GetUsedMemMB`: the working set in a debug build
+            // of the original, 0 in the builds games ship with.
+            "UsedMemory" => Value::Int(0),
             "TextEncoding" => Value::Int(self.text_encoding),
             "TextRTL" => Value::Bool(self.text_rtl),
             "StartupScene" => self.startup_scene.clone().map_or(Value::Null, Value::from),
@@ -540,6 +597,7 @@ impl World {
             }
             "VideoSubtitles" => self.video_subtitles = value.get_bool(self),
             "SuspendedRendering" => self.suspended_rendering = value.get_bool(self),
+            "SuppressScriptErrors" => self.suppress_script_errors = value.get_bool(self),
             "VideoSkipButton" => {
                 self.video_skip_button = TalkSkipButton::from_code(value.get_int(self));
             }
@@ -920,7 +978,23 @@ impl World {
                 Return::value(self.open_document(&target))
             }
             "FileExists" => Return::value(self.vfs().exists(&arg(0).get_string(self))),
-            "ClearScriptCache" => Return::null(),
+            // `CScEngine::EmptyScriptCache`: a script file is read again
+            // the next time a script is started from it.
+            "ClearScriptCache" => {
+                ctx.engine.clear_cache();
+                Return::value(true)
+            }
+            // The script profiler (`CScEngine::EnableProfiling`,
+            // `DisableProfiling`): turning it off writes its table to
+            // the log.
+            "EnableScriptProfiling" => {
+                ctx.engine.enable_profiling(self);
+                Return::null()
+            }
+            "DisableScriptProfiling" => {
+                ctx.engine.disable_profiling(self);
+                Return::null()
+            }
             "SaveGame" => {
                 // Done once `true` is on the caller's stack (`after_call`).
                 let slot = arg(0).get_int(self);
@@ -1539,7 +1613,11 @@ impl World {
             "Type" => Value::from("entity"),
             "Name" => Value::from(e.name.clone()),
             "Caption" => Value::from(e.caption.clone()),
-            "Filename" => Value::Null,
+            // The file the entity was loaded from (`CAdEntity::LoadFile`);
+            // null for an entity written in a scene file or created empty.
+            "Filename" => self
+                .node_id(r)
+                .map_or(Value::Null, |id| self.holder_filename(id)),
             "X" => Value::Int(e.x),
             "Y" => Value::Int(e.y),
             "Height" => Value::Int(self.entity_height(r)),
@@ -1680,7 +1758,7 @@ impl World {
                 let ok =
                     self.play_entity_theora(id, &filename, looping, alpha.as_deref(), start_ms);
                 if !ok {
-                    self.log(format!(
+                    self.report_script_error(&format!(
                         "Runtime error. Entity.PlayTheora - error playing video '{filename}'"
                     ));
                 }
@@ -1934,18 +2012,29 @@ impl World {
     }
 }
 
-/// The `Math` object's methods (`SXMath`): every one takes floats and
-/// returns a float, as the original engine does (`Floor` included).
-fn math_call(name: &str, args: &[Value]) -> Option<Value> {
-    let arg = |i: usize| -> f64 {
-        match args.get(i) {
-            Some(Value::Int(n)) => f64::from(*n),
-            Some(Value::Float(f)) => *f,
-            Some(Value::Bool(b)) => f64::from(u8::from(*b)),
-            Some(Value::String(s)) => s.trim().parse().unwrap_or(0.0),
-            _ => 0.0,
-        }
-    };
+/// `PI` of `SXMath.cpp`: a single-precision constant (`3.141592653589793f`),
+/// so what scripts read is 3.1415927410125732.
+const MATH_PI: f32 = std::f32::consts::PI;
+
+/// `CSXMath::DegreeToRadian`: the factor is computed in single precision
+/// (`PI / 180.0f`), then widened.
+fn degree_to_radian(value: f64) -> f64 {
+    value * f64::from(MATH_PI / 180.0f32)
+}
+
+/// `CSXMath::RadianToDegree`: the factor is computed in single precision
+/// (`180.0f / PI`), then widened.
+fn radian_to_degree(value: f64) -> f64 {
+    value * f64::from(180.0f32 / MATH_PI)
+}
+
+/// The `Math` object's methods (`CSXMath::ScCallMethod`): every one takes
+/// floats (`GetFloat`: a string is read like `atof`) and returns a float,
+/// `Floor` included. `Sin`, `Cos`, `Tan`, `Sinh`, `Cosh` and `Tanh` take
+/// degrees: the original converts the argument with `DegreeToRadian`
+/// first. The inverse functions return radians.
+fn math_call(name: &str, args: &[Value], natives: &dyn luma_script::Natives) -> Option<Value> {
+    let arg = |i: usize| -> f64 { args.get(i).map_or(0.0, |v| v.get_float(natives)) };
     let x = arg(0);
     let result = match name {
         "Abs" => x.abs(),
@@ -1954,20 +2043,20 @@ fn math_call(name: &str, args: &[Value]) -> Option<Value> {
         "Atan" => x.atan(),
         "Atan2" => x.atan2(arg(1)),
         "Ceil" => x.ceil(),
-        "Cos" => x.cos(),
-        "Cosh" => x.cosh(),
+        "Cos" => degree_to_radian(x).cos(),
+        "Cosh" => degree_to_radian(x).cosh(),
         "Exp" => x.exp(),
         "Floor" => x.floor(),
         "Log" => x.ln(),
         "Log10" => x.log10(),
         "Pow" => x.powf(arg(1)),
-        "Sin" => x.sin(),
-        "Sinh" => x.sinh(),
-        "Tan" => x.tan(),
-        "Tanh" => x.tanh(),
+        "Sin" => degree_to_radian(x).sin(),
+        "Sinh" => degree_to_radian(x).sinh(),
+        "Tan" => degree_to_radian(x).tan(),
+        "Tanh" => degree_to_radian(x).tanh(),
         "Sqrt" => x.sqrt(),
-        "DegToRad" => x.to_radians(),
-        "RadToDeg" => x.to_degrees(),
+        "DegToRad" => degree_to_radian(x),
+        "RadToDeg" => radian_to_degree(x),
         _ => return None,
     };
     Some(Value::Float(result))
