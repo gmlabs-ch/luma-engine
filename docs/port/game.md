@@ -271,7 +271,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBGame::IsSaveSlotUsed` | done | `World::is_save_slot_used`. |
 | `CBGame::EmptySaveSlot` | done | `World::empty_save_slot`. |
 | `CBGame::SetActiveObject` | done | `World::update_active_object` (`input.rs`): none while not interactive unless the object has `NonIntMouseEvents`; `MouseLeave` on the old one, the caption spoken, `MouseEntry` on the new one (queued, delivered at the end of the frame). |
-| `CBGame::PushViewport` | partial | No viewport stack: `World::viewport` and `Camera` (`origin_x`, `origin_y`) place the scene in its viewport, but the renderer is not clipped to it (`docs/game-loop.md`: a scene larger than its viewport draws over what lies outside), where `m_Renderer->SetViewport` clips. |
+| `CBGame::PushViewport` | partial | No viewport stack: `World::viewport` and `Camera` (`origin_x`, `origin_y`) place the scene in its viewport, but the renderer is not clipped to it (`docs/game-loop.md`: a scene larger than its viewport draws over what lies outside), where `m_Renderer->SetViewport` clips. The second user, a window with `CLIP_CONTENTS` (`CUIWindow::Display` pushes its rectangle), is not clipped either: `clip_contents` is kept in `ui.rs` and read by nothing. |
 | `CBGame::PopViewport` | partial | See `PushViewport`: nothing to restore, as nothing is clipped. |
 | `CBGame::GetCurrentViewportRect` | partial | `World::viewport` gives the scene viewport or the whole screen; it is not a stack, and it is not what clips the active rectangles (see `CBActiveRect::ClipRect`). |
 | `CBGame::GetCurrentViewportOffset` | done | `Camera::origin_x`, `origin_y` from `World::camera` (`world.rs`): the viewport's top-left, 0 without one. |
@@ -648,5 +648,5 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CPartParticle::Update` | done | `Particle::update`: the fade-in and fade-out branches return without moving; else end of life (fade-out or death), the border, the alpha by age, the forces, the position, the rotation normalised, the growth, death at scale 0 or less. |
 | `CPartParticle::Display` | partial | `Emitter::quads`: the sprite's current frame at the position, scaled, turned, with the alpha and the emitter's blend mode. Different: the sprite is stepped in `Emitter::update_internal`, so it does not animate while the emitter is paused (WME steps it here, every frame drawn), and a frame becoming current plays no `SOUND` and raises no event (WME goes through `CBSprite::Display`, owner the game). |
 | `CPartParticle::FadeIn` | done | `Particle::fade_in`. |
-| `CPartParticle::FadeOut` | unreviewed |  |
-| `CPartParticle::Persist` | unreviewed |  |
+| `CPartParticle::FadeOut` | done | `Particle::fade_out` (`luma-adventure/src/particles.rs`): from the alpha shown now. |
+| `CPartParticle::Persist` | done | Serde on `Particle`: alphas, border, position, depth, velocity, scale, creation and life time, dead flag, state, fade start and time, current and fade-start alpha, spin, rotation, growth, and the sprite by path (loaded again by `Emitter::reload_sprites`). |
