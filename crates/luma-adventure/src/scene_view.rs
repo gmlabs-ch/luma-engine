@@ -566,6 +566,9 @@ pub struct VideoOverlay<'a> {
     pub texture: &'a Texture,
     /// Scale in percent.
     pub zoom: f32,
+    /// Where the picture is from the entity's position: its place in
+    /// the video's coded frame, zoomed.
+    pub offset: (f32, f32),
     /// Tint and opacity.
     pub tint: Rgba,
 }
@@ -1445,8 +1448,8 @@ impl SceneView {
                 list.push(Quad {
                     texture: video.texture,
                     dst: Rect::new(
-                        entity.x as f32,
-                        entity.y as f32,
+                        entity.x as f32 + video.offset.0,
+                        entity.y as f32 + video.offset.1,
                         (video.texture.width as f32 * zoom).trunc(),
                         (video.texture.height as f32 * zoom).trunc(),
                     ),

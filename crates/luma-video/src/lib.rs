@@ -44,6 +44,19 @@ pub struct VideoInfo {
     pub width: u32,
     /// Height of the picture in pixels.
     pub height: u32,
+    /// Width of the coded frame: a multiple of 16 that holds the
+    /// picture. The original engine's texture has this size.
+    pub coded_width: u32,
+    /// Height of the coded frame.
+    pub coded_height: u32,
+    /// Where the picture's left edge is in the coded frame.
+    pub pic_x: u32,
+    /// Where the picture's top edge is in the coded frame, from the top
+    /// (the stream states it from the bottom).
+    pub pic_y: u32,
+    /// Whether the stream is older than bitstream 3.2.1: its frames are
+    /// then timed one period later (see [`VideoInfo::shown_at_ms`]).
+    pub before_3_2_1: bool,
     /// Frame rate numerator.
     pub fps_num: u32,
     /// Frame rate denominator.
@@ -53,6 +66,36 @@ pub struct VideoInfo {
 }
 
 impl VideoInfo {
+    /// The description of a stream from its identification header.
+    fn from_ident(ident: &TheoraIdentHeader, has_audio: bool) -> VideoInfo {
+        let coded_width = u32::from(ident.fmbw) * 16;
+        let coded_height = u32::from(ident.fmbh) * 16;
+        VideoInfo {
+            width: ident.picw,
+            height: ident.pich,
+            coded_width,
+            coded_height,
+            pic_x: u32::from(ident.picx),
+            pic_y: coded_height
+                .saturating_sub(ident.pich)
+                .saturating_sub(u32::from(ident.picy)),
+            before_3_2_1: (ident.vmaj, ident.vmin, ident.vrev) < (3, 2, 1),
+            fps_num: ident.frn,
+            fps_den: ident.frd,
+            has_audio,
+        }
+    }
+
+    /// When the frame numbered `number` is shown, in milliseconds: the
+    /// time the original engine's decoder library (libtheora 1.0,
+    /// `theora_granule_time` of the decoder's own position) gives it.
+    /// That is the start of the frame's interval, `number` periods, for a
+    /// stream of bitstream 3.2.1 or later, and its end, one period
+    /// later, for an older stream.
+    pub fn shown_at_ms(&self, number: u64) -> u64 {
+        self.frame_time_ms(number.saturating_add(u64::from(self.before_3_2_1)))
+    }
+
     /// When the frame numbered `index` is shown, in milliseconds from
     /// the start.
     pub fn frame_time_ms(&self, index: u64) -> u64 {
@@ -166,10 +209,13 @@ fn decoder_comment_header(packet: &[u8]) -> Vec<u8> {
 /// granule position of the page when the packet is the last one ending
 /// on it (the only packet of a page whose position the container
 /// states). Such a packet takes the frame number of that position; any
-/// other packet comes one frame after the one before. This is what the
-/// original engine's decoder library did, and it keeps a stream that
-/// leaves frames out (its granule positions skip the missing frames,
-/// with no zero-length packet in their place) on its real clock.
+/// other packet comes one frame after the one before. This is Luma's
+/// own rule: the original engine's decoder library (libtheora 1.0)
+/// counts the packets and ignores the page positions. The two agree on
+/// a regular stream; this one keeps a stream that leaves frames out
+/// (its granule positions skip the missing frames, with no zero-length
+/// packet in their place) on its real clock, where the original plays
+/// it too fast. See "Frame times" in `docs/video.md`.
 ///
 /// A position that marks no frame, one that would go back in time, or
 /// one that jumps further ahead than [`MAX_FRAME_GAP`] (a damaged or
@@ -285,13 +331,7 @@ impl Video {
             &[&headers[0], &comment, &headers[2]],
         )
         .map_err(decode_err)?;
-        let info = VideoInfo {
-            width: ident.picw,
-            height: ident.pich,
-            fps_num: ident.frn,
-            fps_den: ident.frd,
-            has_audio,
-        };
+        let info = VideoInfo::from_ident(&ident, has_audio);
         Ok(Video {
             reader,
             bytes_len,
@@ -360,7 +400,7 @@ impl Video {
             let granule = packet.last_in_page().then(|| packet.absgp_page());
             let number = next_frame_number(&self.ident, self.frame_number, granule);
             self.frame_number = Some(number);
-            let time_ms = self.info.frame_time_ms(number);
+            let time_ms = self.info.shown_at_ms(number);
             let keyframe = packet.data.first().is_some_and(|b| b & 0x40 == 0);
             let frame = if packet.data.is_empty() {
                 match &self.last {
@@ -774,15 +814,45 @@ mod tests {
         assert_eq!(next_frame_number(&legacy, None, Some(4 << shift)), 4);
         assert_eq!(next_frame_number(&legacy, Some(0), Some(0)), 0);
         // Times do not overflow on absurd numbers.
-        let info = VideoInfo {
-            width: 32,
-            height: 32,
-            fps_num: 30000,
-            fps_den: 1001,
-            has_audio: false,
+        let film = TheoraIdentHeader {
+            frn: 30000,
+            frd: 1001,
+            ..ident.clone()
         };
+        let info = VideoInfo::from_ident(&film, false);
         assert_eq!(info.frame_time_ms(115), 3837);
         assert_eq!(info.frame_time_ms(u64::MAX), u64::MAX);
+        // A frame is shown at the start of its interval; before
+        // bitstream 3.2.1, the original's decoder gives its end.
+        assert_eq!(info.shown_at_ms(115), 3837);
+        let old = VideoInfo::from_ident(
+            &TheoraIdentHeader {
+                vrev: 0,
+                ..film.clone()
+            },
+            false,
+        );
+        assert!(old.before_3_2_1);
+        assert_eq!(old.shown_at_ms(114), 3837);
+        assert_eq!(old.shown_at_ms(u64::MAX), u64::MAX);
+        // The coded frame holds the picture, whose offset the stream
+        // gives from the bottom-left corner.
+        let cropped = VideoInfo::from_ident(
+            &TheoraIdentHeader {
+                fmbw: 40,
+                fmbh: 23,
+                picw: 640,
+                pich: 360,
+                picx: 0,
+                picy: 2,
+                ..ident.clone()
+            },
+            true,
+        );
+        assert_eq!((cropped.width, cropped.height), (640, 360));
+        assert_eq!((cropped.coded_width, cropped.coded_height), (640, 368));
+        assert_eq!((cropped.pic_x, cropped.pic_y), (0, 6));
+        assert!(!cropped.before_3_2_1 && cropped.has_audio);
     }
 
     #[test]

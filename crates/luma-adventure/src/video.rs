@@ -44,6 +44,38 @@ impl VideoPlayback {
     }
 }
 
+/// Where a video goes and how much it is zoomed
+/// (`CVidTheoraPlayer::Play`): the top-left corner of its **coded
+/// frame** and the zoom in percent, for a coded frame of `width` x
+/// `height` on a screen of `screen_w` x `screen_h`. The engine sizes
+/// its texture after the coded frame (multiples of 16), not after the
+/// picture, so a 640x360 video is 640x368 here: stretched on a 1280x720
+/// screen it is zoomed 195.65 %, not 200 %.
+pub fn placement(
+    playback: VideoPlayback,
+    x: i32,
+    y: i32,
+    (screen_w, screen_h): (f32, f32),
+    (width, height): (f32, f32),
+) -> (i32, i32, f32) {
+    match playback {
+        VideoPlayback::Pos => (x, y, 100.0),
+        VideoPlayback::Stretch => {
+            let zoom = (screen_w / width.max(1.0) * 100.0).min(screen_h / height.max(1.0) * 100.0);
+            (
+                ((screen_w - width * (zoom / 100.0)) / 2.0) as i32,
+                ((screen_h - height * (zoom / 100.0)) / 2.0) as i32,
+                zoom,
+            )
+        }
+        VideoPlayback::Center => (
+            ((screen_w - width) / 2.0) as i32,
+            ((screen_h - height) / 2.0) as i32,
+            100.0,
+        ),
+    }
+}
+
 /// One subtitle of a `.sub` file: a text shown from a frame to a frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subtitle {
@@ -227,7 +259,9 @@ pub struct VideoPlayer {
     pub info: VideoInfo,
     /// How it is placed.
     pub playback: VideoPlayback,
-    /// Where the picture's top-left corner is.
+    /// Where the top-left corner of the coded frame is (the engine's
+    /// `m_PosX`, `m_PosY`); the picture is at
+    /// [`VideoPlayer::picture_offset`] from it.
     pub x: i32,
     /// See `x`.
     pub y: i32,
@@ -333,6 +367,15 @@ impl VideoPlayer {
     /// Whether the video plays.
     pub fn is_playing(&self) -> bool {
         !self.finished
+    }
+
+    /// Where the picture is from the corner of the coded frame, on
+    /// screen: the picture's offset in the coded frame, zoomed. Luma
+    /// draws the picture only; the engine drew the whole coded frame,
+    /// its padding rows and columns included.
+    pub fn picture_offset(&self) -> (f32, f32) {
+        let zoom = self.zoom / 100.0;
+        (self.info.pic_x as f32 * zoom, self.info.pic_y as f32 * zoom)
     }
 
     /// The frame shown, by index.
@@ -612,20 +655,9 @@ impl World {
             return false;
         };
         let info = video.info().clone();
-        let (sw, sh) = (self.settings.width as f32, self.settings.height as f32);
-        let (w, h) = (info.width as f32, info.height as f32);
-        let (px, py, zoom) = match playback {
-            VideoPlayback::Pos => (x, y, 100.0),
-            VideoPlayback::Stretch => {
-                let zoom = (sw / w.max(1.0) * 100.0).min(sh / h.max(1.0) * 100.0);
-                (
-                    ((sw - w * zoom / 100.0) / 2.0) as i32,
-                    ((sh - h * zoom / 100.0) / 2.0) as i32,
-                    zoom,
-                )
-            }
-            VideoPlayback::Center => (((sw - w) / 2.0) as i32, ((sh - h) / 2.0) as i32, 100.0),
-        };
+        let screen = (self.settings.width as f32, self.settings.height as f32);
+        let coded = (info.coded_width as f32, info.coded_height as f32);
+        let (px, py, zoom) = placement(playback, x, y, screen, coded);
         let subtitler = self.load_subtitler(filename, subtitle_file);
         self.freeze(engine, freeze_music);
         self.video = Some(VideoPlayer {
@@ -956,6 +988,7 @@ impl World {
                     entity: r,
                     texture,
                     zoom: video.player.zoom,
+                    offset: video.player.picture_offset(),
                     tint: view.scene.entity_tint(entity),
                 })
             })
@@ -978,11 +1011,12 @@ impl World {
         };
         let entity = self.ui_entities.get(index)?;
         let zoom = video.player.zoom / 100.0;
+        let (dx, dy) = video.player.picture_offset();
         Some(Quad {
             texture,
             dst: Rect::new(
-                x as f32,
-                y as f32,
+                x as f32 + dx,
+                y as f32 + dy,
                 (texture.width as f32 * zoom).trunc(),
                 (texture.height as f32 * zoom).trunc(),
             ),
@@ -1130,11 +1164,12 @@ impl World {
         };
         if let (Some(texture), Some(_)) = (&self.video_texture, &player.frame) {
             let zoom = player.zoom / 100.0;
+            let (dx, dy) = player.picture_offset();
             list.push(Quad {
                 texture,
                 dst: Rect::new(
-                    player.x as f32,
-                    player.y as f32,
+                    player.x as f32 + dx,
+                    player.y as f32 + dy,
                     (texture.width as f32 * zoom).trunc(),
                     (texture.height as f32 * zoom).trunc(),
                 ),
@@ -1201,6 +1236,37 @@ mod tests {
         assert_eq!(s.shown(), Some("Last"));
         s.update(200);
         assert_eq!(s.shown(), None);
+    }
+
+    /// `CVidTheoraPlayer::Play` places the coded frame, not the picture.
+    #[test]
+    fn a_video_is_placed_by_its_coded_frame() {
+        let screen = (1280.0, 720.0);
+        // 640x360 is coded as 640x368.
+        let (x, y, zoom) = placement(VideoPlayback::Stretch, 5, 6, screen, (640.0, 368.0));
+        assert!((zoom - 195.652).abs() < 0.01, "{zoom}");
+        assert_eq!((x, y), (13, 0));
+        assert_eq!(
+            placement(VideoPlayback::Center, 5, 6, screen, (640.0, 368.0)),
+            (320, 176, 100.0)
+        );
+        assert_eq!(
+            placement(VideoPlayback::Pos, 5, 6, screen, (640.0, 368.0)),
+            (5, 6, 100.0)
+        );
+        // A coded frame larger than the screen is centred with a
+        // negative corner, truncated towards zero.
+        assert_eq!(
+            placement(VideoPlayback::Center, 0, 0, (100.0, 100.0), (131.0, 103.0)),
+            (-15, -1, 100.0)
+        );
+        // The picture is drawn at its place in the coded frame.
+        let mut player = player_of(luma_video::synthetic_clip(32, 32, 2, 10), None);
+        assert_eq!(player.picture_offset(), (0.0, 0.0));
+        player.info.pic_x = 4;
+        player.info.pic_y = 8;
+        player.zoom = 150.0;
+        assert_eq!(player.picture_offset(), (6.0, 12.0));
     }
 
     /// The details of `CVidSubtitler::LoadSubtitles`.
