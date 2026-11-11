@@ -6,176 +6,176 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBDiskFile::CBDiskFile` | unreviewed |  |
-| `CBDiskFile::~CBDiskFile` | unreviewed |  |
-| `CBDiskFile::Open` | unreviewed |  |
-| `CBDiskFile::Close` | unreviewed |  |
-| `CBDiskFile::Read` | unreviewed |  |
-| `CBDiskFile::Seek` | unreviewed |  |
+| `CBDiskFile::CBDiskFile` | replaced | No file object in Luma: `Vfs::read` (`crates/luma-archive/src/vfs.rs`) returns the whole file as a `Vec<u8>`, so there is no handle, position or prefix state to default. |
+| `CBDiskFile::~CBDiskFile` | replaced | Rust ownership; nothing observable. |
+| `CBDiskFile::Open` | partial | `Vfs::find_loose` + `read_loose` (`crates/luma-archive/src/vfs.rs`): same compressed container (`DEC0ADDE`/`ZCMP`, DataOffset, CompSize, UncompSize). Differences: (1) no fallback `fopen(Filename)` when the name is not under a search path: `safe_components` refuses absolute paths, drive letters and `..`, which the original opens straight from disk; (2) the search paths differ, see `CBFileManager::InitPaths`; (3) a compressed file that fails to inflate makes the original fall through to the packaged copy (`OpenFileRaw`), Luma returns the error; (4) the Rich Saved Game prefix (`RGMH` header + thumbnail skipped before the magic test) is not handled: it only occurs in the original's saved games, which Luma does not read (`docs/saving.md`). Luma also matches each path component ignoring ASCII case (`find_case_insensitive`), which Windows did for the original. |
+| `CBDiskFile::Close` | replaced | No handle to close: the file is read whole and dropped. |
+| `CBDiskFile::Read` | replaced | Callers slice the `Vec<u8>` returned by `Vfs::read`; no streaming read. |
+| `CBDiskFile::Seek` | replaced | Callers index the in-memory bytes; no seek. |
 
 ## `wme_base/BDynBuffer.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBDynBuffer::CBDynBuffer` | unreviewed |  |
-| `CBDynBuffer::~CBDynBuffer` | unreviewed |  |
-| `CBDynBuffer::Cleanup` | unreviewed |  |
-| `CBDynBuffer::GetSize` | unreviewed |  |
-| `CBDynBuffer::Init` | unreviewed |  |
-| `CBDynBuffer::PutBytes` | unreviewed |  |
-| `CBDynBuffer::GetBytes` | unreviewed |  |
-| `CBDynBuffer::PutDWORD` | unreviewed |  |
-| `CBDynBuffer::GetDWORD` | unreviewed |  |
-| `CBDynBuffer::PutString` | unreviewed |  |
-| `CBDynBuffer::GetString` | unreviewed |  |
-| `CBDynBuffer::PutText` | unreviewed |  |
-| `CBDynBuffer::PutTextIndent` | unreviewed |  |
-| `CBDynBuffer::PutTextForm` | unreviewed |  |
+| `CBDynBuffer::CBDynBuffer` | replaced | `Vec<u8>` / `String`; the initial size and growth step are allocator details. |
+| `CBDynBuffer::~CBDynBuffer` | replaced | Rust ownership. |
+| `CBDynBuffer::Cleanup` | replaced | Rust ownership (`Vec::clear`). |
+| `CBDynBuffer::GetSize` | replaced | `Vec::len`. |
+| `CBDynBuffer::Init` | replaced | `Vec::with_capacity`. |
+| `CBDynBuffer::PutBytes` | replaced | `Vec::extend_from_slice`. |
+| `CBDynBuffer::GetBytes` | replaced | Slice reads; only used by `GetDWORD`, which has no caller. |
+| `CBDynBuffer::PutDWORD` | n/a | Only caller is `CScScript::ExternalCall`, which marshals the arguments of a call into a Windows DLL. |
+| `CBDynBuffer::GetDWORD` | n/a | No caller anywhere in `wme_base` or `wme_ad`. |
+| `CBDynBuffer::PutString` | n/a | No caller anywhere in `wme_base` or `wme_ad`. |
+| `CBDynBuffer::GetString` | n/a | No caller anywhere in `wme_base` or `wme_ad`. |
+| `CBDynBuffer::PutText` | n/a | Only called by the `SaveAsText` methods, which nothing in `wme_base`/`wme_ad` invokes (no script method, no engine path creates the buffer): they serve the editors. |
+| `CBDynBuffer::PutTextIndent` | n/a | Same as `PutText`: only the editors' `SaveAsText` path uses it. |
+| `CBDynBuffer::PutTextForm` | n/a | Same as `PutText`: only the editors' `SaveAsText` path uses it. |
 
 ## `wme_base/BFile.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBFile::CBFile` | unreviewed |  |
-| `CBFile::~CBFile` | unreviewed |  |
-| `CBFile::IsEOF` | unreviewed |  |
-| `CBFile::ReadData` | unreviewed |  |
-| `CBFile::GetFileSize` | unreviewed |  |
-| `CBFile::GetFilePosition` | unreviewed |  |
-| `CBFile::SeekToPosition` | unreviewed |  |
+| `CBFile::CBFile` | replaced | No file object: files are whole `Vec<u8>` from `Vfs::read`. |
+| `CBFile::~CBFile` | replaced | Rust ownership. |
+| `CBFile::IsEOF` | replaced | Only the Theora player asks; `luma-video` decodes from the in-memory bytes and sees their end. |
+| `CBFile::ReadData` | replaced | Plugin-facing `IWmeFile`: a Luma module reads a game file through the public `luma::archive::Vfs::read` (whole file) instead of a stream handle. |
+| `CBFile::GetFileSize` | replaced | Plugin-facing `IWmeFile`: `Vec::len` of what `Vfs::read` returns. |
+| `CBFile::GetFilePosition` | replaced | Plugin-facing `IWmeFile`: no stream position, the module owns the bytes. |
+| `CBFile::SeekToPosition` | replaced | Plugin-facing `IWmeFile`: no stream position, the module owns the bytes. |
 
 ## `wme_base/BFileEntry.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBFileEntry::CBFileEntry` | unreviewed |  |
-| `CBFileEntry::~CBFileEntry` | unreviewed |  |
+| `CBFileEntry::CBFileEntry` | replaced | `Entry` (`crates/luma-archive/src/package.rs`) built whole by the parser, plus `Location` in the `Vfs` index; `m_Filename`, `m_TimeDate2` and `m_JournalTime` are never used by the original either. |
+| `CBFileEntry::~CBFileEntry` | replaced | Rust ownership. |
 
 ## `wme_base/BFileManager.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBFileManager::CBFileManager` | unreviewed |  |
-| `CBFileManager::~CBFileManager` | unreviewed |  |
-| `CBFileManager::Cleanup` | unreviewed |  |
-| `CBFileManager::ReadWholeFile` | unreviewed |  |
-| `CBFileManager::MakeRelativePath` | unreviewed |  |
-| `CBFileManager::MakeAbsolutePath` | unreviewed |  |
-| `CBFileManager::SaveFile` | unreviewed |  |
-| `CBFileManager::RequestCD` | unreviewed |  |
-| `CBFileManager::AddPath` | unreviewed |  |
-| `CBFileManager::ReloadPaths` | unreviewed |  |
-| `CBFileManager::InitPaths` | unreviewed |  |
-| `CBFileManager::RegisterPackages` | unreviewed |  |
-| `CBFileManager::RegisterPackage` | unreviewed |  |
-| `CBFileManager::OpenPackage` | unreviewed |  |
-| `CBFileManager::OpenSingleFile` | unreviewed |  |
-| `CBFileManager::GetFullPath` | unreviewed |  |
-| `CBFileManager::GetPackageEntry` | unreviewed |  |
-| `CBFileManager::OpenFile` | unreviewed |  |
-| `CBFileManager::CloseFile` | unreviewed |  |
-| `CBFileManager::OpenFileRaw` | unreviewed |  |
-| `CBFileManager::RestoreCurrentDir` | unreviewed |  |
-| `CBFileManager::SetBasePath` | unreviewed |  |
-| `CBFileManager::FindPackageSignature` | unreviewed |  |
+| `CBFileManager::CBFileManager` | done | `Vfs::open_game` (`crates/luma-archive/src/vfs.rs`): sets the search paths, then registers the packages. What differs is in the `InitPaths` and `RegisterPackages` rows. |
+| `CBFileManager::~CBFileManager` | replaced | Rust ownership. |
+| `CBFileManager::Cleanup` | replaced | Rust ownership; the open-file list does not exist (files are read whole). |
+| `CBFileManager::ReadWholeFile` | done | `Vfs::read` (`crates/luma-archive/src/vfs.rs`): whole file, loose copy first; `MustExist` logging is left to the callers, which get `Error::NotFound`. The extra NUL terminator is not needed with `Vec<u8>`. |
+| `CBFileManager::MakeRelativePath` | n/a | No caller in `wme_base`/`wme_ad`: the editors use it to turn a picked file into a project-relative name. |
+| `CBFileManager::MakeAbsolutePath` | n/a | Only caller is `CBDebugger::ResolveFilename`, for the external script debugger. |
+| `CBFileManager::SaveFile` | replaced | Only caller is `CBPersistMgr::SaveFile`. Luma writes saved games in its own format (`crates/luma-adventure/src/save.rs`: header then compressed body); the `DEC0ADDE`/`ZCMP` container, the Rich Saved Game prefix and the uncompressed variant are not written, so saves are not interchangeable with the original (`docs/saving.md`). |
+| `CBFileManager::RequestCD` | n/a | Unfinished stub in the original: it closes the packages on CDs and always fails, no disc is ever asked for. |
+| `CBFileManager::AddPath` | replaced | `Vfs::add_directory` (`crates/luma-archive/src/vfs.rs`) keeps a `PathBuf`; lower-casing and the trailing `\` are Windows path handling (case is ignored at lookup). There is no separate list of package paths: see `InitPaths`. |
+| `CBFileManager::ReloadPaths` | n/a | No caller in `wme_base`/`wme_ad`; the tools use it after changing the registry paths. |
+| `CBFileManager::InitPaths` | partial | `Vfs::open_game` (`crates/luma-archive/src/vfs.rs`). Missing: the `CustomPaths` (loose files) and `PackagePaths` (packages) values of the `Resource` section of the registry or `wme.ini`, `;`-separated lists of extra directories, are not read. Different: the original searches loose files in `CustomPaths` then `.\` only, and packages in `.\`, `PackagePaths`, then `data`; Luma also searches loose files in `data/`, so a loose file there shadows a packaged one only in Luma. |
+| `CBFileManager::RegisterPackages` | partial | `Vfs::open_game` + `package_files` (`crates/luma-archive/src/vfs.rs`): every `*.dcp` file (not directory) of the game directory then of `data`. Missing: (1) the package bound to the executable (`RegisterPackage("", exe, true)`): `Package::open_embedded` exists but nothing calls it, so a game shipped as one `.exe` with its data appended finds no file; (2) a package that cannot be opened or has a bad header is logged and skipped by the original, `open_game` returns the error and the game does not start. Different: registration order is the OS listing order in the original, byte-sorted paths in Luma (it only decides ties of equal CD and priority, where the first registered wins). |
+| `CBFileManager::RegisterPackage` | partial | `Package::from_reader_at`/`Parser::parse` (`crates/luma-archive/src/package.rs`) and `Vfs::add_package` (`crates/luma-archive/src/vfs.rs`): magics, version <= 0x200, v2 `DirOffset`, names XORed with `D` in v2, CD forced to 0 without `MasterIndex`, replacement only on lower CD or higher priority all agree. Missing or different: (1) Luma refuses the whole package (`Error::Corrupt`) when an entry's data would end past the file, which is always the case for a master index, whose entries live in other `.dcp` files: master indexes cannot be registered; (2) names are upper-cased with ASCII rules (`normalize_name`), the original uses `strupr` in the ANSI code page, so names with accented letters differing only by case do not match; (3) the 'package is outdated' warning for versions below 0x200 is not logged. |
+| `CBFileManager::OpenPackage` | partial | The original reopens a package by the name stored in its directory record (`<name>.dcp` in each package path). Luma keeps the handle of the file it parsed (`Package::source`, `crates/luma-archive/src/package.rs`) and never uses the stored name: a renamed `.dcp` still works in Luma, but a directory whose data is in another file (master index) cannot be read. |
+| `CBFileManager::OpenSingleFile` | partial | Outside `BPackage::Open` (reopening the executable that holds a bound package) it has no caller. `Package::open_embedded` keeps its own handle, but bound packages are never registered (see `RegisterPackages`). |
+| `CBFileManager::GetFullPath` | replaced | Callers (DirectShow video, GDI font registration) need a host path because Windows APIs open the file; Luma's decoders take the bytes of `Vfs::read`, so TrueType fonts and videos also load from packages. `Vfs::find_loose` (`crates/luma-archive/src/vfs.rs`) is the path lookup when one is needed. |
+| `CBFileManager::GetPackageEntry` | done | `Vfs::find_packaged` (`crates/luma-archive/src/vfs.rs`): upper-cased name looked up in the single table. |
+| `CBFileManager::OpenFile` | partial | `Vfs::read` (`crates/luma-archive/src/vfs.rs`): an empty name finds nothing, as in the original. Missing: the debug-mode log line 'Referencing absolute path ... The game will NOT work on another computer' (Luma refuses such names instead, see `CBDiskFile::Open`). The list of open files is not needed. |
+| `CBFileManager::CloseFile` | replaced | No handles: files are read whole. |
+| `CBFileManager::OpenFileRaw` | partial | `Vfs::read` (`crates/luma-archive/src/vfs.rs`): loose file, then package, as in the original. Missing: (1) names starting with `savegame:` (a saved game's thumbnail read as an image file, `CBSaveThumbFile`) are not served (`docs/saving.md`, 'Not yet'); (2) the last fallback, the engine's built-in resources, does not exist (see `CBResourceFile::Open`). |
+| `CBFileManager::RestoreCurrentDir` | replaced | `Vfs` holds explicit directory paths and never depends on the process's current directory. |
+| `CBFileManager::SetBasePath` | replaced | The game directory is the argument of `Vfs::open_game`; in the original only the tools call this. |
+| `CBFileManager::FindPackageSignature` | done | `find_signature` (`crates/luma-archive/src/package.rs`): scan from 1 MiB for `DE AD C0 DE 4A 55 4E 4B`, first match, chunks overlapping so a straddling signature is found. Not wired into `Vfs::open_game`: see `RegisterPackages`. |
 
 ## `wme_base/BPackage.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBPackage::CBPackage` | unreviewed |  |
-| `CBPackage::~CBPackage` | unreviewed |  |
-| `CBPackage::Open` | unreviewed |  |
-| `CBPackage::Close` | unreviewed |  |
-| `CBPackage::Read` | unreviewed |  |
+| `CBPackage::CBPackage` | replaced | `Package` and `Directory` (`crates/luma-archive/src/package.rs`) are built whole by the parser; no default state to compare. |
+| `CBPackage::~CBPackage` | replaced | Rust ownership closes the file. |
+| `CBPackage::Open` | partial | The original opens lazily: the executable for a bound package, else `<name>.dcp` through the package paths, with one retry after `RequestCD`. `Package::open` (`crates/luma-archive/src/package.rs`) opens the file once and keeps it; consequences in `CBFileManager::OpenPackage` (master index) and `RegisterPackages` (bound package). |
+| `CBPackage::Close` | replaced | The handle lives as long as the `Vfs`; the only caller in the original is the `RequestCD` stub. |
+| `CBPackage::Read` | done | `Package::read` (`crates/luma-archive/src/package.rs`): seek to the entry's offset and read exactly the stored length, an error otherwise. |
 
 ## `wme_base/BParamSet.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBParamSet::CBParamSet` | unreviewed |  |
-| `CBParamSet::~CBParamSet` | unreviewed |  |
-| `CBParamSet::AddParam` | unreviewed |  |
-| `CBParamSet::AddParam #2` | unreviewed |  |
-| `CBParamSet::AddParam #3` | unreviewed |  |
-| `CBParamSet::AddParam #4` | unreviewed |  |
-| `CBParamSet::AddParam #5` | unreviewed |  |
-| `CBParamSet::AddParam #6` | unreviewed |  |
-| `CBParamSet::AddParam #7` | unreviewed |  |
-| `CBParamSet::PushToStack` | unreviewed |  |
-| `CBParamSet::Clean` | unreviewed |  |
+| `CBParamSet::CBParamSet` | replaced | Plugin-facing `IWmeParamSet` (arguments a DLL plugin passes to `CallMethod`/`CreateObject`). Luma loads no DLL; Rust code passes `&[luma_script::Value]`. |
+| `CBParamSet::~CBParamSet` | replaced | Rust ownership. |
+| `CBParamSet::AddParam` | replaced | `Value::from(i32)` pushed in a `Vec<Value>`. |
+| `CBParamSet::AddParam #2` | replaced | `Value::from(&str)` pushed in a `Vec<Value>`. |
+| `CBParamSet::AddParam #3` | replaced | `Value::from(f64)` pushed in a `Vec<Value>`. |
+| `CBParamSet::AddParam #4` | replaced | `Value::from(bool)` pushed in a `Vec<Value>`. |
+| `CBParamSet::AddParam #5` | replaced | `Value::Native(id)` pushed in a `Vec<Value>`. |
+| `CBParamSet::AddParam #6` | replaced | A cloned `Value` pushed in a `Vec<Value>`. |
+| `CBParamSet::AddParam #7` | replaced | `Value::Null` pushed in a `Vec<Value>`. |
+| `CBParamSet::PushToStack` | replaced | Same layout as `Engine::copy_parameters` (`crates/luma-script/src/engine.rs`): arguments pushed last to first, then their count. That function is private; natives receive the arguments as a slice. |
+| `CBParamSet::Clean` | replaced | Rust ownership. |
 
 ## `wme_base/BParser.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBParser::CBParser` | unreviewed |  |
-| `CBParser::~CBParser` | unreviewed |  |
-| `CBParser::GetLastOffender` | unreviewed |  |
-| `CBParser::GetObject` | unreviewed |  |
-| `CBParser::GetCommand` | unreviewed |  |
-| `CBParser::SkipCharacters` | unreviewed |  |
-| `CBParser::GetSubText` | unreviewed |  |
-| `CBParser::GetAssignmentText` | unreviewed |  |
-| `CBParser::GetToken` | unreviewed |  |
-| `CBParser::GetTokenFloat` | unreviewed |  |
-| `CBParser::GetTokenInt` | unreviewed |  |
-| `CBParser::SkipToken` | unreviewed |  |
-| `CBParser::ScanStr` | unreviewed |  |
+| `CBParser::CBParser` | replaced | `Parser` in `crates/luma-formats/src/def.rs`; the whitespace set (space, tab, CR, LF) is the same. |
+| `CBParser::~CBParser` | replaced | Rust ownership. |
+| `CBParser::GetLastOffender` | n/a | No caller in `wme_base`/`wme_ad`; Luma's `ParseError` carries the line instead. |
+| `CBParser::GetObject` | partial | `Parser::statement` (`crates/luma-formats/src/def.rs`) reads the same shapes (`;` comment lines between statements, key, optional `'name'`, `= value` or a brace block), but as a structural parser, not against a token table. Differences: (1) an unknown key makes the original loader fail ('Syntax error in ... definition', the object does not load); Luma's loaders skip it and load the rest, and `docs/formats/definition-files.md` wrongly says the engine skips it; (2) keys match by prefix in table order in the original (`_strnicmp` on the token's length), exactly in Luma; (3) the original hands the raw text of a block to the loader, which reads a scalar from either `KEY = v` or `KEY { v }`; Luma types the block as `Value::List`/`Value::Block`, and `Node::as_int`/`as_float`/`as_bool`/`as_str` return `None` for it, so `ALPHA { 128 }` or `SCALABLE { TRUE }` keep their default in Luma, and `NAME { "x" }` is a parse error. |
+| `CBParser::GetCommand` | partial | Wrapper over `GetObject` (see that row for what differs). Its `Game->MiniUpdate()` call, which keeps streamed sound fed every 200 ms during a long load, is replaced by `luma-audio` mixing on its own thread. |
+| `CBParser::SkipCharacters` | done | `Parser::skip_whitespace` (`crates/luma-formats/src/def.rs`): space, tab, CR, LF, counting lines. |
+| `CBParser::GetSubText` | partial | `Parser::statement` (names), `assignment` (strings) and `block` (`crates/luma-formats/src/def.rs`). Differences: (1) the original finds the end of a `{ }` block by counting braces without regard to quotes, Luma tokenises, so an unbalanced brace inside a string ends the block early only in the original; (2) an unterminated name, string or block runs to the end of the buffer in the original and is a `ParseError` in Luma (the whole file is refused). |
+| `CBParser::GetAssignmentText` | partial | `Parser::assignment` (`crates/luma-formats/src/def.rs`): quoted string to the next `"` without escapes, else an unquoted run. Differences: (1) inside a block the original's run cannot cross the closing brace (the block text was cut out first); Luma's run stops only at whitespace, so `FRAME { DELAY=100}` or `{ X=5}` swallows the `}` and the file fails with 'expected `}`'; (2) the original ends the run at any byte <= 0x20 as a signed char: every control character and every byte >= 0x80 (accented letters) end it; Luma only at space, tab, CR, LF. |
+| `CBParser::GetToken` | n/a | No caller outside `GetTokenFloat`/`GetTokenInt`/`SkipToken`, themselves never called in `wme_base`/`wme_ad` (dead tokenizer). |
+| `CBParser::GetTokenFloat` | n/a | No caller in `wme_base`/`wme_ad`. |
+| `CBParser::GetTokenInt` | n/a | No caller in `wme_base`/`wme_ad`. |
+| `CBParser::SkipToken` | n/a | No caller in `wme_base`/`wme_ad`. |
+| `CBParser::ScanStr` | partial | `Scalar::as_int`, `as_float`, `as_bool`, `as_ints` (`crates/luma-formats/src/def.rs`); the engine only uses the formats `%d`, `%f`, `%b`, `%d,%d...`, `%f,%f,%f` and `%D`. Differences: (1) `%b` compares only the length of the value's alphanumeric run, so an empty value and any prefix of `yes`, `true`, `on` (`T`, `Y`, `O`, `TR`...) are true in the original and false in Luma, and `TRUE,` is true in the original; (2) `%d`/`%f` store 0 when the text is not a number (`atoi`/`atof`), Luma returns `None` and the loaders keep their default; (3) in `%d,%d,...` a missing comma stops the scan and leaves the remaining variables untouched: `as_ints` agrees, each loader must then keep the previous values. |
 
 ## `wme_base/BPkgFile.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBPkgFile::CBPkgFile` | unreviewed |  |
-| `CBPkgFile::~CBPkgFile` | unreviewed |  |
-| `CBPkgFile::Open` | unreviewed |  |
-| `CBPkgFile::Close` | unreviewed |  |
-| `CBPkgFile::Read` | unreviewed |  |
-| `CBPkgFile::Seek` | unreviewed |  |
-| `CBPkgFile::SeekToPos` | unreviewed |  |
+| `CBPkgFile::CBPkgFile` | replaced | No stream object: `Package::read` inflates the whole entry. |
+| `CBPkgFile::~CBPkgFile` | replaced | Rust ownership. |
+| `CBPkgFile::Open` | done | `Vfs::find_packaged` (`crates/luma-archive/src/vfs.rs`) with `normalize_name` (`crates/luma-archive/src/package.rs`): `/` and `\` are the same separator, case ignored, compressed when `CompLength` is not 0. |
+| `CBPkgFile::Close` | replaced | Nothing to close. |
+| `CBPkgFile::Read` | replaced | `Package::read` (`crates/luma-archive/src/package.rs`) reads the stored bytes and inflates the complete zlib stream at once. Stricter than the original: an entry whose inflated size differs from `Length` is an error, where the original returns what it got. |
+| `CBPkgFile::Seek` | replaced | Callers index the in-memory bytes. |
+| `CBPkgFile::SeekToPos` | replaced | No streaming inflate to restart: the entry is inflated whole. |
 
 ## `wme_base/BResourceFile.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBResourceFile::CBResourceFile` | unreviewed |  |
-| `CBResourceFile::~CBResourceFile` | unreviewed |  |
-| `CBResourceFile::Open` | unreviewed |  |
-| `CBResourceFile::OpenModule` | unreviewed |  |
-| `CBResourceFile::Close` | unreviewed |  |
-| `CBResourceFile::Read` | unreviewed |  |
-| `CBResourceFile::Seek` | unreviewed |  |
+| `CBResourceFile::CBResourceFile` | replaced | No file object. |
+| `CBResourceFile::~CBResourceFile` | replaced | Rust ownership. |
+| `CBResourceFile::Open` | todo | Last source tried for any file name: the `GF_RES` resources linked into the engine (`system_font.fnt` + `system_font.bmp`, `invalid.bmp`, `invalid_debug.bmp`, `shadow.png`, `wpt.bmp` + `wpt.sprite`), then those of each plugin DLL. Luma has no built-in files: a game without a loadable `SYSTEM_FONT` gets no fallback font (`CBGame` falls back to `system_font.fnt`), a missing image or sprite shows nothing instead of the `invalid.bmp` placeholder, and a game file naming one of these resources fails to load. `shadow.png` is stood in by a generated blob (`crates/luma-adventure/src/draw3d.rs`). |
+| `CBResourceFile::OpenModule` | n/a | Win32 `FindResource`/`LoadResource` on a module handle; the missing behaviour is in the `Open` row. |
+| `CBResourceFile::Close` | replaced | Nothing to close. |
+| `CBResourceFile::Read` | replaced | Would be a slice of embedded bytes (`include_bytes!`) once `Open` exists. |
+| `CBResourceFile::Seek` | replaced | Would be an index into embedded bytes once `Open` exists. |
 
 ## `wme_base/utils.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBUtils::ClosestColor` | unreviewed |  |
-| `CBUtils::Clip` | unreviewed |  |
-| `CBUtils::Swap` | unreviewed |  |
-| `CBUtils::RGBtoNative` | unreviewed |  |
-| `CBUtils::StrBeginsI` | unreviewed |  |
-| `CBUtils::NormalizeAngle` | unreviewed |  |
-| `CBUtils::COLORREF2D3D` | unreviewed |  |
-| `CBUtils::D3D2COLORREF` | unreviewed |  |
-| `CBUtils::GetWindowsVersion` | unreviewed |  |
-| `CBUtils::CreatePath` | unreviewed |  |
-| `CBUtils::DebugMessage` | unreviewed |  |
-| `CBUtils::SetString` | unreviewed |  |
-| `CBUtils::StrNumEntries` | unreviewed |  |
-| `CBUtils::StrEntry` | unreviewed |  |
-| `CBUtils::RandomInt` | unreviewed |  |
-| `CBUtils::RandomFloat` | unreviewed |  |
-| `CBUtils::RandomAngle` | unreviewed |  |
-| `CBUtils::IsWinNT` | unreviewed |  |
-| `CBUtils::IsKeyDown` | unreviewed |  |
-| `CBUtils::GetArgCount` | unreviewed |  |
-| `CBUtils::GetArg` | unreviewed |  |
-| `CBUtils::MatchesPattern` | unreviewed |  |
-| `CBUtils::GetUsedMemMB` | unreviewed |  |
-| `CBUtils::GetPath` | unreviewed |  |
-| `CBUtils::GetFilename` | unreviewed |  |
-| `CBUtils::RGBtoHSL` | unreviewed |  |
-| `CBUtils::HSLtoRGB` | unreviewed |  |
-| `CBUtils::Hue2RGB` | unreviewed |  |
+| `CBUtils::ClosestColor` | n/a | Only used by `CBSurfaceDD` to find a colour key in the palette of an 8-bit DirectDraw surface; Luma decodes every image to RGBA. |
+| `CBUtils::Clip` | replaced | Only used by the DirectDraw blits of `CBSurfaceDD`; `luma-render` lets the GPU clip to the viewport. |
+| `CBUtils::Swap` | replaced | `std::mem::swap`. |
+| `CBUtils::RGBtoNative` | n/a | Packs a colour into a DirectDraw surface's pixel format (`CBSurfaceDD`, `CBRenderDD`). |
+| `CBUtils::StrBeginsI` | done | Only used to class the meshes of a 3D scene by name (`walk_`, `blk_`, `wpt_`): the default patterns `walk_*`, `blk_*`, `wpt_*` of `crates/luma-3d/src/node_patterns.rs`, matched ignoring case. |
+| `CBUtils::NormalizeAngle` | done | `normalize_angle` in `crates/luma-adventure/src/particles.rs` and `actor3d.rs`: whole turns until within 0..=360, both bounds kept. |
+| `CBUtils::COLORREF2D3D` | n/a | No caller in `wme_base`/`wme_ad`. |
+| `CBUtils::D3D2COLORREF` | n/a | Converts a colour for GDI `SetTextColor` in `CBFontTT`; Luma's TrueType rasterizer takes RGBA. |
+| `CBUtils::GetWindowsVersion` | n/a | Windows version string for the first lines of the log. |
+| `CBUtils::CreatePath` | replaced | `std::fs::create_dir_all` (save directory, `Directory.CreateDirectory`). |
+| `CBUtils::DebugMessage` | n/a | Empty body in the original. |
+| `CBUtils::SetString` | replaced | `String` assignment. |
+| `CBUtils::StrNumEntries` | n/a | No caller in `wme_base`/`wme_ad`. |
+| `CBUtils::StrEntry` | n/a | Only splits the debugger's `Breakpoint<n>` registry values (`CScEngine::LoadBreakpoints`) and a plugin DLL's version string (`CBPlugin`). |
+| `CBUtils::RandomInt` | partial | `World::random` for the scripts' `Random` (`crates/luma-adventure/src/world.rs`; the bounds are swapped when reversed in `crates/luma-script/src/engine.rs`) and `Rng::int` for particles (`particles.rs`). Different: (1) the generator starts from a constant (`rng: 0x2545F4914F6CDD1D` in `World`), so every launch of a game draws the same sequence, where the original seeds with `srand(time(NULL))` in `CBGame::CBGame`; (2) the original's `rand()` gives 0..32767, so `Random(a, b)` never exceeds `a + 32767`; Luma covers the whole span. |
+| `CBUtils::RandomFloat` | partial | `Rng::float` (`crates/luma-adventure/src/particles.rs`): `from + (to - from) * unit`, either order. Same fixed seed as `RandomInt`: particle emitters produce the same pattern at each launch. |
+| `CBUtils::RandomAngle` | done | `Rng::angle` (`crates/luma-adventure/src/particles.rs`): `to` raised by whole turns until not below `from`, result normalised. The seed is in the `RandomInt` row. |
+| `CBUtils::IsWinNT` | n/a | Chooses between ANSI and wide-character Win32 calls. |
+| `CBUtils::IsKeyDown` | replaced | `GetAsyncKeyState`; Luma tracks the modifier keys from the window's key events (`self.keyboard.control`, `is_key_down` in `crates/luma-adventure/src/accessibility.rs` and `input.rs`). |
+| `CBUtils::GetArgCount` | replaced | Splits the Windows command line for `CBPlatform::Initialize`; `luma-player` gets its arguments already split from `std::env::args`. The options themselves are in `platform.md` (`CBPlatform::Initialize`). |
+| `CBUtils::GetArg` | replaced | Same as `GetArgCount`: `std::env::args`. |
+| `CBUtils::MatchesPattern` | done | `matches_pattern` in `crates/luma-3d/src/node_patterns.rs`: same branches (`*`, `?`, the DOS rules for `*.`, a trailing `.`, case ignored). |
+| `CBUtils::GetUsedMemMB` | partial | `Game.UsedMemory`: the working set in debug builds, 0 in release builds. Luma has no `UsedMemory` property (`docs/compatibility.md` lists it as a no-op, but no native answers it), so a script reads null instead of 0. |
+| `CBUtils::GetPath` | replaced | `Path::parent`; only used on the executable's and the ini file's path. |
+| `CBUtils::GetFilename` | replaced | `Path::file_name`; only used on the `-ini` argument. |
+| `CBUtils::RGBtoHSL` | done | `rgb_to_hsl` in `crates/luma-script/src/engine.rs`: same single-precision formulas, hue and saturation 0 for a grey, each result truncated to a byte. |
+| `CBUtils::HSLtoRGB` | done | `hsl_to_rgb` in `crates/luma-script/src/engine.rs`: same branches, channels truncated, alpha 255. |
+| `CBUtils::Hue2RGB` | done | `hue_to_channel` in `crates/luma-script/src/engine.rs`: same four ranges. |
