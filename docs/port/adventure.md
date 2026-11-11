@@ -255,64 +255,64 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdEntity::CAdEntity` | unreviewed |  |
-| `CAdEntity::~CAdEntity` | unreviewed |  |
-| `CAdEntity::LoadFile` | unreviewed |  |
-| `CAdEntity::LoadBuffer` | unreviewed |  |
-| `CAdEntity::LoadBuffer ENTITY` | unreviewed |  |
-| `CAdEntity::LoadBuffer SPRITE` | unreviewed |  |
-| `CAdEntity::LoadBuffer X` | unreviewed |  |
-| `CAdEntity::LoadBuffer Y` | unreviewed |  |
-| `CAdEntity::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdEntity::LoadBuffer NAME` | unreviewed |  |
-| `CAdEntity::LoadBuffer SCALABLE` | unreviewed |  |
-| `CAdEntity::LoadBuffer REGISTRABLE` | unreviewed |  |
-| `CAdEntity::LoadBuffer INTERACTIVE` | unreviewed |  |
-| `CAdEntity::LoadBuffer SHADOWABLE` | unreviewed |  |
-| `CAdEntity::LoadBuffer COLORABLE` | unreviewed |  |
-| `CAdEntity::LoadBuffer ACTIVE` | unreviewed |  |
-| `CAdEntity::LoadBuffer EVENTS` | unreviewed |  |
-| `CAdEntity::LoadBuffer FONT` | unreviewed |  |
-| `CAdEntity::LoadBuffer TALK_SPECIAL` | unreviewed |  |
-| `CAdEntity::LoadBuffer TALK` | unreviewed |  |
-| `CAdEntity::LoadBuffer CURSOR` | unreviewed |  |
-| `CAdEntity::LoadBuffer REGION` | unreviewed |  |
-| `CAdEntity::LoadBuffer BLOCKED_REGION` | unreviewed |  |
-| `CAdEntity::LoadBuffer EDITOR_SELECTED` | unreviewed |  |
-| `CAdEntity::LoadBuffer SCRIPT` | unreviewed |  |
-| `CAdEntity::LoadBuffer SOUND_START_TIME` | unreviewed |  |
-| `CAdEntity::LoadBuffer SOUND_VOLUME` | unreviewed |  |
-| `CAdEntity::LoadBuffer SOUND_PANNING` | unreviewed |  |
-| `CAdEntity::LoadBuffer SOUND` | unreviewed |  |
-| `CAdEntity::LoadBuffer SUBTYPE` | unreviewed |  |
-| `CAdEntity::LoadBuffer CAPTION` | unreviewed |  |
-| `CAdEntity::LoadBuffer PROPERTY` | unreviewed |  |
-| `CAdEntity::LoadBuffer WAYPOINTS` | unreviewed |  |
-| `CAdEntity::LoadBuffer IGNORE_ITEMS` | unreviewed |  |
-| `CAdEntity::LoadBuffer ROTABLE` | unreviewed |  |
-| `CAdEntity::LoadBuffer ROTATABLE` | unreviewed |  |
-| `CAdEntity::LoadBuffer ALPHA_COLOR` | unreviewed |  |
-| `CAdEntity::LoadBuffer SCALE` | unreviewed |  |
-| `CAdEntity::LoadBuffer RELATIVE_SCALE` | unreviewed |  |
-| `CAdEntity::LoadBuffer ALPHA` | unreviewed |  |
-| `CAdEntity::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdEntity::LoadBuffer ITEM` | unreviewed |  |
-| `CAdEntity::LoadBuffer WALK_TO_X` | unreviewed |  |
-| `CAdEntity::LoadBuffer WALK_TO_Y` | unreviewed |  |
-| `CAdEntity::LoadBuffer WALK_TO_DIR` | unreviewed |  |
-| `CAdEntity::LoadBuffer SAVE_STATE` | unreviewed |  |
-| `CAdEntity::Display` | unreviewed |  |
-| `CAdEntity::Update` | unreviewed |  |
-| `CAdEntity::ScCallMethod` | unreviewed |  |
-| `CAdEntity::ScGetProperty` | unreviewed |  |
-| `CAdEntity::ScSetProperty` | unreviewed |  |
-| `CAdEntity::ScToString` | unreviewed |  |
-| `CAdEntity::SaveAsText` | unreviewed |  |
-| `CAdEntity::GetHeight` | unreviewed |  |
-| `CAdEntity::UpdatePosition` | unreviewed |  |
-| `CAdEntity::Persist` | unreviewed |  |
-| `CAdEntity::SetItem` | unreviewed |  |
-| `CAdEntity::SetSprite` | unreviewed |  |
+| `CAdEntity::CAdEntity` | done | `luma-formats/src/scene.rs` `Entity::default`: normal subtype, no region, no item, walk-to point 0,0 without direction, no video. |
+| `CAdEntity::~CAdEntity` | replaced | Rust ownership; the region object and the video go with the entity (`scene_edit.rs` `drop_object`, `video.rs` `update_entity_videos`). |
+| `CAdEntity::LoadFile` | partial | `scene_edit.rs` `read_entity_def`: a file that cannot be read or parsed is logged and gives no entity. Missing: the file name is not kept (`Entity.Filename` is null in `natives.rs` `entity_get`; the original keeps `m_Filename`). |
+| `CAdEntity::LoadBuffer` | partial | `luma-formats/src/scene.rs` `Entity::from_node`, then `scene_edit.rs` `init_scene_entity` or `world.rs` `load_scene`. `ENTITY` root for a file, tint from `ALPHA_COLOR`/`ALPHA`, entities whose item is taken hidden. Missing or different: (1) `UpdatePosition()` after loading (see that row); (2) the item-taken test runs only when a scene loads (`inventory.rs` `hide_taken_item_entities`, after the scene state is restored, so it wins over a remembered `Active`): an entity loaded later by `Scene.LoadEntity`, `Game.LoadEntity` or `AddAttachment` is not hidden; (3) unknown keys are skipped where the original fails with a syntax error, and a `CURSOR` that does not load does not fail the load; (4) no warning for an entity with both a sprite and a region. |
+| `CAdEntity::LoadBuffer ENTITY` | done | `scene.rs` `Entity::from_document`: the `ENTITY` block is required in an entity file. |
+| `CAdEntity::LoadBuffer SPRITE` | done | `luma-formats/src/scene.rs` `Entity::from_node`; loaded by `init_scene_entity` / `SceneView::load`, shown by `SceneView::shown_sprite`. |
+| `CAdEntity::LoadBuffer X` | done | `luma-formats/src/scene.rs` `Entity::from_node`. |
+| `CAdEntity::LoadBuffer Y` | done | `luma-formats/src/scene.rs` `Entity::from_node`. |
+| `CAdEntity::LoadBuffer TEMPLATE` | partial | Parsed into `Entity::template`, which nothing reads: the template file is never loaded. The original loads it (`LoadFile`) where the key stands, so the keys before it are defaults the template overrides and the keys after it override the template; it also leaves `Filename` at the template's name and drops the template's `ALPHA_COLOR`/`ALPHA` when the entity sets none. |
+| `CAdEntity::LoadBuffer NAME` | done | `luma-formats/src/scene.rs` `Entity::from_node`. |
+| `CAdEntity::LoadBuffer SCALABLE` | done | `luma-formats/src/scene.rs` `Entity::from_node`; `scene_view.rs` `Transform::of_entity`, `natives.rs` `entity_height`. |
+| `CAdEntity::LoadBuffer REGISTRABLE` | done | `luma-formats/src/scene.rs` `Entity::from_node`; `input.rs` `entity_hits`. |
+| `CAdEntity::LoadBuffer INTERACTIVE` | done | Same field as `REGISTRABLE`. |
+| `CAdEntity::LoadBuffer SHADOWABLE` | done | `luma-formats/src/scene.rs` `Entity::from_node`; `Scene::entity_tint`. |
+| `CAdEntity::LoadBuffer COLORABLE` | done | Same field as `SHADOWABLE`. |
+| `CAdEntity::LoadBuffer ACTIVE` | done | `luma-formats/src/scene.rs` `Entity::from_node`; inactive entities are not updated, drawn or hit. |
+| `CAdEntity::LoadBuffer EVENTS` | done | Accepted and ignored by the original (no case in the switch); Luma skips it too. |
+| `CAdEntity::LoadBuffer FONT` | partial | Read (`luma-formats/src/scene.rs` `Entity::from_node`) and used for the entity's speech, but loaded at the first `Talk` (`world.rs` `load_own_font`), not with the entity; `GetFont` returns the file name even when the font cannot be loaded. |
+| `CAdEntity::LoadBuffer TALK_SPECIAL` | done | `luma-formats/src/scene.rs` `Entity::from_node`, added to the list; `scene_view.rs` `talk_stance`. |
+| `CAdEntity::LoadBuffer TALK` | done | `luma-formats/src/scene.rs` `Entity::from_node`, added to the list; `scene_view.rs` `talk_stance`. |
+| `CAdEntity::LoadBuffer CURSOR` | done | `luma-formats/src/scene.rs` `Entity::from_node`; `natives_object.rs` `object_cursor`, loaded and shown by `input.rs` `cursor_to_show`. |
+| `CAdEntity::LoadBuffer REGION` | done | `luma-formats/src/scene.rs` `Entity::from_node` (`Region::from_node`, base keys only); a script object of its own (`natives_region.rs` `register_entity_region`), hit as a polygon by `input.rs` `entity_hits`. |
+| `CAdEntity::LoadBuffer BLOCKED_REGION` | partial | `luma-formats/src/scene.rs` `Entity::from_node`; `actor.rs` `entity_block_polygon` for the scene's entities. Not counted for an entity of the game (`Game.LoadEntity`): `world.rs` `obstacles_for` only reads the scene and the actors. |
+| `CAdEntity::LoadBuffer EDITOR_SELECTED` | n/a | The selection of the scene editor; nothing at run time reads `m_EditorSelected`. |
+| `CAdEntity::LoadBuffer SCRIPT` | done | `luma-formats/src/scene.rs` `Entity::from_node`; attached by `load_scene` / `init_scene_entity`. |
+| `CAdEntity::LoadBuffer SOUND_START_TIME` | partial | `luma-formats/src/scene.rs` `Entity::from_node`; `world.rs` `load_entity_sound` (`set_sfx_time`). Same limits as `SOUND`. |
+| `CAdEntity::LoadBuffer SOUND_VOLUME` | partial | `luma-formats/src/scene.rs` `Entity::from_node`; `world.rs` `load_entity_sound` (`set_sfx_volume`). Same limits as `SOUND`. |
+| `CAdEntity::LoadBuffer SOUND_PANNING` | done | `luma-formats/src/scene.rs` `Entity::from_node`; `sound.rs` `sound_pan_of`. |
+| `CAdEntity::LoadBuffer SOUND` | partial | `world.rs` `load_entity_sound` loads the sound without playing it (`PlaySFX(file, false, false)`). Different: (1) it looks the entity up in the scene view only, so the `SOUND` of an entity of the game (`Game.LoadEntity`, an attachment) is never loaded; (2) Luma applies `SOUND_START_TIME` and `SOUND_VOLUME` whatever their place in the block. The original loads the sound where `SOUND` stands, with the start time and volume read so far: with the order the scene editor writes (`SOUND`, `SOUND_START_TIME`, `SOUND_VOLUME`) the loaded sound has volume 100 and position 0, and the two values only apply at the next `PlaySound()` without a file, and only when the start time is not 0. |
+| `CAdEntity::LoadBuffer SUBTYPE` | done | `luma-formats/src/scene.rs` `Entity::from_node`: `sound` drops the sprite and turns scalable, rotatable, interactive and colorable off at that point of the block; such entities are not drawn (`EntityKind::Sound`). The editor-only sprite: n/a. |
+| `CAdEntity::LoadBuffer CAPTION` | done | `luma-formats/src/scene.rs` `Entity::from_node`, expanded through the string table (`load_scene`, `init_scene_entity`). |
+| `CAdEntity::LoadBuffer PROPERTY` | done | `luma-formats/src/scene.rs` `Entity::from_node`; set as script properties. |
+| `CAdEntity::LoadBuffer WAYPOINTS` | partial | `luma-formats/src/scene.rs` `Entity::from_node`; `actor.rs` `entity_waypoints` for the scene's entities; not counted for an entity of the game (see `BLOCKED_REGION`). |
+| `CAdEntity::LoadBuffer IGNORE_ITEMS` | done | `luma-formats/src/scene.rs` `Entity::from_node`; `input.rs` `entity_hits`: not registered while an item is selected. |
+| `CAdEntity::LoadBuffer ROTABLE` | done | `luma-formats/src/scene.rs` `Entity::from_node`; `Scene::object_rotation`. |
+| `CAdEntity::LoadBuffer ROTATABLE` | done | Same field as `ROTABLE`. |
+| `CAdEntity::LoadBuffer ALPHA_COLOR` | done | `luma-formats/src/scene.rs` `Entity::from_node`: with `ALPHA` it makes the tint; all zero means none. |
+| `CAdEntity::LoadBuffer SCALE` | done | `luma-formats/src/scene.rs` `Entity::from_node`, an integer; `Scene::object_scale`. |
+| `CAdEntity::LoadBuffer RELATIVE_SCALE` | done | `luma-formats/src/scene.rs` `Entity::from_node`, an integer. |
+| `CAdEntity::LoadBuffer ALPHA` | done | `luma-formats/src/scene.rs` `Entity::from_node`: an alpha without colour gives white. |
+| `CAdEntity::LoadBuffer EDITOR_PROPERTY` | n/a | `CBBase::ParseEditorProperty` returns at once when the game is not in editor mode. |
+| `CAdEntity::LoadBuffer ITEM` | partial | `luma-formats/src/scene.rs` `Entity::from_node`; `inventory.rs` `handle_item_associations` hides and shows the entity with the item. The test at load time (`IsItemTaken`) only happens for a scene's entities when the scene loads: see `LoadBuffer` (2). |
+| `CAdEntity::LoadBuffer WALK_TO_X` | done | `luma-formats/src/scene.rs` `Entity::from_node`; `actor.rs` `Actor::go_to_entity`. |
+| `CAdEntity::LoadBuffer WALK_TO_Y` | done | `luma-formats/src/scene.rs` `Entity::from_node`. |
+| `CAdEntity::LoadBuffer WALK_TO_DIR` | done | `luma-formats/src/scene.rs` `Entity::from_node` (`Direction::from_code`): below 0 is up, 8 and more is none. |
+| `CAdEntity::LoadBuffer SAVE_STATE` | done | `luma-formats/src/scene.rs` `Entity::from_node`; `scene_state.rs` skips entities without it. |
+| `CAdEntity::Display` | partial | `scene_view.rs` (drawing with tint, scale, rotation, blend mode), `input.rs` `entity_hits` (region then sprite, nothing when not interactive or `IgnoreItems` with a selected item), attachments around, the emitter through the region, the video instead of the sprite (`video.rs` `video_overlays`), `sound.rs` `update_sounds`. Different: while a video plays in the entity the original does not display the sprite at all, so it is not registered for the mouse; `entity_hits` still registers the sprite's frame. |
+| `CAdEntity::Update` | partial | `scene_view.rs` `advance_with` / `talk_step`, `video.rs` `update_entity_videos`, `natives_particles.rs` `update_emitters`. Different: (1) a frame's `MOVE` is added unscaled; the original scales the X move by the scene zoom at the entity when scalable (`GetCurrentFrame(zoom)`: only ZoomX is given, Y stays at 100); (2) `TimeIsUp` with a speech sound: the original waits for the sound to stop whatever the duration, Luma also ends the sentence when the duration has passed; (3) `m_Sentence->Update()` and the sprite a talk definition gives are missing (no `.talk` definitions). Playing and finished animations, talk stances, block region, the ready flag and the video (position, end) agree. |
+| `CAdEntity::ScCallMethod` | done | `natives.rs` `entity_call`, `natives_sound.rs`, `natives_region.rs`: StopSound (the sound is kept), PlayTheora (file, looping, alpha file, start time; a failure is logged), StopTheora, IsTheoraPlaying, PauseTheora, ResumeTheora, IsTheoraPaused, CreateRegion, DeleteRegion. |
+| `CAdEntity::ScGetProperty` | partial | `natives.rs` `entity_get`: Type, Item, Subtype, WalkToX, WalkToY, Region agree. `WalkToDirection` without a direction gives 8; the original gives 9 (`DI_NONE`, after `NUM_DIRECTIONS`). |
+| `CAdEntity::ScSetProperty` | partial | `natives.rs` `entity_set`: Item, WalkToX, WalkToY agree. `WalkToDirection` outside 0..7 should leave the direction as it is; Luma turns a negative number into up and 8 or more into none. |
+| `CAdEntity::ScToString` | partial | `world.rs` `Natives::to_string` gives `[<the entity's name>]`; the original gives `[entity object]`. |
+| `CAdEntity::SaveAsText` | n/a | Only reached from the scene editor's save (`CAdScene::SaveAsText`, `CAdLayer::SaveAsText`); no script method or engine path calls it. |
+| `CAdEntity::GetHeight` | partial | `natives.rs` `entity_height`: the sprite's frame height. Missing: an entity with a region and no sprite should return the height of the region's bounding rectangle; Luma returns 0. |
+| `CAdEntity::UpdatePosition` | todo | After loading, an entity with a region and no sprite is placed at the bottom centre of the region's bounding rectangle (X = left + width / 2, Y = bottom). Luma keeps the X and Y of the file (0,0 by default), which `Talk` (subtitle place), `GoToObject` without a walk-to point, `TurnTo(entity)`, sound panning and the `X`/`Y` properties then use. |
+| `CAdEntity::Persist` | partial | serde: the entity definition (item, region, subtype, talk sprites, walk-to point and direction) is saved with the scene view. Missing: the video playing in the entity (`m_Theora`) is not saved (`World::entity_videos` is not in `save.rs` `world_state!`): after a load the entity shows its sprite again. |
+| `CAdEntity::SetItem` | done | `natives.rs` `entity_set` `Item`. |
+| `CAdEntity::SetSprite` | done | `scene_state.rs` `restore_scene_state` (its only caller is `CAdNodeState::TransferEntity`): the remembered sprite is loaded and becomes the entity's. On a failure Luma keeps the file's sprite, the original leaves the entity without one. |
 
 ## `wme_ad/AdGame.cpp`
 
@@ -571,7 +571,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdObject::ScCallMethod` | partial | `luma-adventure/src/natives.rs` `entity_call` / `talk_call` / `inventory_call`, `natives_actor.rs` `actor_call`, `natives_object.rs` `object_call`, `natives_particles.rs` `emitter_owner_call`. Different: (1) `Reset` on an entity only restarts its sprite animation and ends a `PlayAnim`; it does not finish a sentence being said nor release the scripts waiting for the object (`ScEngine->ResetObject`), and the original does not restart the sprite; (2) `HasItem(itemObject)` answers false, the original accepts the item object as well as its name; (3) `GetItem(null)` and out-of-range agree, but `TakeItem`/`DropItem` errors are logged, not script runtime errors; (4) `Talk` on a container's entity says nothing (no sentence, the script does not wait); (5) on items (`CAdItem` is a `CAdObject`) `Talk`, `TalkAsync`, `StopTalk`, `PlayAnim`, `PlayAnimAsync`, `Reset` are stubs and `TakeItem`, `DropItem`, `GetItem`, `HasItem`, `StickToRegion`, `CreateParticleEmitter`, `DeleteParticleEmitter`, `AddAttachment`, `RemoveAttachment`, `GetAttachment` are missing; (6) `GetAttachment(name)` returns the right post-attachment where the original, by a bug, indexes the pre list. PlayAnim, IsTalking, StopTalk, ForceTalkAnim, Talk (align clamped to 0..2), StickToRegion, SetFont, GetFont, TakeItem, DropItem, CreateParticleEmitter, DeleteParticleEmitter, AddAttachment (pre-display by default), RemoveAttachment agree for actors and entities. |
 | `CAdObject::ScGetProperty` | partial | `luma-adventure/src/natives.rs` `entity_get`, `natives_actor.rs` `actor_get`, `natives_object.rs` `object_get`: Active, IgnoreItems, SceneIndependent, SubtitlesWidth, SubtitlesPosRelative, SubtitlesPosX, SubtitlesPosY, SubtitlesPosXCenter, NumItems, ParticleEmitter, NumAttachments for actors and entities. Missing on items (`natives_item.rs` `item_get`): `Active` is always true and IgnoreItems, the Subtitles properties, NumItems, ParticleEmitter and NumAttachments are not there (they read as null). |
 | `CAdObject::ScSetProperty` | partial | `luma-adventure/src/natives.rs` `entity_set`, `natives_actor.rs` `actor_set`, `natives_object.rs` `object_set` for actors and entities. Missing on items: Active, IgnoreItems and the Subtitles properties are stored as plain script properties with no effect. |
-| `CAdObject::ScToString` | partial | `world.rs` `Natives::to_string`: an entity or an item gives `[<its name>]`; the original gives `[ad object]` for every adventure object that does not override it (entities and items do not). |
+| `CAdObject::ScToString` | done | No bare `CAdObject` reaches scripts (only the game's hidden inventory object is one): actors, entities and items each override it; see `CAdEntity::ScToString` and `CAdItem::ScToString` for theirs. |
 | `CAdObject::SetFont` | done | `world.rs` `set_font`: the font is loaded; `null` or a font that does not load leaves the system font. |
 | `CAdObject::GetHeight` | done | `natives.rs` `entity_height`, `actor.rs` `Actor::height`, `scene_view.rs` `frame_height`: the largest hotspot Y of the current frame's sub-frames, times the scene zoom at the object when it is scalable. |
 | `CAdObject::Talk` | partial | `world.rs` `World::talk`: text expanded, speech file given or found by the string key, duration from the sound else from the text (at least 1000 ms), width and position rules, scroll offset, `ForceTalkAnim` forgotten once used, text-to-speech without a sound. Missing or different: (1) the sentence does not take the object's freezable flag (`m_Sentence->m_Freezable`, see `CAdGame::DisplaySentences`); (2) `m_Sentence->SetupTalkFile(Sound)` (the `.talk` definition beside the sound) is not called here, see `CAdSentence`; (3) an object that is not an actor, a 3D actor or a scene/game entity cannot talk: a container's entity and an item get no sentence; (4) an empty sound name is treated as none (automatic lookup), the original tries to load it and gets no sound. |
