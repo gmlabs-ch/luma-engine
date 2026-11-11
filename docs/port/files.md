@@ -151,15 +151,15 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `crc_initialize` | unreviewed |  |
-| `crc_process_byte` | unreviewed |  |
-| `crc_finalize` | unreviewed |  |
+| `crc_initialize` | replaced | Builds the CRC-32 table (polynomial `04C11DB7`, reflected data and remainder) and returns the initial remainder `FFFFFFFF`; only used by `Game.GetFileChecksum`. Replaced by the `crc32fast` crate (`luma-adventure/src/world.rs` `file_checksum`), the same standard CRC-32 (check value `CBF43926`, 0 for an empty file). |
+| `crc_process_byte` | replaced | One byte through the table; `crc32fast::hash` over the whole file in `file_checksum`, same value. |
+| `crc_finalize` | replaced | Reflects the remainder and xors it with `FFFFFFFF`; part of `crc32fast::hash`. The result is pushed as a signed 32-bit integer or as lower-case hex without padding in both (`luma-adventure/src/natives.rs` `GetFileChecksum`). |
 
 ## `wme_base/utils.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `Sqr` | unreviewed |  |
+| `Sqr` | n/a | Square of an integer, a static helper of `CBUtils::ClosestColor` only (palette search for 8-bit DirectDraw surfaces). |
 | `CBUtils::ClosestColor` | n/a | Only used by `CBSurfaceDD` to find a colour key in the palette of an 8-bit DirectDraw surface; Luma decodes every image to RGBA. |
 | `CBUtils::Clip` | replaced | Only used by the DirectDraw blits of `CBSurfaceDD`; `luma-render` lets the GPU clip to the viewport. |
 | `CBUtils::Swap` | replaced | `std::mem::swap`. |
