@@ -147,6 +147,10 @@ pub struct World {
     /// The fonts of talking objects that could not be loaded, so that
     /// each is tried and reported once.
     failed_fonts: std::collections::HashSet<String>,
+    /// The source scripts that did not compile, so that each is compiled
+    /// and reported once.
+    #[cfg(feature = "compiler")]
+    failed_scripts: std::collections::HashSet<String>,
     pub(crate) mouse: Mouse,
     pub(crate) keyboard: Keyboard,
     pub(crate) active_object: Option<NativeId>,
@@ -321,6 +325,8 @@ impl World {
             talk_skip_button: TalkSkipButton::Left,
             sentences: Vec::new(),
             failed_fonts: std::collections::HashSet::new(),
+            #[cfg(feature = "compiler")]
+            failed_scripts: std::collections::HashSet::new(),
             mouse: Mouse::default(),
             keyboard: Keyboard::default(),
             active_object: None,
@@ -3143,12 +3149,27 @@ impl Host for World {
     /// compiler, as the original without its compiler library.
     #[cfg(feature = "compiler")]
     fn compile_script(&mut self, filename: &str, source: &[u8]) -> Option<Vec<u8>> {
+        // A source script comes from the game's files: bound what the
+        // compiler is given, and try a file that failed only once.
+        const MAX_SOURCE: usize = 4 * 1024 * 1024;
+        let key = filename.to_ascii_lowercase();
+        if self.failed_scripts.contains(&key) {
+            return None;
+        }
+        if source.len() > MAX_SOURCE {
+            self.failed_scripts.insert(key);
+            self.log(format!("Compiling script '{filename}'..."));
+            self.log("  Error: the script is too large".to_string());
+            self.quick_message("Script compiler error. View log for details.");
+            return None;
+        }
         let compiler = luma_compiler::Compiler::new(luma_compiler::Natives::wme());
         let vfs = &self.vfs;
         let mut includes = |name: &[u8]| vfs.read(&String::from_utf8_lossy(name)).ok();
         match compiler.compile(source, filename, &mut includes) {
             Ok(compiled) => Some(compiled),
             Err(err) => {
+                self.failed_scripts.insert(key);
                 self.log(format!("Compiling script '{filename}'..."));
                 self.log(format!("  Error@line {}: {}", err.line, err.message));
                 self.quick_message("Script compiler error. View log for details.");
