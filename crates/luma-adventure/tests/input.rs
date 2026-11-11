@@ -769,3 +769,40 @@ fn random_numbers_are_seeded_from_the_clock_and_can_be_fixed() {
     std::fs::remove_dir_all(&dir1).ok();
     std::fs::remove_dir_all(&dir2).ok();
 }
+
+#[test]
+fn a_games_own_ini_is_read_before_the_players_settings() {
+    let (mut runtime, dir, _, _) = start();
+    let section = luma_adventure::registry::PRIVATE_SECTION;
+    // No `wme.ini`: the player's settings, else the default.
+    assert_eq!(runtime.world.registry_string(section, "Lang", "en"), "en");
+    assert_eq!(runtime.world.registry_int(section, "Volume", 100), 100);
+    std::fs::write(
+        dir.join("wme.ini"),
+        b"[PrivateSettings]\r\nLang=de\r\nVolume=80 percent\r\nName=Zo\xe9\r\n[Video]\r\nWindowed=0\r\n",
+    )
+    .unwrap();
+    assert_eq!(runtime.world.registry_string(section, "Lang", "en"), "de");
+    assert_eq!(runtime.world.registry_int(section, "Volume", 100), 80);
+    assert_eq!(
+        runtime.world.registry_string(section, "Name", ""),
+        "Zo\u{e9}"
+    );
+    assert_eq!(runtime.world.read_engine_int("Video", "Windowed"), Some(0));
+    assert_eq!(runtime.world.read_engine_int("Video", "WindowPosX"), None);
+    // What the game writes goes to the player's settings, and the
+    // game's file keeps hiding it, as in the original...
+    assert!(runtime.world.write_setting("Lang", "fr"));
+    assert!(runtime.world.write_setting("Volume", "50"));
+    assert_eq!(runtime.world.registry_string(section, "Lang", "en"), "de");
+    assert_eq!(runtime.world.registry_int(section, "Volume", 100), 80);
+    // ...unless the reader's default is the file's value: then the
+    // player's value is looked up.
+    assert_eq!(runtime.world.registry_string(section, "Lang", "de"), "fr");
+    assert_eq!(runtime.world.registry_int(section, "Volume", 80), 50);
+    // A key the game's file lacks comes from the player's settings.
+    assert!(runtime.world.write_setting("Seen", "1"));
+    assert_eq!(runtime.world.registry_int(section, "Seen", 0), 1);
+    assert_eq!(runtime.world.registry_string(section, "Missing", "x"), "x");
+    std::fs::remove_dir_all(&dir).ok();
+}

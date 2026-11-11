@@ -225,9 +225,10 @@ is not part of a saved game.
 `Game.RegWriteNumber(key, value)`, `RegWriteString(key, value)`,
 `RegReadNumber(key, default)` and `RegReadString(key, default)` keep
 values between runs of the game: its options, the language picked, a
-"seen the intro" flag. The original engine stores them in the
-`PrivateSettings` section of its `wme.ini`, or in the Windows registry
-under the game's key. Luma stores them in `settings.ini` in the save
+"seen the intro" flag. The original engine stores them in the Windows
+registry under the game's key, in a `PrivateSettings` key, and reads
+them from the `PrivateSettings` section of the `wme.ini` beside the
+game first. Luma stores them in `settings.ini` in the save
 directory (the one of `Game.SaveDirectory`), in a `[PrivateSettings]`
 section, one `key=value` per line:
 
@@ -242,12 +243,24 @@ written returns the default; `RegReadNumber` takes the leading integer
 of the stored text (`GetPrivateProfileInt`), `0` when there is none. A
 value is written to the file at once; a file that cannot be written is
 logged and the value is lost, as the original engine reports nothing
-to the script either. The section name is the original engine's, so a
-game's values can be copied from its `wme.ini` by hand.
+to the script either.
+
+A game may ship a `wme.ini` in its directory (a loose file beside the
+packages) to preset values. As in the original (`CBRegistry::
+ReadString`, `ReadInt`), a read looks there first, in the same sections,
+and only then in the player's `settings.ini`. Writes never touch
+`wme.ini`, so a value it holds keeps hiding what the game writes
+afterwards, with one exception the original has too: when the value in
+`wme.ini` equals the default the script passes, the player's value is
+looked up. So `RegReadNumber("Volume", 80)` over a `wme.ini` saying
+`Volume=80` returns what the player last set, while
+`RegReadNumber("Volume", 100)` always returns 80. The file is read as
+the game's ANSI text; one larger than 1 MB is ignored.
 
 The same file holds the settings the engine keeps for itself, under the
 sections and keys of the original's registry (`World::
-read_engine_setting`, `read_engine_int`, `write_engine_setting`):
+read_engine_setting`, `read_engine_int`, `write_engine_setting`); a
+game's `wme.ini` is read first for these too:
 
 | Section | Key | Meaning |
 |---------|-----|---------|

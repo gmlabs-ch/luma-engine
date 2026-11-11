@@ -1,10 +1,12 @@
 //! The game's persistent private settings (`Game.RegReadNumber`,
 //! `RegReadString`, `RegWriteNumber`, `RegWriteString`): values a game
-//! keeps between runs, such as its options. The original engine writes
-//! them to the `PrivateSettings` section of its `wme.ini` or to the
-//! Windows registry; Luma keeps them in `settings.ini` in the save
-//! directory, in the same section, so that a game's own values can be
-//! carried over by hand. See `docs/saving.md`.
+//! keeps between runs, such as its options, and the settings the
+//! engine keeps for itself. The original engine writes them to the
+//! Windows registry, and reads them from the `wme.ini` beside the game
+//! first, then from the registry. Luma keeps them in `settings.ini` in
+//! the save directory, under the registry's section names, and reads a
+//! game's own `wme.ini` first as the original does. See
+//! `docs/saving.md`.
 //!
 //! Written with reference to `BRegistry.cpp` and `BGame.cpp`
 //! (`RegReadNumber`, `RegReadString`, `RegWriteNumber`,
@@ -20,6 +22,13 @@ pub const SETTINGS_INI: &str = "settings.ini";
 
 /// The section the script-visible settings live in.
 pub const PRIVATE_SECTION: &str = "PrivateSettings";
+
+/// The settings file a game may ship in its directory, read before the
+/// player's own (`CBRegistry::m_IniName`).
+pub const GAME_INI: &str = "wme.ini";
+
+/// The largest `wme.ini` read; a settings file is a few lines.
+const GAME_INI_MAX: u64 = 1 << 20;
 
 /// A small INI file: sections of `key=value` lines. Names compare
 /// without case, as Windows reads them; the file keeps its order and
@@ -131,6 +140,52 @@ impl World {
         }
     }
 
+    /// The `wme.ini` in the game's directory, empty when the game has
+    /// none. Its bytes are the game's ANSI text, one character each.
+    fn read_game_ini(&self) -> Ini {
+        let path = self.game_directory().join(GAME_INI);
+        let small = std::fs::metadata(&path).is_ok_and(|m| m.is_file() && m.len() <= GAME_INI_MAX);
+        if !small {
+            return Ini::default();
+        }
+        match std::fs::read(&path) {
+            Ok(bytes) => Ini::parse(&bytes.iter().map(|b| char::from(*b)).collect::<String>()),
+            Err(_) => Ini::default(),
+        }
+    }
+
+    /// A text setting (`CBRegistry::ReadString`): the value of the
+    /// game's `wme.ini` when it has one that differs from `init`, else
+    /// the value the player's `settings.ini` holds, else `init`. As in
+    /// the original, a value in `wme.ini` hides whatever was written
+    /// since, unless it equals the default the reader passes.
+    pub fn registry_string(&mut self, section: &str, key: &str, init: &str) -> String {
+        if let Some(value) = self.read_game_ini().get(section, key) {
+            if value != init {
+                return value.to_string();
+            }
+        }
+        self.read_ini()
+            .get(section, key)
+            .map_or_else(|| init.to_string(), str::to_string)
+    }
+
+    /// A number setting (`CBRegistry::ReadInt`): the leading integer of
+    /// the value, as `GetPrivateProfileInt` reads it, from the game's
+    /// `wme.ini` when it differs from `init`, else from the player's
+    /// `settings.ini`, else `init`.
+    pub fn registry_int(&mut self, section: &str, key: &str, init: i32) -> i32 {
+        if let Some(value) = self.read_game_ini().get(section, key) {
+            let value = luma_script::atoi(value);
+            if value != init {
+                return value;
+            }
+        }
+        self.read_ini()
+            .get(section, key)
+            .map_or(init, luma_script::atoi)
+    }
+
     /// A private setting as stored (`RegReadString` without its
     /// default), `None` when it was never written.
     pub fn read_setting(&mut self, key: &str) -> Option<String> {
@@ -146,9 +201,13 @@ impl World {
     }
 
     /// A value the engine itself keeps between runs (`CBRegistry::
-    /// ReadString` for a section of its own, such as `Video`), `None`
-    /// when it was never written.
+    /// ReadString` for a section of its own, such as `Video`): the
+    /// game's `wme.ini` first, then the player's `settings.ini`; `None`
+    /// when neither has the key.
     pub fn read_engine_setting(&mut self, section: &str, key: &str) -> Option<String> {
+        if let Some(value) = self.read_game_ini().get(section, key) {
+            return Some(value.to_string());
+        }
         self.read_ini().get(section, key).map(str::to_string)
     }
 

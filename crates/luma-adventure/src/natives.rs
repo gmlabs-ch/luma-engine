@@ -961,16 +961,17 @@ impl World {
             "RegReadString" => {
                 let key = arg(0).get_string(self);
                 let default = arg(1).get_string(self);
-                Return::value(self.read_setting(&key).unwrap_or(default))
+                Return::value(self.registry_string(
+                    crate::registry::PRIVATE_SECTION,
+                    &key,
+                    &default,
+                ))
             }
             "RegReadNumber" => {
                 // `GetPrivateProfileInt`: the leading integer of the value.
                 let key = arg(0).get_string(self);
                 let default = arg(1).get_int(self);
-                Return::value(
-                    self.read_setting(&key)
-                        .map_or(default, |v| luma_script::atoi(&v)),
-                )
+                Return::value(self.registry_int(crate::registry::PRIVATE_SECTION, &key, default))
             }
             "AddResponse" | "AddResponseOnce" | "AddResponseOnceGame" => {
                 let kind = match name {
