@@ -6,507 +6,507 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBPersistMgr::CBPersistMgr` | unreviewed |  |
-| `CBPersistMgr::~CBPersistMgr` | unreviewed |  |
-| `CBPersistMgr::Cleanup` | unreviewed |  |
-| `CBPersistMgr::InitSave` | unreviewed |  |
-| `CBPersistMgr::InitLoad` | unreviewed |  |
-| `CBPersistMgr::SaveFile` | unreviewed |  |
-| `CBPersistMgr::PutBytes` | unreviewed |  |
-| `CBPersistMgr::GetBytes` | unreviewed |  |
-| `CBPersistMgr::PutDWORD` | unreviewed |  |
-| `CBPersistMgr::GetDWORD` | unreviewed |  |
-| `CBPersistMgr::PutString` | unreviewed |  |
-| `CBPersistMgr::GetString` | unreviewed |  |
-| `CBPersistMgr::Transfer` | unreviewed |  |
-| `CBPersistMgr::Transfer #2` | unreviewed |  |
-| `CBPersistMgr::Transfer #3` | unreviewed |  |
-| `CBPersistMgr::Transfer #4` | unreviewed |  |
-| `CBPersistMgr::Transfer #5` | unreviewed |  |
-| `CBPersistMgr::Transfer #6` | unreviewed |  |
-| `CBPersistMgr::Transfer #7` | unreviewed |  |
-| `CBPersistMgr::Transfer #8` | unreviewed |  |
-| `CBPersistMgr::Transfer #9` | unreviewed |  |
-| `CBPersistMgr::Transfer #10` | unreviewed |  |
-| `CBPersistMgr::Transfer #11` | unreviewed |  |
-| `CBPersistMgr::Transfer #12` | unreviewed |  |
-| `CBPersistMgr::Transfer #13` | unreviewed |  |
-| `CBPersistMgr::Transfer #14` | unreviewed |  |
-| `CBPersistMgr::Transfer #15` | unreviewed |  |
-| `CBPersistMgr::CheckVersion` | unreviewed |  |
-| `CBPersistMgr::IsSaving` | unreviewed |  |
-| `CBPersistMgr::GetBuffer` | unreviewed |  |
-| `CBPersistMgr::PutBuffer` | unreviewed |  |
-| `CBPersistMgr::TransferValue` | unreviewed |  |
-| `CBPersistMgr::TransferValue #2` | unreviewed |  |
-| `CBPersistMgr::TransferValue #3` | unreviewed |  |
-| `CBPersistMgr::TransferValue #4` | unreviewed |  |
-| `CBPersistMgr::TransferValue #5` | unreviewed |  |
-| `CBPersistMgr::TransferValue #6` | unreviewed |  |
-| `CBPersistMgr::TransferValue #7` | unreviewed |  |
-| `CBPersistMgr::TransferValue #8` | unreviewed |  |
-| `CBPersistMgr::FillRichBuffer` | unreviewed |  |
+| `CBPersistMgr::CBPersistMgr` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::~CBPersistMgr` | replaced | Rust ownership |
+| `CBPersistMgr::Cleanup` | replaced | Rust ownership |
+| `CBPersistMgr::InitSave` | partial | `luma-adventure/src/save.rs` `save_game`/`write_file`: Luma's own header (magic `LUMASAVE`, layout version, then game name, description, timestamp and the thumbnail as PNG). Missing: when no thumbnail was stored with `Game.StoreSaveThumbnail`, the original takes one at this moment (`StoreThumbnail(true)`) if the game sets a thumbnail size; Luma then saves none (documented in `docs/saving.md`). The rich saved game header (`RICH_SAVED_GAMES`) is Windows-only: see `FillRichBuffer` |
+| `CBPersistMgr::InitLoad` | partial | `save.rs` `load_game`/`read_header_bytes`: a file of another game (name compared without case) is refused with the original's message, description and timestamp are read back. Different: only Luma's own format is read; a saved game written by the original engine (`SAVE_MAGIC`/`SAVE_MAGIC_2`) is refused, and the rules 'newer than the engine' / 'too old' become one test, the layout version must be the current one |
+| `CBPersistMgr::SaveFile` | replaced | `save.rs` `write_file`: header then the body, always zlib-compressed (the original compresses when `COMPRESSED_SAVEGAMES` is set); no rich header in front |
+| `CBPersistMgr::PutBytes` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::GetBytes` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::PutDWORD` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::GetDWORD` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::PutString` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::GetString` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #2` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #3` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #4` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #5` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #6` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #7` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #8` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #9` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #10` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #11` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #12` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #13` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #14` | replaced | serde with `postcard` in `luma-adventure/src/save.rs`: the state is serialized as typed structures, not as a byte stream written field by field |
+| `CBPersistMgr::Transfer #15` | replaced | the pointer transfer (class id and instance id from the class registry): Luma's objects and scripts are referred to by `NativeId` and `ScriptId`, which are saved as numbers and stay valid after a load |
+| `CBPersistMgr::CheckVersion` | replaced | `save.rs` `VERSION`: one layout version for the whole file, another version is refused, so no field is read conditionally |
+| `CBPersistMgr::IsSaving` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::GetBuffer` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::PutBuffer` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::TransferValue` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::TransferValue #2` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::TransferValue #3` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::TransferValue #4` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::TransferValue #5` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::TransferValue #6` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::TransferValue #7` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::TransferValue #8` | n/a | `IWmePersistMgr` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBPersistMgr::FillRichBuffer` | n/a | builds the `RICH_GAME_MEDIA_HEADER` that Windows Vista's Game Explorer reads in front of a saved game |
 
 ## `wme_base/BSaveThumbFile.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSaveThumbFile::CBSaveThumbFile` | unreviewed |  |
-| `CBSaveThumbFile::~CBSaveThumbFile` | unreviewed |  |
-| `CBSaveThumbFile::Open` | unreviewed |  |
-| `CBSaveThumbFile::Close` | unreviewed |  |
-| `CBSaveThumbFile::Read` | unreviewed |  |
-| `CBSaveThumbFile::Seek` | unreviewed |  |
+| `CBSaveThumbFile::CBSaveThumbFile` | todo | part of the missing `savegame:` file, see `CBSaveThumbFile::Open` |
+| `CBSaveThumbFile::~CBSaveThumbFile` | todo | part of the missing `savegame:` file, see `CBSaveThumbFile::Open` |
+| `CBSaveThumbFile::Open` | todo | a file name `savegame:<slot>` (digits after the colon) opens the thumbnail stored in that slot's saved game as an image file, so that a sprite or a window image can show it; fails when the slot has no saved game or no thumbnail. Luma has no such file (`docs/saving.md`, 'Not yet'), though `save.rs` `read_save_header` already returns the thumbnail |
+| `CBSaveThumbFile::Close` | todo | part of the missing `savegame:` file, see `CBSaveThumbFile::Open` |
+| `CBSaveThumbFile::Read` | todo | part of the missing `savegame:` file, see `CBSaveThumbFile::Open`: reads from the thumbnail bytes, failing past the end |
+| `CBSaveThumbFile::Seek` | todo | part of the missing `savegame:` file, see `CBSaveThumbFile::Open`: seeks from the start, the end or the current position, failing outside the data |
 
 ## `wme_base/BSaveThumbHelper.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSaveThumbHelper::CBSaveThumbHelper` | unreviewed |  |
-| `CBSaveThumbHelper::~CBSaveThumbHelper` | unreviewed |  |
-| `CBSaveThumbHelper::StoreThumbnail` | unreviewed |  |
+| `CBSaveThumbHelper::CBSaveThumbHelper` | done | `luma-adventure/src/capture.rs`: `World::save_thumbnail` starts empty |
+| `CBSaveThumbHelper::~CBSaveThumbHelper` | replaced | Rust ownership |
+| `CBSaveThumbHelper::StoreThumbnail` | partial | `capture.rs` `store_save_thumbnail` and `deliver_frame`: a picture of the screen scaled to `THUMBNAIL_WIDTH` x `THUMBNAIL_HEIGHT`, nothing when the game sets no size. Different: the picture is the next frame the front-end renders, not the screen at the call (the original can also redraw the content first, `DoFlip`, which is how a save without a stored thumbnail gets one); nothing is taken in a headless run; the scaling filter was not compared; the 256-pixel-wide picture of rich saved games is Windows-only |
 
 ## `wme_base/BScriptable.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBScriptable::CBScriptable` | unreviewed |  |
-| `CBScriptable::~CBScriptable` | unreviewed |  |
-| `CBScriptable::ScCallMethod` | unreviewed |  |
-| `CBScriptable::ScGetProperty` | unreviewed |  |
-| `CBScriptable::ScSetProperty` | unreviewed |  |
-| `CBScriptable::ScToString` | unreviewed |  |
-| `CBScriptable::ScToMemBuffer` | unreviewed |  |
-| `CBScriptable::ScToInt` | unreviewed |  |
-| `CBScriptable::ScToFloat` | unreviewed |  |
-| `CBScriptable::ScToBool` | unreviewed |  |
-| `CBScriptable::ScSetString` | unreviewed |  |
-| `CBScriptable::ScSetInt` | unreviewed |  |
-| `CBScriptable::ScSetFloat` | unreviewed |  |
-| `CBScriptable::ScSetBool` | unreviewed |  |
-| `CBScriptable::Persist` | unreviewed |  |
-| `CBScriptable::ScCompare` | unreviewed |  |
-| `CBScriptable::ScDebuggerDesc` | unreviewed |  |
-| `CBScriptable::CanHandleMethod` | unreviewed |  |
-| `CBScriptable::InvokeMethodThread` | unreviewed |  |
-| `CBScriptable::SendEvent` | unreviewed |  |
-| `CBScriptable::CallMethod` | unreviewed |  |
-| `CBScriptable::SetProperty` | unreviewed |  |
-| `CBScriptable::SetProperty #2` | unreviewed |  |
-| `CBScriptable::SetProperty #3` | unreviewed |  |
-| `CBScriptable::SetProperty #4` | unreviewed |  |
-| `CBScriptable::SetProperty #5` | unreviewed |  |
-| `CBScriptable::SetProperty #6` | unreviewed |  |
-| `CBScriptable::SetProperty #7` | unreviewed |  |
-| `CBScriptable::GetProperty` | unreviewed |  |
-| `CBScriptable::GetInterface` | unreviewed |  |
-| `CBScriptable::DbgGetNativeClass` | unreviewed |  |
-| `CBScriptable::DbgGetProperty` | unreviewed |  |
+| `CBScriptable::CBScriptable` | replaced | a native is an entry of `luma-adventure/src/objects.rs` `Objects` (kind, script properties `props`); handles replace the reference count |
+| `CBScriptable::~CBScriptable` | replaced | Rust ownership |
+| `CBScriptable::ScCallMethod` | done | the base class knows no method: `luma-script/src/engine.rs` `call_by_exp` logs 'Call to undefined method' and pushes null when the host answers `None` |
+| `CBScriptable::ScGetProperty` | done | `luma-adventure/src/world.rs` `Natives::get_property`: a name no class answers is read from the object's `props`, null when never set |
+| `CBScriptable::ScSetProperty` | done | `world.rs` `Natives::set_property`: a name no class takes is kept in the object's `props` |
+| `CBScriptable::ScToString` | done | `luma-script/src/value.rs` `Natives::to_string` default `[native object]` |
+| `CBScriptable::ScToMemBuffer` | n/a | raw memory address, only used to pass a buffer to a DLL function |
+| `CBScriptable::ScToInt` | done | `value.rs` `Natives::to_int` default 0; `World` does not override it |
+| `CBScriptable::ScToFloat` | done | `value.rs` `Natives::to_float` default 0.0; `World` does not override it |
+| `CBScriptable::ScToBool` | partial | in the original no class overrides it: every native converts to false, so `if(obj)` is false and `!obj` is true for a live object (scripts must write `obj != null`), and `ToBool(obj)` is false. `world.rs` `Natives::to_bool` returns true for every native except the library classes (`String`, `Array`...), so those tests take the other branch in Luma |
+| `CBScriptable::ScSetString` | done | `value.rs` `Natives::assign_scalar` default: ignored |
+| `CBScriptable::ScSetInt` | done | `value.rs` `Natives::assign_scalar` default: ignored |
+| `CBScriptable::ScSetFloat` | done | `value.rs` `Natives::assign_scalar` default: ignored |
+| `CBScriptable::ScSetBool` | done | `value.rs` `Natives::assign_scalar` default: ignored |
+| `CBScriptable::Persist` | replaced | the `props` of each native are saved with it (`objects.rs`, serde); no reference count to save |
+| `CBScriptable::ScCompare` | done | `value.rs` `Natives::compare` default: by handle, so equal only for the same object (the original orders by address; which of two objects is 'less' is arbitrary in both) |
+| `CBScriptable::ScDebuggerDesc` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CBScriptable::CanHandleMethod` | done | `engine.rs` `can_handle_method`: false for an object with no script |
+| `CBScriptable::InvokeMethodThread` | done | `engine.rs` `invoke_method_thread`: none for an object with no script |
+| `CBScriptable::SendEvent` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::CallMethod` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::SetProperty` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::SetProperty #2` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::SetProperty #3` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::SetProperty #4` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::SetProperty #5` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::SetProperty #6` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::SetProperty #7` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::GetProperty` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::GetInterface` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CBScriptable::DbgGetNativeClass` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CBScriptable::DbgGetProperty` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
 
 ## `wme_base/BScriptHolder.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBScriptHolder::CBScriptHolder` | unreviewed |  |
-| `CBScriptHolder::~CBScriptHolder` | unreviewed |  |
-| `CBScriptHolder::Cleanup` | unreviewed |  |
-| `CBScriptHolder::SetFilename` | unreviewed |  |
-| `CBScriptHolder::ApplyEvent` | unreviewed |  |
-| `CBScriptHolder::Listen` | unreviewed |  |
-| `CBScriptHolder::ScCallMethod` | unreviewed |  |
-| `CBScriptHolder::ScGetProperty` | unreviewed |  |
-| `CBScriptHolder::ScSetProperty` | unreviewed |  |
-| `CBScriptHolder::ScToString` | unreviewed |  |
-| `CBScriptHolder::SaveAsText` | unreviewed |  |
-| `CBScriptHolder::Persist` | unreviewed |  |
-| `CBScriptHolder::AddScript` | unreviewed |  |
-| `CBScriptHolder::RemoveScript` | unreviewed |  |
-| `CBScriptHolder::CanHandleEvent` | unreviewed |  |
-| `CBScriptHolder::CanHandleMethod` | unreviewed |  |
-| `CBScriptHolder::ParseProperty` | unreviewed |  |
-| `CBScriptHolder::ParseProperty PROPERTY` | unreviewed |  |
-| `CBScriptHolder::ParseProperty NAME` | unreviewed |  |
-| `CBScriptHolder::ParseProperty VALUE` | unreviewed |  |
-| `CBScriptHolder::MakeFreezable` | unreviewed |  |
-| `CBScriptHolder::InvokeMethodThread` | unreviewed |  |
-| `CBScriptHolder::ScDebuggerDesc` | unreviewed |  |
-| `CBScriptHolder::SendEvent` | unreviewed |  |
+| `CBScriptHolder::CBScriptHolder` | partial | freezable by default and no file name, as in Luma. The default name `<unnamed>` is only given to `new Object()` (`luma-adventure/src/natives.rs`); an actor, entity, region, layer or control whose file has no `NAME` reads `Name` as an empty string (the `luma-formats` defaults) |
+| `CBScriptHolder::~CBScriptHolder` | replaced | Rust ownership |
+| `CBScriptHolder::Cleanup` | done | where Luma removes an object its scripts are finished with their threads (`engine.finish(script, true)` in `world.rs` on a scene change, `scene_edit.rs`, `ui.rs`, `inventory.rs`, `responses.rs`); the owner handle simply becomes invalid instead of being cleared |
+| `CBScriptHolder::SetFilename` | partial | the path is kept per kind, not for every holder: actors, sprites, the scene and controls keep theirs, but `Filename` reads null for an entity or an item loaded from its own file (`natives.rs` `entity_get`, `natives_item.rs`), which the original sets in `CAdEntity::LoadFile` and `CAdItem::LoadFile` |
+| `CBScriptHolder::ApplyEvent` | done | `engine.rs` `Engine::apply_event`: one thread per non-thread script of the object that handles the event, in attach order; an unbreakable event runs them at once; true when any handler exists |
+| `CBScriptHolder::Listen` | done | the base class refuses (`E_FAIL`); the listeners of the UI classes are reviewed with those classes |
+| `CBScriptHolder::ScCallMethod` | partial | `luma-adventure/src/natives.rs` `holder_call`: `ApplyEvent`, `CanHandleEvent`, `CanHandleMethod`, `AttachScript`, `DetachScript(file, killThreads = false)`, `IsScriptRunning`. Different: in `DetachScript` and `IsScriptRunning` the file name is compared with the path recorded inside the compiled file (`Script::filename`), where the original compares the path the script was attached with (`m_Filename`, Luma's `Script::source`): the two differ when a script is attached under another spelling of its path (`/` for `\`, a leading `.\`) or the file was renamed after compiling. `DEBUG_CrashMe` (crashes the engine on purpose) is not provided |
+| `CBScriptHolder::ScGetProperty` | partial | `Name` and `Filename` are answered by each kind in `natives*.rs`, not once for every holder. Missing: `Name` and `Filename` on sprites, particle emitters, the fader and the response box (they read null); `Filename` of entities and items (see `SetFilename`). `Type` is always the subclass's |
+| `CBScriptHolder::ScSetProperty` | partial | `Name` is set per kind in `natives*.rs`; on a sprite, a particle emitter, the fader or the response box it becomes an ordinary script property (it reads back, but the object keeps no name) |
+| `CBScriptHolder::ScToString` | done | `[script_holder]` is never seen: every holder class of the original overrides it (at least `CBObject`'s `[object]`) |
+| `CBScriptHolder::SaveAsText` | n/a | only reachable from the `SaveAsText` of the editors |
+| `CBScriptHolder::Persist` | replaced | name and file name are saved with each object's own state, the scripts by `snapshot.rs` with their owner handle and freezable flag; a holder-level freezable flag exists only for the entity of a UI container (`ui.rs`) |
+| `CBScriptHolder::AddScript` | partial | `luma-adventure/src/world.rs` `World::attach`: a file already attached and not finished is logged and counts as success; the script starts through `Engine::run_script`. Different: (1) the duplicate test is compared with the path recorded inside the compiled file (`Script::filename`), where the original compares the path the script was attached with (`m_Filename`, Luma's `Script::source`): the two differ when a script is attached under another spelling of its path (`/` for `\`, a leading `.\`) or the file was renamed after compiling; (2) the new script takes the owner's freezable flag only when the owner is the entity of a UI container: a script attached to a window that a system-exclusive mode made non-freezable (`MakeFreezable(false)`), or to one of its controls, after the fact is freezable in Luma and pauses with the game. The `m_EditorForceScripts` branch is editor-only |
+| `CBScriptHolder::RemoveScript` | replaced | an owner's scripts are found in the engine's list (`engine.rs` `scripts_of`); there is no second list to update |
+| `CBScriptHolder::CanHandleEvent` | done | `engine.rs` `Engine::can_handle_event`: non-thread scripts of the owner |
+| `CBScriptHolder::CanHandleMethod` | done | `engine.rs` `Engine::can_handle_method`: non-thread scripts of the owner |
+| `CBScriptHolder::ParseProperty` | partial | read by `luma-formats` (`scene.rs` `Property::from_node`, `window.rs`). Three differences: (1) the blocks are only applied to actors (`world.rs`), 3D actors (`actor3d.rs`), inventory items (`inventory.rs`) and entities created at run time (`scene_edit.rs` `init_scene_entity`); those of the game file, of a scene, of its layers, regions, waypoint groups and of the entities written in a scene file are parsed into `properties` and never used, so scripts read null; (2) where applied, the value goes straight into the object's script-property map, not through `ScSetProperty`, so a block naming a built-in property (`Active`, `X`...) does not set it; (3) a block without `NAME` or `VALUE` makes `Property::from_node` fail the whole file, where the original logs 'Error loading PROPERTY definition' and goes on (its callers ignore the result) |
+| `CBScriptHolder::ParseProperty PROPERTY` | partial | see `ParseProperty`: parsed everywhere, applied only to actors, 3D actors, items and entities created at run time; parsed and not used for the game, scenes, layers, regions, waypoint groups and scene-file entities |
+| `CBScriptHolder::ParseProperty NAME` | done | `luma-formats/src/scene.rs` `Property::from_node` (`NAME`); what is done with it is on the `PROPERTY` row |
+| `CBScriptHolder::ParseProperty VALUE` | partial | `Property::from_node` keeps the text; it is stored as a string script property, as the original's string value, but not passed to `ScSetProperty` (see `ParseProperty`, point 2) |
+| `CBScriptHolder::MakeFreezable` | partial | `luma-adventure/src/ui.rs` `make_freezable` (a window and its controls) and `make_entity_freezable` change the scripts attached at that moment; the flag is not kept on the window or control itself, so scripts attached later are freezable (see `AddScript`) |
+| `CBScriptHolder::InvokeMethodThread` | done | `engine.rs` `invoke_method_thread`: the most recently attached script of the owner that has the method |
+| `CBScriptHolder::ScDebuggerDesc` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CBScriptHolder::SendEvent` | n/a | `IWmeObject` interface offered to DLL plugins; Luma loads no plugin DLL |
 
 ## `wme_base/ScEngine.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CScEngine::CScEngine` | unreviewed |  |
-| `CScEngine::~CScEngine` | unreviewed |  |
-| `CScEngine::Cleanup` | unreviewed |  |
-| `CScEngine::LoadFile` | unreviewed |  |
-| `CScEngine::CloseFile` | unreviewed |  |
-| `CScEngine::AddError` | unreviewed |  |
-| `CScEngine::ParseElement` | unreviewed |  |
-| `CScEngine::RunScript` | unreviewed |  |
-| `CScEngine::GetCompiledScript` | unreviewed |  |
-| `CScEngine::Tick` | unreviewed |  |
-| `CScEngine::TickUnbreakable` | unreviewed |  |
-| `CScEngine::RemoveFinishedScripts` | unreviewed |  |
-| `CScEngine::GetNumScripts` | unreviewed |  |
-| `CScEngine::EmptyScriptCache` | unreviewed |  |
-| `CScEngine::ResetObject` | unreviewed |  |
-| `CScEngine::ResetScript` | unreviewed |  |
-| `CScEngine::Persist` | unreviewed |  |
-| `CScEngine::EditorCleanup` | unreviewed |  |
-| `CScEngine::PauseAll` | unreviewed |  |
-| `CScEngine::ResumeAll` | unreviewed |  |
-| `CScEngine::SetFileToCompile` | unreviewed |  |
-| `CScEngine::SetCompileErrorCallback` | unreviewed |  |
-| `CScEngine::SetParseElementCallback` | unreviewed |  |
-| `CScEngine::IsValidScript` | unreviewed |  |
-| `CScEngine::ClearGlobals` | unreviewed |  |
-| `CScEngine::DbgSendScripts` | unreviewed |  |
-| `CScEngine::AddBreakpoint` | unreviewed |  |
-| `CScEngine::RemoveBreakpoint` | unreviewed |  |
-| `CScEngine::RefreshScriptBreakpoints` | unreviewed |  |
-| `CScEngine::RefreshScriptBreakpoints #2` | unreviewed |  |
-| `CScEngine::SaveBreakpoints` | unreviewed |  |
-| `CScEngine::LoadBreakpoints` | unreviewed |  |
-| `CScEngine::AddScriptTime` | unreviewed |  |
-| `CScEngine::EnableProfiling` | unreviewed |  |
-| `CScEngine::DisableProfiling` | unreviewed |  |
-| `CScEngine::DumpStats` | unreviewed |  |
+| `CScEngine::CScEngine` | done | `engine.rs` `Engine::new`; the globals `Game`, `Math` and `Directory` are registered by `luma-adventure/src/world.rs` (`engine.set_global`). The binding of the compiler DLL has no equivalent: see `GetCompiledScript` |
+| `CScEngine::~CScEngine` | replaced | Rust ownership; the breakpoints saved here are debugger state, the profiler dump is covered by `DumpStats` |
+| `CScEngine::Cleanup` | replaced | Rust ownership; `snapshot.rs` `restore` empties scripts, globals and cache before a load |
+| `CScEngine::LoadFile` | replaced | callback handed to `dcscomp.dll` to read a source or include file; `luma-compiler` reads its files through `GameDirs` (but is not called when the game runs: see `GetCompiledScript`) |
+| `CScEngine::CloseFile` | replaced | callback freeing the buffer of `LoadFile`; Rust ownership |
+| `CScEngine::AddError` | replaced | callback logging `Compiling script '...'` and `Error@line N: text` for `dcscomp.dll`; `luma-compiler` returns its own errors (`luma-compiler/src/error.rs`), which nothing logs at run time since no script is compiled then: see `GetCompiledScript` |
+| `CScEngine::ParseElement` | n/a | callback forwarding the compiler's parse elements to a tool (the script editor's code completion); never set by the game |
+| `CScEngine::RunScript` | done | `engine.rs` `Engine::run_script`: `self` and `this` set to the owner (null without one) in the script's globals, script appended to the list |
+| `CScEngine::GetCompiledScript` | partial | `engine.rs` `Engine::program`: a compiled file is read through the host and cached by its name without case. Missing: a script file that is still source text is compiled when it is loaded by the original (through `dcscomp.dll`, with the quick message `Script compiler error. View log for details.` on failure); Luma fails with 'is not a valid compiled script' and never calls `luma-compiler` at run time (only `luma-cli` and tests use it), so a game shipped with uncompiled scripts does not run. The cache is an unbounded map instead of the original's fixed slots that replace the least recently used entry (no observable effect) |
+| `CScEngine::Tick` | partial | `engine.rs` `Engine::tick`: waits resolved first (object gone ends the script, sleeps on the game timer or the wall clock, a finished method thread hands its value over, a vanished or failed one gives null), then every non-paused script runs until it blocks, then finished scripts are removed. Different: the original chooses the time-sliced or the plain loop once per script and tick from the slice at that moment; Luma reads the slice before every instruction, so a script that calls `SetScriptTimeSlice` is cut in the same tick (the original runs it unsliced to its next wait) and one that sets the slice to 0 runs on (the original leaves the loop at once). No profiler timing: see `AddScriptTime` |
+| `CScEngine::TickUnbreakable` | done | `engine.rs` `tick_unbreakable`: each unbreakable script runs while it is running, then is finished. Deliberately different when called from inside a native call (`ApplyEvent` from a script): the calling script stays the current one and the finished scripts are removed at the end of the tick, where the original clears `m_CurrentScript` and removes them at once, shifting the list under the loop of `Tick` |
+| `CScEngine::RemoveFinishedScripts` | done | `engine.rs` `remove_finished`: finished and failed scripts leave the list; an owner's scripts are looked up in that list (`scripts_of`), so there is no per-owner list to update |
+| `CScEngine::GetNumScripts` | partial | `engine.rs` `Engine::counts` groups the states differently: the original's total leaves out finished scripts (Luma counts every script in the list), its running count includes sleeping and paused scripts (Luma: running only), its waiting count is only scripts waiting for an object (Luma adds sleeping scripts and scripts waiting for a thread). `luma-player` prints these numbers |
+| `CScEngine::EmptyScriptCache` | partial | `engine.rs` `Engine::clear_cache` exists but is not called: `Game.ClearScriptCache` (`luma-adventure/src/natives.rs`) returns null without emptying the cache (and `docs/compatibility.md` says Luma keeps no cache, which is no longer true), so a script file replaced on disk is not read again until a saved game is loaded |
+| `CScEngine::ResetObject` | partial | `engine.rs` `reset_object`: every script waiting for the object is finished, a top-level one with its threads, and the scripts waiting for it too. Missing: `COMPAT_KILL_METHOD_THREADS` of the game file (`m_CompatKillMethodThreads`), which makes the original skip `ResetScript` and leave the scripts waiting for the reset one alone (they then get null at the next tick and go on); Luma does not read the key and always ends them |
+| `CScEngine::ResetScript` | done | `engine.rs` `reset_script` |
+| `CScEngine::Persist` | replaced | `snapshot.rs` `EngineSnapshot`: engine globals with their constant flag, scripts in execution order, next script id; the current script is not kept (a save completes inside the native call, a load replaces every script) |
+| `CScEngine::EditorCleanup` | n/a | only called by the scene editor |
+| `CScEngine::PauseAll` | done | `engine.rs` `pause_all`: every script but the one being executed |
+| `CScEngine::ResumeAll` | done | `engine.rs` `resume_all` |
+| `CScEngine::SetFileToCompile` | replaced | name kept for the compile error log of `dcscomp.dll`; `luma-compiler` errors carry their own file name |
+| `CScEngine::SetCompileErrorCallback` | n/a | lets a tool (the WME editors) receive compile errors; the game never sets it |
+| `CScEngine::SetParseElementCallback` | n/a | lets a tool (the WME editors) receive parse elements; the game never sets it |
+| `CScEngine::IsValidScript` | done | `engine.rs` `index_of` in `resolve_waiting_script` |
+| `CScEngine::ClearGlobals` | done | `engine.rs` `clear_globals`: constants kept, natives kept unless asked |
+| `CScEngine::DbgSendScripts` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client (breakpoints kept in the Windows registry) |
+| `CScEngine::AddBreakpoint` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client (breakpoints kept in the Windows registry) |
+| `CScEngine::RemoveBreakpoint` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client (breakpoints kept in the Windows registry) |
+| `CScEngine::RefreshScriptBreakpoints` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client (breakpoints kept in the Windows registry) |
+| `CScEngine::RefreshScriptBreakpoints #2` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client (breakpoints kept in the Windows registry) |
+| `CScEngine::SaveBreakpoints` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client (breakpoints kept in the Windows registry) |
+| `CScEngine::LoadBreakpoints` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client (breakpoints kept in the Windows registry) |
+| `CScEngine::AddScriptTime` | todo | script profiler: adds the time a script ran in a tick to a per-file total (file name in lower case) while profiling is on; `Engine::tick` measures nothing |
+| `CScEngine::EnableProfiling` | todo | script profiler: clears the totals and records the start time; `Game.EnableScriptProfiling` is a no-op in `luma-adventure/src/natives.rs` |
+| `CScEngine::DisableProfiling` | todo | script profiler: dumps the statistics to the log and stops; also run when the engine shuts down. `Game.DisableScriptProfiling` is a no-op |
+| `CScEngine::DumpStats` | todo | script profiler: logs `***** Script profiling information: *****`, the total time and each script file with its seconds and percentage, longest first |
 
 ## `wme_base/ScScript.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CScScript::CScScript` | unreviewed |  |
-| `CScScript::~CScScript` | unreviewed |  |
-| `CScScript::InitScript` | unreviewed |  |
-| `CScScript::InitTables` | unreviewed |  |
-| `CScScript::Create` | unreviewed |  |
-| `CScScript::CreateThread` | unreviewed |  |
-| `CScScript::CreateMethodThread` | unreviewed |  |
-| `CScScript::Cleanup` | unreviewed |  |
-| `CScScript::GetDWORD` | unreviewed |  |
-| `CScScript::GetFloat` | unreviewed |  |
-| `CScScript::GetString` | unreviewed |  |
-| `CScScript::ExecuteInstruction` | unreviewed |  |
-| `CScScript::GetFuncPos` | unreviewed |  |
-| `CScScript::GetMethodPos` | unreviewed |  |
-| `CScScript::GetVar` | unreviewed |  |
-| `CScScript::WaitFor` | unreviewed |  |
-| `CScScript::WaitForExclusive` | unreviewed |  |
-| `CScScript::Sleep` | unreviewed |  |
-| `CScScript::Finish` | unreviewed |  |
-| `CScScript::Run` | unreviewed |  |
-| `CScScript::RuntimeError` | unreviewed |  |
-| `CScScript::Persist` | unreviewed |  |
-| `CScScript::AfterLoad` | unreviewed |  |
-| `CScScript::InvokeEventHandler` | unreviewed |  |
-| `CScScript::GetEventPos` | unreviewed |  |
-| `CScScript::CanHandleEvent` | unreviewed |  |
-| `CScScript::CanHandleMethod` | unreviewed |  |
-| `CScScript::Pause` | unreviewed |  |
-| `CScScript::Resume` | unreviewed |  |
-| `CScScript::GetExternal` | unreviewed |  |
-| `CScScript::ExternalCall` | unreviewed |  |
-| `CScScript::Call_cdecl` | unreviewed |  |
-| `CScScript::Call_stdcall` | unreviewed |  |
-| `CScScript::GetST0Double` | unreviewed |  |
-| `CScScript::CopyParameters` | unreviewed |  |
-| `CScScript::FinishThreads` | unreviewed |  |
-| `CScScript::GetFilename` | unreviewed |  |
-| `CScScript::GetCurrentLine` | unreviewed |  |
-| `CScScript::ReportRuntimeError` | unreviewed |  |
-| `CScScript::GetVariable` | unreviewed |  |
-| `CScScript::SetVariable` | unreviewed |  |
-| `CScScript::SetVariable #2` | unreviewed |  |
-| `CScScript::SetVariable #3` | unreviewed |  |
-| `CScScript::SetVariable #4` | unreviewed |  |
-| `CScScript::SetVariable #5` | unreviewed |  |
-| `CScScript::SetVariable #6` | unreviewed |  |
-| `CScScript::SetVariable #7` | unreviewed |  |
-| `CScScript::DbgGetLine` | unreviewed |  |
-| `CScScript::DbgGetFilename` | unreviewed |  |
-| `CScScript::DbgSendScript` | unreviewed |  |
-| `CScScript::DbgSendVariables` | unreviewed |  |
-| `CScScript::DbgGetState` | unreviewed |  |
-| `CScScript::DbgGetNumBreakpoints` | unreviewed |  |
-| `CScScript::DbgGetBreakpoint` | unreviewed |  |
-| `CScScript::DbgSetTracingMode` | unreviewed |  |
-| `CScScript::DbgGetTracingMode` | unreviewed |  |
+| `CScScript::CScScript` | done | `luma-script/src/script.rs` `Script::new`: same defaults (no wait, time slice 0, freezable, not unbreakable, no parent); starts `Running` because `InitScript` always follows; no tracing mode (debugger) |
+| `CScScript::~CScScript` | replaced | Rust ownership |
+| `CScScript::InitScript` | done | `luma-script/src/program.rs` `Program::parse` (magic, version above the current one refused) and `Script::new` (ip at the code start, line 0, running). Luma also refuses tables or offsets outside the file, which the original does not check; breakpoints not ported (debugger) |
+| `CScScript::InitTables` | done | `program.rs` `Program::parse`: symbols by explicit index, functions, events, externals from version 1.1, methods |
+| `CScScript::Create` | done | `luma-script/src/engine.rs` `Engine::run_script` with `Script::new`: own globals table, owner; the bytecode is shared (`Rc<Program>`) instead of copied |
+| `CScScript::CreateThread` | done | `script.rs` `Script::thread` through `engine.rs` `spawn`: shares the parent's globals, copies time slice, freezable flag and owner, records the event and the parent |
+| `CScScript::CreateMethodThread` | done | `engine.rs` `invoke_method_thread` with `Script::thread(method = true)`; no thread when the method is unknown |
+| `CScScript::Cleanup` | replaced | Rust ownership; a thread never frees the globals it shares (`Rc`) |
+| `CScScript::GetDWORD` | done | `luma-script/src/instruction.rs` `Instruction::decode` (little-endian 32-bit operands), bounds-checked |
+| `CScScript::GetFloat` | done | `instruction.rs` `Instruction::decode`, 8-byte little-endian float operand |
+| `CScScript::GetString` | done | `instruction.rs` `Instruction::decode`, zero-terminated string operand, one `char` per byte |
+| `CScScript::ExecuteInstruction` | done | `engine.rs` `step` and `call_by_exp`: every instruction compared (variables, calls, method threads and the native-first rule inside a method thread, unbreakable refusal, stack and `this` stack, `reg1`, arithmetic and null rules, comparisons through `Value::compare`, invalid opcode ends the script). The debugger callbacks and breakpoints of `DBG_LINE` are not ported; an instruction pointer or symbol index outside the program ends the script where the original reads wild memory. Runtime errors only log: see `RuntimeError` |
+| `CScScript::GetFuncPos` | done | `program.rs` `function_position`: exact name, first match (not used by the VM, as in the original where its only caller is commented out) |
+| `CScScript::GetMethodPos` | done | `program.rs` `method_position`: exact name, first match |
+| `CScScript::GetVar` | done | `engine.rs` `find_var`/`get_var`: top scope only, then script globals, then engine globals; an unknown name is created as null in the top scope (or the script globals) with the same warning |
+| `CScScript::WaitFor` | done | `engine.rs` `wait_for` (`Effect::WaitFor`): refused with 'Script cannot be interrupted.' when unbreakable |
+| `CScScript::WaitForExclusive` | done | `engine.rs` `apply_return` on `Effect::WaitForExclusive`: `reset_object` then `wait_for` |
+| `CScScript::Sleep` | partial | `engine.rs` `sleep` implements both clocks (`wait_frozen`), but asks `Host::is_frozen`, which `impl Host for World` (`luma-adventure/src/world.rs`) does not override (the inherent `World::is_frozen` in `ui.rs` is not the trait method), so it is always false: a script that calls `Sleep` while the game is frozen (a non-freezable script of a system-exclusive window) sleeps on the game timer, which is stopped, and wakes only after the game unfreezes. The original uses the wall clock there |
+| `CScScript::Finish` | done | `engine.rs` `Engine::finish`: with threads only when the script was not already finished |
+| `CScScript::Run` | done | `script.rs` `Script::run` |
+| `CScScript::RuntimeError` | partial | `engine.rs` `runtime_error` and `host.rs` `Context::runtime_error` log `Runtime error. Script '...', line N: message` (one line for the original's two). Missing: the on-screen quick message `Script runtime error. View log for details.` the original shows on every runtime error unless `Game.SuppressScriptErrors` is set (that property is a no-op in Luma). The script named is the path recorded in the compiled file, not the path it was loaded by |
+| `CScScript::Persist` | partial | `luma-script/src/snapshot.rs` `Engine::snapshot`/`restore` keep every field the original saves (ip, line, value stack with dead slots, `this` stack, scopes, call stack, globals table shared with threads, `reg1`, state and state before pause, wait object/time/frozen/script, time slice, thread flags and event, owner, freezable, unbreakable, parent). Different: the original stores the bytecode of every script that is not persistent or finished inside the saved game, so a script saved in the middle of its code resumes the code it was running even if the game's script file changed since; Luma always reads the file again and resumes at the old instruction pointer in it |
+| `CScScript::AfterLoad` | done | `snapshot.rs` `restore`: the program is read again by the path it was loaded from; when it cannot be read the script is logged with the original's message and dropped (the original marks it `SCRIPT_ERROR`, removed at the next tick; a script waiting for it gets null in both) |
+| `CScScript::InvokeEventHandler` | done | `engine.rs` `invoke_event_handler`: thread at the handler, unbreakable flag, appended to the engine's list |
+| `CScScript::GetEventPos` | done | `program.rs` `event_position`: case-insensitive, last match |
+| `CScScript::CanHandleEvent` | done | `script.rs` `can_handle_event` |
+| `CScScript::CanHandleMethod` | done | `script.rs` `can_handle_method` |
+| `CScScript::Pause` | done | `script.rs` `Script::pause`: an already paused script is reported (logged by `Engine::pause_all`), non-freezable and persistent scripts are left alone |
+| `CScScript::Resume` | done | `script.rs` `Script::resume` |
+| `CScScript::GetExternal` | done | `engine.rs` `step` on `ExternalCall`: exact-name search of `Program::externals` |
+| `CScScript::ExternalCall` | n/a | x86 inline assembly calling a function of a Windows DLL. Luma pops the arguments, logs 'External functions are not supported on this platform.' and returns null, which is what the original does when the DLL does not load (it words it as a runtime error) |
+| `CScScript::Call_cdecl` | n/a | x86 inline assembly calling a function of a Windows DLL |
+| `CScScript::Call_stdcall` | n/a | x86 inline assembly calling a function of a Windows DLL |
+| `CScScript::GetST0Double` | n/a | x86 inline assembly reading the FPU register after a DLL call |
+| `CScScript::CopyParameters` | done | `engine.rs` `copy_parameters`: the caller's arguments and their count pushed on the thread's stack in the caller's layout, and popped from the caller |
+| `CScScript::FinishThreads` | done | `engine.rs` `finish_threads`: threads with the same owner and the same script file (compared without case) |
+| `CScScript::GetFilename` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::GetCurrentLine` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::ReportRuntimeError` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::GetVariable` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::SetVariable` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::SetVariable #2` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::SetVariable #3` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::SetVariable #4` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::SetVariable #5` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::SetVariable #6` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::SetVariable #7` | n/a | `IWmeScript` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScScript::DbgGetLine` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScScript::DbgGetFilename` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScScript::DbgSendScript` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScScript::DbgSendVariables` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScScript::DbgGetState` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScScript::DbgGetNumBreakpoints` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScScript::DbgGetBreakpoint` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScScript::DbgSetTracingMode` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScScript::DbgGetTracingMode` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
 
 ## `wme_base/ScStack.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CScStack::CScStack` | unreviewed |  |
-| `CScStack::~CScStack` | unreviewed |  |
-| `CScStack::Pop` | unreviewed |  |
-| `CScStack::Push` | unreviewed |  |
-| `CScStack::GetPushValue` | unreviewed |  |
-| `CScStack::GetTop` | unreviewed |  |
-| `CScStack::GetAt` | unreviewed |  |
-| `CScStack::CorrectParams` | unreviewed |  |
-| `CScStack::PushNULL` | unreviewed |  |
-| `CScStack::PushInt` | unreviewed |  |
-| `CScStack::PushFloat` | unreviewed |  |
-| `CScStack::PushBool` | unreviewed |  |
-| `CScStack::PushString` | unreviewed |  |
-| `CScStack::PushNative` | unreviewed |  |
-| `CScStack::Persist` | unreviewed |  |
-| `CScStack::PopValue` | unreviewed |  |
-| `CScStack::PushValue` | unreviewed |  |
-| `CScStack::PushValue #2` | unreviewed |  |
-| `CScStack::PushValue #3` | unreviewed |  |
-| `CScStack::PushValue #4` | unreviewed |  |
-| `CScStack::PushValue #5` | unreviewed |  |
-| `CScStack::PushValue #6` | unreviewed |  |
-| `CScStack::PushValue #7` | unreviewed |  |
-| `CScStack::ExpectParams` | unreviewed |  |
+| `CScStack::CScStack` | done | `luma-script/src/stack.rs` `Stack::new`, empty |
+| `CScStack::~CScStack` | replaced | Rust ownership |
+| `CScStack::Pop` | done | `stack.rs` `Stack::pop`: the slot stays in place for references to it; underflow gives `None`, which the VM handles where the original does (the 'Fatal: Stack underflow' log line is not written) |
+| `CScStack::Push` | done | `stack.rs` `Stack::push`: a copy of the value (objects with their properties) or of the reference, reusing the slot |
+| `CScStack::GetPushValue` | done | `stack.rs` `push_value` |
+| `CScStack::GetTop` | done | `stack.rs` `top`/`top_index` |
+| `CScStack::GetAt` | done | `stack.rs` `at` |
+| `CScStack::CorrectParams` | done | `stack.rs` `correct_params` (count popped by the caller in `engine.rs`): surplus arguments removed from the deep end, missing ones inserted as null below the given ones |
+| `CScStack::PushNULL` | done | `stack.rs` `push_value` |
+| `CScStack::PushInt` | done | `stack.rs` `push_value` |
+| `CScStack::PushFloat` | done | `stack.rs` `push_value` |
+| `CScStack::PushBool` | done | `stack.rs` `push_value` |
+| `CScStack::PushString` | done | `stack.rs` `push_value` |
+| `CScStack::PushNative` | done | `stack.rs` `push_value(Value::Native)`; the persistent flag belongs to the original's reference counting, which handles replace |
+| `CScStack::Persist` | replaced | `snapshot.rs` `ScriptSnapshot.slots` and `stack_len`: every slot, live or not, with references kept as references |
+| `CScStack::PopValue` | n/a | `IWmeStack` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScStack::PushValue` | n/a | `IWmeStack` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScStack::PushValue #2` | n/a | `IWmeStack` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScStack::PushValue #3` | n/a | `IWmeStack` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScStack::PushValue #4` | n/a | `IWmeStack` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScStack::PushValue #5` | n/a | `IWmeStack` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScStack::PushValue #6` | n/a | `IWmeStack` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScStack::PushValue #7` | n/a | `IWmeStack` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScStack::ExpectParams` | n/a | `IWmeStack` interface offered to DLL plugins; Luma loads no plugin DLL |
 
 ## `wme_base/ScValue.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CScValue::CScValue` | unreviewed |  |
-| `CScValue::CScValue #2` | unreviewed |  |
-| `CScValue::CScValue #3` | unreviewed |  |
-| `CScValue::CScValue #4` | unreviewed |  |
-| `CScValue::CScValue #5` | unreviewed |  |
-| `CScValue::Cleanup` | unreviewed |  |
-| `CScValue::~CScValue` | unreviewed |  |
-| `CScValue::GetProp` | unreviewed |  |
-| `CScValue::DeleteProp` | unreviewed |  |
-| `CScValue::SetProp` | unreviewed |  |
-| `CScValue::PropExists` | unreviewed |  |
-| `CScValue::DeleteProps` | unreviewed |  |
-| `CScValue::CleanProps` | unreviewed |  |
-| `CScValue::IsNULL` | unreviewed |  |
-| `CScValue::IsNative` | unreviewed |  |
-| `CScValue::IsString` | unreviewed |  |
-| `CScValue::IsFloat` | unreviewed |  |
-| `CScValue::IsInt` | unreviewed |  |
-| `CScValue::IsBool` | unreviewed |  |
-| `CScValue::IsObject` | unreviewed |  |
-| `CScValue::GetTypeTolerant` | unreviewed |  |
-| `CScValue::SetBool` | unreviewed |  |
-| `CScValue::SetInt` | unreviewed |  |
-| `CScValue::SetFloat` | unreviewed |  |
-| `CScValue::SetString` | unreviewed |  |
-| `CScValue::SetStringVal` | unreviewed |  |
-| `CScValue::SetNULL` | unreviewed |  |
-| `CScValue::SetNative` | unreviewed |  |
-| `CScValue::SetObject` | unreviewed |  |
-| `CScValue::SetReference` | unreviewed |  |
-| `CScValue::GetBool` | unreviewed |  |
-| `CScValue::GetInt` | unreviewed |  |
-| `CScValue::GetFloat` | unreviewed |  |
-| `CScValue::GetMemBuffer` | unreviewed |  |
-| `CScValue::GetString` | unreviewed |  |
-| `CScValue::GetNative` | unreviewed |  |
-| `CScValue::GetType` | unreviewed |  |
-| `CScValue::Copy` | unreviewed |  |
-| `CScValue::SetValue` | unreviewed |  |
-| `CScValue::Persist` | unreviewed |  |
-| `CScValue::SaveAsText` | unreviewed |  |
-| `CScValue::Compare` | unreviewed |  |
-| `CScValue::CompareStrict` | unreviewed |  |
-| `CScValue::GetValInt` | unreviewed |  |
-| `CScValue::GetValString` | unreviewed |  |
-| `CScValue::GetValFloat` | unreviewed |  |
-| `CScValue::GetValBool` | unreviewed |  |
-| `CScValue::GetValNative` | unreviewed |  |
-| `CScValue::SetVal` | unreviewed |  |
-| `CScValue::SetVal #2` | unreviewed |  |
-| `CScValue::SetVal #3` | unreviewed |  |
-| `CScValue::SetVal #4` | unreviewed |  |
-| `CScValue::SetVal #5` | unreviewed |  |
-| `CScValue::SetVal #6` | unreviewed |  |
-| `CScValue::SetVal #7` | unreviewed |  |
-| `CScValue::IsValInt` | unreviewed |  |
-| `CScValue::IsValString` | unreviewed |  |
-| `CScValue::IsValFloat` | unreviewed |  |
-| `CScValue::IsValBool` | unreviewed |  |
-| `CScValue::IsValNative` | unreviewed |  |
-| `CScValue::IsValObject` | unreviewed |  |
-| `CScValue::IsValNull` | unreviewed |  |
-| `CScValue::GetProperty` | unreviewed |  |
-| `CScValue::SetProperty` | unreviewed |  |
-| `CScValue::SetProperty #2` | unreviewed |  |
-| `CScValue::SetProperty #3` | unreviewed |  |
-| `CScValue::SetProperty #4` | unreviewed |  |
-| `CScValue::SetProperty #5` | unreviewed |  |
-| `CScValue::SetProperty #6` | unreviewed |  |
-| `CScValue::SetProperty #7` | unreviewed |  |
-| `CScValue::DbgSendVariables` | unreviewed |  |
-| `CScValue::DbgGetType` | unreviewed |  |
-| `CScValue::DbgGetValInt` | unreviewed |  |
-| `CScValue::DbgGetValFloat` | unreviewed |  |
-| `CScValue::DbgGetValBool` | unreviewed |  |
-| `CScValue::DbgGetValString` | unreviewed |  |
-| `CScValue::DbgGetValNative` | unreviewed |  |
-| `CScValue::DbgSetVal` | unreviewed |  |
-| `CScValue::DbgSetVal #2` | unreviewed |  |
-| `CScValue::DbgSetVal #3` | unreviewed |  |
-| `CScValue::DbgSetVal #4` | unreviewed |  |
-| `CScValue::DbgSetVal #5` | unreviewed |  |
-| `CScValue::DbgGetNumProperties` | unreviewed |  |
-| `CScValue::DbgGetProperty` | unreviewed |  |
-| `CScValue::DbgGetDescription` | unreviewed |  |
+| `CScValue::CScValue` | done | `luma-script/src/value.rs` `Value::Null` (the default); the constant flag of a global is `engine.rs` `Global.is_const`, the persistent flag belongs to reference counting |
+| `CScValue::CScValue #2` | done | `value.rs` `Value::Bool` |
+| `CScValue::CScValue #3` | done | `value.rs` `Value::Int` |
+| `CScValue::CScValue #4` | done | `value.rs` `Value::Float` |
+| `CScValue::CScValue #5` | done | `value.rs` `Value::String` |
+| `CScValue::Cleanup` | replaced | Rust ownership; natives are handles, not reference-counted pointers |
+| `CScValue::~CScValue` | replaced | Rust ownership |
+| `CScValue::GetProp` | done | `value.rs` `Value::get_property`: `Length` of a string (characters of the game's text encoding), a native's property through the host, an object's property; references are resolved by the VM first |
+| `CScValue::DeleteProp` | done | `value.rs` `remove_property`. The original keeps the name with an empty entry; its only callers are the internals of `Array`, `File` and `MemBuffer`, where Luma's own containers read the same (null) |
+| `CScValue::SetProp` | done | `value.rs` `Value::set_property`: a native takes it through the host, any other value becomes an object holding it. The original's fallback (a native that refuses a property keeps it on the variable itself) is unreachable with the classes of this table, which either accept every property or answer every name themselves; constants are flagged in `engine.rs` `Global` |
+| `CScValue::PropExists` | done | `value.rs` `has_property`; the VM's variable tables are plain maps (`engine.rs` `find_var`) |
+| `CScValue::DeleteProps` | replaced | Rust ownership |
+| `CScValue::CleanProps` | done | `engine.rs` `clear_globals` |
+| `CScValue::IsNULL` | done | `value.rs` `is_null` |
+| `CScValue::IsNative` | done | `value.rs` `is_native` |
+| `CScValue::IsString` | done | `value.rs` `is_string` |
+| `CScValue::IsFloat` | done | `value.rs` `is_float` |
+| `CScValue::IsInt` | done | `value.rs`: matched on `Value::Int` where needed |
+| `CScValue::IsBool` | done | `value.rs`: matched on `Value::Bool` where needed |
+| `CScValue::IsObject` | done | `value.rs` `is_object` |
+| `CScValue::GetTypeTolerant` | done | `value.rs` `same_type`, on values the VM has dereferenced |
+| `CScValue::SetBool` | done | `value.rs`: the `Value` is replaced; the branch that hands the scalar to a native is `Value::assign` with `Natives::assign_scalar` |
+| `CScValue::SetInt` | done | `value.rs`: the `Value` is replaced; the branch that hands the scalar to a native is `Value::assign` with `Natives::assign_scalar` |
+| `CScValue::SetFloat` | done | `value.rs`: the `Value` is replaced; the branch that hands the scalar to a native is `Value::assign` with `Natives::assign_scalar` |
+| `CScValue::SetString` | done | `value.rs`: the `Value` is replaced; the branch that hands the scalar to a native is `Value::assign` with `Natives::assign_scalar` |
+| `CScValue::SetStringVal` | done | `value.rs` `Value::String` |
+| `CScValue::SetNULL` | done | `value.rs` `Value::Null`; no reference count to drop |
+| `CScValue::SetNative` | done | `value.rs` `Value::Native`; no reference count |
+| `CScValue::SetObject` | done | `value.rs` `Value::object`, empty |
+| `CScValue::SetReference` | done | `stack.rs` `Slot::Ref(VarRef)`: references live on the stacks only and name the variable (scope, script global, engine global or stack slot) |
+| `CScValue::GetBool` | done | `value.rs` `get_bool`: numbers non-zero, strings `1`/`yes`/`true` without case, null and objects false, natives ask the host (whose answer differs from the original: see `CBScriptable::ScToBool`) |
+| `CScValue::GetInt` | done | `value.rs` `get_int` and `atoi`: floats truncated, strings as C `atoi`, null and objects 0. A float outside the `int` range saturates and NaN gives 0, where the C cast is undefined (the x86 build gives the minimum `int`) |
+| `CScValue::GetFloat` | done | `value.rs` `get_float` and `atof` |
+| `CScValue::GetMemBuffer` | n/a | raw memory address of a `MemBuffer`, only used to pass it to a DLL function |
+| `CScValue::GetString` | done | `value.rs` `get_string`: `[null]`, `yes`/`no`, `%d`, `%f` (six decimals), `[object]`, the native's own string |
+| `CScValue::GetNative` | done | `value.rs` `as_native` |
+| `CScValue::GetType` | done | `value.rs`: the enum variant (`type_name`); arithmetic only sees dereferenced values, and `luma-compiler` never leaves a reference as an arithmetic operand (`PUSH_VAR_REF` is always followed by `PUSH_BY_EXP`/`POP_BY_EXP`) |
+| `CScValue::Copy` | done | `value.rs` `Clone`: an object is copied with all its properties (value semantics), a native is the same handle |
+| `CScValue::SetValue` | done | `value.rs` `Value::assign`: a variable holding a native keeps it and hands it an integer, string or boolean, anything else replaces the value. As in the original the VM never reaches the scalar branch: `POP_VAR` only calls it when the operand is a native, where it is a plain copy (`engine.rs` writes the value directly) |
+| `CScValue::Persist` | replaced | serde derive on `Value` (`value.rs`), `Global` and the snapshot types; references are saved as `VarRefSnapshot` |
+| `CScValue::SaveAsText` | n/a | writes `PROPERTY` blocks for the `SaveAsText` of the editors; no script method and no engine code path calls it |
+| `CScValue::Compare` | done | `value.rs` `Value::compare`: natives of one class by the host (identity unless the class orders itself), of two classes by their strings; two objects never equal; null below everything; then strings (byte order, case-sensitive), floats, integers |
+| `CScValue::CompareStrict` | done | `value.rs` `compare_strict`: different types are never equal |
+| `CScValue::GetValInt` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::GetValString` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::GetValFloat` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::GetValBool` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::GetValNative` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetVal` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetVal #2` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetVal #3` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetVal #4` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetVal #5` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetVal #6` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetVal #7` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::IsValInt` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::IsValString` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::IsValFloat` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::IsValBool` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::IsValNative` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::IsValObject` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::IsValNull` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::GetProperty` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetProperty` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetProperty #2` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetProperty #3` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetProperty #4` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetProperty #5` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetProperty #6` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::SetProperty #7` | n/a | `IWmeValue` interface offered to DLL plugins; Luma loads no plugin DLL |
+| `CScValue::DbgSendVariables` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgGetType` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgGetValInt` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgGetValFloat` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgGetValBool` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgGetValString` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgGetValNative` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgSetVal` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgSetVal #2` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgSetVal #3` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgSetVal #4` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgSetVal #5` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgGetNumProperties` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgGetProperty` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
+| `CScValue::DbgGetDescription` | n/a | script debugger hook (`IWmeDebug*`); Luma has no debugger client |
 
 ## `wme_base/SXArray.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXArray::CSXArray` | unreviewed |  |
-| `CSXArray::CSXArray #2` | unreviewed |  |
-| `CSXArray::~CSXArray` | unreviewed |  |
-| `CSXArray::ScToString` | unreviewed |  |
-| `CSXArray::ScCallMethod` | unreviewed |  |
-| `CSXArray::ScGetProperty` | unreviewed |  |
-| `CSXArray::ScSetProperty` | unreviewed |  |
-| `CSXArray::Persist` | unreviewed |  |
-| `CSXArray::ValidNumber` | unreviewed |  |
-| `CSXArray::Push` | unreviewed |  |
+| `CSXArray::CSXArray` | done | `luma-script/src/classes/array.rs` `ArrayObject::new`: no argument is empty, one argument is a length, several are the elements. A negative length is clamped to 0, where the original keeps it (with meaningless results) |
+| `CSXArray::CSXArray #2` | done | `array.rs` `ArrayObject::default`/`from_values`, for the arrays the engine builds itself (`Split`, `GetFiles`) |
+| `CSXArray::~CSXArray` | replaced | Rust ownership |
+| `CSXArray::ScToString` | done | `array.rs` `to_string`: elements joined by commas, an element never set left empty (without the original's 32768-byte limit) |
+| `CSXArray::ScCallMethod` | done | `array.rs` `call_method`: `Push(...)` returns the new length, `Pop()` the last element or null |
+| `CSXArray::ScGetProperty` | done | `array.rs` `get_property`: `Type`, `Length`, `[index]`; any other name reads null |
+| `CSXArray::ScSetProperty` | done | `array.rs` `set_property`: `Length` (clamped to 0, elements past it dropped), `[index]` (grows the array); any other name is dropped |
+| `CSXArray::Persist` | replaced | serde derive on `ArrayObject` (length and the elements set) |
+| `CSXArray::ValidNumber` | partial | `array.rs` `ArrayObject::index`: all digits, read with `atoi`. An empty name is a valid number in the original (index 0, so `a[""]` is `a[0]`); Luma treats it as no index |
+| `CSXArray::Push` | done | `array.rs` `ArrayObject::push` |
 
 ## `wme_base/SXDate.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXDate::CSXDate` | unreviewed |  |
-| `CSXDate::~CSXDate` | unreviewed |  |
-| `CSXDate::ScToString` | unreviewed |  |
-| `CSXDate::ScCallMethod` | unreviewed |  |
-| `CSXDate::ScGetProperty` | unreviewed |  |
-| `CSXDate::ScSetProperty` | unreviewed |  |
-| `CSXDate::Persist` | unreviewed |  |
-| `CSXDate::ScCompare` | unreviewed |  |
+| `CSXDate::CSXDate` | partial | `luma-script/src/classes/date.rs` `DateObject::new`: six fields, missing ones 0, month from 1, out-of-range fields carried over; no first argument is now, local time. Different: the original runs C `mktime` on a `struct tm` whose daylight-saving flag starts at 0: a date given during daylight-saving time comes back one hour later (`new Date(2020,7,1,12,0,0).GetHours()` is 13 in a zone with summer time), and `mktime` fails (fields left as given, weekday 0) outside the range it supports (before 1970). Luma normalises with the plain Gregorian calendar, no zone rules, any year |
+| `CSXDate::~CSXDate` | replaced | Rust ownership |
+| `CSXDate::ScToString` | done | `date.rs` `Display`: the `asctime` form with its trailing newline |
+| `CSXDate::ScCallMethod` | partial | `date.rs` `call_method`: `GetYear`, `GetMonth`, `GetDate`, `GetHours`, `GetMinutes`, `GetSeconds`, `GetWeekday`, the six setters (each normalises), `SetCurrentTime`. Different after a setter in the same way as the constructor: the original runs C `mktime` on a `struct tm` whose daylight-saving flag starts at 0: a date given during daylight-saving time comes back one hour later (`new Date(2020,7,1,12,0,0).GetHours()` is 13 in a zone with summer time), and `mktime` fails (fields left as given, weekday 0) outside the range it supports (before 1970). Luma normalises with the plain Gregorian calendar, no zone rules, any year |
+| `CSXDate::ScGetProperty` | done | `date.rs` `get_property`: `Type` is `date`, any other name reads null |
+| `CSXDate::ScSetProperty` | done | `luma-script/src/classes/mod.rs` `ClassObject::set_property`: a date keeps no property |
+| `CSXDate::Persist` | replaced | serde derive on `DateObject` (seconds in the local zone instead of the `struct tm` bytes) |
+| `CSXDate::ScCompare` | done | `mod.rs` `ClassObject::compare`: by time |
 
 ## `wme_base/SXDirectory.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXDirectory::CSXDirectory` | unreviewed |  |
-| `CSXDirectory::~CSXDirectory` | unreviewed |  |
-| `CSXDirectory::ScCallMethod` | unreviewed |  |
-| `CSXDirectory::ScGetProperty` | unreviewed |  |
-| `CSXDirectory::ScSetProperty` | unreviewed |  |
-| `CSXDirectory::Persist` | unreviewed |  |
+| `CSXDirectory::CSXDirectory` | done | `classes/mod.rs` `ClassObject::directory`, published as the global `Directory` by `luma-adventure/src/world.rs`; no state |
+| `CSXDirectory::~CSXDirectory` | replaced | Rust ownership |
+| `CSXDirectory::ScCallMethod` | partial | `luma-script/src/classes/directory.rs` `call_method`: `Create`, `Delete`, `GetFiles(path, mask = "*.*")`, `GetDirectories`, `GetDrives`. Deliberately confined: every path resolves inside the game's save directory (`ClassHost::writable_dir` in `luma-adventure/src/world.rs`), where the original works on any path of the machine: an absolute path or one with `..` is refused; `GetFiles`/`GetDirectories` list what the save directory holds plus the game's own files and packages, sorted by name (the original lists one Windows directory in directory order); `Create` answers whether the directory exists afterwards (the original answers `mkdir`, false when `CreatePath` already made it); `GetDrives` returns an empty array (no drive letters) |
+| `CSXDirectory::ScGetProperty` | partial | `directory.rs` `get_property`: `Type`, `PathSeparator` (`\`). Different: `CurrentDirectory` is the save directory, not the process's working directory; `TempDirectory` is `temp` under the save directory (created on demand), not the system's temporary directory |
+| `CSXDirectory::ScSetProperty` | partial | `directory.rs` `set_property`: `CurrentDirectory` is accepted and ignored (the original changes the working directory, which changes where relative file names of `File` and `Directory` land); other names are kept as script properties |
+| `CSXDirectory::Persist` | replaced | nothing to save; the object is one of the natives saved with the world |
 
 ## `wme_base/SXFile.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXFile::CSXFile` | unreviewed |  |
-| `CSXFile::~CSXFile` | unreviewed |  |
-| `CSXFile::Cleanup` | unreviewed |  |
-| `CSXFile::Close` | unreviewed |  |
-| `CSXFile::ScToString` | unreviewed |  |
-| `CSXFile::ScCallMethod` | unreviewed |  |
-| `CSXFile::ScGetProperty` | unreviewed |  |
-| `CSXFile::ScSetProperty` | unreviewed |  |
-| `CSXFile::GetPos` | unreviewed |  |
-| `CSXFile::SetPos` | unreviewed |  |
-| `CSXFile::GetLength` | unreviewed |  |
-| `CSXFile::Persist` | unreviewed |  |
+| `CSXFile::CSXFile` | done | `luma-script/src/classes/file.rs` `FileObject::new`: the name when given, closed, not text |
+| `CSXFile::~CSXFile` | replaced | Rust ownership; the object holds no open handle |
+| `CSXFile::Cleanup` | done | `file.rs`: `close` then the name replaced, in `SetFilename` |
+| `CSXFile::Close` | done | `file.rs` `FileObject::close`: mode 0, not text |
+| `CSXFile::ScToString` | done | `file.rs` `Display`: the name, or `[file object]` |
+| `CSXFile::ScCallMethod` | partial | `file.rs` `call_method`: every method is there with the original's results and runtime errors (`SetFilename`, `OpenAsText`/`OpenAsBinary` with mode 1 by default and the invalid-mode fallback, `Close`, `SetPosition`, `Delete`, `Copy(dest, overwrite = true)`, `ReadLine`, `ReadText`, `WriteLine`/`WriteText`, the binary readers and writers, `ReadShort` adding 65536). Different: (1) writing, `Delete` and the destination of `Copy` are confined to the game's save directory (`ClassHost::writable_path`), the original uses the path as given; (2) a file open as text is written with `\n` alone, where the original's text mode writes CR LF (`WriteLine`, and any `\n` inside the text); (3) reading and the source of `Copy` also find files inside packages (the original's `Copy` and `Delete` only see the disk) |
+| `CSXFile::ScGetProperty` | partial | `file.rs` `get_property`: `Type`, `Position`, `Length`, `TextMode`, `AccessMode`, other names from the script properties. `Filename` of an object with no name is null in the original, an empty string in Luma |
+| `CSXFile::ScSetProperty` | done | `classes/mod.rs` `ClassObject::set_property` returns false for a file, so `world.rs` keeps the name as a script property, as the base class does |
+| `CSXFile::GetPos` | done | `file.rs` `position` |
+| `CSXFile::SetPos` | done | `file.rs` `set_position`: from the start of the file, the only origin a script can ask for; past the end of a file being read fails |
+| `CSXFile::GetLength` | done | `file.rs` `length` |
+| `CSXFile::Persist` | partial | `file.rs` `SavedFile`: name, text flag, and for a file open for reading its content and position (the original reopens the file and seeks). A file open for writing is closed after a load in both, but the original first reopens it with `w+`, which empties a file that was open in mode 2; Luma leaves the file as it was |
 
 ## `wme_base/SXMath.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXMath::CSXMath` | unreviewed |  |
-| `CSXMath::~CSXMath` | unreviewed |  |
-| `CSXMath::ScCallMethod` | unreviewed |  |
-| `CSXMath::ScGetProperty` | unreviewed |  |
-| `CSXMath::DegreeToRadian` | unreviewed |  |
-| `CSXMath::RadianToDegree` | unreviewed |  |
-| `CSXMath::Persist` | unreviewed |  |
+| `CSXMath::CSXMath` | done | `luma-adventure/src/world.rs`: one `Kind::Math` native, published as the global `Math` |
+| `CSXMath::~CSXMath` | replaced | Rust ownership |
+| `CSXMath::ScCallMethod` | partial | `luma-adventure/src/natives.rs` `math_call` has every method, but `Sin`, `Cos`, `Tan`, `Sinh`, `Cosh` and `Tanh` take **degrees** in the original (it applies `DegreeToRadian` to the argument first) and radians in Luma: `Math.Sin(90)` is 1 in the original, 0.894 in Luma. `Acos`, `Asin`, `Atan`, `Atan2` return radians in both. Also a string argument is read with `atof` in the original (`"12abc"` is 12) and with a whole-string parse in Luma (0); `math_call` should use `Value::get_float` |
+| `CSXMath::ScGetProperty` | partial | `natives.rs` `native_get` for `Kind::Math`: `Type` is `math`. `PI` is the single-precision constant in the original (`3.141592653589793f`, that is 3.1415927410125732 once widened) and the double-precision one in Luma; they differ from the 8th digit |
+| `CSXMath::DegreeToRadian` | partial | `natives.rs` `math_call` `DegToRad` uses `f64::to_radians`; the original multiplies by a single-precision `PI / 180.0f`, so results differ from the 8th significant digit. Not applied to the arguments of the trigonometric methods: see `ScCallMethod` |
+| `CSXMath::RadianToDegree` | partial | `natives.rs` `math_call` `RadToDeg` uses `f64::to_degrees`; the original multiplies by a single-precision `180.0f / PI`, so results differ from the 8th significant digit |
+| `CSXMath::Persist` | replaced | nothing to save; the object is one of the natives saved with the world |
 
 ## `wme_base/SXMemBuffer.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXMemBuffer::CSXMemBuffer` | unreviewed |  |
-| `CSXMemBuffer::CSXMemBuffer #2` | unreviewed |  |
-| `CSXMemBuffer::~CSXMemBuffer` | unreviewed |  |
-| `CSXMemBuffer::ScToMemBuffer` | unreviewed |  |
-| `CSXMemBuffer::Cleanup` | unreviewed |  |
-| `CSXMemBuffer::Resize` | unreviewed |  |
-| `CSXMemBuffer::CheckBounds` | unreviewed |  |
-| `CSXMemBuffer::ScToString` | unreviewed |  |
-| `CSXMemBuffer::ScCallMethod` | unreviewed |  |
-| `CSXMemBuffer::ScGetProperty` | unreviewed |  |
-| `CSXMemBuffer::ScSetProperty` | unreviewed |  |
-| `CSXMemBuffer::Persist` | unreviewed |  |
-| `CSXMemBuffer::ScCompare` | unreviewed |  |
+| `CSXMemBuffer::CSXMemBuffer` | done | `luma-script/src/classes/membuffer.rs` `MemBuffer::new`: that many zero bytes, a negative size is 0 |
+| `CSXMemBuffer::CSXMemBuffer #2` | n/a | wraps a raw memory address returned by a DLL function or read by `GetPointer` |
+| `CSXMemBuffer::~CSXMemBuffer` | replaced | Rust ownership |
+| `CSXMemBuffer::ScToMemBuffer` | n/a | raw memory address, only used to pass the buffer to a DLL function |
+| `CSXMemBuffer::Cleanup` | replaced | Rust ownership |
+| `CSXMemBuffer::Resize` | done | `membuffer.rs` `SetSize`: `Vec::resize`, new bytes zero, content kept |
+| `CSXMemBuffer::CheckBounds` | done | `membuffer.rs` `check`: same runtime error. An empty buffer and a negative length are out of bounds in Luma, where the original lets them through and reads or writes memory it does not own |
+| `CSXMemBuffer::ScToString` | done | `classes/mod.rs` `ClassObject::to_string`: `[membuffer object]` |
+| `CSXMemBuffer::ScCallMethod` | done | `membuffer.rs` `call_method`: `SetSize`, the typed getters and setters (little-endian, `GetShort` adding 65536), `GetString(start, length)` with length 0 meaning up to the zero byte, `SetString` writing the terminator. `GetPointer`/`SetPointer` (raw addresses for DLL calls) log a runtime error and return null/false; `DEBUG_Dump` (writes `c:\!!buffer.bin`) does nothing |
+| `CSXMemBuffer::ScGetProperty` | done | `membuffer.rs` `get_property`: `Type`, `Size`, other names from the script properties |
+| `CSXMemBuffer::ScSetProperty` | done | `classes/mod.rs` `ClassObject::set_property` returns false, so `world.rs` keeps the name as a script property |
+| `CSXMemBuffer::Persist` | replaced | serde derive on `MemBuffer` (the bytes) |
+| `CSXMemBuffer::ScCompare` | done | `membuffer.rs` `MemBuffer::compare`: equal for the same object, 'greater' otherwise |
 
 ## `wme_base/SxObject.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXObject::CSXObject` | unreviewed |  |
-| `CSXObject::~CSXObject` | unreviewed |  |
-| `CSXObject::Persist` | unreviewed |  |
+| `CSXObject::CSXObject` | done | `luma-adventure/src/world.rs` `call_function` on `Object`: a bare object (`Kind::Object`) with every argument attached as a script |
+| `CSXObject::~CSXObject` | replaced | Rust ownership |
+| `CSXObject::Persist` | replaced | saved as any native (kind, script properties, object state); what `CBObject::Persist` adds is reviewed with `CBObject` |
 
 ## `wme_base/SXString.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXString::CSXString` | unreviewed |  |
-| `CSXString::~CSXString` | unreviewed |  |
-| `CSXString::SetStringVal` | unreviewed |  |
-| `CSXString::ScToString` | unreviewed |  |
-| `CSXString::ScSetString` | unreviewed |  |
-| `CSXString::ScCallMethod` | unreviewed |  |
-| `CSXString::ScGetProperty` | unreviewed |  |
-| `CSXString::ScSetProperty` | unreviewed |  |
-| `CSXString::Persist` | unreviewed |  |
-| `CSXString::ScCompare` | unreviewed |  |
+| `CSXString::CSXString` | done | `luma-script/src/classes/string.rs` `StringObject::new`: an integer is a capacity with an empty text, anything else its string (`new String()` is `[null]`) |
+| `CSXString::~CSXString` | replaced | Rust ownership |
+| `CSXString::SetStringVal` | done | `string.rs` `set_text`: the capacity grows to the length plus one |
+| `CSXString::ScToString` | done | `classes/mod.rs` `ClassObject::to_string`: the text |
+| `CSXString::ScSetString` | done | `classes/mod.rs` `ClassObject::assign_scalar`: a string replaces the text |
+| `CSXString::ScCallMethod` | partial | `string.rs` `call_method`: `Substring` (inclusive, swapped when reversed, clamped), `Substr` (no length means to the end, zero or less is empty), `IndexOf(text, from)`, `Split(separators = ",")` (empty parts kept) agree, in ANSI and UTF-8 games. Different: in an ANSI game `ToUpperCase`/`ToLowerCase` use `_strupr`/`_strlwr`, which in the C locale the engine starts in change only the unaccented letters A-Z; Luma also converts the accented letters of Latin-1 (`é` becomes `É`). In a UTF-8 game `Split` compares each character with the separator string's bytes in the original; Luma compares characters, which only differs for separators outside ASCII |
+| `CSXString::ScGetProperty` | done | `string.rs` `get_property`: `Type`, `Length` (characters of the game's encoding), `Capacity`; any other name reads null |
+| `CSXString::ScSetProperty` | done | `string.rs` `set_property`: `Capacity` grows, a value below the text's length plus one logs 'Warning: cannot lower string capacity'; any other name is dropped |
+| `CSXString::Persist` | replaced | serde derive on `StringObject` (text and capacity) |
+| `CSXString::ScCompare` | done | `classes/mod.rs` `ClassObject::compare`: by text, byte order |
 
 ## `wme_base/SysClass.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSysClass::CSysClass` | unreviewed |  |
-| `CSysClass::~CSysClass` | unreviewed |  |
-| `CSysClass::RemoveAllInstances` | unreviewed |  |
-| `CSysClass::AddInstance` | unreviewed |  |
-| `CSysClass::RemoveInstance` | unreviewed |  |
-| `CSysClass::GetInstanceID` | unreviewed |  |
-| `CSysClass::IDToPointer` | unreviewed |  |
-| `CSysClass::GetNumInstances` | unreviewed |  |
-| `CSysClass::Dump` | unreviewed |  |
-| `CSysClass::SaveTable` | unreviewed |  |
-| `CSysClass::LoadTable` | unreviewed |  |
-| `CSysClass::SaveInstances` | unreviewed |  |
-| `CSysClass::LoadInstance` | unreviewed |  |
-| `CSysClass::ResetSavedIDs` | unreviewed |  |
-| `CSysClass::InstanceCallback` | unreviewed |  |
+| `CSysClass::CSysClass` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::~CSysClass` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::RemoveAllInstances` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::AddInstance` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::RemoveInstance` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::GetInstanceID` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::IDToPointer` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::GetNumInstances` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::Dump` | n/a | one line of the class registry dump, a debugging aid (`Game.DEBUG_DumpClassRegistry`) |
+| `CSysClass::SaveTable` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::LoadTable` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::SaveInstances` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::LoadInstance` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::ResetSavedIDs` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClass::InstanceCallback` | replaced | see `CSysClassRegistry::EnumInstances` |
 
 ## `wme_base/SysClassRegistry.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSysClassRegistry::CSysClassRegistry` | unreviewed |  |
-| `CSysClassRegistry::~CSysClassRegistry` | unreviewed |  |
-| `CSysClassRegistry::GetInstance` | unreviewed |  |
-| `CSysClassRegistry::RegisterClass` | unreviewed |  |
-| `CSysClassRegistry::UnregisterClass` | unreviewed |  |
-| `CSysClassRegistry::RegisterInstance` | unreviewed |  |
-| `CSysClassRegistry::AddInstanceToTable` | unreviewed |  |
-| `CSysClassRegistry::GetNextID` | unreviewed |  |
-| `CSysClassRegistry::UnregisterInstance` | unreviewed |  |
-| `CSysClassRegistry::GetPointerID` | unreviewed |  |
-| `CSysClassRegistry::IDToPointer` | unreviewed |  |
-| `CSysClassRegistry::SaveTable` | unreviewed |  |
-| `CSysClassRegistry::LoadTable` | unreviewed |  |
-| `CSysClassRegistry::SaveInstances` | unreviewed |  |
-| `CSysClassRegistry::LoadInstances` | unreviewed |  |
-| `CSysClassRegistry::EnumInstances` | unreviewed |  |
-| `CSysClassRegistry::DumpClasses` | unreviewed |  |
+| `CSysClassRegistry::CSysClassRegistry` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::~CSysClassRegistry` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::GetInstance` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::RegisterClass` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::UnregisterClass` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::RegisterInstance` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::AddInstanceToTable` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::GetNextID` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::UnregisterInstance` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::GetPointerID` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::IDToPointer` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysClassRegistry::SaveTable` | partial | the table of classes and instance ids is not needed (the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data). Not reproduced: the original redraws the screen while it works (saving or loading screen with the progress indicator, `m_IndicatorProgress` from 0 to 100); Luma saves and loads inside one frame and ignores the `INDICATOR_*` keys (`docs/saving.md`) |
+| `CSysClassRegistry::LoadTable` | partial | the table of classes and instance ids is not needed (the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data). Not reproduced: the original redraws the screen while it works (saving or loading screen with the progress indicator, `m_IndicatorProgress` from 0 to 100); Luma saves and loads inside one frame and ignores the `INDICATOR_*` keys (`docs/saving.md`) |
+| `CSysClassRegistry::SaveInstances` | partial | every object is serialized by `save.rs` `save_game` (the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data). Not reproduced: the original redraws the screen while it works (saving or loading screen with the progress indicator, `m_IndicatorProgress` from 0 to 100); Luma saves and loads inside one frame and ignores the `INDICATOR_*` keys (`docs/saving.md`); the original also keeps the game alive between classes (`MiniUpdate`) |
+| `CSysClassRegistry::LoadInstances` | partial | every object is restored by `save.rs` `load_game` (the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data). Not reproduced: the original redraws the screen while it works (saving or loading screen with the progress indicator, `m_IndicatorProgress` from 0 to 100); Luma saves and loads inside one frame and ignores the `INDICATOR_*` keys (`docs/saving.md`) |
+| `CSysClassRegistry::EnumInstances` | partial | Luma walks its own collections for what the original does after a load (regions, sub-frames, sounds, videos, models, scripts: `save.rs` `after_restore`/`reload_assets`, `snapshot.rs` `restore`). Missing: the original also uses it when an object is destroyed (`CBGame::UnregisterObject` with `InvalidateValues`) to set every script value that holds the object to null, so `obj == null` becomes true; Luma leaves the stale handle in the variables (`objects.rs` `remove`): it converts to `[invalid object]` and is not equal to null |
+| `CSysClassRegistry::DumpClasses` | n/a | writes the class registry to a file, a debugging aid (`Game.DEBUG_DumpClassRegistry`) |
 
 ## `wme_base/SysInstance.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSysInstance::CSysInstance` | unreviewed |  |
-| `CSysInstance::~CSysInstance` | unreviewed |  |
+| `CSysInstance::CSysInstance` | replaced | the class and instance registry exists to turn pointers into numbers for a saved game and back; Luma's objects are named by handles that stay the same across a save (`NativeId` in `luma-adventure/src/objects.rs`, `ScriptId`) and are saved as ordinary serde data |
+| `CSysInstance::~CSysInstance` | replaced | Rust ownership |
