@@ -119,39 +119,39 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBFrame::CBFrame` | unreviewed |  |
-| `CBFrame::~CBFrame` | unreviewed |  |
-| `CBFrame::Draw` | unreviewed |  |
-| `CBFrame::OneTimeDisplay` | unreviewed |  |
-| `CBFrame::LoadBuffer` | unreviewed |  |
-| `CBFrame::LoadBuffer DELAY` | unreviewed |  |
-| `CBFrame::LoadBuffer IMAGE` | unreviewed |  |
-| `CBFrame::LoadBuffer TRANSPARENT` | unreviewed |  |
-| `CBFrame::LoadBuffer RECT` | unreviewed |  |
-| `CBFrame::LoadBuffer HOTSPOT` | unreviewed |  |
-| `CBFrame::LoadBuffer 2D_ONLY` | unreviewed |  |
-| `CBFrame::LoadBuffer 3D_ONLY` | unreviewed |  |
-| `CBFrame::LoadBuffer MIRROR_X` | unreviewed |  |
-| `CBFrame::LoadBuffer MIRROR_Y` | unreviewed |  |
-| `CBFrame::LoadBuffer MOVE` | unreviewed |  |
-| `CBFrame::LoadBuffer ALPHA_COLOR` | unreviewed |  |
-| `CBFrame::LoadBuffer ALPHA` | unreviewed |  |
-| `CBFrame::LoadBuffer SUBFRAME` | unreviewed |  |
-| `CBFrame::LoadBuffer SOUND` | unreviewed |  |
-| `CBFrame::LoadBuffer KEYFRAME` | unreviewed |  |
-| `CBFrame::LoadBuffer DECORATION` | unreviewed |  |
-| `CBFrame::LoadBuffer APPLY_EVENT` | unreviewed |  |
-| `CBFrame::LoadBuffer EDITOR_SELECTED` | unreviewed |  |
-| `CBFrame::LoadBuffer EDITOR_EXPANDED` | unreviewed |  |
-| `CBFrame::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CBFrame::LoadBuffer KILL_SOUND` | unreviewed |  |
-| `CBFrame::GetBoundingRect` | unreviewed |  |
-| `CBFrame::SaveAsText` | unreviewed |  |
-| `CBFrame::Persist` | unreviewed |  |
-| `CBFrame::ScCallMethod` | unreviewed |  |
-| `CBFrame::ScGetProperty` | unreviewed |  |
-| `CBFrame::ScSetProperty` | unreviewed |  |
-| `CBFrame::ScToString` | unreviewed |  |
+| `CBFrame::CBFrame` | done | `Frame::default` (`luma-formats/src/sprite.rs`): delay 0, no move, no sound, no kill, not a keyframe. |
+| `CBFrame::~CBFrame` | replaced | Rust ownership. |
+| `CBFrame::Draw` | done | `scene_view::draw_object` over `drawn_subframes`: every sub-frame in order, the `2D_ONLY` ones skipped as an accelerated renderer does. |
+| `CBFrame::OneTimeDisplay` | done | `World::frame_shown_in`: the sound is panned with its owner and played (`play_frame_sound`), the `APPLY_EVENT`s are raised on the owner. |
+| `CBFrame::LoadBuffer` | partial | `Frame::from_node`: the frame's own sub-frame comes first, built from the frame's keys, then the `SUBFRAME`s. Different: unknown keys are skipped (WME: syntax error); a missing `IMAGE` file does not fail the frame (WME: placeholder image, or `Error loading SUBFRAME`); a negative `DELAY` is clamped to 0. |
+| `CBFrame::LoadBuffer DELAY` | done | `Frame::delay_ms`. |
+| `CBFrame::LoadBuffer IMAGE` | done | The own sub-frame's `SubFrame::image`. |
+| `CBFrame::LoadBuffer TRANSPARENT` | done | `SubFrame::color_key`, `custom_color_key`; magenta by default. |
+| `CBFrame::LoadBuffer RECT` | done | `SubFrame::rect`; an empty rectangle is the whole image. |
+| `CBFrame::LoadBuffer HOTSPOT` | done | `SubFrame::hotspot_x`, `hotspot_y`. |
+| `CBFrame::LoadBuffer 2D_ONLY` | done | `SubFrame::only_2d`: never drawn (`scene_view::is_drawn`), as with WME's accelerated renderer. |
+| `CBFrame::LoadBuffer 3D_ONLY` | done | `SubFrame::only_3d`: always drawn. |
+| `CBFrame::LoadBuffer MIRROR_X` | done | `SubFrame::mirror_x`. |
+| `CBFrame::LoadBuffer MIRROR_Y` | done | `SubFrame::mirror_y`. |
+| `CBFrame::LoadBuffer MOVE` | partial | `Frame::move_x`, `move_y`, added to an entity's or actor's position when the frame becomes current (`AnimState::move_x`), but not scaled by the object's zoom as `CBSprite::GetCurrentFrame` does, and not applied to inventory items. |
+| `CBFrame::LoadBuffer ALPHA_COLOR` | done | `SubFrame::tint` colour. |
+| `CBFrame::LoadBuffer ALPHA` | done | `SubFrame::tint` alpha. |
+| `CBFrame::LoadBuffer SUBFRAME` | done | `SubFrame::from_node`, after the frame's own. |
+| `CBFrame::LoadBuffer SOUND` | done | `Frame::sound`, loaded when first played (`World::play_frame_sound`); a file that does not load is logged then, not at load. |
+| `CBFrame::LoadBuffer KEYFRAME` | done | `Frame::keyframe`; only the `Keyframe` script property reads it, in both engines. |
+| `CBFrame::LoadBuffer DECORATION` | done | `SubFrame::decoration`: no hit area (`World::sprite_hits_with`). |
+| `CBFrame::LoadBuffer APPLY_EVENT` | done | `Frame::apply_events`. |
+| `CBFrame::LoadBuffer EDITOR_SELECTED` | n/a | SpriteEdit only. |
+| `CBFrame::LoadBuffer EDITOR_EXPANDED` | n/a | SpriteEdit only. |
+| `CBFrame::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` does nothing outside the editors. |
+| `CBFrame::LoadBuffer KILL_SOUND` | done | `Frame::kill_sound`, read by `World::frame_shown_in`. |
+| `CBFrame::GetBoundingRect` | done | `World::sprite_size` (`ui.rs`): the union of the sub-frames' rectangles around their hotspots, unscaled (the only use Luma has for it). |
+| `CBFrame::SaveAsText` | n/a | Editor only. |
+| `CBFrame::Persist` | done | A sprite a script edited is saved whole (`LoadedSprite::edited`, serde on `Frame`); the others are loaded again from their files. |
+| `CBFrame::ScCallMethod` | partial | `World::frame_call` (`natives_sprite.rs`): `GetSound`, `SetSound`, `GetSubframe`, `AddSubframe`, `InsertSubframe`, `AddEvent`, `DeleteEvent` and the single sub-frame fall-through agree (`GetEvent` is unreachable in WME, its test is spelled `GetSubframe`, and absent in Luma). Different: `DeleteSubframe(index)` deletes; in WME an integer argument is only range-checked and nothing is deleted. |
+| `CBFrame::ScGetProperty` | done | `World::frame_get`: `Type`, `Delay`, `Keyframe`, `KillSounds`, `MoveX`, `MoveY`, `NumSubframes`, `NumEvents`, else the single sub-frame's properties. |
+| `CBFrame::ScSetProperty` | done | `World::frame_set`: `Delay` (not below 0), `Keyframe`, `KillSounds`, `MoveX`, `MoveY`, else the single sub-frame's. |
+| `CBFrame::ScToString` | done | `Natives::to_string`: `[frame]`. |
 
 ## `wme_base/BGame.cpp`
 
@@ -488,89 +488,89 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSprite::CBSprite` | unreviewed |  |
-| `CBSprite::~CBSprite` | unreviewed |  |
-| `CBSprite::SetDefaults` | unreviewed |  |
-| `CBSprite::Cleanup` | unreviewed |  |
-| `CBSprite::Draw` | unreviewed |  |
-| `CBSprite::LoadFile` | unreviewed |  |
-| `CBSprite::LoadBuffer` | unreviewed |  |
-| `CBSprite::LoadBuffer CONTINUOUS` | unreviewed |  |
-| `CBSprite::LoadBuffer SPRITE` | unreviewed |  |
-| `CBSprite::LoadBuffer LOOPING` | unreviewed |  |
-| `CBSprite::LoadBuffer FRAME` | unreviewed |  |
-| `CBSprite::LoadBuffer NAME` | unreviewed |  |
-| `CBSprite::LoadBuffer PRECISE` | unreviewed |  |
-| `CBSprite::LoadBuffer EDITOR_MUTED` | unreviewed |  |
-| `CBSprite::LoadBuffer STREAMED_KEEP_LOADED` | unreviewed |  |
-| `CBSprite::LoadBuffer STREAMED` | unreviewed |  |
-| `CBSprite::LoadBuffer SCRIPT` | unreviewed |  |
-| `CBSprite::LoadBuffer EDITOR_BG_FILE` | unreviewed |  |
-| `CBSprite::LoadBuffer EDITOR_BG_OFFSET_X` | unreviewed |  |
-| `CBSprite::LoadBuffer EDITOR_BG_OFFSET_Y` | unreviewed |  |
-| `CBSprite::LoadBuffer EDITOR_BG_ALPHA` | unreviewed |  |
-| `CBSprite::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CBSprite::Reset` | unreviewed |  |
-| `CBSprite::GetCurrentFrame` | unreviewed |  |
-| `CBSprite::Display` | unreviewed |  |
-| `CBSprite::GetSurface` | unreviewed |  |
-| `CBSprite::GetBoundingRect` | unreviewed |  |
-| `CBSprite::SaveAsText` | unreviewed |  |
-| `CBSprite::Persist` | unreviewed |  |
-| `CBSprite::ScCallMethod` | unreviewed |  |
-| `CBSprite::ScGetProperty` | unreviewed |  |
-| `CBSprite::ScSetProperty` | unreviewed |  |
-| `CBSprite::ScToString` | unreviewed |  |
-| `CBSprite::KillAllSounds` | unreviewed |  |
+| `CBSprite::CBSprite` | done | `AnimState::new` (`luma-adventure/src/scene_view.rs`) and `Sprite::from_document` (`luma-formats/src/sprite.rs`): first frame, not looping, not finished, not paused, `precise` true, no pending move. The owner is the object holding the animation state. |
+| `CBSprite::~CBSprite` | replaced | Rust ownership. |
+| `CBSprite::SetDefaults` | done | See the constructor: `Sprite::default` with `precise: true`, `AnimState::new`. |
+| `CBSprite::Cleanup` | replaced | Rust ownership. |
+| `CBSprite::Draw` | partial | Cursors, control images and inventory items are stepped (`AnimState::step`) and drawn (`scene_view::place`) without this function. Missing: an item drawn through it (`CAdItem::Display`, owner movable) is moved by its frames' `MOVE`; Luma ignores `MOVE` for items. No owner, no effect, for cursors and control images, as in WME. |
+| `CBSprite::LoadFile` | partial | `SpriteBank::add_sprite` (`scene_view.rs`): an image path (`.bmp`, `.tga`, `.png`, `.jpg`) becomes a one-frame sprite, else the definition is parsed. Missing: a file that does not exist is replaced by the engine's `invalid.bmp` placeholder (`invalid_debug.bmp` in debug mode) and the load succeeds, so the object shows the placeholder; Luma records the sprite as missing and shows nothing (callers such as `SetCursor` answer false). Missing: the `savegame:<slot>` paths, the thumbnail of a saved game as a sprite (`docs/saving.md` lists it as not done). |
+| `CBSprite::LoadBuffer` | partial | `Sprite::from_document`. Different: unknown keys are skipped (WME: syntax error); a frame whose image is missing still loads (WME gets the placeholder image, or fails the whole sprite when a frame cannot be built). `m_CanBreak` is not kept: nothing reads it in the engine. |
+| `CBSprite::LoadBuffer CONTINUOUS` | done | `Sprite::continuous`. It only feeds `m_CanBreak`, which no code of the engine reads (checked across `wme_base` and `wme_ad`), so there is nothing to act on. |
+| `CBSprite::LoadBuffer SPRITE` | done | `Sprite::from_document` requires the `SPRITE` block. |
+| `CBSprite::LoadBuffer LOOPING` | done | `Sprite::looping`, read by `AnimState::step`. |
+| `CBSprite::LoadBuffer FRAME` | done | `Frame::from_node`; the first frame is the current one. |
+| `CBSprite::LoadBuffer NAME` | done | `Sprite::name`. |
+| `CBSprite::LoadBuffer PRECISE` | done | `Sprite::precise` (true by default), read by `World::sprite_hits_with` (`input.rs`). |
+| `CBSprite::LoadBuffer EDITOR_MUTED` | n/a | Mutes the frame sounds in the editors only (`Game->m_EditorMode && m_EditorMuted`). |
+| `CBSprite::LoadBuffer STREAMED_KEEP_LOADED` | replaced | Parsed (`Sprite::streamed_keep_loaded`); a hint for the original's surface cache. Luma's banks keep their textures. |
+| `CBSprite::LoadBuffer STREAMED` | replaced | Parsed (`Sprite::streamed`); gives the surfaces a 500 ms lifetime in the original's cache so unused frames are unloaded. Luma's banks keep their textures; nothing visible differs. |
+| `CBSprite::LoadBuffer SCRIPT` | partial | Parsed into `Sprite::scripts`, never attached: in WME the scripts are attached to the sprite object and receive its `FrameChanged`. Parsed, not used. |
+| `CBSprite::LoadBuffer EDITOR_BG_FILE` | n/a | Background shown behind the sprite in SpriteEdit. |
+| `CBSprite::LoadBuffer EDITOR_BG_OFFSET_X` | n/a | SpriteEdit only. |
+| `CBSprite::LoadBuffer EDITOR_BG_OFFSET_Y` | n/a | SpriteEdit only. |
+| `CBSprite::LoadBuffer EDITOR_BG_ALPHA` | n/a | SpriteEdit only. |
+| `CBSprite::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` does nothing outside the editors. |
+| `CBSprite::Reset` | done | `AnimState::reset` (first frame, time 0, not finished, no move) with `World::kill_frame_sounds` from the callers (`reset_sprite_anim`, `natives_sprite.rs`). |
+| `CBSprite::GetCurrentFrame` | partial | `AnimState::step` (`scene_view.rs`): the same advance, loop, finish, first-call and `changed` rules. Different: (1) the `MOVE` of the frame that becomes current is not scaled by the zoom (`m_MoveX * ZoomX / 100`, truncated): `SceneView::advance_with` and `Actor::update` add it as written, so a scaled entity or actor is moved too far or not far enough; (2) the clock. WME takes the game timer only when the sprite has an owner that is freezable, else the live timer, which runs while the game is frozen; cursors, window and control images and response icons have no owner. Luma steps them all on `World::timer` (`update_cursor`, `step_control_image`, `update_loading_icon`, the inventory), so an animated cursor, button or window image stands still while a system-exclusive window (a menu) or the accessibility pause freezes the game. |
+| `CBSprite::Display` | done | `World::frame_shown_in` (`world.rs`) when a step changes the frame: `KILL_SOUND` first, `FrameChanged` on the sprite object, then the frame's sound and events; the frame is drawn at the position minus the scroll offset by `scene_view::draw_object`. |
+| `CBSprite::GetSurface` | n/a | Used by the Direct3D code to fetch the first sub-frame's surface (shadow image, model textures); Luma's banks give the texture by image path. |
+| `CBSprite::GetBoundingRect` | partial | `World::sprite_size` and `sprite_size_loaded` (`ui.rs`) measure the first frame only; WME takes the union of every frame, so a control sized from an animated image whose later frames are larger is smaller in Luma. Entities and actors use their hit area (`World::hit_rect`) instead. |
+| `CBSprite::SaveAsText` | n/a | Editor only (SpriteEdit); no script method reaches it. |
+| `CBSprite::Persist` | done | Serde on `AnimState` (frame, frame time, finished, paused, looping, move) and on sprites a script edited (`LoadedSprite::edited`); the others are loaded again from their files (`reload_sprites`). |
+| `CBSprite::ScCallMethod` | partial | `World::sprite_call` (`natives_sprite.rs`): `GetFrame`, `Reset`, `AddFrame`, `InsertFrame`, `Pause`, `Play` agree. Different: `DeleteFrame(index)` deletes the frame; in WME an integer argument is only range-checked and nothing is deleted (only a frame object is). |
+| `CBSprite::ScGetProperty` | done | `World::sprite_get`: `Type`, `NumFrames`, `CurrentFrame`, `PixelPerfect`, `Looping`, `Owner`, `Finished`, `Paused`. |
+| `CBSprite::ScSetProperty` | partial | `World::sprite_set`. Different: `CurrentFrame` out of range becomes frame 0 (WME: -1, no frame), and setting it also clears `finished`, which WME leaves. |
+| `CBSprite::ScToString` | done | `Natives::to_string` (`world.rs`): `[sprite]`. |
+| `CBSprite::KillAllSounds` | done | `World::kill_frame_sounds` (`sound.rs`). |
 
 ## `wme_base/BSubFrame.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBSubFrame::CBSubFrame` | unreviewed |  |
-| `CBSubFrame::~CBSubFrame` | unreviewed |  |
-| `CBSubFrame::LoadBuffer` | unreviewed |  |
-| `CBSubFrame::LoadBuffer IMAGE` | unreviewed |  |
-| `CBSubFrame::LoadBuffer TRANSPARENT` | unreviewed |  |
-| `CBSubFrame::LoadBuffer RECT` | unreviewed |  |
-| `CBSubFrame::LoadBuffer HOTSPOT` | unreviewed |  |
-| `CBSubFrame::LoadBuffer 2D_ONLY` | unreviewed |  |
-| `CBSubFrame::LoadBuffer 3D_ONLY` | unreviewed |  |
-| `CBSubFrame::LoadBuffer DECORATION` | unreviewed |  |
-| `CBSubFrame::LoadBuffer ALPHA_COLOR` | unreviewed |  |
-| `CBSubFrame::LoadBuffer ALPHA` | unreviewed |  |
-| `CBSubFrame::LoadBuffer MIRROR_X` | unreviewed |  |
-| `CBSubFrame::LoadBuffer MIRROR_Y` | unreviewed |  |
-| `CBSubFrame::LoadBuffer EDITOR_SELECTED` | unreviewed |  |
-| `CBSubFrame::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CBSubFrame::Draw` | unreviewed |  |
-| `CBSubFrame::GetBoundingRect` | unreviewed |  |
-| `CBSubFrame::SaveAsText` | unreviewed |  |
-| `CBSubFrame::SetDefaultRect` | unreviewed |  |
-| `CBSubFrame::Persist` | unreviewed |  |
-| `CBSubFrame::ScCallMethod` | unreviewed |  |
-| `CBSubFrame::ScGetProperty` | unreviewed |  |
-| `CBSubFrame::ScSetProperty` | unreviewed |  |
-| `CBSubFrame::ScToString` | unreviewed |  |
-| `CBSubFrame::SetSurface` | unreviewed |  |
-| `CBSubFrame::SetSurfaceSimple` | unreviewed |  |
-| `CBSubFrame::StartPixelOperations` | unreviewed |  |
-| `CBSubFrame::EndPixelOperations` | unreviewed |  |
-| `CBSubFrame::GetPixel` | unreviewed |  |
-| `CBSubFrame::PutPixel` | unreviewed |  |
-| `CBSubFrame::GetWidth` | unreviewed |  |
-| `CBSubFrame::GetHeight` | unreviewed |  |
-| `CBSubFrame::SendEvent` | unreviewed |  |
-| `CBSubFrame::CallMethod` | unreviewed |  |
-| `CBSubFrame::SetProperty` | unreviewed |  |
-| `CBSubFrame::SetProperty #2` | unreviewed |  |
-| `CBSubFrame::SetProperty #3` | unreviewed |  |
-| `CBSubFrame::SetProperty #4` | unreviewed |  |
-| `CBSubFrame::SetProperty #5` | unreviewed |  |
-| `CBSubFrame::SetProperty #6` | unreviewed |  |
-| `CBSubFrame::SetProperty #7` | unreviewed |  |
-| `CBSubFrame::GetProperty` | unreviewed |  |
-| `CBSubFrame::GetInterface` | unreviewed |  |
+| `CBSubFrame::CBSubFrame` | done | `SubFrame::default` (`luma-formats/src/sprite.rs`): no image, hotspot 0, white opaque tint, magenta colour key, no rectangle, no mirroring, not a decoration. |
+| `CBSubFrame::~CBSubFrame` | replaced | Rust ownership; textures live in the banks. |
+| `CBSubFrame::LoadBuffer` | partial | `SubFrame::from_node`. Unknown keys are skipped where WME reports a syntax error; otherwise the same (a sub-frame without image is allowed). |
+| `CBSubFrame::LoadBuffer IMAGE` | done | `SubFrame::image`. |
+| `CBSubFrame::LoadBuffer TRANSPARENT` | done | `SubFrame::color_key`. |
+| `CBSubFrame::LoadBuffer RECT` | done | `SubFrame::rect`; empty is the whole image. |
+| `CBSubFrame::LoadBuffer HOTSPOT` | done | `SubFrame::hotspot_x`, `hotspot_y`. |
+| `CBSubFrame::LoadBuffer 2D_ONLY` | done | `SubFrame::only_2d`, see `scene_view::is_drawn`. |
+| `CBSubFrame::LoadBuffer 3D_ONLY` | done | `SubFrame::only_3d`. |
+| `CBSubFrame::LoadBuffer DECORATION` | done | `SubFrame::decoration`. |
+| `CBSubFrame::LoadBuffer ALPHA_COLOR` | done | `SubFrame::tint` colour. |
+| `CBSubFrame::LoadBuffer ALPHA` | done | `SubFrame::tint` alpha. |
+| `CBSubFrame::LoadBuffer MIRROR_X` | done | `SubFrame::mirror_x`. |
+| `CBSubFrame::LoadBuffer MIRROR_Y` | done | `SubFrame::mirror_y`. |
+| `CBSubFrame::LoadBuffer EDITOR_SELECTED` | n/a | SpriteEdit only. |
+| `CBSubFrame::LoadBuffer EDITOR_PROPERTY` | n/a | `ParseEditorProperty` does nothing outside the editors. |
+| `CBSubFrame::Draw` | done | `scene_view::place_transformed` and `input::pixel_area`: the active rectangle is registered unless `DECORATION`, with the source rectangle's corner added to the position as WME does; a sub-frame tint other than opaque white replaces the owner's; unscaled at `x - hotspot`, scaled with each term truncated, turned around the hotspot. `SuspendedRendering` is the player skipping the present. Luma hit-tests a turned sprite where it is drawn (documented in `docs/game-loop.md`). |
+| `CBSubFrame::GetBoundingRect` | done | `World::sprite_size` (`ui.rs`) for the unscaled case it needs: from `-hotspot`, the rectangle's size. |
+| `CBSubFrame::SaveAsText` | n/a | Editor only. |
+| `CBSubFrame::SetDefaultRect` | done | `SubFrame::rect` `None`: the whole image, sized when the image is known. |
+| `CBSubFrame::Persist` | done | Saved with an edited sprite (serde on `SubFrame`), else loaded again from the sprite file; the colour key travels with the sub-frame. |
+| `CBSubFrame::ScCallMethod` | partial | `World::subframe_call_at` (`natives_sprite.rs`): `GetImage`, `SetImage`. Different: a `SetImage` whose file is missing keeps the old image and answers false; WME has dropped the old image by then (and puts the placeholder for a missing file). |
+| `CBSubFrame::ScGetProperty` | done | `subframe_value`: `Type`, `AlphaColor`, `TransparentColor`, `Is2DOnly`, `Is3DOnly`, `MirrorX`, `MirrorY`, `Decoration`, `HotspotX`, `HotspotY`. |
+| `CBSubFrame::ScSetProperty` | done | `subframe_assign`: the same names but `TransparentColor`, read-only in both. |
+| `CBSubFrame::ScToString` | done | `Natives::to_string`: `[subframe]`. |
+| `CBSubFrame::SetSurface` | replaced | `SpriteBank` textures keyed by image path and colour key (`scene_view.rs`); lifetime and keep-loaded hints have no use. |
+| `CBSubFrame::SetSurfaceSimple` | replaced | `World::reload_assets` (`save.rs`) loads the sprites again after a saved game. |
+| `CBSubFrame::StartPixelOperations` | n/a | `IWmeSubFrame` interface for Windows DLL plugins. |
+| `CBSubFrame::EndPixelOperations` | n/a | `IWmeSubFrame` interface for Windows DLL plugins. |
+| `CBSubFrame::GetPixel` | n/a | `IWmeSubFrame` interface for Windows DLL plugins. |
+| `CBSubFrame::PutPixel` | n/a | `IWmeSubFrame` interface for Windows DLL plugins. |
+| `CBSubFrame::GetWidth` | n/a | `IWmeSubFrame` interface for Windows DLL plugins. |
+| `CBSubFrame::GetHeight` | n/a | `IWmeSubFrame` interface for Windows DLL plugins. |
+| `CBSubFrame::SendEvent` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBSubFrame::CallMethod` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBSubFrame::SetProperty` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBSubFrame::SetProperty #2` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBSubFrame::SetProperty #3` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBSubFrame::SetProperty #4` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBSubFrame::SetProperty #5` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBSubFrame::SetProperty #6` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBSubFrame::SetProperty #7` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBSubFrame::GetProperty` | n/a | `IWmeObject` interface for Windows DLL plugins. |
+| `CBSubFrame::GetInterface` | n/a | `IWmeObject` interface for Windows DLL plugins. |
 
 ## `wme_base/BTransitionMgr.cpp`
 
