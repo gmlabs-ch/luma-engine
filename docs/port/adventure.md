@@ -220,9 +220,9 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdActorDir::CAdActorDir` | unreviewed |  |
-| `CAdActorDir::~CAdActorDir` | unreviewed |  |
-| `CAdActorDir::Persist` | unreviewed |  |
+| `CAdActorDir::CAdActorDir` | n/a | An empty class: no member, nothing in the engine creates or uses it. |
+| `CAdActorDir::~CAdActorDir` | n/a | An empty class: no member, nothing in the engine creates or uses it. |
+| `CAdActorDir::Persist` | n/a | An empty class: no member, nothing in the engine creates or uses it. `Persist` transfers nothing. |
 
 ## `wme_ad/AdAttach3DX.cpp`
 
@@ -247,9 +247,9 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdBlock::CAdBlock` | unreviewed |  |
-| `CAdBlock::~CAdBlock` | unreviewed |  |
-| `CAdBlock::Persist` | unreviewed |  |
+| `CAdBlock::CAdBlock` | done | `luma-3d/src/scene_geometry.rs` `MeshNode` (the geometry's `blocks`): active when created; `receive_shadows` comes from the node pattern when the geometry loads. |
+| `CAdBlock::~CAdBlock` | replaced | Rust ownership. |
+| `CAdBlock::Persist` | replaced | serde: `luma-adventure/src/scene3d.rs` saves each node's name and active flag and puts them back on the reloaded geometry (`set_node_enabled`). |
 
 ## `wme_ad/AdEntity.cpp`
 
@@ -401,9 +401,9 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdGeneric::CAdGeneric` | unreviewed |  |
-| `CAdGeneric::~CAdGeneric` | unreviewed |  |
-| `CAdGeneric::Persist` | unreviewed |  |
+| `CAdGeneric::CAdGeneric` | done | `luma-3d/src/scene_geometry.rs` `MeshNode` (the geometry's `generics`): active when created; `receive_shadows` comes from the node pattern when the geometry loads. |
+| `CAdGeneric::~CAdGeneric` | replaced | Rust ownership. |
+| `CAdGeneric::Persist` | replaced | serde: `luma-adventure/src/scene3d.rs` saves each node's name and active flag and puts them back on the reloaded geometry (`set_node_enabled`). |
 
 ## `wme_ad/AdGeomExt.cpp`
 
@@ -438,82 +438,82 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdInventory::CAdInventory` | unreviewed |  |
-| `CAdInventory::~CAdInventory` | unreviewed |  |
-| `CAdInventory::InsertItem` | unreviewed |  |
-| `CAdInventory::RemoveItem` | unreviewed |  |
-| `CAdInventory::RemoveItem #2` | unreviewed |  |
-| `CAdInventory::Persist` | unreviewed |  |
+| `CAdInventory::CAdInventory` | done | `objects.rs` `ObjectInventory::default` and `luma-adventure/src/inventory.rs` `Inventory::default`: scroll offset 0, nothing taken. |
+| `CAdInventory::~CAdInventory` | replaced | Rust ownership. |
+| `CAdInventory::InsertItem` | done | `luma-adventure/src/inventory.rs` `take_item_for`: unknown item fails; the item is taken out if it was there, then put after the named item when that one is in the inventory, else at the end. |
+| `CAdInventory::RemoveItem` | done | `luma-adventure/src/inventory.rs` `drop_item_for`: by name; fails when not there; the selected item is deselected. |
+| `CAdInventory::RemoveItem #2` | done | `luma-adventure/src/inventory.rs` `delete_item`: the item leaves every inventory and is deselected. |
+| `CAdInventory::Persist` | replaced | serde: `Inventory::taken` and `own_scroll_offset` for the game, `ObjectState::inventory` (`taken`, `scroll_offset`) for objects. |
 
 ## `wme_ad/AdInventoryBox.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdInventoryBox::CAdInventoryBox` | unreviewed |  |
-| `CAdInventoryBox::~CAdInventoryBox` | unreviewed |  |
-| `CAdInventoryBox::Listen` | unreviewed |  |
-| `CAdInventoryBox::Display` | unreviewed |  |
-| `CAdInventoryBox::LoadFile` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer INVENTORY_BOX` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer WINDOW` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer EXCLUSIVE` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer ALWAYS_VISIBLE` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer AREA` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer SPACING` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer ITEM_WIDTH` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer ITEM_HEIGHT` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer SCROLL_BY` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer NAME` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer CAPTION` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer HIDE_SELECTED` | unreviewed |  |
-| `CAdInventoryBox::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdInventoryBox::SaveAsText` | unreviewed |  |
-| `CAdInventoryBox::Persist` | unreviewed |  |
+| `CAdInventoryBox::CAdInventoryBox` | done | `luma-formats/src/window.rs` `InventoryBoxDef::default` and `luma-adventure/src/inventory.rs` `Inventory::default`: empty area, cells of 50x50, spacing 0, scroll by 1, selected item shown, not visible, not exclusive. |
+| `CAdInventoryBox::~CAdInventoryBox` | replaced | `luma-adventure/src/inventory.rs` `load_inventory_box_from` unloads the old window and close button before loading another box. |
+| `CAdInventoryBox::Listen` | done | `luma-adventure/src/inventory.rs` `inventory_listen` (from `ui.rs` button presses): `close` hides the box, `prev` scrolls back by `SCROLL_BY` not below 0, `next` scrolls forward; names without case. |
+| `CAdInventoryBox::Display` | partial | `luma-adventure/src/inventory.rs` `update_inventory`, `item_cells`, `draw_inventory`, `inventory_hits`: nothing when not visible; columns and rows from the area; `prev` enabled when scrolled, `next` when more items follow; the full-screen close button, the window, then the items of the owner's inventory cell by cell from the scroll offset, the selected one skipped with `HIDE_SELECTED`. Missing: when the window has an `AlphaColor` the original draws the items with it (`m_Renderer->m_ForceAlphaColor`); Luma draws them with their own tint only. `prev`/`next` are looked up as the first widget of that name (the original enables every widget so named). |
+| `CAdInventoryBox::LoadFile` | done | `luma-adventure/src/inventory.rs` `load_inventory_box_from`: a missing or unparsable file is logged and leaves the game without a box. |
+| `CAdInventoryBox::LoadBuffer` | partial | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with` and `luma-adventure/src/inventory.rs` `load_inventory_box_from`: `INVENTORY_BOX` root, the close button of an exclusive box, visible when `ALWAYS_VISIBLE`, the box listening to its window's buttons. Different: `TEMPLATE` is not loaded; only buttons get the box as listener and all of them do (the original gives it to every widget that has no listener yet); unknown keys are skipped where the original fails. |
+| `CAdInventoryBox::LoadBuffer INVENTORY_BOX` | done | `InventoryBoxDef::parse_with`: the root block is required. |
+| `CAdInventoryBox::LoadBuffer TEMPLATE` | partial | Parsed into `InventoryBoxDef::template`, which nothing reads: the template file is never loaded. The original loads it where the key stands (`LoadFile`). |
+| `CAdInventoryBox::LoadBuffer WINDOW` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with` (`WindowDef::apply_with`), created by `load_inventory_box_from` (`apply_window_def`). |
+| `CAdInventoryBox::LoadBuffer EXCLUSIVE` | partial | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`; a full-screen `close` button under the window. Luma creates it only when the box has a `WINDOW`; the original creates it for any exclusive box. |
+| `CAdInventoryBox::LoadBuffer ALWAYS_VISIBLE` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`; `Inventory::visible` starts from it. |
+| `CAdInventoryBox::LoadBuffer AREA` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with` (left, top, right, bottom, relative to the window); `item_cells`. |
+| `CAdInventoryBox::LoadBuffer SPACING` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`; `InventoryBoxDef::grid`, `item_cells`. |
+| `CAdInventoryBox::LoadBuffer ITEM_WIDTH` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`; `grid`, `item_cells`. |
+| `CAdInventoryBox::LoadBuffer ITEM_HEIGHT` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`; `grid`, `item_cells`. |
+| `CAdInventoryBox::LoadBuffer SCROLL_BY` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`; `inventory_listen`. |
+| `CAdInventoryBox::LoadBuffer NAME` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`. Kept; the box object is not reachable from scripts in the original either, so the name has no run-time use. |
+| `CAdInventoryBox::LoadBuffer CAPTION` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`. Kept; no run-time use in the original either. |
+| `CAdInventoryBox::LoadBuffer HIDE_SELECTED` | done | `luma-formats/src/window.rs` `InventoryBoxDef::apply_with`; `item_cells`. |
+| `CAdInventoryBox::LoadBuffer EDITOR_PROPERTY` | n/a | `CBBase::ParseEditorProperty` returns at once when the game is not in editor mode. |
+| `CAdInventoryBox::SaveAsText` | n/a | Only the editors write a box definition; no script method or engine path calls it. |
+| `CAdInventoryBox::Persist` | replaced | serde: `luma-adventure/src/inventory.rs` `Inventory` (the definition with area, cell size, spacing, scroll step, flags; the window and close button handles; visibility; scroll offset). |
 
 ## `wme_ad/AdItem.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CAdItem::CAdItem` | unreviewed |  |
-| `CAdItem::~CAdItem` | unreviewed |  |
-| `CAdItem::LoadFile` | unreviewed |  |
-| `CAdItem::LoadBuffer` | unreviewed |  |
-| `CAdItem::LoadBuffer ITEM` | unreviewed |  |
-| `CAdItem::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CAdItem::LoadBuffer CURSOR_HOVER` | unreviewed |  |
-| `CAdItem::LoadBuffer CURSOR_COMBINED` | unreviewed |  |
-| `CAdItem::LoadBuffer CURSOR` | unreviewed |  |
-| `CAdItem::LoadBuffer NAME` | unreviewed |  |
-| `CAdItem::LoadBuffer IMAGE_HOVER` | unreviewed |  |
-| `CAdItem::LoadBuffer IMAGE` | unreviewed |  |
-| `CAdItem::LoadBuffer EVENTS` | unreviewed |  |
-| `CAdItem::LoadBuffer SCRIPT` | unreviewed |  |
-| `CAdItem::LoadBuffer CAPTION` | unreviewed |  |
-| `CAdItem::LoadBuffer PROPERTY` | unreviewed |  |
-| `CAdItem::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CAdItem::LoadBuffer FONT` | unreviewed |  |
-| `CAdItem::LoadBuffer ALPHA_COLOR` | unreviewed |  |
-| `CAdItem::LoadBuffer ALPHA` | unreviewed |  |
-| `CAdItem::LoadBuffer TALK_SPECIAL` | unreviewed |  |
-| `CAdItem::LoadBuffer TALK` | unreviewed |  |
-| `CAdItem::LoadBuffer SPRITE_HOVER` | unreviewed |  |
-| `CAdItem::LoadBuffer SPRITE` | unreviewed |  |
-| `CAdItem::LoadBuffer DISPLAY_AMOUNT` | unreviewed |  |
-| `CAdItem::LoadBuffer AMOUNT_OFFSET_X` | unreviewed |  |
-| `CAdItem::LoadBuffer AMOUNT_OFFSET_Y` | unreviewed |  |
-| `CAdItem::LoadBuffer AMOUNT_ALIGN` | unreviewed |  |
-| `CAdItem::LoadBuffer AMOUNT_STRING` | unreviewed |  |
-| `CAdItem::LoadBuffer AMOUNT` | unreviewed |  |
-| `CAdItem::Update` | unreviewed |  |
-| `CAdItem::Display` | unreviewed |  |
-| `CAdItem::ScCallMethod` | unreviewed |  |
-| `CAdItem::ScGetProperty` | unreviewed |  |
-| `CAdItem::ScSetProperty` | unreviewed |  |
-| `CAdItem::ScToString` | unreviewed |  |
-| `CAdItem::Persist` | unreviewed |  |
-| `CAdItem::GetExtendedFlag` | unreviewed |  |
+| `CAdItem::CAdItem` | partial | `luma-formats/src/window.rs` `ItemDef::default`: combined cursor, no amount shown, amount 0, offsets 0, right-aligned amount, no amount string. Different: the original sets `m_Movable = false` for items; `natives_item.rs` `item_get` answers `Movable` true (and `objects.rs` `ObjectState::default` has `movable` true). |
+| `CAdItem::~CAdItem` | replaced | Rust ownership. |
+| `CAdItem::LoadFile` | todo | Reads an item file with an `ITEM` root; only reached through the `TEMPLATE` key, which Luma does not follow. |
+| `CAdItem::LoadBuffer` | partial | `luma-formats/src/window.rs` `ItemDef::apply` from `ItemDef::parse_all`, applied by `luma-adventure/src/inventory.rs` `add_item`. Different: `TEMPLATE` is not loaded; the tint rule (see `ALPHA`, `ALPHA_COLOR`); unknown keys are skipped where the original fails with a syntax error; a sprite or cursor that does not load does not fail the item. |
+| `CAdItem::LoadBuffer ITEM` | done | `ItemDef::parse_all`: one item per top-level `ITEM` block (`CAdGame::LoadItemsBuffer` passes the block's content). |
+| `CAdItem::LoadBuffer TEMPLATE` | partial | Parsed into `ItemDef::template`, which nothing reads: the template file is never loaded. The original loads it where the key stands (`LoadFile`). |
+| `CAdItem::LoadBuffer CURSOR_HOVER` | done | `luma-formats/src/window.rs` `ItemDef::apply`; loaded by `add_item`, shown by `update_item_cursor`. |
+| `CAdItem::LoadBuffer CURSOR_COMBINED` | done | `luma-formats/src/window.rs` `ItemDef::apply` (true by default); `update_item_cursor`. |
+| `CAdItem::LoadBuffer CURSOR` | done | `luma-formats/src/window.rs` `ItemDef::apply`; loaded by `add_item`, shown by `update_item_cursor`. |
+| `CAdItem::LoadBuffer NAME` | done | `luma-formats/src/window.rs` `ItemDef::apply`. |
+| `CAdItem::LoadBuffer IMAGE_HOVER` | done | Same field as `SPRITE_HOVER`. |
+| `CAdItem::LoadBuffer IMAGE` | done | Same field as `SPRITE`. |
+| `CAdItem::LoadBuffer EVENTS` | done | Accepted and ignored by the original (no case in the switch); Luma skips it too. |
+| `CAdItem::LoadBuffer SCRIPT` | done | `luma-formats/src/window.rs` `ItemDef::apply`; attached by `add_item`. |
+| `CAdItem::LoadBuffer CAPTION` | done | `luma-formats/src/window.rs` `ItemDef::apply`, expanded through the string table by `add_item`. |
+| `CAdItem::LoadBuffer PROPERTY` | done | `luma-formats/src/window.rs` `ItemDef::apply`; set as script properties by `add_item`. |
+| `CAdItem::LoadBuffer EDITOR_PROPERTY` | n/a | `CBBase::ParseEditorProperty` returns at once when the game is not in editor mode. |
+| `CAdItem::LoadBuffer FONT` | done | `luma-formats/src/window.rs` `ItemDef::apply`; loaded by `add_item`, used for the amount (`draw_inventory`). |
+| `CAdItem::LoadBuffer ALPHA_COLOR` | partial | `luma-formats/src/window.rs` `ItemDef::apply` makes the tint with `ALPHA` (255 by default). Different: the original turns a black colour with a non-zero alpha into white (`ALPHA_COLOR {0,0,0}` means no tint); Luma keeps black and draws the item black. |
+| `CAdItem::LoadBuffer ALPHA` | partial | Read only together with `ALPHA_COLOR`: `ItemDef::apply` builds a tint only when a colour was given. In the original `ALPHA` alone gives white with that alpha (a translucent item), since the colour defaults to 0,0,0 and is then made white. |
+| `CAdItem::LoadBuffer TALK_SPECIAL` | partial | Parsed into `ItemDef::talk_special`, not used: items cannot talk in Luma (`natives_item.rs`: `Talk` is a stub). |
+| `CAdItem::LoadBuffer TALK` | partial | Parsed into `ItemDef::talk`, not used: items cannot talk in Luma. |
+| `CAdItem::LoadBuffer SPRITE_HOVER` | done | `luma-formats/src/window.rs` `ItemDef::apply`; shown while the item is under the mouse (`update_inventory`). |
+| `CAdItem::LoadBuffer SPRITE` | done | `luma-formats/src/window.rs` `ItemDef::apply`; drawn in the box (`draw_inventory`). |
+| `CAdItem::LoadBuffer DISPLAY_AMOUNT` | done | `luma-formats/src/window.rs` `ItemDef::apply`; `draw_inventory`. |
+| `CAdItem::LoadBuffer AMOUNT_OFFSET_X` | done | `luma-formats/src/window.rs` `ItemDef::apply`; `draw_inventory`. |
+| `CAdItem::LoadBuffer AMOUNT_OFFSET_Y` | done | `luma-formats/src/window.rs` `ItemDef::apply`; `draw_inventory`. |
+| `CAdItem::LoadBuffer AMOUNT_ALIGN` | done | `luma-formats/src/window.rs` `ItemDef::apply`: `left`, `right`, anything else centre. |
+| `CAdItem::LoadBuffer AMOUNT_STRING` | done | `luma-formats/src/window.rs` `ItemDef::apply`; drawn instead of the number. |
+| `CAdItem::LoadBuffer AMOUNT` | done | `luma-formats/src/window.rs` `ItemDef::apply`. |
+| `CAdItem::Update` | partial | `luma-adventure/src/inventory.rs` `update_inventory`: the hover sprite while the item is the active object, else its sprite, animated. Missing: the playing-animation state (`PlayAnim` on an item) and the talking state (sentence, talk stances): items neither play animations nor talk in Luma. |
+| `CAdItem::Display` | partial | `luma-adventure/src/inventory.rs` `draw_inventory` / `inventory_hits`: the sprite at the cell with the item's tint, registered for the mouse, and the amount (offsets, right-align rule, item font else system font, amount string else number). Different: the original sets the item's position to X + half the sprite's width, Y; Luma keeps the cell's X (`Item::x`), so `Item.X` is off by half the width. |
+| `CAdItem::ScCallMethod` | done | `natives_item.rs` `item_call`: SetHoverSprite, GetHoverSprite, GetHoverSpriteObject, SetNormalCursor, GetNormalCursor, GetNormalCursorObject, SetHoverCursor, GetHoverCursor, GetHoverCursorObject; a file that does not load leaves the slot empty and returns false. (The inherited members: see `CAdObject::ScCallMethod`.) |
+| `CAdItem::ScGetProperty` | done | `natives_item.rs` `item_get`: Type, Name, DisplayAmount, Amount, AmountOffsetX, AmountOffsetY, AmountAlign, AmountString, CursorCombined. (The inherited properties: see `CAdObject::ScGetProperty`.) |
+| `CAdItem::ScSetProperty` | done | `natives_item.rs` `item_set`: Name, DisplayAmount, Amount, AmountOffsetX, AmountOffsetY, AmountAlign (clamped to 0..2, the original stores the number as is), AmountString (null removes it), CursorCombined. |
+| `CAdItem::ScToString` | partial | `world.rs` `Natives::to_string` gives `[<the item's name>]`; the original gives `[item]`. |
+| `CAdItem::Persist` | replaced | serde: `luma-adventure/src/inventory.rs` `Item` (the definition with its cursors, hover sprite, amount fields; the sprite shown and its animation). |
+| `CAdItem::GetExtendedFlag` | done | `input.rs` `cursor_to_show` and `luma-adventure/src/inventory.rs` `update_item_cursor`: an item is `usable`. |
 
 ## `wme_ad/AdLayer.cpp`
 
@@ -1106,25 +1106,25 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CUIEntity::CUIEntity` | unreviewed |  |
-| `CUIEntity::~CUIEntity` | unreviewed |  |
-| `CUIEntity::LoadFile` | unreviewed |  |
-| `CUIEntity::LoadBuffer` | unreviewed |  |
-| `CUIEntity::LoadBuffer ENTITY_CONTAINER` | unreviewed |  |
-| `CUIEntity::LoadBuffer TEMPLATE` | unreviewed |  |
-| `CUIEntity::LoadBuffer DISABLED` | unreviewed |  |
-| `CUIEntity::LoadBuffer VISIBLE` | unreviewed |  |
-| `CUIEntity::LoadBuffer X` | unreviewed |  |
-| `CUIEntity::LoadBuffer Y` | unreviewed |  |
-| `CUIEntity::LoadBuffer NAME` | unreviewed |  |
-| `CUIEntity::LoadBuffer ENTITY` | unreviewed |  |
-| `CUIEntity::LoadBuffer SCRIPT` | unreviewed |  |
-| `CUIEntity::LoadBuffer EDITOR_PROPERTY` | unreviewed |  |
-| `CUIEntity::SaveAsText` | unreviewed |  |
-| `CUIEntity::SetEntity` | unreviewed |  |
-| `CUIEntity::Display` | unreviewed |  |
-| `CUIEntity::ScCallMethod` | unreviewed |  |
-| `CUIEntity::ScGetProperty` | unreviewed |  |
-| `CUIEntity::ScSetProperty` | unreviewed |  |
-| `CUIEntity::ScToString` | unreviewed |  |
-| `CUIEntity::Persist` | unreviewed |  |
+| `CUIEntity::CUIEntity` | done | `luma-adventure/src/ui.rs` `ControlKind::EntityContainer(None)`: a control without an entity. |
+| `CUIEntity::~CUIEntity` | partial | The original unregisters the entity with its container, which ends the entity's scripts. `luma-adventure/src/ui.rs` `set_container_entity` does it for a replaced entity, but `unload_control` (a window deleted or unloaded) removes the controls only: the container's entity keeps its handle, its `World::ui_entities` entry and its running scripts. |
+| `CUIEntity::LoadFile` | todo | Reads a container file with an `ENTITY_CONTAINER` root; only reached through the `TEMPLATE` key, which Luma does not read. |
+| `CUIEntity::LoadBuffer` | partial | `luma-formats/src/window.rs` `EntityContainerDef::apply`, created by `luma-adventure/src/ui.rs` (`WidgetDef::EntityContainer`). Different: `TEMPLATE` is not read; an `ENTITY` file that does not load is logged and leaves an empty container (the original fails the window); the common control keys (`WIDTH`, `IMAGE`, `CAPTION`...) are accepted where the original has a syntax error; `CorrectSize()` is not applied. |
+| `CUIEntity::LoadBuffer ENTITY_CONTAINER` | done | `window.rs` `WindowDef::apply_with`: an `ENTITY_CONTAINER` block among a window's widgets. |
+| `CUIEntity::LoadBuffer TEMPLATE` | todo | Not read: `EntityContainerDef` has no template and `ControlDef::apply_key` skips the key. The original loads the named container file where the key stands. |
+| `CUIEntity::LoadBuffer DISABLED` | done | `window.rs` `ControlDef::apply_key`; a disabled container's entity is not registered for the mouse (`luma-adventure/src/ui.rs` window hits). |
+| `CUIEntity::LoadBuffer VISIBLE` | done | `ControlDef::apply_key`; `draw_ui_entity` draws nothing when not visible. |
+| `CUIEntity::LoadBuffer X` | done | `ControlDef::apply_key`. |
+| `CUIEntity::LoadBuffer Y` | done | `ControlDef::apply_key`. |
+| `CUIEntity::LoadBuffer NAME` | done | `ControlDef::apply_key`. |
+| `CUIEntity::LoadBuffer ENTITY` | done | `EntityContainerDef::apply`, `luma-adventure/src/ui.rs` `set_container_entity` (failure: see `LoadBuffer`). |
+| `CUIEntity::LoadBuffer SCRIPT` | done | `ControlDef::apply_key`; attached to the container by `apply_control_def`. |
+| `CUIEntity::LoadBuffer EDITOR_PROPERTY` | n/a | `CBBase::ParseEditorProperty` returns at once when the game is not in editor mode. |
+| `CUIEntity::SaveAsText` | n/a | Only reached from the window editor's save (`CUIWindow::SaveAsText`); no script method or engine path calls it. |
+| `CUIEntity::SetEntity` | partial | `luma-adventure/src/ui.rs` `set_container_entity`: the file is loaded, the previous entity dropped, the entity takes mouse events while the game is not interactive and is not freezable. Different: `m_SceneIndependent = true` is not set (`objects.rs` `ObjectState::for_kind` leaves it false, so `SceneIndependent` reads false); on a failure the previous entity is kept (the original has none left). |
+| `CUIEntity::Display` | partial | `luma-adventure/src/ui.rs` `draw_ui_entity`, `step_ui_entity_anim` and the window hits: nothing when the container is hidden or the entity inactive; not registered when the container is disabled; no scene tint. Different: (1) the original puts the entity at the container's position (`m_Entity->m_PosX = OffsetX + m_PosX`), overwriting the X and Y of the entity file; Luma draws and hits it at the container's position plus the entity's own X and Y; (2) the entity is not freezable, so its sprite runs on the live timer and keeps animating in a frozen game (a system-exclusive menu); Luma steps it on the game timer, which stops then; (3) the whole `CAdEntity::Update` is reduced to the animation of the entity's own sprite: no `Talk`, no `PlayAnim` (both refused for a container's entity), no frame `MOVE`; (4) `CAdEntity::Display` is reduced to the sprite: the entity's region is not registered for the mouse, and a `SCALE` of the entity (the only case it stays scalable) and its rotation are not applied. |
+| `CUIEntity::ScCallMethod` | done | `natives_ui.rs` `control_call`: `GetEntity` (null without one), `SetEntity(file)` returning whether it loaded. |
+| `CUIEntity::ScGetProperty` | done | `natives_ui.rs` `control_get`: Type `entity container`, `Freezable` (false without an entity). |
+| `CUIEntity::ScSetProperty` | done | `natives_ui.rs` `control_set`: `Freezable` makes the entity and its scripts freezable or not (applied at the next window update). |
+| `CUIEntity::ScToString` | partial | `world.rs` `Natives::to_string` gives `[<the control's name>]`; the original gives `[entity container]`. |
+| `CUIEntity::Persist` | replaced | serde: the control (`luma-adventure/src/ui.rs` `Control`) and `World::ui_entities` (`UiEntity`: definition, file, animation, freezable). |
