@@ -2001,6 +2001,12 @@ impl World {
         engine.remove_finished();
 
         let mut view = SceneView::load(&self.vfs, path)?;
+        // The scene object is the same across scenes and only `NAME`
+        // changes its name: a file without one keeps the name of the
+        // scene left behind (empty before the first scene).
+        if view.scene.name.is_empty() {
+            view.scene.name = self.prev_scene_name.clone();
+        }
         // Captions go through the string table when the objects load
         // (`CBObject::SetCaption`).
         for layer in &mut view.scene.layers {

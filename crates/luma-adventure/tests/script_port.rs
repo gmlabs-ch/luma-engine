@@ -751,3 +751,52 @@ Sleep(1);
     assert!(runtime.shutdown().is_empty(), "the profiler is off now");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_scene_without_a_name_keeps_the_name_of_the_one_before() {
+    let (dir, mut runtime, mut log) = start(
+        r#"
+global result = new Object();
+var scene = Game.Scene;
+result.first = scene.Name;
+Game.ChangeScene("scenes/room.scene");
+
+on "Next"
+{
+  var scene = Game.Scene;
+  result.named = scene.Name;
+  Game.ChangeScene("scenes/bare.scene");
+}
+
+on "Check"
+{
+  var scene = Game.Scene;
+  result.kept = scene.Name;
+  result.file = scene.Filename;
+}
+"#,
+        &[
+            File::Raw("scenes\\room.scene", ROOM),
+            File::Raw(
+                "scenes\\bare.scene",
+                b"SCENE { LAYER { MAIN=TRUE WIDTH=64 HEIGHT=48 } }",
+            ),
+        ],
+    );
+    let game = runtime.world.game_id();
+    for event in ["Next", "Check"] {
+        log.extend(runtime.tick(16));
+        runtime
+            .engine
+            .apply_event(&mut runtime.world, game, event, false);
+        log.extend(runtime.tick(16));
+    }
+    log.extend(runtime.tick(16));
+    no_errors(&log);
+    // `CAdGame` names its scene object `""`; only `NAME` changes it.
+    assert_eq!(result(&runtime, "first"), Value::from(""));
+    assert_eq!(result(&runtime, "named"), Value::from("Room"));
+    assert_eq!(result(&runtime, "kept"), Value::from("Room"), "{log:?}");
+    assert_eq!(result(&runtime, "file"), Value::from("scenes/bare.scene"));
+    std::fs::remove_dir_all(&dir).ok();
+}

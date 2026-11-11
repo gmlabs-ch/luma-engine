@@ -116,7 +116,7 @@ is absent.
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. The scene object starts with an empty name, where every other object starts as `<unnamed>`. |
+| `NAME` | string | kept | Name used by scripts. The scene object is the same from scene to scene and starts with an empty name (every other object starts as `<unnamed>`): a file without `NAME` keeps the name of the scene left behind. |
 | `CAPTION` | string | `""` | Caption shown by the interface. |
 | `TEMPLATE` | string | | Another scene file loaded first; this file then overrides it. Not written by the editor. |
 | `SCRIPT` | string, repeatable | | Scripts attached to the scene, run in order. |
