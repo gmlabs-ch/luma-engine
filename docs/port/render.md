@@ -70,6 +70,17 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
+| `C3DEffectParams::C3DEffectParam::C3DEffectParam` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParam::C3DEffectParam #2` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParam::~C3DEffectParam` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParam::SetValue` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParam::SetValue #2` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParam::SetValue #3` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParam::SetValue #4` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParam::SetValue #5` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParam::SetDefaultValues` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParam::Persist` | unreviewed |  |
+| `C3DEffectParams::C3DEffectParam::SetEffectParam` | unreviewed |  |
 | `C3DEffectParams::C3DEffectParams` | todo | The list of script-set effect parameters of a material (`Actor3D.SetEffectParam...`). Not in Luma. |
 | `C3DEffectParams::~C3DEffectParams` | todo | Frees the parameter list. Not in Luma. |
 | `C3DEffectParams::Clear` | todo | Empties the parameter list. Not in Luma. |
@@ -148,6 +159,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `C3DLoader3DS::C3DLoader3DS` | replaced | `luma-3d/src/three_ds.rs` `File`. |
 | `C3DLoader3DS::~C3DLoader3DS` | replaced | Rust ownership. |
+| `C3DLoader3DS::C3DFileObject3DS::C3DFileObject3DS` | unreviewed |  |
+| `C3DLoader3DS::C3DFileObject3DS::~C3DFileObject3DS` | unreviewed |  |
 | `C3DLoader3DS::ParseFile` | done | `three_ds.rs` `File::parse`: the same flat chunk walk (objects, mesh vertices with Y and Z swapped, mapping coordinates with `v` flipped, faces with the second and third index swapped, material face lists, local matrix, camera with lens and bank, light position, spot target, hotspot and falloff, off flag, float and byte colours inside a light, the camera roll from the first key of the keyframer's roll track). Luma returns an error on a truncated or inconsistent chunk where the original reads on. |
 | `C3DLoader3DS::GetNumMeshes` | done | `three_ds.rs` `File::meshes`. |
 | `C3DLoader3DS::GetMeshName` | done | `three_ds.rs` `File::meshes` yields the names. |
@@ -296,7 +309,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `C3DSkelAnim::C3DSkelAnim` | todo | An animation of a Milkshape model (per-joint rotation and translation keys, total and frame time, looping true by default, events). Not in Luma (see `C3DModel::LoadFile`). |
 | `C3DSkelAnim::~C3DSkelAnim` | todo | Frees the joint animations and events. Not in Luma. |
+| `C3DSkelAnim::C3DJointAnim::C3DJointAnim` | unreviewed |  |
+| `C3DSkelAnim::C3DJointAnim::~C3DJointAnim` | unreviewed |  |
 | `C3DSkelAnim::Persist` | todo | Saves the animation: current frame, finished, frame time, looping, name, total time, events and every joint's keys. Not in Luma. |
+| `C3DSkelAnim::C3DJointAnim::Persist` | unreviewed |  |
 
 ## `wme_base/3DUtils.cpp`
 
@@ -343,6 +359,20 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBImage::CreatePalette` | n/a | DirectDraw palette for 8-bit display modes. |
 | `CBImage::LoadBMPFile` | replaced | `image` crate BMP decoder through `decode`; the alpha byte of a 32-bit BMP is ignored in both. The crate also reads RLE and bit-field files the original rejects. |
 | `CBImage::LoadTGAFile` | replaced | `image` crate TGA decoder through `decode`; 32-bit files keep their alpha, bottom-up files are flipped. |
+| `CBImage::TGAGetWord` | unreviewed |  |
+| `CBImage::Flip` | unreviewed |  |
+| `CBImage::LoadPNGFile` | unreviewed |  |
+| `CBImage::GetImageInfo` | unreviewed |  |
+| `CBImage::GetImageInfoBMP` | unreviewed |  |
+| `CBImage::GetImageInfoTGA` | unreviewed |  |
+| `CBImage::GetImageInfoPNG` | unreviewed |  |
+| `CBImage::CreateTexture` | unreviewed |  |
+| `CBImage::CreateDDSurface` | unreviewed |  |
+| `CBImage::FillTexture` | unreviewed |  |
+| `CBImage::PNG_ReadData` | unreviewed |  |
+| `CBImage::PNG_ReadDataBuffer` | unreviewed |  |
+| `CBImage::LoadFromDDSurface` | unreviewed |  |
+| `CBImage::LoadFromD3DDevice` | unreviewed |  |
 | `CBImage::SaveBMPFile` | done | `image.rs` `Image::to_bmp` and `luma-adventure/src/capture.rs` `write_image`: 24-bit uncompressed BMP. |
 | `CBImage::Resize` | replaced | `image.rs` `Image::resized` (the `image` crate's triangle filter for the original's two-pass bilinear scale); values can differ by rounding. |
 | `CBImage::CreateBMPBuffer` | replaced | The saved-game thumbnail is stored as PNG in Luma's own save format (`capture.rs` `deliver_frame`, `save.rs`) instead of a BMP buffer. |

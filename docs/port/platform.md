@@ -367,6 +367,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
 | `CBUtils::GetDXVersion` | n/a | Finds the installed DirectX version for the first lines of the log. |
+| `GetDirectXVerionViaFileVersions` | unreviewed |  |
+| `GetFileVersion` | unreviewed |  |
+| `MakeInt64` | unreviewed |  |
+| `CompareLargeInts` | unreviewed |  |
 
 ## `wme_base/WinButton.cpp`
 

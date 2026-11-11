@@ -52,8 +52,14 @@ GROUPS = [
 ]
 
 METHOD = re.compile(
-    r"^(?!\s)(?!(?:return|if|else|case|while|for|switch|delete|new|typedef|#|//)\b)"
-    r"(?:[\w:\*&<>,\s]*?[\s\*&])?(~?\w+)::(~?\w+|operator\s*\S+?)\s*\("
+    r"^(?!\s)(?!(?:return|if|else|case|while|for|switch|delete|new|typedef|using|namespace|#)\b)"
+    r"(?:[\w:\*&<>,\s]*?[\s\*&])?(~?\w+(?:::\w+)*)::(~?\w+|operator\s*\S+?)\s*\("
+)
+# A function that belongs to no class: a return type, a name, an opening
+# parenthesis, at the start of a line that is not a declaration.
+FREE = re.compile(
+    r"^(?!\s)(?!(?:return|if|else|case|while|for|switch|delete|new|typedef|using|namespace|extern|#)\b)"
+    r"(?:[\w\*&<>,\s]+?[\s\*&])(\w+)\s*\([^;]*$"
 )
 TOKEN = re.compile(r"^\s*TOKEN_TABLE\s*\(\s*(\w+)\s*\)")
 ROW = re.compile(r"^\| `([^`]+)` \| ([^|]+?) \| (.*?) \|$")
@@ -66,19 +72,53 @@ def group_of(stem):
     raise AssertionError(stem)
 
 
+def uncommented(text):
+    """The text without its comments (old code lives in them), strings
+    and line breaks kept, so that `//*` or a `/*` inside a string does
+    not swallow the code that follows."""
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        two = text[i : i + 2]
+        if two == "//":
+            while i < n and text[i] != "\n":
+                i += 1
+        elif two == "/*":
+            end = text.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            out.append("\n" * text.count("\n", i, end))
+            i = end
+        elif text[i] in "\"'":
+            quote = text[i]
+            j = i + 1
+            while j < n and text[j] != quote and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            out.append(quote + quote)
+            i = min(j + 1, n)
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
 def scan(path):
     """The functions of a source file in order, each with the keys of
     its `TOKEN_TABLE` block."""
     functions = []
-    text = path.read_text(encoding="latin-1")
-    # Comments hold old code: drop them before looking for definitions.
-    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    text = uncommented(path.read_text(encoding="latin-1"))
+    depth = 0
     for line in text.splitlines():
-        line = line.split("//")[0].rstrip()
-        found = METHOD.match(line)
-        if found and not line.endswith(";"):
-            functions.append((f"{found.group(1)}::{found.group(2)}", []))
-            continue
+        line = line.rstrip()
+        # Definitions stand outside every block; what is inside one is a
+        # call or a declaration.
+        if depth == 0 and not line.endswith(";"):
+            found = METHOD.match(line)
+            free = None if found else FREE.match(line)
+            if found:
+                functions.append((f"{found.group(1)}::{found.group(2)}", []))
+            elif free:
+                functions.append((free.group(1), []))
+        depth = max(0, depth + line.count("{") - line.count("}"))
         key = TOKEN.match(line)
         if key and functions and key.group(1) not in functions[-1][1]:
             functions[-1][1].append(key.group(1))

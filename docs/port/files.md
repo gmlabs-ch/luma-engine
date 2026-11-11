@@ -147,10 +147,19 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBResourceFile::Read` | replaced | Would be a slice of embedded bytes (`include_bytes!`) once `Open` exists. |
 | `CBResourceFile::Seek` | replaced | Would be an index into embedded bytes once `Open` exists. |
 
+## `wme_base/crc.cpp`
+
+| Function or key | Status | Luma, or what is missing |
+|---|---|---|
+| `crc_initialize` | unreviewed |  |
+| `crc_process_byte` | unreviewed |  |
+| `crc_finalize` | unreviewed |  |
+
 ## `wme_base/utils.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
+| `Sqr` | unreviewed |  |
 | `CBUtils::ClosestColor` | n/a | Only used by `CBSurfaceDD` to find a colour key in the palette of an 8-bit DirectDraw surface; Luma decodes every image to RGBA. |
 | `CBUtils::Clip` | replaced | Only used by the DirectDraw blits of `CBSurfaceDD`; `luma-render` lets the GPU clip to the viewport. |
 | `CBUtils::Swap` | replaced | `std::mem::swap`. |
