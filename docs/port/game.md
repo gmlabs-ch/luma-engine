@@ -401,41 +401,41 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBObject::CBObject` | unreviewed |  |
-| `CBObject::~CBObject` | unreviewed |  |
-| `CBObject::Cleanup` | unreviewed |  |
-| `CBObject::SetCaption` | unreviewed |  |
-| `CBObject::GetCaption` | unreviewed |  |
-| `CBObject::Listen` | unreviewed |  |
-| `CBObject::ScCallMethod` | unreviewed |  |
-| `CBObject::ScGetProperty` | unreviewed |  |
-| `CBObject::ScSetProperty` | unreviewed |  |
-| `CBObject::ScToString` | unreviewed |  |
-| `CBObject::ShowCursor` | unreviewed |  |
-| `CBObject::SaveAsText` | unreviewed |  |
-| `CBObject::Persist` | unreviewed |  |
-| `CBObject::SetCursor` | unreviewed |  |
-| `CBObject::SetActiveCursor` | unreviewed |  |
-| `CBObject::GetHeight` | unreviewed |  |
-| `CBObject::HandleMouse` | unreviewed |  |
-| `CBObject::HandleKeypress` | unreviewed |  |
-| `CBObject::HandleMouseWheel` | unreviewed |  |
-| `CBObject::PlaySFX` | unreviewed |  |
-| `CBObject::StopSFX` | unreviewed |  |
-| `CBObject::PauseSFX` | unreviewed |  |
-| `CBObject::ResumeSFX` | unreviewed |  |
-| `CBObject::SetSFXTime` | unreviewed |  |
-| `CBObject::SetSFXVolume` | unreviewed |  |
-| `CBObject::UpdateSounds` | unreviewed |  |
-| `CBObject::UpdateOneSound` | unreviewed |  |
-| `CBObject::ResetSoundPan` | unreviewed |  |
-| `CBObject::GetExtendedFlag` | unreviewed |  |
-| `CBObject::IsReady` | unreviewed |  |
-| `CBObject::SetSoundEvent` | unreviewed |  |
-| `CBObject::AfterMove` | unreviewed |  |
-| `CBObject::GetMatrix` | unreviewed |  |
-| `CBObject::RenderModel` | unreviewed |  |
-| `CBObject::GetAccessCaption` | unreviewed |  |
+| `CBObject::CBObject` | done | `ObjectState::default` (`luma-adventure/src/objects.rs`: movable, no `NonIntMouseEvents`), `luma_formats::Entity::default` and the actor definition (scalable, interactive, colorable, not rotatable, relative scale 0, no scale, no rotation, normal blend, `save_state`, `sound_panning`), `ObjectSfx::default` (`sound.rs`: volume 100, no start time, no effect). The 3D defaults (shadow size 10, colour 0x80000000, light -40,200,-40, backfaces) are the 3D actor's (`actor3d.rs`). |
+| `CBObject::~CBObject` | replaced | Rust ownership. |
+| `CBObject::Cleanup` | replaced | Rust ownership; the active object is dropped by handle validity (`World::active_object`), the sound by `World::unload_object` / `drop_orphan_sounds`. |
+| `CBObject::SetCaption` | done | `World::set_caption` (`natives_object.rs`): slot 0 is 1, 1..7 only, expanded through the string table. |
+| `CBObject::GetCaption` | done | `World::caption_of`: slot 0 is 1, empty for an unset or out-of-range slot. |
+| `CBObject::Listen` | n/a | Base stub returning failure; the windows override it (ui-text table). |
+| `CBObject::ScCallMethod` | partial | `World::object_call` (`natives_object.rs`), `object_sound_call` (`natives_sound.rs`), `SkipTo` per kind. Different: (1) on the game object `SetCursor`, `RemoveCursor`, `GetCursor`, `GetCursorObject`, `HasCursor` do nothing (`set_object_cursor` and `object_cursor` have no `Kind::Game` arm); in WME the game's `m_Cursor` is its normal cursor (`CURSOR`), so `Game.SetCursor(file)` changes the default cursor; (2) `StopSound` stops the sound and keeps it loaded (`stop_sfx(id, false)`), WME's `StopSFX()` deletes it by default, after which `PlaySound()` without a file fails and `GetSoundVolume` reads the object's volume; (3) the sound methods exist only on the game, entities and actors (`can_own_sound`); on windows, controls, items, regions, the scene and `new Object`s they are missing; (4) a `SetCursor` whose sprite does not load leaves the old cursor, WME leaves none; (5) `SetShadowImage` tests that the file exists instead of loading it. `Caption`, `SetCaption`, `LoadSound`, `PlaySound` (both argument orders), `PlaySoundEvent`, `Pause`/`ResumeSound`, `IsSoundPlaying`, the position and volume methods, `SetLightPosition` and the `SoundFX` methods with their defaults agree. |
+| `CBObject::ScGetProperty` | partial | Per kind: `entity_get` (`natives.rs`), `actor_get` (`natives_actor.rs`), `control_get` (`natives_ui.rs`), `object_get` (`natives_object.rs`). Entities and actors answer every property as WME does. Different: the game object does not answer `X`, `Y`, `Height`, `Ready`, `Registrable`, `Zoomable`/`Scalable`, `Rotatable`, `AlphaColor`, `BlendMode`, `Scale`, `ScaleX`, `ScaleY`, `RelativeScale`, `Rotate`, `RelativeRotate`, `Colorable`, `SoundPanning`, `SaveState` (null; WME gives the object's values, `X`/`Y` the screen centre); controls, items and `new Object`s answer a subset only; `Type` of a plain object is per kind. |
+| `CBObject::ScSetProperty` | partial | `entity_set`, `actor_set`, `control_set`, `object_set`. Different: `SoundPanning = false` does not recentre the sound playing (`ResetSoundPan`); the properties the game object and other kinds do not answer (see `ScGetProperty`) become plain script properties when set; `Scale`, `ScaleX`, `ScaleY` set to a negative number read back as that number (WME: null). `BlendMode` out of range is normal, `Rotate` null clears, as in WME. |
+| `CBObject::ScToString` | partial | `Natives::to_string` for `World` (`world.rs`) gives `[object]` only for `new Object`; kinds WME leaves to this base method get other texts (`[<name>]` for entities, regions, layers, controls and items, `[native object]` for the rest). |
+| `CBObject::ShowCursor` | done | `World::cursor_to_show` (`input.rs`): the active object's own cursor (`object_cursor`) goes through the same restart-and-draw path as the game's (`DrawCursor`). |
+| `CBObject::SaveAsText` | n/a | Empty, and `SaveAsText` is only reached from the editors (`SaveAsFile`); no script method calls it. |
+| `CBObject::Persist` | done | Serde on `Native` / `ObjectState` (`objects.rs`), the entity and actor definitions, and `SoundsState` (`save.rs`: the sound, its start time, volume, event and effect): captions, cursor, alpha, position, scales, rotation, flags, blend mode, `AccCaption`, shadow image and light are all in the saved state. |
+| `CBObject::SetCursor` | partial | `World::set_object_cursor` (`natives_object.rs`) for entities, actors, 3D actors and controls. Different: not on the game (its normal cursor), items or other kinds; a sprite that fails to load leaves the old cursor where WME has deleted it. |
+| `CBObject::SetActiveCursor` | partial | `World::set_active_cursor` (`input.rs`; only the game has one, as in WME's script interface). A sprite that fails to load leaves the old active cursor; WME is left with none. |
+| `CBObject::GetHeight` | done | Base default 0; per kind in Luma (`entity_height`, `Actor::height`, 0 for items). |
+| `CBObject::HandleMouse` | done | Base no-op; the windows' override is `World::ui_mouse_down` / `ui_mouse_up` (ui-text table). |
+| `CBObject::HandleKeypress` | done | Base default false; `World::window_key` asks only windows and editors. |
+| `CBObject::HandleMouseWheel` | done | Base default false: no stock control takes the wheel, and `Runtime::mouse_wheel` asks none. |
+| `CBObject::PlaySFX` | done | `World::play_sfx` (`sound.rs`): without a file the loaded sound starts again (volume and start time applied when a start time waits), else the old sound is dropped, the file loaded with the object's volume, start time and effect, the event and loop start set when it plays now. Only for the kinds of `can_own_sound` (see `ScCallMethod`). |
+| `CBObject::StopSFX` | partial | `World::stop_sfx(owner, unload)`. The function agrees; its script caller passes `unload = false` where WME's default is to delete the sound (see `ScCallMethod`). |
+| `CBObject::PauseSFX` | done | `World::pause_sfx`. |
+| `CBObject::ResumeSFX` | done | `World::resume_sfx`. |
+| `CBObject::SetSFXTime` | done | `World::set_sfx_time`: kept for the next start, applied at once when playing. |
+| `CBObject::SetSFXVolume` | done | `World::set_sfx_volume`. |
+| `CBObject::UpdateSounds` | done | `World::update_sounds` (`sound.rs`): the sound event fires once the sound stopped and is cleared, then the pan follows. |
+| `CBObject::UpdateOneSound` | partial | `World::update_sounds` and `sound_pan_of`: the pan follows `x - offset_x` when `SoundPanning` is on. Different: only entities, actors and 3D actors pan, and only while `active`; the pan law is `Sounds::pos_to_pan` (half a screen of margin, linear), not `CBSoundMgr::PosToPan` (five screens of margin on DirectSound's scale), so Luma pans much harder (for the sound-video table); the effect is applied when set and when a sound loads rather than every frame (same result). |
+| `CBObject::ResetSoundPan` | todo | Centres the object's sound when `SoundPanning` is turned off. Luma stops updating the pan and leaves it where it was. |
+| `CBObject::GetExtendedFlag` | done | Base default false; the `usable` flag of `CAdObject` is the kind test in `World::cursor_to_show` (`input.rs`). |
+| `CBObject::IsReady` | done | `Host::is_ready` (`world.rs`) per kind. |
+| `CBObject::SetSoundEvent` | done | `ObjectSound::event`, set by `World::play_sfx`, cleared by `update_sounds`. |
+| `CBObject::AfterMove` | done | Base no-op; `CAdObject`'s override is in the adventure table. |
+| `CBObject::GetMatrix` | done | `world_matrix` (`luma-adventure/src/actor3d.rs`): rotation about Y by the angle, uniform scale, translation, in that order. |
+| `CBObject::RenderModel` | replaced | `draw3d.rs` pushes the model as a 3D item of the draw list (render table). |
+| `CBObject::GetAccessCaption` | done | `World::spoken_caption` (`accessibility.rs`): `AccCaption`, else the caption. |
 
 ## `wme_base/BPoint.cpp`
 
