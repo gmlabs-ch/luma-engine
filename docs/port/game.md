@@ -608,45 +608,45 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CPartEmitter::CPartEmitter` | unreviewed |  |
-| `CPartEmitter::~CPartEmitter` | unreviewed |  |
-| `CPartEmitter::AddSprite` | unreviewed |  |
-| `CPartEmitter::RemoveSprite` | unreviewed |  |
-| `CPartEmitter::InitParticle` | unreviewed |  |
-| `CPartEmitter::Update` | unreviewed |  |
-| `CPartEmitter::UpdateInternal` | unreviewed |  |
-| `CPartEmitter::Display` | unreviewed |  |
-| `CPartEmitter::Start` | unreviewed |  |
-| `CPartEmitter::SortParticlesByZ` | unreviewed |  |
-| `CPartEmitter::CompareZ` | unreviewed |  |
-| `CPartEmitter::SetBorder` | unreviewed |  |
-| `CPartEmitter::SetBorderThickness` | unreviewed |  |
-| `CPartEmitter::AddForceByName` | unreviewed |  |
-| `CPartEmitter::AddForce` | unreviewed |  |
-| `CPartEmitter::RemoveForce` | unreviewed |  |
-| `CPartEmitter::ScCallMethod` | unreviewed |  |
-| `CPartEmitter::ScGetProperty` | unreviewed |  |
-| `CPartEmitter::ScSetProperty` | unreviewed |  |
-| `CPartEmitter::ScToString` | unreviewed |  |
-| `CPartEmitter::Persist` | unreviewed |  |
+| `CPartEmitter::CPartEmitter` | done | `Emitter::new` (`luma-adventure/src/particles.rs`): every default agrees (a point, no speed, scale 100, 100 particles, lifetime 1000, interval 0, one per batch, alpha 255, not running, no batch limit). |
+| `CPartEmitter::~CPartEmitter` | replaced | Rust ownership. |
+| `CPartEmitter::AddSprite` | done | `Emitter::add_sprite`: a file already listed is fine, a missing file is refused. |
+| `CPartEmitter::RemoveSprite` | done | `Emitter::remove_sprite`. |
+| `CPartEmitter::InitParticle` | partial | `Emitter::init_particle`: the same draws in the same order (position, depth, speed, scale, lifetime, angle, sprite, rotation, spin, growth, alpha), the depth-based forms, the velocity vector, the sprite kept and rewound or loaded, dead when it does not load, then the fade-in. Different by a pixel: the border is shrunk by `T - trunc(T * z / 100)`, WME by `trunc(T - T * z / 100)`. |
+| `CPartEmitter::Update` | done | `Emitter::update`: nothing unless running, else the frame on the game timer and its delta (`World::update_emitter`, `natives_particles.rs`). |
+| `CPartEmitter::UpdateInternal` | done | `Emitter::update_internal`: every particle updated and the live ones counted; below the cap and past the interval (strictly), a batch in the dead slots or new ones, the batch limit, the depth sort when a range is depth based, the emit event when a batch was born outside a run ahead. |
+| `CPartEmitter::Display` | done | `Emitter::quads`: the live particles in order, only those inside the region when `UseRegion`. The sprite batch calls are the renderer's business. |
+| `CPartEmitter::Start` | done | `Emitter::start`: every particle dead, running, batches from 0, then the run ahead in 500 ms steps from `timer - overhead`. |
+| `CPartEmitter::SortParticlesByZ` | done | The `sort_by` on `z` in `Emitter::update_internal` (stable, where `qsort` is not; equal depths may order differently). |
+| `CPartEmitter::CompareZ` | done | `a.z.partial_cmp(&b.z)` in `Emitter::update_internal`. |
+| `CPartEmitter::SetBorder` | done | `Emitter::set_border`. |
+| `CPartEmitter::SetBorderThickness` | done | `Emitter::set_border_thickness`. |
+| `CPartEmitter::AddForceByName` | done | `Emitter::add_force`: the force with that name, without case, is redefined, else added. |
+| `CPartEmitter::AddForce` | done | `Emitter::add_force` and `direction`: `(0, strength)` turned by `angle - 180`. |
+| `CPartEmitter::RemoveForce` | done | `Emitter::remove_force`. |
+| `CPartEmitter::ScCallMethod` | done | `World::emitter_call` (`natives_particles.rs`): `SetBorder`, `SetBorderThickness`, `AddSprite`, `RemoveSprite`, `Start(overhead)`, `Stop`, `Pause`, `Resume`, `AddGlobalForce`, `AddPointForce` (a global force, as in WME), `RemoveForce`. |
+| `CPartEmitter::ScGetProperty` | done | `World::emitter_get`: every property of the original; `BlendMode` is the `CBObject` one the particles are drawn with. |
+| `CPartEmitter::ScSetProperty` | done | `World::emitter_set`: the same, `Alpha1` and `Alpha2` clamped to 0..255, `EmitEvent` cleared by null. |
+| `CPartEmitter::ScToString` | done | `Natives::to_string` (`world.rs`): `[particle emitter]`. |
+| `CPartEmitter::Persist` | done | Serde on `Emitter`: the parameters, the sprites, the forces and the particles (the sprite bank is loaded again, `Emitter::reload_sprites`). |
 
 ## `wme_base/PartForce.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CPartForce::CPartForce` | unreviewed |  |
-| `CPartForce::~CPartForce` | unreviewed |  |
-| `CPartForce::Persist` | unreviewed |  |
+| `CPartForce::CPartForce` | done | `Force` (`luma-adventure/src/particles.rs`); the default type (point) is never seen, `add_force` always sets it. |
+| `CPartForce::~CPartForce` | replaced | Rust ownership. |
+| `CPartForce::Persist` | done | Serde on `Force`: name, point, direction, kind. |
 
 ## `wme_base/PartParticle.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CPartParticle::CPartParticle` | unreviewed |  |
-| `CPartParticle::~CPartParticle` | unreviewed |  |
-| `CPartParticle::SetSprite` | unreviewed |  |
-| `CPartParticle::Update` | unreviewed |  |
-| `CPartParticle::Display` | unreviewed |  |
-| `CPartParticle::FadeIn` | unreviewed |  |
+| `CPartParticle::CPartParticle` | done | `Particle::default`: dead, scale 100, alpha 255, normal state, no border. |
+| `CPartParticle::~CPartParticle` | replaced | Rust ownership. |
+| `CPartParticle::SetSprite` | done | In `Emitter::init_particle`: the same file rewinds the animation (`AnimState::reset`), another one starts afresh; a sprite that is not loaded leaves the particle dead. |
+| `CPartParticle::Update` | done | `Particle::update`: the fade-in and fade-out branches return without moving; else end of life (fade-out or death), the border, the alpha by age, the forces, the position, the rotation normalised, the growth, death at scale 0 or less. |
+| `CPartParticle::Display` | partial | `Emitter::quads`: the sprite's current frame at the position, scaled, turned, with the alpha and the emitter's blend mode. Different: the sprite is stepped in `Emitter::update_internal`, so it does not animate while the emitter is paused (WME steps it here, every frame drawn), and a frame becoming current plays no `SOUND` and raises no event (WME goes through `CBSprite::Display`, owner the game). |
+| `CPartParticle::FadeIn` | done | `Particle::fade_in`. |
 | `CPartParticle::FadeOut` | unreviewed |  |
 | `CPartParticle::Persist` | unreviewed |  |
