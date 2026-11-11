@@ -127,6 +127,32 @@ fn is_vorbis_header(data: &[u8]) -> bool {
     data.len() >= 7 && data[0] == 0x01 && &data[1..7] == b"vorbis"
 }
 
+fn is_theora_comment_header(data: &[u8]) -> bool {
+    data.len() >= 7 && data[0] == 0x81 && &data[1..7] == b"theora"
+}
+
+/// The comment header handed to the decoder in place of the stream's
+/// own: a comment header packet with an empty vendor string and no user
+/// comment (Theora specification, section 6.3.2).
+///
+/// The decoder validates the comment header and refuses the stream when
+/// the vendor string or a comment is not UTF-8, or when a length runs
+/// past the packet. Old encoders wrote Latin-1 text there, and nothing in
+/// the comments is needed to decode, so the stream's own text is never
+/// parsed. A packet that is not a comment header at all is passed on as
+/// it is, for the decoder to report.
+fn decoder_comment_header(packet: &[u8]) -> Vec<u8> {
+    if !is_theora_comment_header(packet) {
+        return packet.to_vec();
+    }
+    let mut out = Vec::with_capacity(15);
+    out.push(0x81);
+    out.extend_from_slice(b"theora");
+    out.extend_from_slice(&0u32.to_le_bytes()); // vendor string length
+    out.extend_from_slice(&0u32.to_le_bytes()); // number of user comments
+    out
+}
+
 impl Video {
     /// Opens a video from the bytes of an Ogg file: reads the headers of
     /// its streams and gets ready to decode the first frame.
@@ -164,9 +190,10 @@ impl Video {
         let serial = serial.ok_or(Error::NoVideoStream)?;
         let headers: [Vec<u8>; 3] = [headers[0].clone(), headers[1].clone(), headers[2].clone()];
         let ident = decode_identification_header(&headers[0]).map_err(decode_err)?;
+        let comment = decoder_comment_header(&headers[1]);
         let decoder = TheoraDecoder::with_headers(
             CodecId::new(THEORA_CODEC_ID),
-            &[&headers[0], &headers[1], &headers[2]],
+            &[&headers[0], &comment, &headers[2]],
         )
         .map_err(decode_err)?;
         let info = VideoInfo {
@@ -306,8 +333,8 @@ impl Video {
         Ok(())
     }
 
-    /// The three Theora header packets, for callers that re-mux the
-    /// stream.
+    /// The three Theora header packets as the file has them (the comment
+    /// header untouched), for callers that re-mux the stream.
     pub fn headers(&self) -> &[Vec<u8>; 3] {
         &self.headers
     }
@@ -530,6 +557,111 @@ mod tests {
         video.rewind().unwrap();
         assert_eq!(video.next_index(), 0);
         assert!(video.next_frame().unwrap().is_some());
+    }
+
+    /// Rewrites an Ogg file packet by packet, on the same pages and with
+    /// the same granule positions; `edit` gets each packet's number in
+    /// the file and its bytes.
+    fn remux(bytes: &[u8], mut edit: impl FnMut(usize, Vec<u8>) -> Vec<u8>) -> Vec<u8> {
+        let mut reader = PacketReader::new(Cursor::new(bytes.to_vec()));
+        let mut writer = PacketWriter::new(Cursor::new(Vec::new()));
+        let mut number = 0;
+        while let Some(packet) = reader.read_packet().unwrap() {
+            let end = if packet.last_in_stream() {
+                PacketWriteEndInfo::EndStream
+            } else if packet.last_in_page() {
+                PacketWriteEndInfo::EndPage
+            } else {
+                PacketWriteEndInfo::NormalPacket
+            };
+            let (serial, granule) = (packet.stream_serial(), packet.absgp_page());
+            writer
+                .write_packet(edit(number, packet.data), serial, end, granule)
+                .unwrap();
+            number += 1;
+        }
+        writer.into_inner().into_inner()
+    }
+
+    /// A Theora comment header with a vendor string and user comments.
+    fn comment_header(vendor: &[u8], comments: &[&[u8]]) -> Vec<u8> {
+        let mut out = b"\x81theora".to_vec();
+        out.extend_from_slice(&(vendor.len() as u32).to_le_bytes());
+        out.extend_from_slice(vendor);
+        out.extend_from_slice(&(comments.len() as u32).to_le_bytes());
+        for comment in comments {
+            out.extend_from_slice(&(comment.len() as u32).to_le_bytes());
+            out.extend_from_slice(comment);
+        }
+        out
+    }
+
+    #[test]
+    fn gives_the_decoder_a_bare_comment_header() {
+        use oxideav_theora::parse_comment_header;
+        let bare = comment_header(b"", &[]);
+        // Latin-1 text, in the vendor string or in a comment: what the
+        // decoder refuses.
+        let latin1_vendor = comment_header(b"Encoder \xa9 2005", &[b"TITLE=Intro"]);
+        let latin1_comment = comment_header(b"Encoder", &[b"ENCODER=Tool \xa9 2005"]);
+        assert!(parse_comment_header(&latin1_vendor).is_err());
+        assert!(parse_comment_header(&latin1_comment).is_err());
+        let mut cases = vec![latin1_vendor.clone(), latin1_comment.clone()];
+        // Truncated anywhere after the signature.
+        for len in 7..latin1_comment.len() {
+            cases.push(latin1_comment[..len].to_vec());
+        }
+        // Lengths far beyond the packet.
+        let mut huge_vendor = b"\x81theora".to_vec();
+        huge_vendor.extend_from_slice(&u32::MAX.to_le_bytes());
+        huge_vendor.extend_from_slice(b"short");
+        cases.push(huge_vendor);
+        let mut huge_count = comment_header(b"Encoder", &[]);
+        let at = huge_count.len() - 4;
+        huge_count[at..].copy_from_slice(&u32::MAX.to_le_bytes());
+        cases.push(huge_count);
+        let mut huge_comment = comment_header(b"Encoder", &[b"A=B"]);
+        let at = huge_comment.len() - 7;
+        huge_comment[at..at + 4].copy_from_slice(&0x7fff_ffffu32.to_le_bytes());
+        cases.push(huge_comment);
+        for case in cases {
+            let out = decoder_comment_header(&case);
+            assert_eq!(out, bare, "{case:02x?}");
+            assert!(parse_comment_header(&out).is_ok());
+        }
+        // Anything else is left for the decoder to refuse.
+        for other in [&b""[..], b"\x81theor", b"\x82theora\0\0", b"\x03vorbis"] {
+            assert_eq!(decoder_comment_header(other), other);
+        }
+    }
+
+    #[test]
+    fn opens_a_stream_whose_comments_are_not_utf8() {
+        let clean = synthetic_clip(32, 32, 4, 10);
+        let latin1 = comment_header(b"Encoder \xa9 2005", &[b"ENCODER=Tool \xa9 2005"]);
+        let truncated = latin1[..latin1.len() - 3].to_vec();
+        for header in [latin1, truncated] {
+            let bytes = remux(&clean, |number, data| {
+                if number == 1 {
+                    assert!(is_theora_comment_header(&data));
+                    header.clone()
+                } else {
+                    data
+                }
+            });
+            let mut video = Video::open(bytes).unwrap();
+            // The stream's own header is kept for callers.
+            assert_eq!(video.headers()[1], header);
+            let mut reference = Video::open(clean.clone()).unwrap();
+            let mut count = 0;
+            while let Some(frame) = video.next_frame().unwrap() {
+                assert_eq!(Some(frame), reference.next_frame().unwrap());
+                count += 1;
+            }
+            assert_eq!(count, 4);
+            video.rewind().unwrap();
+            assert!(video.next_frame().unwrap().is_some());
+        }
     }
 
     #[test]

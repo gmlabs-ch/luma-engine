@@ -20,6 +20,18 @@ give the picture size (`picw` × `pich`) and the frame rate. Every data
 packet of the Theora stream then yields one frame (`next_frame`); a
 zero-length packet repeats the previous frame, as the format says.
 
+The second header packet, the comment header (Theora specification,
+section 6.3: a vendor string and `NAME=value` user comments, each with a
+32-bit length), is not parsed. The specification asks for UTF-8 there,
+but old encoders wrote Latin-1 text (a `©` in the encoder's name), which
+the decoder crate refuses along with the whole stream. Nothing in the
+comments is needed to decode or to play, so the decoder is given a bare
+comment header instead (`\x81theora`, an empty vendor string, no
+comment), whatever the stream's own holds, malformed lengths included;
+`Video::headers` still returns the packet as the file has it. The
+original engine's decoder library did not validate the text either
+(inferred from such files playing there, not read from its sources).
+
 The container is read with the [`ogg`](https://crates.io/crates/ogg)
 crate (BSD-3-Clause) and the pictures decoded with
 [`oxideav-theora`](https://crates.io/crates/oxideav-theora) (MIT, pure
