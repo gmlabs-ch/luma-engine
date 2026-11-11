@@ -148,14 +148,17 @@ struct EffectTrack {
 /// (`CBSoundBuffer::SetVolume`), in hundredths of a decibel: the type's
 /// volume (0 to 200 for 0 to 100 %) weighted by the sound's own volume
 /// in percent and truncated, the remaining fraction cubed, times
-/// -100 dB, truncated. `None` when the result is outside what
-/// DirectSound accepts (-10000 to 0): the call failed and the sound
-/// kept the loudness it had.
-pub fn attenuation(type_volume: i32, private_volume: i32) -> Option<i32> {
-    let volume = (type_volume as f32 / 100.0 * private_volume as f32) as i32;
+/// -100 dB, truncated.
+///
+/// The weighted volume is clamped to its range first. The engine did
+/// not clamp: above full volume or below none it computed a value
+/// DirectSound refused, and the sound kept whatever loudness it had
+/// before. That is a defect of the original, not reproduced: a volume
+/// out of range is full volume or silence.
+pub fn attenuation(type_volume: i32, private_volume: i32) -> i32 {
+    let volume = ((type_volume as f32 / 100.0 * private_volume as f32) as i32).clamp(0, 200);
     let remaining = 1.0 - f64::from(volume) / 200.0;
-    let centibels = (-10000.0 * remaining.powi(3)) as i32;
-    (-10000..=0).contains(&centibels).then_some(centibels)
+    ((-10000.0 * remaining.powi(3)) as i32).clamp(-10000, 0)
 }
 
 /// The gain of a volume in percent, as the engine attenuates it: the
@@ -695,14 +698,17 @@ impl Audio {
     }
 
     /// Stops a sound (`CBSound::Stop`): the buffer goes back to its
-    /// start. Neither the start position of the next play nor the flag
-    /// of a sound held by [`Audio::pause_all`] is touched, as in the
-    /// engine.
+    /// start. The start position of the next play is not touched, as in
+    /// the engine. A sound held by [`Audio::pause_all`] is no longer
+    /// held: the engine left its mark, so that the unfreeze started the
+    /// stopped sound again from its beginning; that defect is not
+    /// reproduced.
     pub fn stop(&mut self, id: SoundId) -> bool {
         let Some(voice) = self.voices.get_mut(&id) else {
             return false;
         };
         voice.script_paused = false;
+        voice.freeze_paused = false;
         if let Some(mut handle) = voice.handle.take() {
             handle.stop(Tween::default());
         }
@@ -891,16 +897,12 @@ impl Audio {
         true
     }
 
-    /// `CBSoundBuffer::SetVolume` with the type's volume: the loudness
-    /// changes when DirectSound accepts the value.
+    /// `CBSoundBuffer::SetVolume` with the type's volume.
     fn refresh_volume(&mut self, id: SoundId) {
         let Some(voice) = self.voices.get(&id) else {
             return;
         };
-        let Some(centibels) = attenuation(self.type_volume(voice.kind), voice.private_volume)
-        else {
-            return;
-        };
+        let centibels = attenuation(self.type_volume(voice.kind), voice.private_volume);
         let Some(voice) = self.voices.get_mut(&id) else {
             return;
         };
@@ -911,8 +913,7 @@ impl Audio {
         }
     }
 
-    /// The sound's volume in hundredths of a decibel, as DirectSound
-    /// last accepted it.
+    /// The sound's volume in hundredths of a decibel.
     pub fn centibels(&self, id: SoundId) -> i32 {
         self.voices.get(&id).map_or(0, |v| v.centibels)
     }
@@ -948,17 +949,17 @@ impl Audio {
     }
 
     /// The global volume of a sound type in percent
-    /// (`GetVolumePercent`): a byte.
+    /// (`GetVolumePercent`).
     pub fn volume(&self, kind: SoundType) -> i32 {
-        i32::from((self.type_volume(kind) / 2) as u8)
+        self.type_volume(kind) / 2
     }
 
-    /// Sets the global volume of a sound type (`SetVolumePercent`). The
-    /// engine takes a byte and does not clamp it: 150 is kept and read
-    /// back as 150, -1 is 255; above 100 DirectSound refuses the
-    /// resulting volume and the sounds keep their loudness.
+    /// Sets the global volume of a sound type (`SetVolumePercent`),
+    /// clamped to 0..100. The engine took a byte without clamping it
+    /// (150 was kept and changed nothing heard, -1 became 255); that
+    /// defect is not reproduced.
     pub fn set_volume(&mut self, kind: SoundType, percent: i32) {
-        self.set_raw_volume(kind, 2 * i32::from(percent as u8));
+        self.set_raw_volume(kind, 2 * percent.clamp(0, 100));
     }
 
     /// The global volume of a sound type as the engine keeps and saves
@@ -968,8 +969,9 @@ impl Audio {
     }
 
     /// Sets the global volume of a sound type in the engine's own unit
-    /// (`CBSoundMgr::SetVolume`).
+    /// (`CBSoundMgr::SetVolume`), clamped to 0..200.
     pub fn set_raw_volume(&mut self, kind: SoundType, volume: i32) {
+        let volume = volume.clamp(0, 200);
         match kind {
             SoundType::Sfx => self.volume_sfx = volume,
             SoundType::Speech => self.volume_speech = volume,
@@ -988,15 +990,16 @@ impl Audio {
 
     /// The master volume in percent (`GetMasterVolumePercent`).
     pub fn master_volume(&self) -> i32 {
-        i32::from((self.volume_master / (0xFFFF / 100)) as u8)
+        i32::from(self.volume_master / (0xFFFF / 100)).min(100)
     }
 
-    /// Sets the master volume (`SetMasterVolumePercent`). The engine
-    /// takes a byte and keeps the low 16 bits of 655 times it: 100 is
-    /// 65500, and a value above 100 wraps (150 gives 32714, read back as
-    /// 49 and heard at half volume).
+    /// Sets the master volume (`SetMasterVolumePercent`), clamped to
+    /// 0..100: 655 times the percentage, 100 being 65500. The engine
+    /// took a byte and kept the low 16 bits of the product, so that 150
+    /// wrapped to 32714 (read back as 49, heard at half volume); that
+    /// defect is not reproduced.
     pub fn set_master_volume(&mut self, percent: i32) {
-        let volume = (0xFFFF / 100) * u32::from(percent as u8);
+        let volume = (0xFFFF / 100) * percent.clamp(0, 100) as u32;
         self.set_raw_master_volume(volume as u16);
     }
 
@@ -1030,9 +1033,8 @@ impl Audio {
     }
 
     /// Resumes the sounds [`Audio::pause_all`] paused
-    /// (`CBSoundMgr::ResumeAll`). A sound stopped in between kept its
-    /// flag ([`Audio::stop`]) and starts again from its beginning, as in
-    /// the engine.
+    /// (`CBSoundMgr::ResumeAll`). A sound stopped in between is no
+    /// longer held ([`Audio::stop`]) and stays stopped.
     pub fn resume_all(&mut self) {
         let held: Vec<SoundId> = self
             .voices
@@ -1311,7 +1313,7 @@ mod tests {
     /// `CBSoundBuffer::IsPlaying` is the device's status: a sound the
     /// freeze holds is not playing, and is not paused either
     /// (`CBSound::IsPaused` is the script's flag). A sound stopped while
-    /// held starts again at the unfreeze (`CBSoundMgr::ResumeAll`).
+    /// held stays stopped at the unfreeze.
     #[test]
     fn a_frozen_sound_is_neither_playing_nor_paused() {
         let mut audio = Audio::null();
@@ -1327,16 +1329,25 @@ mod tests {
         assert!(audio.is_active(id));
         assert!(audio.is_freeze_paused(id));
         assert!(audio.is_playing(music), "the music was left out");
-        // Stopped during the freeze: the flag stays.
+        // Stopped during the freeze, it is no longer held and the
+        // unfreeze does not start it again (the original did).
         assert!(audio.stop(id));
         audio.tick(20);
         assert!(!audio.is_active(id));
-        assert!(audio.is_freeze_paused(id));
+        assert!(!audio.is_freeze_paused(id));
+        audio.resume_all();
+        audio.tick(40);
+        assert!(!audio.is_playing(id));
+        // A held sound left alone goes on where it was.
+        assert!(audio.play(id, false));
+        audio.tick(100);
+        audio.pause_all(false);
+        audio.tick(50);
         audio.resume_all();
         audio.tick(40);
         assert!(audio.is_playing(id));
-        assert!(!audio.is_freeze_paused(id));
-        assert!(near(audio.position_ms(id), 40), "{}", audio.position_ms(id));
+        let at = audio.position_ms(id);
+        assert!((135..=165).contains(&at), "{at}");
     }
 
     /// `CBSound::SetLoopStart` acts on streamed sounds only: those the
@@ -1393,49 +1404,52 @@ mod tests {
     }
 
     /// `CBSoundBuffer::SetVolume` and `CBSoundMgr::SetVolumePercent`:
-    /// the engine's arithmetic, bytes that are not clamped, and values
-    /// DirectSound refuses leaving the loudness as it was.
+    /// the engine's arithmetic, with the values clamped to their range
+    /// (the engine wrapped them or left the loudness unchanged).
     #[test]
     fn volumes_follow_the_engine_arithmetic() {
-        assert_eq!(attenuation(200, 100), Some(0));
-        assert_eq!(attenuation(200, 0), Some(-10000));
-        assert_eq!(attenuation(200, 50), Some(-1250));
-        assert_eq!(attenuation(100, 50), Some(-4218));
+        assert_eq!(attenuation(200, 100), 0);
+        assert_eq!(attenuation(200, 0), -10000);
+        assert_eq!(attenuation(200, 50), -1250);
+        assert_eq!(attenuation(100, 50), -4218);
         // 2 x 33 % truncated to 66, not 66.66.
         assert_eq!(attenuation(200, 33), attenuation(66, 100));
-        assert_eq!(attenuation(200, 150), None);
-        assert_eq!(attenuation(200, -10), None);
-        assert_eq!(attenuation(300, 100), None);
+        // Out of range: full volume or silence.
+        assert_eq!(attenuation(200, 150), 0);
+        assert_eq!(attenuation(200, -10), -10000);
+        assert_eq!(attenuation(300, 100), 0);
 
         let mut audio = Audio::null();
         let id = audio.add(Arc::new(Clip::silence(1000, 500)), SoundType::Sfx, 50);
         assert_eq!(audio.centibels(id), -1250);
-        // An own volume out of range is kept, the loudness is not
-        // changed.
+        // An own volume out of range is kept as given and heard at full
+        // volume or not at all.
         assert!(audio.set_private_volume(id, 150));
         assert_eq!(audio.private_volume(id), 150);
-        assert_eq!(audio.centibels(id), -1250);
+        assert_eq!(audio.centibels(id), 0);
+        assert!(audio.set_private_volume(id, -5));
+        assert_eq!(audio.centibels(id), -10000);
         assert!(audio.set_private_volume(id, 100));
         assert_eq!(audio.centibels(id), 0);
-        // A type volume is a byte, not clamped.
+        // A type volume is clamped to 0..100.
         audio.set_volume(SoundType::Sfx, 50);
         assert_eq!(audio.volume(SoundType::Sfx), 50);
         assert_eq!(audio.raw_volume(SoundType::Sfx), 100);
         assert_eq!(audio.centibels(id), -1250);
         audio.set_volume(SoundType::Sfx, 150);
-        assert_eq!(audio.volume(SoundType::Sfx), 150);
-        assert_eq!(audio.centibels(id), -1250, "refused: the loudness stays");
+        assert_eq!(audio.volume(SoundType::Sfx), 100);
+        assert_eq!(audio.centibels(id), 0);
         audio.set_volume(SoundType::Sfx, -1);
-        assert_eq!(audio.volume(SoundType::Sfx), 255);
-        audio.set_volume(SoundType::Sfx, 256);
         assert_eq!(audio.volume(SoundType::Sfx), 0);
         assert_eq!(audio.centibels(id), -10000);
+        audio.set_raw_volume(SoundType::Sfx, 900);
+        assert_eq!(audio.raw_volume(SoundType::Sfx), 200);
         assert_eq!(
             audio.volume(SoundType::Music),
             100,
             "the other types are untouched"
         );
-        // The master volume keeps 16 bits of 655 x the byte.
+        // The master volume is 655 x the percentage, clamped.
         assert_eq!(audio.master_volume(), 100);
         audio.set_master_volume(100);
         assert_eq!(audio.raw_master_volume(), 65500);
@@ -1443,12 +1457,9 @@ mod tests {
         audio.set_master_volume(40);
         assert_eq!(audio.master_volume(), 40);
         audio.set_master_volume(150);
-        assert_eq!(audio.raw_master_volume(), 32714);
-        assert_eq!(audio.master_volume(), 49);
-        // A sound of a failed first volume starts at full volume, as a
-        // new DirectSound buffer does.
-        let loud = audio.add(Arc::new(Clip::silence(1000, 500)), SoundType::Music, 130);
-        assert_eq!(audio.centibels(loud), 0);
+        assert_eq!(audio.master_volume(), 100);
+        audio.set_master_volume(-3);
+        assert_eq!(audio.master_volume(), 0);
     }
 
     /// `CBSoundBuffer::SetPan`: DirectSound's unit and range, the far

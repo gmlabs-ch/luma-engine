@@ -119,11 +119,10 @@ fn atoi(text: &[u8]) -> i64 {
 /// Parses a `.sub` file (`CVidSubtitler::LoadSubtitles`): each line is
 /// `{start}{end}text`, a `|` in the text a line break. As in the engine:
 ///
-/// - a line ends at a line feed or a NUL, and the byte before that end
-///   is dropped whatever it is (the engine assumes a carriage return, so
-///   a file with Unix line ends loses the last character of each line);
-///   the last line, when the file does not end with a line feed, is
-///   whole;
+/// - a line ends at a line feed or a NUL; a carriage return before
+///   that end is dropped. (The engine dropped the byte before the end
+///   whatever it was, so a file with Unix line ends lost the last
+///   character of each line; that defect is not reproduced.)
 /// - the numbers are read as `atoi` reads them (`12a` is 12, no digit
 ///   is 0); braces after the second pair are skipped with what they
 ///   hold;
@@ -142,12 +141,12 @@ pub fn parse_subtitles(bytes: &[u8]) -> Vec<Subtitle> {
         while pos + length < size && bytes[pos + length] != b'\n' && bytes[pos + length] != 0 {
             length += 1;
         }
-        let real = if pos + length >= size {
-            length
-        } else {
-            length.saturating_sub(1)
+        let line = &bytes[pos..pos + length];
+        let ended = pos + length < size;
+        let line = match line.split_last() {
+            Some((b'\r', rest)) if ended => rest,
+            _ => line,
         };
-        let line = &bytes[pos..pos + real];
         let (mut start, mut end) = (-1i64, -1i64);
         let mut in_token = false;
         let mut token_start = 0;
@@ -215,6 +214,13 @@ impl Subtitler {
             show: false,
             last_frame: -1,
         }
+    }
+
+    /// Back to the first subtitle, for a video that starts again.
+    pub fn rewind(&mut self) {
+        self.current = 0;
+        self.show = false;
+        self.last_frame = -1;
     }
 
     /// Moves to the subtitle of a frame (`CVidSubtitler::Update`).
@@ -953,11 +959,11 @@ impl World {
             self.stop_entity_video(owner);
             return;
         }
-        // `ResetStream`: back to the first frame, the sound with it. The
-        // engine opens the file again and plays it without a volume, so
-        // from the second round on the sound has the sound effects'
-        // global percentage as its own volume instead of the entity's,
-        // and the subtitles are loaded again.
+        // `ResetStream`: back to the first frame, the sound and the
+        // subtitles with it. The engine opened the file again and played
+        // it without a volume, so from the second round on the sound had
+        // the sound effects' global percentage as its own volume instead
+        // of the entity's; that defect is not reproduced.
         let filename = video.player.filename.clone();
         match video.player.video.rewind() {
             Ok(()) => {
@@ -965,14 +971,11 @@ impl World {
                 video.player.sound_heard = None;
                 video.player.time_offset_ms = 0;
                 video.player.pending = None;
+                if let Some(subtitler) = video.player.subtitler.as_mut() {
+                    subtitler.rewind();
+                }
                 if let Some(sound) = video.player.sound {
                     self.sounds.audio.stop(sound);
-                    let volume = self.sounds.audio.volume(SoundType::Sfx);
-                    self.sounds.audio.set_private_volume(sound, volume);
-                }
-                let subtitler = self.load_subtitler(&filename, None);
-                if let Some(video) = self.entity_videos.get_mut(&owner) {
-                    video.player.subtitler = subtitler;
                 }
             }
             Err(err) => {
@@ -1322,20 +1325,20 @@ mod tests {
                 .map(|s| (s.start, s.end, s.text))
                 .collect()
         };
-        // The byte before a line end is dropped whatever it is: Unix
-        // line ends lose a character; the last line is whole.
+        // Unix and Windows line ends read alike, and a carriage return
+        // is only dropped at the end of a line.
         assert_eq!(
             texts(b"{1}{2}One\n{3}{4}Two\r\n{5}{6}Three"),
             [
-                (1, 2, "On".to_string()),
+                (1, 2, "One".to_string()),
                 (3, 4, "Two".to_string()),
                 (5, 6, "Three".to_string())
             ]
         );
         // A NUL ends a line like a line feed.
         assert_eq!(
-            texts(b"{1}{2}A.\0{3}{4}B"),
-            [(1, 2, "A".to_string()), (3, 4, "B".to_string())]
+            texts(b"{1}{2}A.\0{3}{4}B\r"),
+            [(1, 2, "A.".to_string()), (3, 4, "B\r".to_string())]
         );
         // Numbers as `atoi`: digits up to the first other character, 0
         // without a digit; a start of -1 drops the line.

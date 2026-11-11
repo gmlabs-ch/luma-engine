@@ -7,6 +7,8 @@ The rules follow Wintermute Engine 1.x (`BSoundMgr`, `BSoundBuffer`,
 `BSoundOGG`, `BSound`, `BObject`, `BGame`, `AdGame`, `AdObject`, MIT) so
 that games sound and behave as their authors tested them. Where 1.x and
 WME Lite differ (what a paused sound is, where a sound pans), 1.x wins.
+Bugs of the original are fixed, not reproduced, unless a game's scripts
+can depend on them; each one is named where it applies.
 
 ## Files
 
@@ -50,19 +52,19 @@ number; the fraction that remains to 200 is cubed and multiplied by
 12.5 dB down (about 24 % of its amplitude), at 75 % about 1.6 dB down.
 Kira is silent from -60 dB, where DirectSound went on to -100 dB.
 
-The engine does not clamp any of these, and neither does Luma, because
-scripts read the values back:
+The values are clamped to their range: a global or master volume to
+0..100, and a sound's own volume, kept and read back as given, is heard
+as full volume above 100 and as silence below 0. The master volume is
+655 times the percentage out of 65535 (100 is 65500), multiplying the
+mix linearly on the main mixer track (the original set the system's
+wave volume and put it back at exit).
 
-- A global volume is a byte: `SetGlobalSFXVolume(150)` keeps 150
-  (`GetGlobalSFXVolume` answers 150), `-1` is 255, 256 is 0.
-- A value DirectSound refused leaves the loudness where it was: a
-  global volume above 100, a sound's own volume above 100 (with a full
-  global volume) or below 0 change the number read back and nothing
-  heard. A sound whose first volume is refused plays at full volume.
-- The master volume keeps the low 16 bits of 655 times the byte: 100 is
-  65500, and 150 wraps to 32714, read back as 49 and heard at half
-  volume. It multiplies the mix linearly, on the main mixer track (the
-  original set the system's wave volume and put it back at exit).
+The original did not clamp, which were defects, not reproduced: a
+global volume was a byte (150 was kept and read back, -1 became 255);
+a value out of range made DirectSound refuse the call, so the sound
+kept whatever loudness it had before; and the master volume kept the
+low 16 bits of 655 times the byte, so 150 wrapped to half volume and
+read back as 49.
 
 The four volumes are the player's settings: they are written to the
 game's settings file when the game ends and read back when it starts
@@ -96,10 +98,11 @@ channels come out as DirectSound's.
 The position is the object's `X` less the scroll offset. The engine
 runs this every frame for the game, the active actors and the active
 entities (`UpdateSounds`): their own sound and the speech of the
-sentence they are saying (`CAdObject::UpdateSounds`). The game itself
-stands at the centre of the screen, so `Game.PlaySound` is centred
-until the scene scrolls and then drifts with the scroll offset. A
-sprite frame's sound takes its object's pan when it starts. Setting
+sentence they are saying (`CAdObject::UpdateSounds`). The game's own
+sound (`Game.PlaySound`) is not panned. (In the original the game
+object went through the same update with a position at the centre of
+the screen, so its sound slid to one side as the scene scrolled: an
+accident, not reproduced.) A sprite frame's sound takes its object's pan when it starts. Setting
 `SoundPanning` to false centres the object's sound and its speech
 (`ResetSoundPan`). The sounds of other objects (windows, items,
 regions...) are never panned.
@@ -126,28 +129,31 @@ not what one would guess, and scripts were written against them.
   sound that `PauseSound()` did not pause.
 - **A frozen game holds the playing sounds** (a system window, a
   video): `CBSoundMgr::PauseAll`, music included or not. A held sound is
-  **not playing** for the engine, which reads the device's status
-  (`CBSoundBuffer::IsPlaying`), and it is not paused either (that is the
-  script's flag). So, while the game is frozen:
+  **not playing** for a script, as in the engine, which reads the
+  device's status (`CBSoundBuffer::IsPlaying`), and it is not paused
+  either (that is the script's flag). So, while the game is frozen:
   - `IsSoundPlaying()` and `IsMusicPlaying()` answer false for held
     sounds;
-  - an event waiting for a sound to end (`PlaySoundEvent`) fires when
-    the game freezes;
-  - a sentence with a speech sound ends (see [Speech](#speech));
   - `ResumeSound()` does not resume a held sound;
   - a sound played during the freeze plays.
 
-  The unfreeze resumes what the freeze held (`ResumeAll`). A sound
-  stopped in between keeps its mark and **starts again from its
-  beginning** at the unfreeze; Luma reproduces this, since scripts can
-  see it (`IsSoundPlaying`).
+  But a held sound **has not ended**: the event waiting for a sound to
+  end (`PlaySoundEvent`) does not fire, and a sentence keeps its speech
+  (see [Speech](#speech)). The unfreeze resumes what the freeze held
+  (`ResumeAll`); a sound stopped in between stays stopped.
+
+  The original had three defects here, not reproduced: it only asked
+  whether the sound was playing, so the sound event fired when the game
+  froze and a sentence with a speech sound ended when a menu opened
+  during a line; and a sound stopped while held kept its mark and
+  started again from its beginning at the unfreeze (the cut speech
+  included).
 - **Saved games.** In the original a game saved while frozen (a save
   menu) records its held sounds as not playing and without their
   position, so after loading, the music the freeze held starts again
   from its beginning at the unfreeze. Luma does not reproduce this: a
   held sound is saved as playing, with its position, and goes on where
-  it was. This is a deliberate difference, to be reviewed with the
-  saved games.
+  it was.
 
 ## Looping
 
@@ -179,7 +185,7 @@ particle emitters, `new Object`s.
 |--------|--------|
 | `LoadSound(file)` | Loads the sound without playing it. |
 | `PlaySound(file, looping, loopStart)`, `PlaySound(looping, loopStart)` | Loads and plays, or plays the loaded sound again from its start position; `loopStart` is where a loop restarts, in milliseconds (see [Looping](#looping)). |
-| `PlaySoundEvent(file, event)`, `PlaySoundEvent(event)` | Plays and raises `event` on the object when the sound is no longer playing. |
+| `PlaySoundEvent(file, event)`, `PlaySoundEvent(event)` | Plays and raises `event` on the object when the sound has ended (not while a frozen game holds it). |
 | `StopSound()` | Stops the sound and unloads it: `PlaySound()` without a file then fails, `GetSoundVolume` reads the object's volume. Only a sound entity (`SUBTYPE="sound"`) keeps its sound loaded. False when the object has no sound. |
 | `PauseSound()`, `ResumeSound()` | See [Playing, pausing, resuming](#playing-pausing-resuming). |
 | `IsSoundPlaying()` | Whether it plays; false for a sound a frozen game holds. |
@@ -267,17 +273,13 @@ no sound given and a text of the form `/ID/fallback`, the engine looks
 for `ID.ogg` or `ID.wav` in the speech directories (`AddSpeechDir`,
 `RemoveSpeechDir`; `speech\` by default). The sound plays as speech,
 panned with the object and with the object's sound effect. A sentence
-with a sound ends when the sound is neither playing nor paused by a
-script, whatever duration was given (`TimeIsUp` in `CAdActor::Update`
-and `CAdEntity::Update`); skipping the sentence stops the sound.
-Because a sound held by a frozen game is not playing, **a freeze ends
-the sentences that have a speech sound** (opening a system window while
-an actor speaks cuts the line), except those of 3D actors, which the
-engine does not update while frozen. In the original the cut speech
-then starts again from its beginning at the unfreeze, with no sentence
-on screen, until the object next speaks; Luma unloads the speech with
-its sentence and does not reproduce that. See
-[formats/font.md](formats/font.md) for the rest of `Talk`.
+with a sound ends when the sound has ended: neither playing, nor paused
+by a script, nor held by a frozen game, whatever duration was given
+(`TimeIsUp` in `CAdActor::Update` and `CAdEntity::Update`); skipping
+the sentence stops the sound. A freeze holds the speech with the
+sentence, and both go on at the unfreeze. (The original ended the
+sentence at the freeze, see
+[Playing, pausing, resuming](#playing-pausing-resuming).)
 
 ## Not yet
 

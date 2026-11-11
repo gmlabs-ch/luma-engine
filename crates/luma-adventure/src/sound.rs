@@ -534,12 +534,13 @@ impl World {
 
     /// The pan of an object's sounds when it pans them (`SoundPanning`,
     /// `CBObject::UpdateOneSound`): that of its position on screen,
-    /// less the scroll offset; `None` when it does not. The game itself
-    /// stands at the centre of the screen, so its sounds drift with the
-    /// scroll offset alone.
+    /// less the scroll offset; `None` when it does not. The game's own
+    /// sound is not panned: in the engine the game object stands at the
+    /// centre of the screen and its sound drifted to one side as the
+    /// scene scrolled, an accident of sharing `UpdateSounds` with the
+    /// scene's objects, not reproduced.
     fn sound_pan_of(&self, owner: NativeId) -> Option<i32> {
         let x = match self.objects.get(owner).map(|n| n.kind.clone()) {
-            Some(Kind::Game) => Some(self.settings.width as i32 / 2),
             Some(Kind::Actor) => self
                 .actor(owner)
                 .filter(|a| a.def.active && a.def.sound_panning)
@@ -641,10 +642,12 @@ impl World {
     /// One frame of the objects' sounds (`CBObject::UpdateSounds`,
     /// `CAdObject::UpdateSounds`), for the objects the engine updates
     /// (the game, the active actors and entities): the sound event fires
-    /// when the object's sound is not playing (a sound held by a frozen
-    /// game is not, so the event fires then), the object's sound and the
+    /// when the object's sound has ended, the object's sound and the
     /// speech of its sentence follow its position on screen and take its
-    /// effect; then the frame sounds that ended are forgotten.
+    /// effect; then the frame sounds that ended are forgotten. A sound
+    /// held by a frozen game has not ended: the engine, which only asks
+    /// whether the sound is playing, fired the event at the freeze; that
+    /// defect is not reproduced.
     pub fn update_sounds(&mut self) {
         self.update_crossfade();
         let owners: Vec<NativeId> = self.sounds.objects.keys().copied().collect();
@@ -655,7 +658,8 @@ impl World {
             let Some(sound) = self.sfx_of(owner).map(|s| s.id) else {
                 continue;
             };
-            if !self.sounds.audio.is_playing(sound) {
+            let audio = &self.sounds.audio;
+            if !audio.is_playing(sound) && !audio.is_freeze_paused(sound) {
                 let event = self
                     .sounds
                     .objects
@@ -929,18 +933,21 @@ impl World {
         Some((id, length))
     }
 
-    /// Ends the sentences whose speech sound is neither playing nor
-    /// paused by a script (`TimeIsUp` in `CAdActor::Update`,
-    /// `CAdEntity::Update`, `CAdActor3DX::Update`), and unloads their
-    /// sounds. A sentence with a sound lasts exactly as long as the
-    /// sound plays, whatever its duration. A sound the frozen game holds
-    /// is not playing (`CBSoundBuffer::IsPlaying`), so a freeze ends the
-    /// sentences of actors and entities; the 3D actors are not updated
-    /// while frozen and keep theirs.
+    /// Ends the sentences whose speech sound has ended: neither playing,
+    /// nor paused by a script, nor held by a frozen game (`TimeIsUp` in
+    /// `CAdActor::Update`, `CAdEntity::Update`, `CAdActor3DX::Update`),
+    /// and unloads their sounds. A sentence with a sound lasts exactly
+    /// as long as the sound, whatever its duration. In the engine a
+    /// sound the frozen game holds is simply not playing, so opening a
+    /// menu during a line ended the sentence of an actor or an entity
+    /// and cut its speech; that defect is not reproduced: the speech is
+    /// held with the game and goes on at the unfreeze.
     pub(crate) fn update_speech(&mut self) {
         let mut finished: Vec<SoundId> = Vec::new();
         let audio = &self.sounds.audio;
-        let ended = |id: SoundId| !audio.is_playing(id) && !audio.is_paused(id);
+        let ended = |id: SoundId| {
+            !audio.is_playing(id) && !audio.is_paused(id) && !audio.is_freeze_paused(id)
+        };
         for (_, actor) in &mut self.actors {
             let talking = actor.is_talking();
             if let Some(sentence) = &mut actor.sentence {

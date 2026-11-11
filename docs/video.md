@@ -287,12 +287,12 @@ page (it reads in blocks of 4096 bytes) and takes the first key frame
 that follows; and it then counts time and subtitle frames from that
 point as if the video began there.
 
-A looping video is opened again at each round by the original
-(`ResetStream` calls `Initialize` and `Play` without a volume), with two
-effects Luma reproduces: from the second round on, the sound track's own
-volume is the sound effects' global percentage instead of the entity's
-`SoundVolume`; and the subtitles are loaded again, so they follow the
-state of `VideoSubtitles` at that moment.
+A looping video keeps its sound volume and its subtitles from one
+round to the next. (The original opened the file again at each round
+and played it without a volume, `ResetStream`, so that from the second
+round on the sound track had the sound effects' global percentage as
+its own volume instead of the entity's `SoundVolume`: a defect, not
+reproduced.)
 
 Deviations from the original engine: the video is not kept in saved
 games (the engine saves the player and reopens the file on load; after
@@ -331,14 +331,13 @@ written `/SUB0001/fallback` shows the translation of `SUB0001`. The text
 is read in the game's encoding like any other text the font draws (see
 [formats/font.md](formats/font.md#text-encoding)).
 
-The file is read as the engine reads it (`CVidSubtitler::LoadSubtitles`),
-quirks included, since they decide what a given file shows:
+The file is read as the engine reads it (`CVidSubtitler::LoadSubtitles`):
 
-- a line ends at a line feed (or a NUL byte), and the byte before that
-  end is dropped whatever it is: the engine expects Windows line ends.
-  **A `.sub` file with Unix line ends loses the last character of each
-  line**; the last line, when the file does not end with a line feed, is
-  whole;
+- a line ends at a line feed (or a NUL byte); a carriage return before
+  it is dropped, so Windows and Unix line ends read alike. (The
+  original dropped the byte before the line end whatever it was, so a
+  file with Unix line ends lost the last character of each line: a
+  defect, not reproduced.)
 - the numbers are read as C's `atoi` reads them: `{12a}` is 12, a number
   that is not one is 0;
 - text in braces after the second pair is skipped; a `{` inside braces
