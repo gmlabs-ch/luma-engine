@@ -590,8 +590,10 @@ shown when they do not fit, the window exclusive meanwhile (the keys of
 the file are in [formats/window.md](formats/window.md#the-response-box)).
 The icons and the font a response names are loaded when it is added: one
 that does not load is logged (`CAdResponse::SetIcon failed for file`...)
-and left out, so a response whose icon is missing is a text choice and
-one whose font is missing uses the box's. The pick
+and left out, so a response whose icon does not load is a text choice
+and one whose font does not load uses the box's. (For a missing icon
+file the original shows its `invalid.bmp` placeholder as the icon; Luma
+has no placeholder image and makes a text choice.) The pick
 returns the choice's id to the script, sets `Game.LastResponse` and
 `LastResponseOrig`, and closes the box; without any choice left
 `GetResponse` returns `null` at once, and with a single one it returns

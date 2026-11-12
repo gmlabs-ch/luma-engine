@@ -1906,11 +1906,11 @@ impl World {
         if let Some(white) = white {
             self.draw_access_hint(list, white);
         }
-        // `CAdGame::DisplaySentences(m_State==GAME_FROZEN)`: the sentences
-        // are not shown while the game is frozen (a system-exclusive
-        // window, such as the menu, is up).
-        if self.subtitles && !self.is_frozen() {
-            for draw in &self.sentences {
+        // `CAdGame::DisplaySentences(m_State==GAME_FROZEN)`: while the
+        // game is frozen (a system-exclusive window, such as the menu,
+        // is up) the sentences of freezable objects are not shown.
+        if self.subtitles {
+            for draw in self.displayed_sentences() {
                 if let Some(font) = self.fonts.get(&draw.font) {
                     font.draw(list, &draw.text, draw.x, draw.y, draw.width, draw.align, -1);
                 }
@@ -2266,6 +2266,16 @@ impl World {
         &self.sentences
     }
 
+    /// The sentences drawn this frame (`CAdGame::DisplaySentences`):
+    /// all of them, but those of freezable objects while the game is
+    /// frozen.
+    pub fn displayed_sentences(&self) -> impl Iterator<Item = &SentenceDraw> {
+        let frozen = self.is_frozen();
+        self.sentences
+            .iter()
+            .filter(move |d| !(frozen && d.freezable))
+    }
+
     /// A random number, from the same generator as the scripts'.
     pub(crate) fn next_random(&mut self) -> u32 {
         let mut rng = crate::particles::Rng::new(self.rng);
@@ -2438,8 +2448,8 @@ impl World {
                 .and_then(|key| self.find_speech_file(&key)),
         };
         let mut sound = None;
-        if let Some(file) = speech_file {
-            if let Some((id, length)) = self.start_speech(&file) {
+        if let Some(file) = &speech_file {
+            if let Some((id, length)) = self.start_speech(file) {
                 sound = Some(id);
                 if duration == 0 && length != 0 {
                     duration = length;
@@ -2465,9 +2475,11 @@ impl World {
         };
         // A scene-independent object is placed on the screen already.
         let scene_independent = self.object_state(id).is_some_and(|s| s.scene_independent);
+        // `CAdScene::GetOffsetLeft`, `GetOffsetTop`.
+        let (offset_left, offset_top) = self.scene_offset_in_viewport();
         if mods.relative && !scene_independent {
-            x -= self.offset_x;
-            y -= self.offset_y;
+            x -= offset_left;
+            y -= offset_top;
         }
         let width = if mods.width > 0 {
             mods.width
@@ -2494,9 +2506,23 @@ impl World {
         x = x.max(0).min(sw - width);
         y = y.max(0).min(sh - height);
         if mods.relative {
-            x += self.offset_x;
-            y += self.offset_y;
+            x += offset_left;
+            y += offset_top;
         }
+        // `m_Sentence->m_Freezable = m_Freezable`.
+        let freezable = self.object_state(id).is_none_or(|s| s.freezable);
+        // `SetupTalkFile`: the `.talk` definition beside the speech
+        // file, whether or not the sound itself loaded. Only objects
+        // with sprites use it.
+        let talk_def = match (&kind, &speech_file) {
+            (Kind::Actor | Kind::Entity(_), Some(file)) => self.load_talk_def(file),
+            _ => None,
+        };
+        let talk_sprites: Vec<String> = talk_def
+            .iter()
+            .flat_map(|def| def.sprite_paths())
+            .map(str::to_string)
+            .collect();
         let sentence = Sentence {
             text,
             stances,
@@ -2510,6 +2536,10 @@ impl World {
             align,
             fixed_pos: !mods.relative,
             sound,
+            sound_file: speech_file.filter(|_| sound.is_some()),
+            sound_position: 0,
+            freezable,
+            talk: talk_def.map(crate::talk::TalkPlayback::new),
         };
         let forced = self.forced_talk_sprite(id);
         match kind {
@@ -2518,6 +2548,11 @@ impl World {
                     self.actor_and_vfs(id)
                         .is_some_and(|(vfs, actor)| actor.bank.add_sprite(vfs, path))
                 });
+                if let Some((vfs, actor)) = self.actor_and_vfs(id) {
+                    for sprite in &talk_sprites {
+                        actor.bank.add_sprite(vfs, sprite);
+                    }
+                }
                 if let Some(actor) = self.actor_mut(id) {
                     actor.talk(sentence, forced);
                 }
@@ -2548,8 +2583,8 @@ impl World {
                     _ => self.scene.as_mut(),
                 };
                 if let Some(view) = view {
-                    for sprite in sprites {
-                        view.add_sprite(vfs, &sprite);
+                    for sprite in sprites.iter().chain(&talk_sprites) {
+                        view.add_sprite(vfs, sprite);
                     }
                     let forced = forced.filter(|path| view.add_sprite(vfs, path));
                     view.talk(r, sentence, forced);
@@ -2558,6 +2593,33 @@ impl World {
             _ => {}
         }
         true
+    }
+
+    /// The scene's offset less the origin of its viewport
+    /// (`CAdScene::GetOffsetLeft`, `GetOffsetTop`): what turns a scene
+    /// position into a screen position.
+    pub(crate) fn scene_offset_in_viewport(&self) -> (i32, i32) {
+        let (left, top, _, _) = self.viewport();
+        (self.offset_x - left, self.offset_y - top)
+    }
+
+    /// The talk definition of a speech file (`CAdSentence::
+    /// SetupTalkFile`): the file of the same name with the extension
+    /// `.talk`, when the game has one. A definition that does not load
+    /// is logged and the sentence goes without.
+    fn load_talk_def(&mut self, sound_file: &str) -> Option<luma_formats::TalkDef> {
+        let path = luma_formats::TalkDef::file_for_sound(sound_file);
+        let bytes = self.vfs.read(&path).ok()?;
+        let parsed = crate::scene_view::with_set_files(&self.vfs, |files| {
+            luma_formats::TalkDef::parse_with(&bytes, files)
+        });
+        match parsed {
+            Ok(def) => Some(def),
+            Err(err) => {
+                self.log(format!("Error parsing TALK file '{path}': {err}"));
+                None
+            }
+        }
     }
 
     /// The sprite `ForceTalkAnim` named for the sentence starting on an
@@ -2666,7 +2728,8 @@ impl World {
 
     /// Gathers the sentences shown this frame and lays their text out.
     fn collect_sentences(&mut self) {
-        let (ox, oy, sw) = (self.offset_x, self.offset_y, self.settings.width as i32);
+        let (ox, oy) = self.scene_offset_in_viewport();
+        let sw = self.settings.width as i32;
         let mut draws = Vec::new();
         for (_, actor) in &self.actors {
             if actor.show_sentence {

@@ -1544,7 +1544,7 @@ ITEM { NAME=\"coin\" IMAGE=\"art\\red.png\" CURSOR=\"art\\green.png\" CURSOR_COM
     );
     pkg.add_file(
         "art\\stand.sprite",
-        b"SPRITE { LOOPING=TRUE FRAME { DELAY=100 IMAGE=\"art\\green.png\" HOTSPOT {0,8} APPLY_EVENT=\"Step\" } }"
+        b"SPRITE { NAME=\"stand\" LOOPING=TRUE FRAME { DELAY=100 IMAGE=\"art\\green.png\" HOTSPOT {0,8} APPLY_EVENT=\"Step\" } }"
             .to_vec(),
     );
     pkg.add_file(

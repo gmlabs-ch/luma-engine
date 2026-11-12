@@ -342,7 +342,10 @@ shadow image and light position every object keeps (`SetShadowImage`,
 sound keeps for its later plays and moved the sound event from the
 sound to its object.
 Version 17, after 16, keeps the dialogue-branch context of
-every once-per-game response chosen (it kept the id alone).
+every once-per-game response chosen (it kept the id alone), whether the
+response box's window is the engine's own, and with each sentence being
+said its speech file and position, whether it is hidden by a freeze, and
+its talk definition (`.talk`) with the sprite it is at.
 
 ## Checking a game
 

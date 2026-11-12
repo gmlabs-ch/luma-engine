@@ -94,7 +94,18 @@ file's polygon scaled by the scene's scale level at the actor's `y`
 |-----|------|---------|
 | `NAME` | string | Name of the set (talk stances, animations). |
 | `UP`, `UP_RIGHT`, `RIGHT`, `DOWN_RIGHT`, `DOWN`, `DOWN_LEFT`, `LEFT`, `UP_LEFT` | string | The sprite for each direction. |
-| `TEMPLATE` | string | A `.spriteset` file loaded first. |
+| `TEMPLATE` | string | A `.spriteset` file (a `SPRITESET` root block), read into the same set where the key stands: it overrides the keys before it, the keys after it override it. Templates chain, up to 8 deep in Luma. |
+| `EDITOR_PROPERTY` | block | Editor state, ignored. |
+
+A set is read as `CAdSpriteSet::LoadBuffer` reads it, and **fails** on a
+key that is not in the table, on a template that cannot be read or
+fails, and on a sprite that does not load (a sprite file that exists and
+does not parse; a missing file loads, as the original's `invalid.bmp`
+placeholder, and shows nothing in Luma). A set that fails fails what
+holds it: the actor (`WALK`, `STAND`, `TURN_LEFT`, `TURN_RIGHT`, `TALK`,
+`TALK_SPECIAL`, `ANIMATION`, and the files `MergeAnims` reads) or the
+talk definition ([talk.md](talk.md)). The same block is the root of a
+`.spriteset` file, which templates and talk definitions name.
 
 Directions are numbered clockwise from `UP`: `0` up, `1` up-right, `2`
 right, `3` down-right, `4` down, `5` down-left, `6` left, `7` up-left.

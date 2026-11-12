@@ -38,9 +38,10 @@ pub mod image;
 pub mod scene;
 pub mod sprite;
 pub mod strings;
+pub mod talk;
 pub mod window;
 
-pub use actor::{Actor, SpriteSet};
+pub use actor::{Actor, SetFiles, SpriteSet};
 pub use def::{Document, Node, Nodes, ParseError, Scalar, Value};
 pub use error::{Error, Result};
 pub use font::{
@@ -54,6 +55,7 @@ pub use scene::{
 };
 pub use sprite::{Frame, Rect, Sprite, SubFrame};
 pub use strings::StringTable;
+pub use talk::{TalkDef, TalkNode};
 pub use window::{
     ButtonDef, ControlDef, EditDef, InventoryBoxDef, ItemDef, ResponseBoxDef, ResponseBoxFile,
     StaticDef, TiledImage, VerticalAlign, WidgetDef, WindowDef,

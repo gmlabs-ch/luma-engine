@@ -11,6 +11,21 @@ use crate::error::{Error, Result};
 use crate::image::{BlendMode, Rgba};
 use crate::scene::{Direction, Property, Region, WaypointGroup};
 
+/// The game's files, as reading a sprite set needs them: the bytes of a
+/// `TEMPLATE` file, and whether a sprite file loads.
+pub struct SetFiles<'a> {
+    /// Reads a file of the game; `None` when it cannot be read.
+    pub load: &'a mut dyn FnMut(&str) -> Option<Vec<u8>>,
+    /// Whether a sprite file loads.
+    pub sprite_loads: &'a mut dyn FnMut(&str) -> bool,
+    /// Whether `TEMPLATE` files are read; without it they are only
+    /// recorded (a tool reading one file on its own).
+    pub follow_templates: bool,
+}
+
+/// How many `TEMPLATE` files a sprite set may chain.
+const SET_TEMPLATE_DEPTH: u32 = 8;
+
 /// A sprite for each direction (`SPRITESET`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -59,7 +74,9 @@ impl SpriteSet {
         paths
     }
 
-    /// Parses a `.spriteset` file: a `SPRITESET` root block.
+    /// Parses a `.spriteset` file: a `SPRITESET` root block. A
+    /// `TEMPLATE` cannot be followed without the game's files: see
+    /// [`SpriteSet::parse_with`].
     pub fn parse(bytes: &[u8]) -> Result<SpriteSet> {
         let doc = Document::parse(bytes)?;
         let root = doc.get("SPRITESET").ok_or_else(|| Error::Invalid {
@@ -70,8 +87,91 @@ impl SpriteSet {
         Ok(set)
     }
 
+    /// Parses a `.spriteset` file as `CAdSpriteSet::LoadFile` does, with
+    /// the game's files (see [`SpriteSet::read`]).
+    pub fn parse_with(bytes: &[u8], files: &mut SetFiles<'_>) -> Result<SpriteSet> {
+        let mut set = SpriteSet::default();
+        set.read_file(bytes, files, 0)?;
+        Ok(set)
+    }
+
+    fn read_file(&mut self, bytes: &[u8], files: &mut SetFiles<'_>, depth: u32) -> Result<()> {
+        let doc = Document::parse(bytes)?;
+        let root = doc.get("SPRITESET").ok_or_else(|| Error::Invalid {
+            reason: "'SPRITESET' keyword expected".into(),
+        })?;
+        self.read_at(root, files, depth)
+    }
+
+    /// Reads the keys of a `SPRITESET` block as `CAdSpriteSet::
+    /// LoadBuffer` does: in file order over what is there; a `TEMPLATE`
+    /// file is read into the same set where the key stands; a sprite or
+    /// a template that does not load, and a key the set does not know,
+    /// fail the set.
+    pub fn read(&mut self, node: &Node, files: &mut SetFiles<'_>) -> Result<()> {
+        self.read_at(node, files, 0)
+    }
+
+    fn read_at(&mut self, node: &Node, files: &mut SetFiles<'_>, depth: u32) -> Result<()> {
+        for child in node.nodes() {
+            let direction = match child.key.to_ascii_uppercase().as_str() {
+                "NAME" => {
+                    self.name = text(child);
+                    continue;
+                }
+                "TEMPLATE" => {
+                    let file = text(child);
+                    self.template = Some(file.clone());
+                    if !files.follow_templates {
+                        continue;
+                    }
+                    let bytes = if depth < SET_TEMPLATE_DEPTH {
+                        (files.load)(&file)
+                    } else {
+                        None
+                    };
+                    let bytes = bytes.ok_or_else(|| Error::Invalid {
+                        reason: format!("CAdSpriteSet::LoadFile failed for file '{file}'"),
+                    })?;
+                    self.read_file(&bytes, files, depth + 1)?;
+                    continue;
+                }
+                "EDITOR_PROPERTY" => continue,
+                "UP" => Direction::Up,
+                "UP_RIGHT" => Direction::UpRight,
+                "RIGHT" => Direction::Right,
+                "DOWN_RIGHT" => Direction::DownRight,
+                "DOWN" => Direction::Down,
+                "DOWN_LEFT" => Direction::DownLeft,
+                "LEFT" => Direction::Left,
+                "UP_LEFT" => Direction::UpLeft,
+                other => {
+                    return Err(Error::Invalid {
+                        reason: format!(
+                            "Syntax error in SPRITESET definition: unknown key {other} at line {}",
+                            child.line
+                        ),
+                    });
+                }
+            };
+            let file = text(child);
+            if !(files.sprite_loads)(&file) {
+                return Err(Error::Invalid {
+                    reason: format!(
+                        "Error loading SPRITESET definition: sprite '{file}' at line {}",
+                        child.line
+                    ),
+                });
+            }
+            self.sprites[usize::from(direction.code())] = Some(file);
+        }
+        Ok(())
+    }
+
     /// Reads the keys of a `SPRITESET` block into the set, overriding
-    /// what is already there.
+    /// what is already there, without the game's files: a `TEMPLATE` is
+    /// only recorded, unknown keys are skipped and no sprite is checked
+    /// (for tools; the engine reads with [`SpriteSet::read`]).
     pub fn apply(&mut self, node: &Node) {
         for child in node.nodes() {
             let direction = match child.key.to_ascii_uppercase().as_str() {
@@ -99,7 +199,7 @@ impl SpriteSet {
 
     /// Builds a set from a block holding one `SPRITESET` block (`WALK`,
     /// `STAND`, `TALK`...).
-    fn from_wrapper(node: &Node) -> Result<SpriteSet> {
+    fn from_wrapper(node: &Node, files: &mut SetFiles<'_>) -> Result<SpriteSet> {
         let inner = node.get("SPRITESET").ok_or_else(|| Error::Invalid {
             reason: format!(
                 "'SPRITESET' keyword expected in {} at line {}",
@@ -107,7 +207,7 @@ impl SpriteSet {
             ),
         })?;
         let mut set = SpriteSet::default();
-        set.apply(inner);
+        set.read(inner, files)?;
         Ok(set)
     }
 }
@@ -242,25 +342,60 @@ impl Actor {
     }
 
     /// Reads an `.actor` file over the actor: its keys override what is
-    /// already there, as when a file names another by `TEMPLATE`.
+    /// already there, as when a file names another by `TEMPLATE`. The
+    /// sprite sets are read without the game's files: their templates
+    /// are not followed and every sprite is taken to load (see
+    /// [`Actor::merge_with`]).
     pub fn merge(&mut self, bytes: &[u8]) -> Result<()> {
+        self.merge_with(
+            bytes,
+            &mut SetFiles {
+                load: &mut |_| None,
+                sprite_loads: &mut |_| true,
+                follow_templates: false,
+            },
+        )
+    }
+
+    /// Reads an `.actor` file over the actor as [`Actor::merge`] does,
+    /// its sprite sets with the game's files ([`SpriteSet::read`]): a
+    /// set that fails fails the actor.
+    pub fn merge_with(&mut self, bytes: &[u8], files: &mut SetFiles<'_>) -> Result<()> {
         let doc = Document::parse(bytes)?;
         let root = doc.get("ACTOR").ok_or_else(|| Error::Invalid {
             reason: "'ACTOR' keyword expected".into(),
         })?;
-        self.apply(root)
+        self.apply(root, files)
     }
 
     /// Adds the `ANIMATION` blocks of a file (`MergeAnims`).
     pub fn merge_animations(&mut self, bytes: &[u8]) -> Result<usize> {
+        self.merge_animations_with(
+            bytes,
+            &mut SetFiles {
+                load: &mut |_| None,
+                sprite_loads: &mut |_| true,
+                follow_templates: false,
+            },
+        )
+    }
+
+    /// Adds the `ANIMATION` blocks of a file as [`Actor::
+    /// merge_animations`] does, read with the game's files.
+    pub fn merge_animations_with(
+        &mut self,
+        bytes: &[u8],
+        files: &mut SetFiles<'_>,
+    ) -> Result<usize> {
         let doc = Document::parse(bytes)?;
-        let mut count = 0;
+        let mut sets = Vec::new();
         for node in doc.get_all("ANIMATION") {
             let mut set = SpriteSet::default();
-            set.apply(node);
-            self.animations.push(set);
-            count += 1;
+            set.read(node, files)?;
+            sets.push(set);
         }
+        let count = sets.len();
+        self.animations.extend(sets);
         Ok(count)
     }
 
@@ -294,7 +429,7 @@ impl Actor {
         paths
     }
 
-    fn apply(&mut self, root: &Node) -> Result<()> {
+    fn apply(&mut self, root: &Node, files: &mut SetFiles<'_>) -> Result<()> {
         let (mut r, mut g, mut b, mut alpha) = (0i64, 0i64, 0i64, 0i64);
         for child in root.nodes() {
             match child.key.to_ascii_uppercase().as_str() {
@@ -319,15 +454,17 @@ impl Actor {
                 "ALPHA" => alpha = child.as_int().unwrap_or(0),
                 "IGNORE_ITEMS" => self.ignore_items = boolean(child),
                 "STOP_ON_BLOCKED" => self.stop_on_blocked = boolean(child),
-                "WALK" => self.walk = Some(SpriteSet::from_wrapper(child)?),
-                "STAND" => self.stand = Some(SpriteSet::from_wrapper(child)?),
-                "TURN_LEFT" => self.turn_left = Some(SpriteSet::from_wrapper(child)?),
-                "TURN_RIGHT" => self.turn_right = Some(SpriteSet::from_wrapper(child)?),
-                "TALK" => self.talk.push(SpriteSet::from_wrapper(child)?),
-                "TALK_SPECIAL" => self.talk_special.push(SpriteSet::from_wrapper(child)?),
+                "WALK" => self.walk = Some(SpriteSet::from_wrapper(child, files)?),
+                "STAND" => self.stand = Some(SpriteSet::from_wrapper(child, files)?),
+                "TURN_LEFT" => self.turn_left = Some(SpriteSet::from_wrapper(child, files)?),
+                "TURN_RIGHT" => self.turn_right = Some(SpriteSet::from_wrapper(child, files)?),
+                "TALK" => self.talk.push(SpriteSet::from_wrapper(child, files)?),
+                "TALK_SPECIAL" => self
+                    .talk_special
+                    .push(SpriteSet::from_wrapper(child, files)?),
                 "ANIMATION" => {
                     let mut set = SpriteSet::default();
-                    set.apply(child);
+                    set.read(child, files)?;
                     self.animations.push(set);
                 }
                 "FONT" => self.font = child.as_str().map(str::to_string),
@@ -525,6 +662,78 @@ ACTOR {
     }
 
     /// Every `.actor` file of the local test game parses.
+    #[test]
+    fn a_sprite_set_is_read_with_the_games_files() {
+        let mut load = |file: &str| match file {
+            "base.spriteset" => {
+                Some(b"SPRITESET { NAME=\"base\" LEFT=\"l.sprite\" RIGHT=\"r.sprite\" }".to_vec())
+            }
+            "loop.spriteset" => Some(b"SPRITESET { TEMPLATE=\"loop.spriteset\" }".to_vec()),
+            _ => None,
+        };
+        let mut sprite_loads = |file: &str| !file.starts_with("bad");
+        let mut files = SetFiles {
+            load: &mut load,
+            sprite_loads: &mut sprite_loads,
+            follow_templates: true,
+        };
+        // A template is read where the key stands: it overrides the
+        // keys before it, the keys after it override it.
+        let set = SpriteSet::parse_with(
+            b"SPRITESET { LEFT=\"mine.sprite\" TEMPLATE=\"base.spriteset\" RIGHT=\"own.sprite\" NAME=\"n\" }",
+            &mut files,
+        )
+        .unwrap();
+        assert_eq!(set.name, "n");
+        assert_eq!(set.sprite(Direction::Left), Some("l.sprite"));
+        assert_eq!(set.sprite(Direction::Right), Some("own.sprite"));
+        // What fails a set: a template or a sprite that does not load,
+        // a key it does not know, a chain of templates without end.
+        for bad in [
+            &b"SPRITESET { TEMPLATE=\"none.spriteset\" }"[..],
+            b"SPRITESET { UP=\"bad.sprite\" }",
+            b"SPRITESET { SPEED=3 }",
+            b"SPRITESET { TEMPLATE=\"loop.spriteset\" }",
+        ] {
+            assert!(SpriteSet::parse_with(bad, &mut files).is_err());
+        }
+        // The same inside an actor: the set fails the actor.
+        let mut actor = Actor::default();
+        assert!(
+            actor
+                .merge_with(
+                    b"ACTOR { WALK { SPRITESET { TEMPLATE=\"base.spriteset\" } } ANIMATION { NAME=\"wave\" TEMPLATE=\"base.spriteset\" } }",
+                    &mut files
+                )
+                .is_ok()
+        );
+        assert_eq!(
+            actor.walk.as_ref().unwrap().sprite(Direction::Left),
+            Some("l.sprite")
+        );
+        assert_eq!(actor.animations[0].name, "base");
+        assert!(
+            actor
+                .merge_with(
+                    b"ACTOR { STAND { SPRITESET { UP=\"bad.sprite\" } } }",
+                    &mut files
+                )
+                .is_err()
+        );
+        assert!(
+            actor
+                .merge_animations_with(b"ANIMATION { NAME=\"x\" SPEED=1 }", &mut files)
+                .is_err()
+        );
+        // Without the game's files a template is only recorded.
+        let alone =
+            Actor::parse(b"ACTOR { WALK { SPRITESET { TEMPLATE=\"base.spriteset\" } } }").unwrap();
+        assert_eq!(
+            alone.walk.unwrap().template.as_deref(),
+            Some("base.spriteset")
+        );
+    }
+
     #[test]
     #[ignore = "needs the local test game in testdata/local"]
     fn parses_every_local_actor() {

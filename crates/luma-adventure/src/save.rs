@@ -629,6 +629,7 @@ impl World {
                 }
             }
         }
+        self.restore_speech();
         if self.ui.frozen {
             self.sounds.audio.pause_all(state.music_frozen);
         }

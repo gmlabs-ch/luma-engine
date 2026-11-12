@@ -4,10 +4,10 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use luma_adventure::{Audio, Runtime};
+use luma_adventure::{Audio, EntityRef, Runtime};
 use luma_archive::{PackageBuilder, Vfs};
 use luma_compiler::{Compiler, Natives};
-use luma_formats::Image;
+use luma_formats::{Image, TextAlign};
 use luma_script::Natives as _;
 use luma_script::{NativeId, Value};
 
@@ -538,5 +538,348 @@ fn a_response_box_that_does_not_load_leaves_the_game_without_one() {
             .any(|l| l.contains("Game.GetResponse: response box is not defined")),
         "{log:?}"
     );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The scene's `prop` entity and its native object.
+fn prop(runtime: &Runtime) -> (EntityRef, NativeId) {
+    let (layer, index) = runtime.world.scene().unwrap().find_node("prop").unwrap();
+    let r = EntityRef::Node { layer, index };
+    (r, runtime.world.node_id(r).unwrap())
+}
+
+/// The files of a sentence with a talk definition: a long speech sound
+/// and, next to it, timed sprites.
+fn talk_files() -> Vec<(&'static str, Vec<u8>)> {
+    vec![
+        ("voices\\long.wav", luma_audio::silent_wav(8000, 1, 1200)),
+        (
+            "voices\\long.talk",
+            b"TALK {
+  DEFAULT_SPRITE=\"art\\rest.sprite\"
+  ACTION { START_TIME=100 END_TIME=200 SPRITE=\"art\\blue.png\" }
+  ACTION { START_TIME=300 SPRITE=\"art\\once.sprite\" }
+}"
+            .to_vec(),
+        ),
+        (
+            "art\\rest.sprite",
+            b"SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" } }".to_vec(),
+        ),
+        (
+            "art\\once.sprite",
+            b"SPRITE { LOOPING=FALSE FRAME { DELAY=40 IMAGE=\"art\\red.png\" } FRAME { DELAY=40 IMAGE=\"art\\blue.png\" } }"
+                .to_vec(),
+        ),
+    ]
+}
+
+/// Runs frames while the entity talks and returns the sprites it
+/// showed, each once per run of frames.
+fn sprites_while_talking(runtime: &mut Runtime, r: EntityRef, out: &mut Vec<String>) {
+    for _ in 0..400 {
+        runtime.tick(10);
+        let view = runtime.world.scene().unwrap();
+        if !view.is_talking(r) {
+            return;
+        }
+        let shown = view.shown_sprite(r).unwrap_or_default();
+        if out.last() != Some(&shown) {
+            out.push(shown);
+        }
+    }
+    panic!("the sentence never ended: {out:?}");
+}
+
+#[test]
+fn a_talk_definition_times_the_sprites_of_a_sentence() {
+    let (dir, mut runtime, _) = start(&talk_files());
+    let (r, id) = prop(&runtime);
+    assert!(runtime.world.talk(
+        id,
+        "Hello",
+        Some("voices\\long.wav"),
+        0,
+        None,
+        TextAlign::Center
+    ));
+    let mut shown = Vec::new();
+    sprites_while_talking(&mut runtime, r, &mut shown);
+    // The default sprite outside the nodes; the timed node, whose
+    // sprite is a still image and so has played at once: the entity's
+    // talk stance (its own sprite here) fills the rest of the node, as
+    // in the original; then the node without an end until its sprite
+    // has played.
+    assert_eq!(
+        shown,
+        [
+            "art\\rest.sprite",
+            "art\\blue.png",
+            "art\\green.png",
+            "art\\rest.sprite",
+            "art\\once.sprite",
+            "art\\rest.sprite"
+        ]
+    );
+    // The sentence over, the entity shows its own sprite again.
+    runtime.tick(10);
+    assert_eq!(
+        runtime.world.scene().unwrap().shown_sprite(r).as_deref(),
+        Some("art\\green.png")
+    );
+    // A sentence without a `.talk` file beside its sound keeps the
+    // entity's sprite, and one whose definition does not load is logged.
+    assert!(runtime.world.talk(
+        id,
+        "Hello",
+        Some("voices\\line.wav"),
+        0,
+        None,
+        TextAlign::Center
+    ));
+    let mut shown = Vec::new();
+    sprites_while_talking(&mut runtime, r, &mut shown);
+    assert_eq!(shown, ["art\\green.png"]);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_talk_definition_and_its_speech_survive_a_saved_game() {
+    let (dir, mut runtime, _) = start(&talk_files());
+    let (r, id) = prop(&runtime);
+    assert!(runtime.world.talk(
+        id,
+        "Hello",
+        Some("voices\\long.wav"),
+        0,
+        None,
+        TextAlign::Center
+    ));
+    // Save while the node without an end plays its sprite.
+    let mut before = Vec::new();
+    for _ in 0..33 {
+        runtime.tick(10);
+    }
+    assert_eq!(
+        runtime.world.scene().unwrap().shown_sprite(r).as_deref(),
+        Some("art\\once.sprite")
+    );
+    runtime.save_game(4, "talking", false).unwrap();
+    sprites_while_talking(&mut runtime, r, &mut before);
+
+    let mut loaded = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    loaded.start();
+    loaded.tick(16);
+    loaded.load_game(4).unwrap();
+    {
+        let view = loaded.world.scene_mut().unwrap();
+        assert!(view.is_talking(r));
+        let sentence = view.sentences_mut().next().unwrap();
+        assert!(sentence.sound.is_some(), "the speech plays again");
+        assert!(sentence.talk.is_some(), "the definition came back");
+        assert!(sentence.sound_position > 100, "{}", sentence.sound_position);
+    }
+    let mut after = Vec::new();
+    sprites_while_talking(&mut loaded, r, &mut after);
+    assert_eq!(after, before, "the same sprites as without the save");
+    assert_eq!(after, ["art\\once.sprite", "art\\rest.sprite"]);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_bad_talk_definition_is_logged_and_the_sentence_goes_without() {
+    let mut files = talk_files();
+    files.push((
+        "voices\\line.talk",
+        b"TALK { ACTION { START_TIME=0 LOOP=TRUE } }".to_vec(),
+    ));
+    let (dir, mut runtime, _) = start(&files);
+    let (r, id) = prop(&runtime);
+    runtime.world.talk(
+        id,
+        "Hello",
+        Some("voices\\line.wav"),
+        0,
+        None,
+        TextAlign::Center,
+    );
+    let log = runtime.tick(10);
+    assert!(
+        log.iter()
+            .any(|l| l.starts_with("Error parsing TALK file 'voices\\line.talk'")),
+        "{log:?}"
+    );
+    let view = runtime.world.scene().unwrap();
+    assert!(view.is_talking(r));
+    assert_eq!(view.shown_sprite(r).as_deref(), Some("art\\green.png"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_stance_names_a_talk_sprite_by_its_name_key() {
+    let (dir, mut runtime, _) = start(&[
+        (
+            "scenes\\room.scene",
+            b"SCENE { NAME=\"Room\" LAYER { NAME=\"main\" MAIN=TRUE WIDTH=200 HEIGHT=100
+              ENTITY { NAME=\"prop\" X=40 Y=60 SPRITE=\"art\\green.png\"
+                TALK=\"art\\wave.sprite\" TALK_SPECIAL=\"art\\angry.sprite\" } } }"
+                .to_vec(),
+        ),
+        (
+            "art\\wave.sprite",
+            b"SPRITE { NAME=\"angry\" LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" } }"
+                .to_vec(),
+        ),
+        (
+            "art\\angry.sprite",
+            b"SPRITE { NAME=\"Shout\" LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\blue.png\" } }"
+                .to_vec(),
+        ),
+    ]);
+    let (r, id) = prop(&runtime);
+    // "shout" is the `NAME` of the special sprite; "angry" is the name
+    // of the generic sprite, not the file name of the special one.
+    for (stance, sprite) in [
+        ("shout", "art\\angry.sprite"),
+        ("angry", "art\\wave.sprite"),
+    ] {
+        runtime.world.talk(
+            id,
+            "Hello",
+            None,
+            300,
+            Some(stance.to_string()),
+            TextAlign::Center,
+        );
+        runtime.tick(10);
+        runtime.tick(10);
+        assert_eq!(
+            runtime.world.scene().unwrap().shown_sprite(r).as_deref(),
+            Some(sprite),
+            "{stance}"
+        );
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_sentence_is_placed_in_the_scene_viewport_and_hidden_by_a_freeze() {
+    let (dir, mut runtime, _) = start(&[]);
+    let (_, id) = prop(&runtime);
+    let say = |runtime: &mut Runtime| {
+        runtime
+            .world
+            .talk(id, "Hi", None, 5000, None, TextAlign::Center);
+        runtime.tick(10);
+        runtime.tick(10);
+        let draw = runtime.world.sentences()[0].clone();
+        (draw.x, draw.width)
+    };
+    // The entity stands at x = 40 on a screen 64 wide: a box of half
+    // the screen centred on it.
+    assert_eq!(say(&mut runtime), (24, 32));
+    // In a scene viewport that starts at (10, 5) the entity is drawn 10
+    // pixels to the right, and its sentence with it (`GetOffsetLeft`).
+    let scene = runtime.world.scene_id();
+    call_native(
+        &mut runtime,
+        scene,
+        "SetViewport",
+        &[
+            Value::Int(10),
+            Value::Int(5),
+            Value::Int(40),
+            Value::Int(30),
+        ],
+    );
+    assert_eq!(say(&mut runtime), (36, 28));
+    // A frozen game hides the sentences of freezable objects only.
+    assert_eq!(runtime.world.displayed_sentences().count(), 1);
+    runtime.world.freeze(&mut runtime.engine, false);
+    assert_eq!(runtime.world.displayed_sentences().count(), 0);
+    runtime.world.unfreeze(&mut runtime.engine);
+    assert_eq!(runtime.world.displayed_sentences().count(), 1);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_actor_shows_the_talk_definition_sprite_of_its_direction() {
+    let (dir, mut runtime, _) = start(&[
+        ("voices\\act.wav", luma_audio::silent_wav(8000, 1, 600)),
+        (
+            "voices\\act.talk",
+            b"TALK { ACTION { START_TIME=0 END_TIME=300 SPRITESET_FILE=\"art\\mouth.spriteset\" } }"
+                .to_vec(),
+        ),
+        (
+            "art\\mouth.spriteset",
+            b"SPRITESET { TEMPLATE=\"art\\base.spriteset\" RIGHT=\"art\\right.sprite\" }".to_vec(),
+        ),
+        (
+            "art\\base.spriteset",
+            b"SPRITESET { LEFT=\"art\\left.sprite\" RIGHT=\"art\\blue.png\" }".to_vec(),
+        ),
+        (
+            "art\\left.sprite",
+            b"SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" } }".to_vec(),
+        ),
+        (
+            "art\\right.sprite",
+            b"SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\blue.png\" } }".to_vec(),
+        ),
+        (
+            "actors\\mo.actor",
+            b"ACTOR { NAME=\"mo\" X=20 Y=40 STAND { SPRITESET { LEFT=\"art\\green.png\" } } }".to_vec(),
+        ),
+    ]);
+    let actor = runtime
+        .world
+        .load_actor(&mut runtime.engine, "actors\\mo.actor", true)
+        .unwrap();
+    runtime.tick(10);
+    let shown = |runtime: &Runtime| {
+        runtime
+            .world
+            .actor(actor)
+            .unwrap()
+            .current_sprite()
+            .map(str::to_string)
+    };
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\green.png"));
+    let say = |runtime: &mut Runtime| {
+        assert!(runtime.world.talk(
+            actor,
+            "Hello",
+            Some("voices\\act.wav"),
+            0,
+            None,
+            TextAlign::Center
+        ));
+        runtime.tick(10);
+        runtime.tick(10);
+    };
+    // The set of the action, through its template: the sprite of the
+    // actor's direction.
+    say(&mut runtime);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\left.sprite"));
+    call_native(&mut runtime, actor, "TurnTo", &[Value::Int(2)]);
+    for _ in 0..5 {
+        runtime.tick(10);
+    }
+    say(&mut runtime);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\right.sprite"));
+    // Past the action, without a default, the definition gives nothing
+    // and the actor keeps the sprite it had, a looping one, as in the
+    // original; the sentence over, it stands again.
+    for _ in 0..32 {
+        runtime.tick(10);
+    }
+    assert!(runtime.world.is_talking(actor));
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\right.sprite"));
+    for _ in 0..40 {
+        runtime.tick(10);
+    }
+    assert!(!runtime.world.is_talking(actor));
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\green.png"));
     std::fs::remove_dir_all(&dir).ok();
 }

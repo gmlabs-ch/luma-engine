@@ -162,12 +162,15 @@ fn load_definition(
     };
     let mut probe = luma_formats::Actor::default();
     probe.merge(&bytes).map_err(format)?;
+    let merge = |def: &mut luma_formats::Actor| {
+        crate::scene_view::with_set_files(vfs, |files| def.merge_with(&bytes, files))
+    };
     if let Some(template) = probe.template {
         if depth < TEMPLATE_DEPTH && !template.eq_ignore_ascii_case(path) {
             load_definition(def, vfs, &template, depth + 1)?;
         }
     }
-    def.merge(&bytes).map_err(format)
+    merge(def).map_err(format)
 }
 
 impl Actor {
@@ -251,6 +254,16 @@ impl Actor {
         ]
         .into_iter()
         .flatten()
+        .cloned()
+        .chain(
+            self.sentence
+                .iter()
+                .filter_map(|s| s.talk.as_ref())
+                .flat_map(|t| t.def.sprite_paths())
+                .map(str::to_string),
+        )
+        .collect::<Vec<String>>()
+        .iter()
         {
             paths.push(path.clone());
         }
@@ -560,10 +573,36 @@ impl Actor {
             self.state = ActorState::Ready;
             return;
         };
-        let temp_done = self
-            .temp_sprite2
-            .as_deref()
-            .is_none_or(|p| self.is_finished(p));
+        // `m_Sentence->Update(m_Dir)`: the sprite the `.talk` definition
+        // gives for this moment replaces the talk stance
+        // (`m_TempSprite2`).
+        let shown_done = self.temp_sprite2.clone().filter(|p| self.is_finished(p));
+        let dir = self.dir;
+        let frame = self.sentence.as_mut().and_then(|sentence| {
+            if let Some(path) = &shown_done {
+                sentence.note_sprite_finished(path);
+            }
+            sentence.update_talk(timer, dir)
+        });
+        let mut definition_sprite_done = false;
+        if let Some(crate::talk::TalkFrame {
+            sprite: Some(path),
+            reset,
+            finished,
+        }) = frame
+        {
+            if reset {
+                self.anim(&path).reset();
+            }
+            // Played to its end: the stances take the frame.
+            definition_sprite_done = finished;
+            self.temp_sprite2 = Some(path);
+        }
+        let temp_done = definition_sprite_done
+            || self
+                .temp_sprite2
+                .as_deref()
+                .is_none_or(|p| self.is_finished(p));
         if temp_done || time_is_up {
             if time_is_up {
                 if let Some(sentence) = &mut self.sentence {
@@ -619,7 +658,10 @@ impl Actor {
             return false;
         };
         let before = self.def.animations.len();
-        if self.def.merge_animations(&bytes).is_err() {
+        let merged = crate::scene_view::with_set_files(vfs, |files| {
+            self.def.merge_animations_with(&bytes, files)
+        });
+        if merged.is_err() {
             return false;
         }
         let paths: Vec<String> = self.def.animations[before..]

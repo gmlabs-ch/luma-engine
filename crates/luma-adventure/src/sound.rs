@@ -944,6 +944,21 @@ impl World {
     /// held with the game and goes on at the unfreeze.
     pub(crate) fn update_speech(&mut self) {
         let mut finished: Vec<SoundId> = Vec::new();
+        // Where each speech sound is, for a saved game.
+        let speaking: Vec<Option<SoundId>> = self
+            .talking_sentences_mut()
+            .iter()
+            .map(|s| s.sound)
+            .collect();
+        let positions: Vec<Option<u64>> = speaking
+            .into_iter()
+            .map(|id| id.map(|id| self.sounds.audio.position_ms(id)))
+            .collect();
+        for (sentence, position) in self.talking_sentences_mut().into_iter().zip(positions) {
+            if let Some(position) = position {
+                sentence.sound_position = position;
+            }
+        }
         let audio = &self.sounds.audio;
         let ended = |id: SoundId| {
             !audio.is_playing(id) && !audio.is_paused(id) && !audio.is_freeze_paused(id)
@@ -996,6 +1011,56 @@ impl World {
         for id in finished {
             self.sounds.audio.stop(id);
             self.sounds.audio.remove(id);
+        }
+    }
+
+    /// The sentences being said, by actors, 3D actors and entities.
+    fn talking_sentences_mut(&mut self) -> Vec<&mut crate::talk::Sentence> {
+        let mut out: Vec<&mut crate::talk::Sentence> = Vec::new();
+        for (_, actor) in &mut self.actors {
+            if actor.is_talking() {
+                out.extend(actor.sentence.as_mut());
+            }
+        }
+        #[cfg(feature = "3d")]
+        for (_, actor) in &mut self.actors3d {
+            if actor.is_talking() {
+                out.extend(actor.sentence.as_mut());
+            }
+        }
+        let views = self.scene.iter_mut().chain([&mut self.game_view]);
+        for view in views {
+            out.extend(view.sentences_mut());
+        }
+        out
+    }
+
+    /// After a saved game: the speech of each sentence still being said
+    /// starts again where it was (`CAdSentence::Persist` saves the sound
+    /// with its position).
+    pub(crate) fn restore_speech(&mut self) {
+        let wanted: Vec<Option<(String, u64)>> = self
+            .talking_sentences_mut()
+            .into_iter()
+            .map(|s| {
+                s.sound = None;
+                match &s.sound_file {
+                    Some(file) if s.duration != 0 => Some((file.clone(), s.sound_position)),
+                    _ => None,
+                }
+            })
+            .collect();
+        let sounds: Vec<Option<SoundId>> = wanted
+            .into_iter()
+            .map(|w| {
+                let (file, position) = w?;
+                let (id, _) = self.start_speech(&file)?;
+                self.sounds.audio.set_position_ms(id, position);
+                Some(id)
+            })
+            .collect();
+        for (sentence, sound) in self.talking_sentences_mut().into_iter().zip(sounds) {
+            sentence.sound = sound;
         }
     }
 
