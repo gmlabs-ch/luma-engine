@@ -1,7 +1,8 @@
 //! Choosing the face a TrueType font is drawn with: the typeface a
 //! `.font` file names with `FACE`, in the weight and slant its `BOLD` and
-//! `ITALIC` ask for, among the faces of the font file the game ships and
-//! those installed on the system (see `docs/formats/font.md`).
+//! `ITALIC` ask for, among the faces of the font files the game ships and
+//! those installed on the system, and the face that stands in for a
+//! character the chosen one lacks (see `docs/formats/font.md`).
 //!
 //! Written with reference to `BFontTT.cpp` and `BFontStorage.cpp` of
 //! Wintermute Engine 1.x (MIT License, Copyright (c) 2003-2013 Jan
@@ -10,7 +11,8 @@
 //! italic flag (`CBFontTT::CreateWinFont`); the choice among the faces
 //! found, which GDI's font mapper makes there, is Luma Engine's own.
 
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use fontdb::{Database, ID, Source, Style};
 
@@ -19,7 +21,7 @@ pub const REGULAR: u16 = 400;
 /// The weight of a bold face (`FW_BOLD`).
 pub const BOLD: u16 = 700;
 /// The weight from which a face counts as bold already.
-const BOLD_ENOUGH: u16 = 600;
+pub(crate) const BOLD_ENOUGH: u16 = 600;
 
 /// A face a font can be drawn with, as its file describes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -221,6 +223,62 @@ impl FaceSet {
         self.db.with_face_data(*self.ids.get(index)?, f)
     }
 
+    /// Whether a face has a glyph for a character.
+    pub fn has_glyph(&self, index: usize, ch: char) -> bool {
+        self.with_data(index, |bytes, face| {
+            ttf_parser::Face::parse(bytes, face).is_ok_and(|face| face.glyph_index(ch).is_some())
+        })
+        .unwrap_or(false)
+    }
+
+    /// The face to draw a character with when the font asked for lacks
+    /// it: the first with a glyph for it among the faces of the
+    /// `preferred` families, in their order, then among all the others;
+    /// in a family the regular upright face is looked at first.
+    pub fn face_with_glyph(&self, ch: char, preferred: &[&str]) -> Option<usize> {
+        let plainest = |faces: &mut Vec<usize>| {
+            faces.sort_by_key(|&i| {
+                let face = &self.faces[i];
+                (face.italic, face.weight.abs_diff(REGULAR), i)
+            });
+        };
+        let mut order: Vec<usize> = Vec::with_capacity(self.faces.len());
+        for family in preferred {
+            let mut faces: Vec<usize> = (0..self.faces.len())
+                .filter(|&i| self.faces[i].is_of(family) && !order.contains(&i))
+                .collect();
+            plainest(&mut faces);
+            order.extend(faces);
+        }
+        let mut rest: Vec<usize> = (0..self.faces.len())
+            .filter(|i| !order.contains(i))
+            .collect();
+        plainest(&mut rest);
+        order.extend(rest);
+        order.into_iter().find(|&i| self.has_glyph(i, ch))
+    }
+
+    /// The face of the family of `index` closest to a style that still
+    /// has the character, with what is left to imitate; `index` itself
+    /// when no other face of its family will do.
+    pub fn styled(&self, index: usize, ch: char, bold: bool, italic: bool) -> FaceChoice {
+        let own = || {
+            let face = self.faces.get(index);
+            FaceChoice {
+                index,
+                embolden: bold && face.is_some_and(|f| f.weight < BOLD_ENOUGH),
+                slant: italic && face.is_some_and(|f| !f.italic),
+            }
+        };
+        let Some(family) = self.faces.get(index).and_then(|f| f.families.first()) else {
+            return own();
+        };
+        match choose_face(&self.faces, Some(family), bold, italic) {
+            Some(choice) if choice.index == index || self.has_glyph(choice.index, ch) => choice,
+            _ => own(),
+        }
+    }
+
     /// The file a face comes from, when it comes from one.
     pub fn path(&self, index: usize) -> Option<String> {
         let info = self.db.face(*self.ids.get(index)?)?;
@@ -231,9 +289,101 @@ impl FaceSet {
     }
 }
 
+/// The families looked at first for a character the font of a text
+/// lacks: the usual text faces of the platforms, then those that cover
+/// the most scripts.
+const FALLBACK_FAMILIES: &[&str] = &[
+    "Arial",
+    "Liberation Sans",
+    "Helvetica",
+    "DejaVu Sans",
+    "Noto Sans",
+    "Segoe UI",
+    "Tahoma",
+    "Microsoft Sans Serif",
+    "Lucida Grande",
+    "Arial Unicode MS",
+    "Noto Sans CJK SC",
+    "Noto Sans CJK JP",
+    "Noto Sans CJK KR",
+    "PingFang SC",
+    "Hiragino Sans",
+    "Microsoft YaHei",
+    "Yu Gothic",
+    "MS Gothic",
+    "Malgun Gothic",
+    "Apple SD Gothic Neo",
+];
+
+/// The system's face to draw a character with when no font of the game
+/// has it (see [`FaceSet::face_with_glyph`]); `None` when no installed
+/// font has it. The answer is kept: the fonts are searched once per
+/// character.
+pub fn system_face_with_glyph(ch: char) -> Option<usize> {
+    static FOUND: OnceLock<Mutex<HashMap<char, Option<usize>>>> = OnceLock::new();
+    let found = FOUND.get_or_init(Mutex::default);
+    if let Some(known) = found.lock().ok().and_then(|f| f.get(&ch).copied()) {
+        return known;
+    }
+    let face = FaceSet::system().face_with_glyph(ch, FALLBACK_FAMILIES);
+    if let Ok(mut found) = found.lock() {
+        found.insert(ch, face);
+    }
+    face
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_font::TestFont;
+
+    #[test]
+    fn a_missing_character_is_looked_up_in_the_other_faces() {
+        let mut db = Database::new();
+        for (family, chars, weight) in [
+            ("Plain", "ab", 400),
+            ("Wide", "abж", 700),
+            ("Wide", "abж", 400),
+            ("Other", "abжé", 400),
+        ] {
+            let font = TestFont {
+                family,
+                chars,
+                weight,
+                italic: false,
+            };
+            db.load_font_data(font.build());
+        }
+        let set = FaceSet::of(db);
+        let family = |i: usize| set.faces()[i].families[0].clone();
+        assert!(set.has_glyph(0, 'a') && !set.has_glyph(0, 'ж'));
+        assert!(!set.has_glyph(9, 'a'));
+        // The first face that has it; the regular one of its family.
+        let found = set.face_with_glyph('ж', &[]).unwrap();
+        assert_eq!(
+            (family(found).as_str(), set.faces()[found].weight),
+            ("Wide", 400)
+        );
+        // A preferred family comes first.
+        let found = set.face_with_glyph('ж', &["Missing", "other"]).unwrap();
+        assert_eq!(family(found), "Other");
+        let found = set.face_with_glyph('é', &["Wide"]).unwrap();
+        assert_eq!(family(found), "Other");
+        assert_eq!(set.face_with_glyph('Ω', &["Wide"]), None);
+        // The style asked for, in the family found.
+        let regular = set.face_with_glyph('ж', &[]).unwrap();
+        let bold = set.styled(regular, 'ж', true, false);
+        assert_eq!(set.faces()[bold.index].weight, 700);
+        assert!(!bold.embolden && !bold.slant);
+        let italic = set.styled(regular, 'ж', false, true);
+        assert_eq!((italic.index, italic.slant), (regular, true));
+        let other = set.face_with_glyph('é', &[]).unwrap();
+        let imitated = set.styled(other, 'é', true, true);
+        assert_eq!(
+            (imitated.index, imitated.embolden, imitated.slant),
+            (other, true, true)
+        );
+    }
 
     fn arial_family() -> Vec<Face> {
         vec![

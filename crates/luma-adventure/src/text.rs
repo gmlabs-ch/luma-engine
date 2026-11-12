@@ -16,6 +16,7 @@
 //! [`CodePage`](crate::code_page::CodePage)).
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use luma_archive::Vfs;
 use luma_formats::font::{BitmapFontDef, FontFile, TextAlign, TrueTypeFontDef};
@@ -24,7 +25,9 @@ use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
 use luma_script::classes::utf8_to_text;
 
 use crate::code_page::CodePage;
-use crate::font_face::{FaceChoice, FaceOrigin, FaceSet, choose_face, resolve_face};
+use crate::font_face::{
+    FaceChoice, FaceOrigin, FaceSet, choose_face, resolve_face, system_face_with_glyph,
+};
 use crate::scene_view::key;
 
 /// The number of rendered texts a TrueType font keeps
@@ -81,11 +84,18 @@ impl Font {
     /// Loads a `.font` file and what it needs (the tile image, the
     /// TrueType file).
     pub fn load(vfs: &Vfs, path: &str) -> Result<Font, String> {
+        Font::load_among(vfs, path, &mut FontFiles::default())
+    }
+
+    /// Loads a `.font` file as [`load`](Self::load) does, a TrueType
+    /// font among the game's font files registered so far (its own is
+    /// added to them).
+    pub fn load_among(vfs: &Vfs, path: &str, files: &mut FontFiles) -> Result<Font, String> {
         let bytes = vfs.read(path).map_err(|e| e.to_string())?;
         match FontFile::parse(&bytes).map_err(|e| e.to_string())? {
             FontFile::Bitmap(def) => BitmapFont::load(vfs, def).map(|f| Font::Bitmap(Box::new(f))),
             FontFile::TrueType(def) => {
-                TrueTypeFont::load(vfs, def).map(|f| Font::TrueType(Box::new(f)))
+                TrueTypeFont::load_among(vfs, def, files).map(|f| Font::TrueType(Box::new(f)))
             }
         }
     }
@@ -328,6 +338,67 @@ impl BitmapFont {
     }
 }
 
+/// The game's TrueType files made available to every font
+/// (`CBFontStorage::RegisterTTFont`): the original registers each
+/// `FILENAME` with Windows for the whole process, so that the `FACE` of
+/// any font can name a typeface another font's file brought. A file is
+/// read once; one that cannot be read is remembered too.
+#[derive(Debug, Default)]
+pub struct FontFiles {
+    files: Vec<RegisteredFile>,
+}
+
+#[derive(Debug)]
+struct RegisteredFile {
+    key: String,
+    path: String,
+    faces: Option<Arc<FaceSet>>,
+}
+
+impl FontFiles {
+    /// Registers a file of the game and returns its place; the file is
+    /// read when it is new.
+    fn register(&mut self, vfs: &Vfs, path: &str) -> usize {
+        let k = key(path);
+        if let Some(at) = self.files.iter().position(|f| f.key == k) {
+            return at;
+        }
+        let faces = vfs
+            .read(path)
+            .ok()
+            .map(FaceSet::from_bytes)
+            .filter(|set| !set.faces().is_empty())
+            .map(Arc::new);
+        self.files.push(RegisteredFile {
+            key: k,
+            path: path.to_string(),
+            faces,
+        });
+        self.files.len() - 1
+    }
+
+    /// The files that hold faces, the one at `first` before the others,
+    /// which follow in the order they were registered.
+    fn readable(&self, first: usize) -> Vec<(&str, Arc<FaceSet>)> {
+        let all = self.files.iter().enumerate();
+        let (own, others): (Vec<_>, Vec<_>) = all.partition(|(at, _)| *at == first);
+        own.into_iter()
+            .chain(others)
+            .filter_map(|(_, f)| Some((f.path.as_str(), f.faces.clone()?)))
+            .collect()
+    }
+
+    /// How many files are registered.
+    pub fn len(&self) -> usize {
+        self.files.len()
+    }
+
+    /// Whether no file is registered.
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+}
+
 /// A rasterised glyph.
 #[derive(Debug)]
 struct Glyph {
@@ -335,7 +406,61 @@ struct Glyph {
     coverage: Vec<u8>,
 }
 
+/// A face that draws the characters the font's own face lacks.
+struct Fallback {
+    font: Arc<fontdue::Font>,
+    embolden: bool,
+    slant: bool,
+}
+
+impl std::fmt::Debug for Fallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Fallback").finish_non_exhaustive()
+    }
+}
+
+/// The system's faces loaded to stand in for missing characters, shared
+/// by every font of the process: a face is parsed once.
+fn system_fallback_font(index: usize) -> Option<Arc<fontdue::Font>> {
+    static LOADED: OnceLock<Mutex<HashMap<usize, Option<Arc<fontdue::Font>>>>> = OnceLock::new();
+    let loaded = LOADED.get_or_init(Mutex::default);
+    if let Some(known) = loaded.lock().ok().and_then(|l| l.get(&index).cloned()) {
+        return known;
+    }
+    let font = FaceSet::system()
+        .with_data(index, |bytes, face| parse_face(bytes, face, 40.0).ok())
+        .flatten()
+        .map(Arc::new);
+    if let Ok(mut loaded) = loaded.lock() {
+        loaded.insert(index, font.clone());
+    }
+    font
+}
+
+fn parse_face(bytes: &[u8], index: u32, px: f32) -> Result<fontdue::Font, &'static str> {
+    let settings = fontdue::FontSettings {
+        collection_index: index,
+        scale: px,
+        ..fontdue::FontSettings::default()
+    };
+    fontdue::Font::from_bytes(bytes, settings)
+}
+
 impl Glyph {
+    /// The glyph of a character in a face, at a size, with the bold and
+    /// the italic to imitate.
+    fn of(font: &fontdue::Font, ch: char, px: f32, embolden: usize, slant: bool) -> Glyph {
+        let (metrics, coverage) = font.rasterize(ch, px);
+        let mut glyph = Glyph { metrics, coverage };
+        if embolden > 0 {
+            glyph = glyph.emboldened(embolden);
+        }
+        if slant {
+            glyph = glyph.slanted(SLANT);
+        }
+        glyph
+    }
+
     /// The glyph's top above the baseline (FreeType's `bitmap_top`).
     fn bearing_y(&self) -> i32 {
         self.metrics.ymin + self.metrics.height as i32
@@ -400,6 +525,12 @@ impl Glyph {
     }
 }
 
+/// The pixels a glyph is thickened by to imitate a bold: a regular
+/// stroke is about a twelfth of the size, a bold one half as much again.
+fn embolden_by(px: f32) -> usize {
+    ((px / 24.0).round() as usize).max(1)
+}
+
 /// A horizontal line a face draws along a line of text (the underline,
 /// the strike-through): how far above the baseline its top is, and its
 /// thickness, in pixels.
@@ -460,6 +591,18 @@ pub struct TrueTypeFont {
     /// Where `STRIKE` draws its line.
     strike: Rule,
     glyphs: HashMap<char, Option<Glyph>>,
+    /// The faces loaded so far for the characters the font's own lacks.
+    fallbacks: Vec<Fallback>,
+    /// The game's font files, searched for those characters: the font's
+    /// own first.
+    files: Vec<Arc<FaceSet>>,
+    /// The faces of `files` (file, face) looked at already.
+    tried: Vec<(usize, usize)>,
+    /// Whether the system's fonts are searched after the game's files.
+    system_fallback: bool,
+    /// Whether `FACE` was found, as a family name, in one of the game's
+    /// files.
+    family_found: bool,
     texts: Vec<CachedText>,
     /// Whether lines are laid out right to left (`Game.TextRTL`).
     rtl: bool,
@@ -470,23 +613,52 @@ pub struct TrueTypeFont {
 }
 
 impl TrueTypeFont {
+    /// Loads the face the definition asks for (`CBFontTT::CreateWinFont`)
+    /// with no other font file of the game than its own; see
+    /// [`load_among`](Self::load_among).
+    pub fn load(vfs: &Vfs, def: TrueTypeFontDef) -> Result<TrueTypeFont, String> {
+        TrueTypeFont::load_among(vfs, def, &mut FontFiles::default())
+    }
+
     /// Loads the face the definition asks for (`CBFontTT::CreateWinFont`):
     /// the typeface `FACE` in the weight and slant of `BOLD` and
-    /// `ITALIC`, from the game's `FILENAME` file when that file is of
-    /// that typeface, else from the system's fonts. When neither has
-    /// the typeface the game's file is used whatever its name, and a
-    /// usual system font without one. A bold or an italic the face found
-    /// lacks is imitated.
-    pub fn load(vfs: &Vfs, def: TrueTypeFontDef) -> Result<TrueTypeFont, String> {
-        let game = vfs.read(&def.filename).ok().map(FaceSet::from_bytes);
-        let game_faces = game.as_ref().map_or(&[][..], FaceSet::faces);
-        let (face, bold, italic) = (def.face.clone(), def.bold, def.italic);
-        // The system's fonts are only listed when the game's file is not
-        // the typeface asked for.
-        let found = match choose_face(game_faces, Some(&face), bold, italic) {
-            Some(choice) => Some((FaceOrigin::Game, choice)),
-            None => resolve_face(&[], FaceSet::system().faces(), &face, bold, italic),
+    /// `ITALIC`. The font's `FILENAME` is registered among the game's
+    /// font files (`CBFontStorage::RegisterTTFont`); the typeface is
+    /// looked for in that file, then in the other files registered,
+    /// then among the system's fonts. When none has the typeface the
+    /// font's own file is used whatever its name, and a usual system
+    /// font without one. A bold or an italic the face found lacks is
+    /// imitated.
+    pub fn load_among(
+        vfs: &Vfs,
+        def: TrueTypeFontDef,
+        files: &mut FontFiles,
+    ) -> Result<TrueTypeFont, String> {
+        let own = files.register(vfs, &def.filename);
+        let game = files.readable(own);
+        let sets: Vec<Arc<FaceSet>> = game.iter().map(|(_, set)| set.clone()).collect();
+        let finish = |mut font: TrueTypeFont, family_found: bool| {
+            font.files = sets.clone();
+            font.system_fallback = true;
+            font.family_found = family_found;
+            font
         };
+        let (face, bold, italic) = (def.face.clone(), def.bold, def.italic);
+        // A file of the game that is of the typeface asked for.
+        for (path, set) in &game {
+            let Some(choice) = choose_face(set.faces(), Some(&face), bold, italic) else {
+                continue;
+            };
+            let loaded = set.with_data(choice.index, |bytes, index| {
+                TrueTypeFont::from_face(def.clone(), path, bytes, index, choice)
+            });
+            if let Some(Ok(font)) = loaded {
+                return Ok(finish(font, true));
+            }
+        }
+        // The system's fonts, listed only now that the game has not the
+        // typeface.
+        let found = resolve_face(&[], FaceSet::system().faces(), &face, bold, italic);
         if let Some((FaceOrigin::System, choice)) = found {
             let system = FaceSet::system();
             let source = system.path(choice.index).unwrap_or_else(|| face.clone());
@@ -496,22 +668,16 @@ impl TrueTypeFont {
             // A system file that went away or does not parse is not the
             // end: the fallbacks below still apply.
             if let Some(Ok(font)) = loaded {
-                return Ok(font);
+                return Ok(finish(font, false));
             }
         }
-        // The game's own file: the face asked for, or, when no font has
-        // that typeface, the closest style of whatever the file holds.
-        if let Some(game) = &game {
-            let choice = match found {
-                Some((FaceOrigin::Game, choice)) => Some(choice),
-                _ => choose_face(game.faces(), None, bold, italic),
-            };
-            if let Some(choice) = choice {
-                let source = def.filename.clone();
-                if let Some(font) = game.with_data(choice.index, |bytes, index| {
-                    TrueTypeFont::from_face(def.clone(), &source, bytes, index, choice)
+        // The font's own file: the closest style of whatever it holds.
+        if let Some((path, set)) = game.first().filter(|_| files.files[own].faces.is_some()) {
+            if let Some(choice) = choose_face(set.faces(), None, bold, italic) {
+                if let Some(font) = set.with_data(choice.index, |bytes, index| {
+                    TrueTypeFont::from_face(def.clone(), path, bytes, index, choice)
                 }) {
-                    return font;
+                    return font.map(|font| finish(font, false));
                 }
             }
         }
@@ -526,7 +692,7 @@ impl TrueTypeFont {
             if let Some(font) = set.with_data(choice.index, |bytes, index| {
                 TrueTypeFont::from_face(def.clone(), path, bytes, index, choice)
             }) {
-                return font;
+                return font.map(|font| finish(font, false));
             }
         }
         Err(format!(
@@ -559,13 +725,7 @@ impl TrueTypeFont {
         choice: FaceChoice,
     ) -> Result<TrueTypeFont, String> {
         let px = def.pixel_size();
-        let settings = fontdue::FontSettings {
-            collection_index: index,
-            scale: px,
-            ..fontdue::FontSettings::default()
-        };
-        let font =
-            fontdue::Font::from_bytes(bytes, settings).map_err(|e| format!("{source}: {e}"))?;
+        let font = parse_face(bytes, index, px).map_err(|e| format!("{source}: {e}"))?;
         let metrics = font
             .horizontal_line_metrics(px)
             .ok_or_else(|| format!("{source}: no horizontal metrics"))?;
@@ -599,13 +759,7 @@ impl TrueTypeFont {
             source: source.to_string(),
             font,
             px,
-            // A regular stroke is about a twelfth of the size; a bold
-            // one half as much again.
-            embolden: if choice.embolden {
-                ((px / 24.0).round() as usize).max(1)
-            } else {
-                0
-            },
+            embolden: if choice.embolden { embolden_by(px) } else { 0 },
             slant: choice.slant,
             line_height,
             ascender,
@@ -614,6 +768,11 @@ impl TrueTypeFont {
             underline,
             strike,
             glyphs: HashMap::new(),
+            fallbacks: Vec::new(),
+            files: Vec::new(),
+            tried: Vec::new(),
+            system_fallback: false,
+            family_found: false,
             texts: Vec::new(),
             rtl: false,
             utf8: false,
@@ -679,26 +838,100 @@ impl TrueTypeFont {
         }
     }
 
+    /// Gives the font another file of the game to look in for the
+    /// characters its face lacks, after those it has. The characters
+    /// found missing so far are looked for again.
+    pub fn add_fallback_file(&mut self, faces: Arc<FaceSet>) {
+        if self.files.iter().any(|f| Arc::ptr_eq(f, &faces)) {
+            return;
+        }
+        self.files.push(faces);
+        self.glyphs.retain(|_, glyph| glyph.is_some());
+        self.texts.clear();
+    }
+
+    /// The glyph of a character: the face's own, else that of another
+    /// face that has the character, where Windows substitutes a font
+    /// too. The other faces of the game's font files are looked at
+    /// first (the font's own file, then the others registered), then
+    /// the system's fonts. `None` when no face has the character: it is
+    /// skipped.
     fn glyph(&mut self, ch: char) -> Option<&Glyph> {
-        let font = &self.font;
-        let (px, embolden, slant) = (self.px, self.embolden, self.slant);
-        self.glyphs
-            .entry(ch)
-            .or_insert_with(|| {
-                if font.lookup_glyph_index(ch) == 0 {
-                    return None;
+        if !self.glyphs.contains_key(&ch) {
+            let glyph = self.rasterize(ch);
+            self.glyphs.insert(ch, glyph);
+        }
+        self.glyphs.get(&ch).and_then(Option::as_ref)
+    }
+
+    fn rasterize(&mut self, ch: char) -> Option<Glyph> {
+        let (px, embolden) = (self.px, self.embolden);
+        if self.font.lookup_glyph_index(ch) != 0 {
+            return Some(Glyph::of(&self.font, ch, px, embolden, self.slant));
+        }
+        // A symbol font's character (`CHARSET=12`) in a face that keeps
+        // its symbols at the plain codes.
+        if let code @ 0xF020..=0xF0FF = u32::from(ch) {
+            let plain = char::from((code - 0xF000) as u8);
+            if self.font.lookup_glyph_index(plain) != 0 {
+                return Some(Glyph::of(&self.font, plain, px, embolden, self.slant));
+            }
+        }
+        let fallback = self.fallback_for(ch)?;
+        let face = &self.fallbacks[fallback];
+        let embolden = if face.embolden { embolden_by(px) } else { 0 };
+        Some(Glyph::of(&face.font, ch, px, embolden, face.slant))
+    }
+
+    /// The face, among those loaded for missing characters or still to
+    /// load, that has a character.
+    fn fallback_for(&mut self, ch: char) -> Option<usize> {
+        let loaded = |fallbacks: &[Fallback]| {
+            fallbacks
+                .iter()
+                .position(|f| f.font.lookup_glyph_index(ch) != 0)
+        };
+        if let Some(at) = loaded(&self.fallbacks) {
+            return Some(at);
+        }
+        let (bold, italic, px) = (self.def.bold, self.def.italic, self.px);
+        for (file, set) in self.files.clone().iter().enumerate() {
+            for face in 0..set.faces().len() {
+                if self.tried.contains(&(file, face)) || !set.has_glyph(face, ch) {
+                    continue;
                 }
-                let (metrics, coverage) = font.rasterize(ch, px);
-                let mut glyph = Glyph { metrics, coverage };
-                if embolden > 0 {
-                    glyph = glyph.emboldened(embolden);
+                self.tried.push((file, face));
+                let described = &set.faces()[face];
+                let font = set
+                    .with_data(face, |bytes, index| parse_face(bytes, index, px).ok())
+                    .flatten();
+                if let Some(font) = font {
+                    self.fallbacks.push(Fallback {
+                        font: Arc::new(font),
+                        embolden: bold && described.weight < crate::font_face::BOLD_ENOUGH,
+                        slant: italic && !described.italic,
+                    });
+                    return Some(self.fallbacks.len() - 1);
                 }
-                if slant {
-                    glyph = glyph.slanted(SLANT);
-                }
-                Some(glyph)
-            })
-            .as_ref()
+            }
+        }
+        if self.system_fallback {
+            let system = FaceSet::system();
+            let choice = system.styled(system_face_with_glyph(ch)?, ch, bold, italic);
+            let font = system_fallback_font(choice.index)?;
+            // A face that claims the character and gives no glyph for it
+            // must not be loaded again and again.
+            if font.lookup_glyph_index(ch) == 0 {
+                return None;
+            }
+            self.fallbacks.push(Fallback {
+                font,
+                embolden: choice.embolden,
+                slant: choice.slant,
+            });
+            return Some(self.fallbacks.len() - 1);
+        }
+        None
     }
 
     fn kerning(&self, left: char, right: char) -> f32 {
@@ -1082,6 +1315,8 @@ pub struct FontBank {
     rtl: bool,
     /// Whether text is UTF-8 (`Game.TextEncoding`).
     utf8: bool,
+    /// The game's TrueType files registered so far.
+    files: FontFiles,
     /// The ANSI code page set for the game, when one was.
     page: Option<CodePage>,
     /// The ANSI code page the fonts loaded tell of.
@@ -1104,7 +1339,8 @@ impl FontBank {
         if self.missing.iter().any(|(p, _)| key(p) == k) {
             return false;
         }
-        match Font::load(vfs, path) {
+        let registered = self.files.len();
+        match Font::load_among(vfs, path, &mut self.files) {
             Ok(mut font) => {
                 font.set_rtl(self.rtl);
                 font.set_utf8(self.utf8);
@@ -1121,12 +1357,57 @@ impl FontBank {
                 }
                 font.set_code_page(self.ansi_code_page());
                 self.fonts.insert(k, font);
+                if self.files.len() > registered {
+                    self.share_new_files(vfs, registered);
+                }
                 true
             }
             Err(reason) => {
                 self.missing.push((path.to_string(), reason));
                 false
             }
+        }
+    }
+
+    /// The fonts loaded before a file was registered get what the
+    /// original gives them at their next use, the file being registered
+    /// with Windows for every font: its faces for the characters theirs
+    /// lack, and for the fonts whose `FACE` no file of the game had so
+    /// far, the typeface itself when the new file is of it.
+    fn share_new_files(&mut self, vfs: &Vfs, from: usize) {
+        let new: Vec<Arc<FaceSet>> = self.files.files[from..]
+            .iter()
+            .filter_map(|f| f.faces.clone())
+            .collect();
+        let mut again: Vec<String> = Vec::new();
+        for (k, font) in &mut self.fonts {
+            let Font::TrueType(f) = font else { continue };
+            let named = |set: &Arc<FaceSet>| {
+                choose_face(set.faces(), Some(&f.def.face), false, false).is_some()
+            };
+            if !f.family_found && new.iter().any(named) {
+                again.push(k.clone());
+                continue;
+            }
+            for set in &new {
+                f.add_fallback_file(set.clone());
+            }
+        }
+        for k in again {
+            let Some(Font::TrueType(old)) = self.fonts.get(&k) else {
+                continue;
+            };
+            let Ok(font) = TrueTypeFont::load_among(vfs, old.def.clone(), &mut self.files) else {
+                continue;
+            };
+            let mut font = Font::TrueType(Box::new(font));
+            font.set_rtl(self.rtl);
+            font.set_utf8(self.utf8);
+            font.set_code_page(self.ansi_code_page());
+            if let Font::TrueType(f) = &font {
+                self.chosen.push((k.clone(), f.face_note()));
+            }
+            self.fonts.insert(k, font);
         }
     }
 
@@ -1286,6 +1567,85 @@ mod tests {
         // Without a frame ever ending (no renderer) the cache is bounded.
         frame(&mut font, 1000..1000 + 2 * MAX_FRAME_TEXTS);
         assert_eq!(font.texts.len(), MAX_FRAME_TEXTS);
+    }
+
+    /// A character the face lacks comes from another face of the game's
+    /// font files; one no face has is skipped.
+    #[test]
+    fn a_character_the_face_lacks_is_drawn_with_another_face() {
+        let mut font = test_ttf("", " ab");
+        assert_eq!(font.line_width("aéb"), 20, "skipped");
+        let before = font.render("aéb", 100, TextAlign::Left, -1);
+        assert_eq!(alpha(&before, 25, 10), 0, "two boxes");
+        font.prepare("a\u{e9}b", 100, TextAlign::Left, -1);
+        let other = FaceSet::from_bytes(TestFont::regular("Other", "éж").build());
+        let other = Arc::new(other);
+        font.add_fallback_file(other.clone());
+        assert!(font.texts.is_empty(), "rendered again with the glyph");
+        assert_eq!(font.line_width("aéb"), 30);
+        assert_eq!(font.line_width("aжb aΩb"), 60);
+        let after = font.render("aéb", 100, TextAlign::Left, -1);
+        assert_eq!(alpha(&after, 25, 10), 255, "three, one of the other face");
+        // The face is loaded once, and the file is taken once.
+        assert_eq!(font.fallbacks.len(), 1);
+        font.add_fallback_file(other);
+        assert_eq!(font.files.len(), 1);
+        // A bold asked of the font is imitated on the other face too.
+        let mut bold = test_ttf("BOLD=TRUE", " ab");
+        bold.add_fallback_file(Arc::new(FaceSet::from_bytes(
+            TestFont::regular("Other", "é").build(),
+        )));
+        assert_eq!(bold.line_width("é"), 11);
+    }
+
+    /// `CBFontStorage::RegisterTTFont`: a font file of the game serves
+    /// every font, whichever `.font` file brought it.
+    #[test]
+    fn the_face_of_a_font_can_come_from_another_fonts_file() {
+        let dir = std::env::temp_dir().join(format!("luma-fonts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, bytes: &[u8]| std::fs::write(dir.join(name), bytes).unwrap();
+        // No system has these two families.
+        let (first, second) = ("Luma Test Primus", "Luma Test Secundus");
+        write("first.ttf", &TestFont::regular(first, " ab").build());
+        write("second.ttf", &TestFont::regular(second, " abc").build());
+        let font = |face: &str, file: &str| {
+            format!("TTFONT {{ SIZE=15 FACE=\"{face}\" FILENAME=\"{file}\" ALPHA=255 }}")
+        };
+        write("first.font", font(first, "first.ttf").as_bytes());
+        // Asks for the first family and ships the second.
+        write("borrowed.font", font(first, "second.ttf").as_bytes());
+        write("second.font", font(second, "SECOND.TTF").as_bytes());
+        let mut vfs = Vfs::new();
+        vfs.add_directory(&dir);
+        let source = |bank: &FontBank, path: &str| match bank.get(path) {
+            Some(Font::TrueType(f)) => f.source.clone(),
+            _ => panic!("{path} is not loaded"),
+        };
+
+        let mut bank = FontBank::new();
+        // Alone, the font is drawn with the file it ships: no font has
+        // its typeface.
+        assert!(bank.load(&vfs, "borrowed.font"), "{:?}", bank.missing());
+        assert_eq!(source(&bank, "borrowed.font"), "second.ttf");
+        // The first font registers its file: the typeface is there now.
+        assert!(bank.load(&vfs, "first.font"));
+        assert_eq!(source(&bank, "first.font"), "first.ttf");
+        assert_eq!(source(&bank, "borrowed.font"), "first.ttf");
+        assert_eq!(bank.take_chosen().len(), 3, "the new choice is logged");
+        // A file is registered once, whatever the spelling of its path.
+        assert!(bank.load(&vfs, "second.font"));
+        assert_eq!(bank.files.len(), 2);
+        // Loaded after, the typeface is found at once.
+        let mut later = FontBank::new();
+        assert!(later.load(&vfs, "first.font"));
+        assert!(later.load(&vfs, "borrowed.font"));
+        assert_eq!(source(&later, "borrowed.font"), "first.ttf");
+        // The files serve each other's missing characters: `c` is only
+        // in the second.
+        assert_eq!(later.get_mut("first.font").unwrap().text_width("abc"), 30);
+        assert_eq!(bank.get_mut("first.font").unwrap().text_width("abc"), 30);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn lines(font: &mut TrueTypeFont, text: &str, width: i32, height: i32) -> Vec<String> {

@@ -121,12 +121,18 @@ its typeface: a font file that asks for `FACE = "Arial"`, `BOLD = TRUE`
 and ships another typeface as `FILENAME` is drawn in Arial Bold on any
 system that has Arial. Many games rely on it.
 
+Registering is for the whole process (`CBFontStorage::RegisterTTFont`):
+once any font has brought a file, the `FACE` of every other font can
+name its typeface.
+
 Luma Engine does the same in three steps; the rules for choosing among
 the faces found are its own, GDI's font mapper not being documented:
 
-1. **The game's file.** When `FILENAME` is among the game's files and
-   one of its faces has `FACE` as a family name (compared without
-   case), the file is used.
+1. **The game's files.** Each `FILENAME` is read once and kept for all
+   the fonts. When the font's own file has a face with `FACE` as a
+   family name (compared without case), that file is used; else the
+   first other file registered that has one. A font loaded before the
+   file that holds its typeface is given it when that file arrives.
 2. **The system's fonts.** Otherwise the fonts installed on the system
    are searched for the family `FACE`; when the system lacks it, for
    the families that stand for it: Liberation Sans, Arimo, Helvetica,
@@ -151,9 +157,21 @@ slants each glyph by a fifth of its height about the baseline. A bold
 face is never made lighter nor an italic one upright.
 
 The engine logs the file each TrueType font is drawn with, and what it
-imitates. A character the chosen face lacks is skipped: it is not
-looked up in the game's file or in another font, where Windows would
-substitute one.
+imitates.
+
+**Missing characters.** A character the chosen face lacks is drawn with
+another face that has it, where Windows substitutes a font too (which
+one is Luma Engine's own rule): the other faces of the font's own file,
+then those of the game's other font files, then the fonts of the
+system, where the usual text families (Arial, Liberation Sans,
+Helvetica, DejaVu Sans, Noto Sans, Segoe UI, Tahoma...) and the large
+CJK families are looked at before the rest, the regular upright face of
+a family first. In the family found, the face nearest to the font's
+`BOLD` and `ITALIC` that has the character is used, and what it lacks is
+imitated. The glyph keeps its own advance; no kerning is applied across
+two faces. The system's fonts are searched once per character, and a
+face found is parsed once for all the fonts. A character no font has is
+skipped and takes no room.
 
 ### Metrics
 
@@ -219,8 +237,7 @@ wide as its widest line (at most 4096 pixels). This is a convention of
 Luma Engine for the callers that place a line themselves, the editors;
 the original engine always gives its fonts a width.
 
-Glyphs the font lacks are skipped. Kerning is applied when the font has
-a `kern` table.
+Kerning is applied when the font has a `kern` table.
 
 ## Text encoding
 
