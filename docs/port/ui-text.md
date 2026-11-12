@@ -49,7 +49,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBFontBitmap::LoadBuffer PAINT_WHOLE_CELL` | done | `luma-formats/src/font.rs` `tile`: the whole tile width is drawn, the advance stays the character's width. |
 | `CBFontBitmap::Persist` | replaced | Fonts are not part of a saved game: the fonts in use are loaded again from their files after a load (`save.rs`, `FontBank::load`). |
 | `CBFontBitmap::GetCharWidth` | done | `luma-formats/src/font.rs` `BitmapFontDef::char_width`. |
-| `CBFontBitmap::GetWidths` | partial | `luma-formats/src/font.rs` `BitmapFontDef::measure_tile`: same scan (right-most inked column plus one, pixels outside the image skipped). Different: a pixel is ink when its alpha is above 128; in the original any pixel whose alpha is not 0 is ink (`IsTransparentAtLite`), so the soft edge of an antialiased character counts and the character is wider. `WIDTHS_FRAME` is ignored (first frame measured). |
+| `CBFontBitmap::GetWidths` | done | `luma-formats/src/font.rs` `BitmapFontDef::measure_tile`: same scan (right-most inked column plus one, pixels outside the image skipped), a pixel being ink unless it is fully transparent (`IsTransparentAtLite`). `luma-adventure/src/text.rs` `BitmapFont::load` measures the frame `WIDTHS_FRAME` of the sprite, the image without a sprite, and nothing (widths of 0) when the sprite has no such frame. |
 | `CBFontBitmap::GetLetterHeight` | done | `luma-adventure/src/text.rs` `Font::line_height`: the tile height. |
 
 ## `wme_base/BFontStorage.cpp`
