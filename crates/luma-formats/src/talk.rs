@@ -186,7 +186,7 @@ impl TalkDef {
                 "TEMPLATE" => {
                     let file = child.as_str().unwrap_or_default().to_string();
                     let bytes = if depth < TEMPLATE_DEPTH {
-                        (files.load)(&file)
+                        files.read(&file)
                     } else {
                         None
                     };
@@ -276,7 +276,7 @@ fn time_of(node: &Node) -> u32 {
 }
 
 fn load_set(file: &str, files: &mut SetFiles<'_>) -> Option<SpriteSet> {
-    let bytes = (files.load)(file)?;
+    let bytes = files.read(file)?;
     SpriteSet::parse_with(&bytes, files).ok()
 }
 
@@ -310,6 +310,7 @@ mod tests {
                 load: &mut load,
                 sprite_loads: &mut sprite_loads,
                 follow_templates: true,
+                files_left: SetFiles::FILE_BUDGET,
             },
         )
     }

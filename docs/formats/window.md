@@ -299,7 +299,7 @@ The file is read as `CAdResponseBox::LoadBuffer` reads it, key by key:
 a key that is not in the table is a syntax error and the box is not
 loaded; a template, font or cursor that does not load ends the reading
 there without an error, so the box keeps the keys before it and misses
-those after it. (Templates chain up to 8 deep in Luma.) A response box
+those after it. (Templates chain up to 8 deep in Luma, 64 files in all.) A response box
 that does not load leaves the game without one.
 
 A text choice is as wide as the area (as the screen when the area has

@@ -810,6 +810,10 @@ pub enum ResponseBoxFile {
 /// How many `TEMPLATE` files a response box may chain.
 const RESPONSE_BOX_TEMPLATE_DEPTH: u32 = 8;
 
+/// How many `TEMPLATE` files a response box may read in all: a file may
+/// name several, so the depth alone does not bound the work.
+const RESPONSE_BOX_TEMPLATE_FILES: u32 = 64;
+
 impl ResponseBoxDef {
     /// Parses a `.def` file: a `RESPONSE_BOX` root block.
     pub fn parse(bytes: &[u8]) -> Result<ResponseBoxDef> {
@@ -838,7 +842,8 @@ impl ResponseBoxDef {
         usable: &mut dyn FnMut(ResponseBoxFile, &str) -> bool,
     ) -> Result<ResponseBoxDef> {
         let mut def = ResponseBoxDef::default();
-        def.read_file(bytes, load, usable, 0)?;
+        let mut files_left = RESPONSE_BOX_TEMPLATE_FILES;
+        def.read_file(bytes, load, usable, 0, &mut files_left)?;
         Ok(def)
     }
 
@@ -848,12 +853,13 @@ impl ResponseBoxDef {
         load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
         usable: &mut dyn FnMut(ResponseBoxFile, &str) -> bool,
         depth: u32,
+        files_left: &mut u32,
     ) -> Result<bool> {
         let doc = Document::parse(bytes)?;
         let root = doc.get("RESPONSE_BOX").ok_or_else(|| Error::Invalid {
             reason: "'RESPONSE_BOX' keyword expected".into(),
         })?;
-        self.read(root, load, usable, depth)
+        self.read(root, load, usable, depth, files_left)
     }
 
     /// Reads the keys of a `RESPONSE_BOX` block, overriding what is
@@ -866,7 +872,8 @@ impl ResponseBoxDef {
     /// Reads the keys of the block, overriding what is there; `load`
     /// reads the `TEMPLATE` files. An unknown key ends the reading.
     pub fn apply_with(&mut self, node: &Node, load: &mut dyn FnMut(&str) -> Option<Vec<u8>>) {
-        let _ = self.read(node, load, &mut |_, _| true, 0);
+        let mut files_left = RESPONSE_BOX_TEMPLATE_FILES;
+        let _ = self.read(node, load, &mut |_, _| true, 0, &mut files_left);
     }
 
     /// Reads the keys in order. `Ok(false)` when a file that did not
@@ -877,6 +884,7 @@ impl ResponseBoxDef {
         load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
         usable: &mut dyn FnMut(ResponseBoxFile, &str) -> bool,
         depth: u32,
+        files_left: &mut u32,
     ) -> Result<bool> {
         for child in node.nodes() {
             match child.key.to_ascii_uppercase().as_str() {
@@ -885,15 +893,16 @@ impl ResponseBoxDef {
                     let Some(file) = path(child) else {
                         return Ok(false);
                     };
-                    if depth >= RESPONSE_BOX_TEMPLATE_DEPTH {
+                    if depth >= RESPONSE_BOX_TEMPLATE_DEPTH || *files_left == 0 {
                         return Ok(false);
                     }
+                    *files_left -= 1;
                     let Some(bytes) = load(&file) else {
                         return Ok(false);
                     };
                     // `LoadFile` of the template: a file that does not
                     // parse, or that stopped early, stops this one too.
-                    match self.read_file(&bytes, load, usable, depth + 1) {
+                    match self.read_file(&bytes, load, usable, depth + 1, files_left) {
                         Ok(true) => {}
                         Ok(false) | Err(_) => return Ok(false),
                     }

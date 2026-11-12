@@ -94,8 +94,9 @@ that exists and does not parse. A file that is **missing** loads, in the
 original as its `invalid.bmp` placeholder; Luma shows nothing in its
 place.
 
-Luma bounds a chain of templates at 8 files and a definition at 4096
-actions; the original has no limit.
+Luma bounds a chain of templates at 8 files, the files one definition
+reads through its templates and sprite set files at 256 in all, and a
+definition at 4096 actions; the original has no limit.
 
 ## Playing a definition
 

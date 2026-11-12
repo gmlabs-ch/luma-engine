@@ -2480,7 +2480,7 @@ impl World {
                     .as_deref()
                     .and_then(|p| self.sprite_size_loaded(p))
                     .map_or(0, |(w, _)| w);
-                (item.x + width / 2, item.y)
+                (item.x.saturating_add(width / 2), item.y)
             }),
             _ => (0, 0),
         };
@@ -2612,7 +2612,10 @@ impl World {
     /// position into a screen position.
     pub(crate) fn scene_offset_in_viewport(&self) -> (i32, i32) {
         let (left, top, _, _) = self.viewport();
-        (self.offset_x - left, self.offset_y - top)
+        (
+            self.offset_x.saturating_sub(left),
+            self.offset_y.saturating_sub(top),
+        )
     }
 
     /// The talk definition of a speech file (`CAdSentence::

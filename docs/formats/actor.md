@@ -94,7 +94,7 @@ file's polygon scaled by the scene's scale level at the actor's `y`
 |-----|------|---------|
 | `NAME` | string | Name of the set (talk stances, animations). |
 | `UP`, `UP_RIGHT`, `RIGHT`, `DOWN_RIGHT`, `DOWN`, `DOWN_LEFT`, `LEFT`, `UP_LEFT` | string | The sprite for each direction. |
-| `TEMPLATE` | string | A `.spriteset` file (a `SPRITESET` root block), read into the same set where the key stands: it overrides the keys before it, the keys after it override it. Templates chain, up to 8 deep in Luma. |
+| `TEMPLATE` | string | A `.spriteset` file (a `SPRITESET` root block), read into the same set where the key stands: it overrides the keys before it, the keys after it override it. Templates chain, up to 8 deep in Luma, and one actor or talk definition reads at most 256 such files in all. |
 | `EDITOR_PROPERTY` | block | Editor state, ignored. |
 
 A set is read as `CAdSpriteSet::LoadBuffer` reads it, and **fails** on a

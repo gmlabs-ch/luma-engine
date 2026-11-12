@@ -423,6 +423,7 @@ mod tests {
                 load: &mut load,
                 sprite_loads: &mut sprite_loads,
                 follow_templates: true,
+                files_left: luma_formats::SetFiles::FILE_BUDGET,
             },
         )
         .unwrap()

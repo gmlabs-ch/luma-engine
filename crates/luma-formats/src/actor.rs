@@ -21,6 +21,23 @@ pub struct SetFiles<'a> {
     /// Whether `TEMPLATE` files are read; without it they are only
     /// recorded (a tool reading one file on its own).
     pub follow_templates: bool,
+    /// How many more files `load` may be asked for: templates fan out
+    /// (a file may name several, each naming several), so the depth of
+    /// a chain alone does not bound the work. Start at
+    /// [`SetFiles::FILE_BUDGET`].
+    pub files_left: u32,
+}
+
+impl SetFiles<'_> {
+    /// The files one definition may read through its templates and
+    /// sprite set files, all told. The original has no limit.
+    pub const FILE_BUDGET: u32 = 256;
+
+    /// Reads a file of the game, while the budget lasts.
+    pub(crate) fn read(&mut self, file: &str) -> Option<Vec<u8>> {
+        self.files_left = self.files_left.checked_sub(1)?;
+        (self.load)(file)
+    }
 }
 
 /// How many `TEMPLATE` files a sprite set may chain.
@@ -126,7 +143,7 @@ impl SpriteSet {
                         continue;
                     }
                     let bytes = if depth < SET_TEMPLATE_DEPTH {
-                        (files.load)(&file)
+                        files.read(&file)
                     } else {
                         None
                     };
@@ -353,6 +370,7 @@ impl Actor {
                 load: &mut |_| None,
                 sprite_loads: &mut |_| true,
                 follow_templates: false,
+                files_left: 0,
             },
         )
     }
@@ -376,6 +394,7 @@ impl Actor {
                 load: &mut |_| None,
                 sprite_loads: &mut |_| true,
                 follow_templates: false,
+                files_left: 0,
             },
         )
     }
@@ -676,6 +695,7 @@ ACTOR {
             load: &mut load,
             sprite_loads: &mut sprite_loads,
             follow_templates: true,
+            files_left: SetFiles::FILE_BUDGET,
         };
         // A template is read where the key stands: it overrides the
         // keys before it, the keys after it override it.
@@ -697,6 +717,27 @@ ACTOR {
         ] {
             assert!(SpriteSet::parse_with(bad, &mut files).is_err());
         }
+        // Templates that fan out are cut by the file budget.
+        let mut wide = |file: &str| {
+            let level: u32 = file.trim_end_matches(".spriteset").parse().unwrap_or(9);
+            Some(if level >= 6 {
+                b"SPRITESET { }".to_vec()
+            } else {
+                let next = format!("TEMPLATE=\"{}.spriteset\" ", level + 1).repeat(8);
+                format!("SPRITESET {{ {next} }}").into_bytes()
+            })
+        };
+        let mut any = |_: &str| true;
+        let mut budget = SetFiles {
+            load: &mut wide,
+            sprite_loads: &mut any,
+            follow_templates: true,
+            files_left: SetFiles::FILE_BUDGET,
+        };
+        assert!(
+            SpriteSet::parse_with(b"SPRITESET { TEMPLATE=\"0.spriteset\" }", &mut budget).is_err()
+        );
+        assert_eq!(budget.files_left, 0);
         // The same inside an actor: the set fails the actor.
         let mut actor = Actor::default();
         assert!(

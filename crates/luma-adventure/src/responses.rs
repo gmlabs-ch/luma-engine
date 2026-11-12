@@ -366,7 +366,7 @@ impl World {
         };
         self.responses.scroll_offset = 0;
         let pending = self.responses.pending.clone();
-        let area_width = def.area.right - def.area.left;
+        let area_width = def.area.right.saturating_sub(def.area.left);
         let screen_width = self.settings.width as i32;
         let system_font = self.system_font.clone();
         // The cursor of an icon choice: the box's, else the game's
@@ -438,9 +438,12 @@ impl World {
             self.responses.buttons.push(id);
             let height = self.control(id).map_or(0, |c| c.height);
             if let Some(def) = self.responses.def.as_mut() {
-                let area_height = def.area.bottom - def.area.top;
+                let area_height = def.area.bottom.saturating_sub(def.area.top);
                 if area_height < height {
-                    def.area.bottom += height - area_height;
+                    def.area.bottom = def
+                        .area
+                        .bottom
+                        .saturating_add(height.saturating_sub(area_height));
                     let text = response.text.clone();
                     self.log(format!(
                         "Warning: Response '{text}' is too high to be displayed within response box. Correcting."
