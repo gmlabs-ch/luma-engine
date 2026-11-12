@@ -40,6 +40,9 @@ use crate::world::World;
 /// from the actor to its shadow light (`DisplayShadowVolume`).
 pub const EXTRUSION_FACTOR: f32 = 1.5;
 
+/// The most vertices the shadow volume of one actor may hold (24 MB).
+const MAX_SHADOW_VOLUME_VERTICES: usize = 2_000_000;
+
 /// The range of the point lights of the geometry (`C3DLight::SetLight`).
 pub const POINT_LIGHT_RANGE: f32 = 100_000.0;
 
@@ -979,6 +982,11 @@ impl Render3d {
                         let positions: Vec<Vec3> =
                             posed.vertices.iter().map(|v| v.position).collect();
                         add_shadow_volume(mesh, &positions, adjacency, light, depth, &mut vertices);
+                        // A hostile model must not ask the GPU for a buffer it
+                        // cannot create: past this size nothing is shadowed.
+                        if vertices.len() > MAX_SHADOW_VOLUME_VERTICES {
+                            return;
+                        }
                     }
                     for v in &mut vertices[start..] {
                         let w = model.world.transform_coord(Vec3::new(v[0], v[1], v[2]));
