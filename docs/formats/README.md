@@ -18,4 +18,5 @@ files only (see the clean-room rule in [CONTRIBUTING.md](../../CONTRIBUTING.md))
 | Windows and controls (`.window`), tiled images, inventory (`.def`, `.items`) | [window.md](window.md) | Implemented in `luma-formats`; display, input and the inventory in `luma-adventure` |
 | Scene geometry of 3D scenes (`.3ds`, `.geometry`) | [geometry.md](geometry.md) | Implemented in `luma-3d` (feature `3d`); the scene's 3D keys in `luma-formats` |
 | 3D models (`.x`, DirectX text format) | [xfile.md](xfile.md) | Implemented in `luma-3d` (feature `3d`): frames, meshes, skin weights, animation sets; binary and compressed files rejected |
+| AVI videos (`.avi`): the RIFF container, the picture and sound codecs decoded | [avi.md](avi.md) | Implemented in `luma-video`; played in `luma-adventure` (not a Wintermute format: written from public descriptions) |
 | 3D actors (`.act3d`) and animation sidecars (`.anim`) | [actor3d.md](actor3d.md) | Implemented in `luma-3d` (feature `3d`); the actor itself in a later task |

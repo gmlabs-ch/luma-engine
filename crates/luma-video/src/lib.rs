@@ -1,5 +1,5 @@
-//! Video playback: Ogg Theora files decoded to RGBA frames, one at a
-//! time, with the timing a player needs.
+//! Video playback: Ogg Theora files and AVI files decoded to RGBA
+//! frames, one at a time, with the timing a player needs.
 //!
 //! Part of [Luma Engine](https://github.com/gmlabs-ch/luma-engine).
 //!
@@ -10,6 +10,11 @@
 //! original engine (`VidTheoraPlayer.cpp` of Wintermute Engine 1.x, MIT
 //! License, Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`. How the
 //! engine plays videos is documented in `docs/video.md`.
+//!
+//! AVI files (the older `Game.PlayVideo`) are read by [`AviVideo`]: the
+//! RIFF container and the codecs listed in `docs/video.md`, written
+//! from public descriptions of the formats (`docs/formats/avi.md`).
+//! Both kinds of video are a [`FrameSource`] to the player.
 //!
 //! ```
 //! let bytes = luma_video::synthetic_clip(32, 32, 3, 10);
@@ -22,6 +27,7 @@
 
 #![forbid(unsafe_code)]
 
+mod avi;
 mod error;
 
 use std::io::Cursor;
@@ -34,7 +40,57 @@ use oxideav_theora::{
     decode_identification_header,
 };
 
+pub use avi::{
+    AviFile, AviSound, AviSpec, AviVideo, BitmapFormat, StreamHeader, WaveFormat, build_avi,
+    fourcc_name, is_avi, synthetic_avi,
+};
 pub use error::{Error, Result};
+
+/// A video a player takes its frames from, whatever its container and
+/// codec: the frames come in order, each with the time it is shown at.
+pub trait FrameSource {
+    /// The picture size, frame rate and sound track.
+    fn info(&self) -> &VideoInfo;
+
+    /// Index of the next frame [`FrameSource::next_frame`] gives.
+    fn next_index(&self) -> u64;
+
+    /// Decodes the next frame; `None` once the stream ends.
+    fn next_frame(&mut self) -> Result<Option<Frame>>;
+
+    /// Passes over the frames before `index`, so that the next frame
+    /// given is that one (or the stream's end). A source whose frames
+    /// stand alone need not decode them.
+    fn skip_to(&mut self, index: u64) -> Result<()> {
+        while self.next_index() < index {
+            if self.next_frame()?.is_none() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Goes back to the first frame.
+    fn rewind(&mut self) -> Result<()>;
+}
+
+impl FrameSource for Video {
+    fn info(&self) -> &VideoInfo {
+        Video::info(self)
+    }
+
+    fn next_index(&self) -> u64 {
+        Video::next_index(self)
+    }
+
+    fn next_frame(&mut self) -> Result<Option<Frame>> {
+        Video::next_frame(self)
+    }
+
+    fn rewind(&mut self) -> Result<()> {
+        Video::rewind(self)
+    }
+}
 
 /// What a video is: its picture size, frame rate and whether it has a
 /// sound track.
