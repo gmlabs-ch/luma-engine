@@ -246,10 +246,46 @@ before their children, in file order. A file **without a top-level
 `Model::find_frame(name)` is the original's `FindFrame`: exact,
 case-sensitive, depth-first in file order; the root never matches.
 
-One place where Luma is more tolerant than the original: an **empty
-frame** (`Frame x { }`) fails the whole load in the original (its child
-loop leaves the error code at "failed" when there is nothing to load) and
-is accepted here.
+**What a failing object does** (`CXFrameNode::LoadFromXData`). At the
+top level the first object that fails fails the file. Inside a `Frame`
+the original keeps the result of the **last** object only, and starts
+from "failed" when the frame holds no object at all, so:
+
+- an object that fails (a mesh whose face names a missing vertex, an
+  animation set with a duplicated track) is left out alone when another
+  object follows it in the frame;
+- a frame whose last object fails, and a frame with **no object at all**
+  (`Frame x { }`), is dropped with the frames and meshes under it, and
+  fails in turn: its parent drops it and goes on, unless it was the
+  parent's last object, and so on up to the top level, where it fails the
+  file (`Error::EmptyFrame` for an empty frame);
+- the animation sets and the tick rate read inside a dropped frame stay:
+  they belong to the model, not to the frame.
+
+Luma reproduces this (`Model::load_object`): a model the original loads
+has the same frames and meshes here, and `FindFrame` misses the same
+names. Every failure of an object is treated this way, including one
+D3DX would have refused when it parsed the file (an object with too few
+values): Luma then loads a file the original rejects.
+
+A **data reference** among the objects of a frame (`{ Name }`) counts as
+an object that loaded and is not followed. This point is **[ext]**: the
+Direct3D 9 build hands the reference to the same loader, which asks D3DX
+for the type and data of the object referred to, and the Direct3D 8
+build skips references (and fails the frame when one is its last
+object); no sample file has one.
+
+**Mesh order.** `Model::meshes` lists the meshes in the order the
+original walks them when it updates, draws and builds shadow volumes
+(`CXFrameNode::Render`): a frame's own meshes, then its child frames in
+file order. A mesh written after a child frame in the file therefore
+comes before that child frame's meshes. `Frame::meshes` and
+`Mesh::frame` index accordingly.
+
+**Bounds.** Objects may nest 256 deep (a skeleton is a chain of a few
+dozen frames), every list is allocated from the values the object really
+has, not from the count it announces, and a bone cannot weight more
+vertices than the mesh has (`Error::TooManyWeights`).
 
 ### 2.1 Paths and names
 
@@ -328,7 +364,10 @@ Each `Animation` has:
   (`Animation::frame`); a name the model does not have leaves `None` and
   the animation then drives nothing. The original accepts a reference only
   if it resolves to a `Frame` object; Luma also takes a reference that
-  resolves to nothing as a frame name (D3DX would reject the file). The
+  resolves to nothing in the file as a frame name, which is what a file
+  of animations alone, merged into a model, needs (**[ext]**: whether
+  the DirectX file library accepts a reference to an object the file
+  does not define is not documented). The
   original's check for a duplicated reference is dead code (it tests a
   pointer that is only set later), so with two references the **last
   wins**, as here;
@@ -413,5 +452,73 @@ the `AnimationSet` and loose `Animation` objects of another file, at the
 top level and **inside its frames** (the frames and meshes themselves are
 not added), names unnamed sets after that file, and resolves their frame
 references against the model's existing frames. Merging into a model that
-has no frames is an error. `Model::remove_animation_set(name)` is
-`UnloadAnim` (case-insensitive).
+has no frames is an error.
+
+A frame of the merged file follows the rule of section 2
+(`CXFrameNode::MergeFromXData`): it answers what its last object
+answered, and fails when it is empty. The first top-level object that
+fails ends the merge with an error; the sets read before it **stay in the
+model, bound to no frame** (they play and move nothing), because the
+original looks the bones up only after a merge that succeeded. A later
+merge that succeeds binds every set of the model, those included.
+
+`Model::remove_animation_set(name)` is `CXModel::UnloadAnimation`
+(case-insensitive). When several sets share the name, the original's
+loop steps over the **two sets that follow each removed one**
+(`Model::animation_sets_to_unload`), so of three such sets in a row only
+the first is removed by one call.
+
+### 2.6 A model with a parent (the shadow model)
+
+`CXModel::LoadFromFile(file, ParentModel)` loads a second model whose
+bones are those of another: the actor's `SHADOW_MODEL`, a low-polygon
+stand-in that casts the shadows. `Model::parse_with_parent(bytes,
+file_name, &parent)` is that load: the file is read as any model, then
+the frame of every mesh bone and of every animation target is looked up
+by name in the **parent's** frames instead of its own (`Bone::frame` and
+`Animation::frame` then index `parent.frames`). The file's own frames
+are kept and only place its meshes without bones.
+
+At run time (`luma_3d::animation::ShadowModel`, `update(&parent)` after
+the parent's own update, as `CAdActor3DX::Update` calls
+`m_ShadowModel->Update()` right after the model's):
+
+- a skinned mesh is posed with `offset * the parent's combined matrix`
+  of each bone, so it follows the parent's animation;
+- a mesh without bones is moved by the combined matrix of its own frame
+  **at rest**: nothing animates the shadow model's own frames;
+- a bone the parent has no frame for uses the identity (the original
+  reads a pointer it never set).
+
+## 3. What is inferred
+
+The engine leaves these to Direct3D (`D3DXLoadSkinMeshFromXof`,
+`ID3DXSkinInfo::UpdateSkinnedMesh`, the DirectX file library), whose
+code is not available. Luma's behaviour there comes from the public
+description of the format and from what the sample files need:
+
+- the container: text, binary and MSZIP forms (section 1);
+- templates matched by name instead of by GUID, and template
+  declarations skipped (1.3);
+- polygons cut into fans, vertices duplicated where the normal of a
+  corner differs, duplicates carrying the UV and weights of their
+  original (2.2);
+- smooth normals computed for a mesh without `MeshNormals` (2.2);
+- a material list shorter than the faces repeating its last entry, an
+  index past the materials clamped (2.2);
+- a face or a weight naming a vertex the mesh does not have, and a
+  normal list that does not match the faces, failing the mesh (2.2);
+- `VertexDuplicationIndices` read and not used (2.2);
+- skinning: a vertex no bone weights keeps its loaded position, and the
+  normals are transformed by the bone matrices themselves and then
+  normalised (D3DX takes inverse transposes when it is given them; the
+  engine gives none) ([../3d-actors.md](../3d-actors.md), 6.3);
+- a reference among the objects of a frame not followed (section 2);
+- an animation's reference to a frame the file does not define taken as
+  a frame name (2.3);
+- an object with too few values failing alone instead of failing the
+  file at parse time (section 2).
+
+A missing texture file is not part of the format: the original then uses
+its `invalid.bmp` placeholder (`CBSurfaceStorage::AddSurface`), which is
+the business of whoever loads the texture.

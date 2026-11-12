@@ -50,10 +50,12 @@ pub mod three_ds;
 pub mod xfile;
 mod xfile_binary;
 
-pub use actor3d::{Actor3dDef, AnimationDef, ShadowType};
+pub use actor3d::{
+    Actor3dDef, AnimationDef, AnimationFile, Applied, BuiltModels, ModelStep, ShadowType,
+};
 pub use animation::{
     ActiveAnimation, ActiveAnimationState, AnimatedModel, AnimationState, BoundingBox,
-    ChannelState, SkinnedMesh,
+    ChannelState, ShadowModel, SkinnedMesh,
 };
 pub use camera::{CameraSettings, Projection, Ray, ViewSetup, Viewport};
 pub use math::{Mat4, Plane, Quat, Vec3};

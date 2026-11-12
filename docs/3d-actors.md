@@ -245,10 +245,12 @@ Derived values:
 `load`, `classify`, the wildcard matcher `matches_pattern`) and
 `luma_3d::scene_geometry::SceneGeometry::load_3ds`, specified in
 [formats/geometry.md](formats/geometry.md). Two details found while
-implementing: the original's sidecar parser **fails on any key it does
-not know** and the geometry then falls back to the three built-in nodes
-alone (reproduced by `NodePatterns::load`); and a light without a colour
-chunk has an undefined colour in the original, white in Luma.
+implementing: the original's sidecar parser **stops on any key it does
+not know** in the root block and the geometry is then classified with
+the nodes read before it, followed by the three built-in nodes, while a
+node with an unknown key is left out alone (reproduced by
+`NodePatterns::read` and `load`); and a light without a colour chunk has
+an undefined colour in the original, white in Luma.
 
 After parsing, each mesh is matched by name against the **node list** of
 the optional sidecar `<geometry name>.geometry` (same directory, same base
@@ -449,15 +451,22 @@ actor standing in a region of another layer would use that layer's
 ## 5. The actor definition file (`.act3d`)
 
 **As implemented** in `luma_3d::actor3d` (`Actor3dDef::parse`,
-`parse_with` for templates, `is_actor_x`, `AnimationDef::parse_file` for
-the sidecar and `AnimationDef::apply` onto a model) and specified in
+`parse_with` for templates, `build_models` for the keys that act on the
+model, `is_actor_x`, `AnimationFile` for the sidecar and
+`AnimationDef::apply_to` onto a model) and specified in
 [formats/actor3d.md](formats/actor3d.md), which is the reference; the
 table below is the summary. Found while implementing: an **unknown key
 fails the load** (the parser stops on a token it does not know),
-reproduced; a `SHADOW_TYPE` word that is neither a name nor a number gives
-`none` (`atoi` returns 0); `SHADOW_MODEL`, `ANIMATION` and `EFFECT` before
-any `MODEL` are dropped, not errors; the `.anim` sidecar is only looked
-for by `MergeAnims`, not by the `MODEL` keys.
+reproduced; a key whose file **fails to load does not** (a template, a
+model, a shadow model, a cursor: the error code is overwritten by the
+next statement), so the actor fails only on an unknown key or when it
+has no model at the end; the model keys act **at their place** (`MODEL`
+loads or merges, `ANIMATION` applies to the model as loaded so far,
+`SHADOW_MODEL` loads against it); a `SHADOW_TYPE` word that is neither a
+name nor a number gives `none` (`atoi` returns 0); `SHADOW_MODEL`,
+`ANIMATION` and `EFFECT` before any `MODEL` are dropped, not errors; the
+`.anim` sidecar is only looked for by `MergeAnims`, not by the `MODEL`
+keys.
 
 Same syntax as every definition file ([definition-files.md](formats/
 definition-files.md)). The keyword is `ACTOR3DX` for `.X` actors;
@@ -560,14 +569,29 @@ rejected if no top-level frame was found.
 | anything else | Ignored. |
 
 Templates are matched by **name** in Luma (D3DX matches the GUIDs of the
-registered templates). An **empty frame** (`Frame x { }`) fails the whole
-load in the original, an accident of its child loop; Luma accepts it.
+registered templates). A frame answers for its **last** object only, an
+accident of the original's child loop that Luma reproduces: an object
+that fails before the last one is left out alone, and a frame whose last
+object fails or that holds **no object at all** (`Frame x { }`) is
+dropped with what is under it and fails in turn, up to the top level,
+where a failure rejects the file ([formats/xfile.md](formats/xfile.md),
+section 2). The meshes are kept in the order the original walks them: a
+frame's own meshes before its child frames'.
 
 Merging a second file (`MergeFromFile`) takes only `AnimationSet` and
 `Animation` objects, searching the frames of the file recursively (the
 frames themselves are not added); the bones of the new animations are looked
 up by name in the existing skeleton (`FindBones`). An unnamed animation set
-takes the **file name without path and extension** as its name.
+takes the **file name without path and extension** as its name. A merge
+that fails part-way leaves the sets it had read in the model, bound to no
+frame ([formats/xfile.md](formats/xfile.md), 2.5).
+
+A model can be loaded **against a parent model** (`LoadFromFile(file,
+ParentModel)`, the `SHADOW_MODEL`): its mesh bones and animation targets
+are then looked up in the parent's frames, and its skinned meshes are
+posed with the parent's combined matrices every update
+(`Model::parse_with_parent`, `luma_3d::animation::ShadowModel`;
+[formats/xfile.md](formats/xfile.md), 2.6).
 
 ### 6.3 Meshes (what D3DX does, **[ext]**)
 
@@ -636,9 +660,8 @@ What WME makes of the result:
   every vertex).
 - **Rigid meshes** (no bones) are transformed every frame by their parent
   frame's combined matrix: **positions only**; the normals stay as loaded, so
-  the lighting of rigid parts on moving frames is slightly off. As
-  implemented, Luma transforms the normals as well (by the 3x3 part,
-  renormalised), a deliberate departure.
+  the lighting of rigid parts on moving frames is slightly off. Luma does
+  the same (`skin_mesh`): a game's models were lit that way.
 - **Bounding box.** Recomputed from the skinned vertices every frame
   (`D3DXComputeBoundingBox`, with a manual fallback when NaNs appear). The
   **model's** box (`UpdateBoundingRect`) starts at the origin and grows
@@ -825,7 +848,14 @@ the first key, and a zero gap met after a positive one resets the minimum
   `IsAnimPending(name)` over all channels is `is_playing_on_any_channel`.
 - **Unloading a set** (`UnloadAnim`, `AnimatedModel::remove_animation_set`)
   drops it from every channel slot that plays it; a transition in progress
-  keeps running and ends on whatever is left.
+  keeps running and ends on whatever is left. When several sets share the
+  name (two loose animations of one file, or the same file merged twice),
+  `CXModel::UnloadAnimation` removes the first and then **steps over the
+  two sets that follow each removed one** (its loop advances the index
+  once more after `RemoveAt`), so of three sets of that name in a row only
+  the first goes; the call can be repeated. Reproduced
+  (`Model::animation_sets_to_unload`), since which sets remain decides
+  what `PlayAnim` plays next.
 - **Outputs of an update**: the local and combined matrix of every frame
   (`local_matrices`, `combined_matrices`, `bone_matrix(name)` for
   attachments and `GetBonePosition*`), the skinned meshes
