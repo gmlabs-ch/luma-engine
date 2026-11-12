@@ -245,10 +245,12 @@ Derived values:
 `load`, `classify`, the wildcard matcher `matches_pattern`) and
 `luma_3d::scene_geometry::SceneGeometry::load_3ds`, specified in
 [formats/geometry.md](formats/geometry.md). Two details found while
-implementing: the original's sidecar parser **fails on any key it does
-not know** and the geometry then falls back to the three built-in nodes
-alone (reproduced by `NodePatterns::load`); and a light without a colour
-chunk has an undefined colour in the original, white in Luma.
+implementing: the original's sidecar parser **stops on any key it does
+not know** in the root block and the geometry is then classified with
+the nodes read before it, followed by the three built-in nodes, while a
+node with an unknown key is left out alone (reproduced by
+`NodePatterns::read` and `load`); and a light without a colour chunk has
+an undefined colour in the original, white in Luma.
 
 After parsing, each mesh is matched by name against the **node list** of
 the optional sidecar `<geometry name>.geometry` (same directory, same base

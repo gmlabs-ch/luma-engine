@@ -412,7 +412,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdGeomExt::CAdGeomExt` | done | `luma-3d/src/node_patterns.rs` `NodePatterns::default`: no node. |
 | `CAdGeomExt::~CAdGeomExt` | replaced | Rust ownership. |
 | `CAdGeomExt::LoadFile` | done | `scene3d.rs` `Scene3d::load_file` reads the `.geometry` file next to the `.3ds` and `NodePatterns::load` parses it; without the file, the built-in nodes. |
-| `CAdGeomExt::LoadBuffer` | partial | `NodePatterns::parse` / `from_document`. A file that fails part-way (syntax error, unknown key): the original keeps the nodes read before the error and appends the built-in ones (`GetGeometryExtension`); `NodePatterns::load` then uses the built-in nodes alone. A `GEOMETRY` key nested in the root is ignored by the original and an error in Luma. |
+| `CAdGeomExt::LoadBuffer` | done | `luma-3d/src/node_patterns.rs` `NodePatterns::read` / `read_document` (`parse`, `from_document` answer its error; `load` is `GetGeometryExtension`): the first statement must be `GEOMETRY`, the root keys are matched with the original's table, a `NODE` that fails is left out alone (its error code is overwritten by the next statement), a nested `GEOMETRY` key is ignored, an unknown key stops the file; the nodes read before an error are kept and the built-in ones appended in every case. |
 | `CAdGeomExt::LoadBuffer GEOMETRY` | done | Root block required. |
 | `CAdGeomExt::LoadBuffer NODE` | done | `NodePattern::from_node`, in file order before the built-in nodes. |
 | `CAdGeomExt::AddStandardNodes` | done | `NodePatterns::add_standard_nodes`: `walk_*` walk plane receiving shadows, `blk_*` blocked, `wpt_*` waypoint. |
@@ -424,7 +424,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CAdGeomExtNode::CAdGeomExtNode` | done | `NodePattern::new("", Generic, false)` in `from_node`. |
 | `CAdGeomExtNode::~CAdGeomExtNode` | replaced | Rust ownership. |
-| `CAdGeomExtNode::LoadBuffer` | done | `NodePattern::from_node`: each role key that is true sets the role (the last wins), an unknown key is an error as in the original. |
+| `CAdGeomExtNode::LoadBuffer` | done | `NodePattern::from_node`: the original's key table, each role key that is true sets the role (the last wins), `RECEIVE_SHADOWS` with an empty value keeps the flag, an unknown key fails the node (which `CAdGeomExt::LoadBuffer` then leaves out). |
 | `CAdGeomExtNode::LoadBuffer NODE` | done | Accepted and ignored inside a node, as in the original. |
 | `CAdGeomExtNode::LoadBuffer NAME` | done | `NodePattern::pattern`. |
 | `CAdGeomExtNode::LoadBuffer WALKPLANE` | done | `NodeKind::Walkplane` when true. |

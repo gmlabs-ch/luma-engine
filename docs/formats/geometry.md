@@ -106,7 +106,8 @@ GEOMETRY
 |---------------|------|---------|---------|
 | `NAME` | string | `""` | A pattern on mesh names: `*` matches any run of characters, `?` exactly one, letters match ignoring ASCII case. A `.` in the pattern follows the original's DOS file-name rules (a trailing `.` matches a name without extension, `*.ext` a name with that extension); mesh names have no dots in practice. |
 | `WALKPLANE`, `BLOCKED`, `WAYPOINT` | bool | false | The role. Each key that is `TRUE` sets the role, so when several are true the last one in the block wins; none means a **generic** mesh. |
-| `RECEIVE_SHADOWS` | bool | false | The meshes receive stencil shadows. |
+| `RECEIVE_SHADOWS` | bool | false | The meshes receive stencil shadows. With an empty value the flag keeps what it had. |
+| `NODE` | | | Accepted inside a node and ignored. |
 
 A `NODE` without `NAME` only matches an empty name (the original would
 dereference a null pattern).
@@ -117,11 +118,28 @@ After the file's nodes come three **built-in** nodes, in this order:
 exist, so a `.3ds` of `walk_`, `blk_` and `wpt_` meshes plus cameras and
 lights needs no sidecar.
 
-The original's parser only knows the keys above: a key it does not know,
-in `GEOMETRY` or in a `NODE`, fails the whole file, and the geometry is
-then classified with the built-in nodes alone, as if the file were absent.
-`luma_3d::NodePatterns::parse` fails the same way and
-`NodePatterns::load` applies the same fallback.
+**What a faulty file gives** (`CAdGeomExt::LoadBuffer`,
+`CAdGeomExtNode::LoadBuffer`, `CAdSceneGeometry::GetGeometryExtension`).
+The keys are matched with the original's tables, and:
+
+- the `GEOMETRY` block must be the **first statement** of the file; a
+  file that starts with anything else gives no node of its own;
+- a `NODE` with a key a node does not know **fails alone**: it is left
+  out and the next statement is read (the error code it sets is
+  overwritten);
+- a `GEOMETRY` key inside the root block is ignored;
+- any other key in the root block **stops the file** there with a syntax
+  error.
+
+In every case the nodes read up to that point are kept and the built-in
+nodes come after them: when the file loads the loader appends them, and
+when it fails its caller does, on the same list. A file that fails
+half-way therefore still classifies with its first nodes.
+
+`luma_3d::NodePatterns::read` returns that list with the error, if any;
+`NodePatterns::load` is the list a geometry gets (the built-in nodes
+alone without a sidecar), and `NodePatterns::parse` answers the error
+instead when the original's loader fails.
 
 ## Classification
 
