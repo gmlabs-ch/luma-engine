@@ -816,7 +816,7 @@ impl AnimatedModel {
             };
         }
         for (mesh, skinned) in self.model.meshes.iter().zip(&mut self.meshes) {
-            skin_mesh(mesh, &self.combined, skinned);
+            skin_mesh(mesh, &self.combined, &self.combined, skinned);
         }
         // The model's box starts at the origin and grows around the
         // meshes, so it always contains the origin (`UpdateBoundingRect`).
@@ -883,17 +883,99 @@ impl AnimatedModel {
     }
 }
 
+/// A model loaded against a parent model, posed with the parent's bones
+/// (`CXModel` with a `ParentModel`): the low-polygon `SHADOW_MODEL` of an
+/// actor, which casts the shadows in place of the model drawn.
+///
+/// Its skinned meshes follow the frames of the **parent**: their bones
+/// were looked up by name in the parent's skeleton
+/// ([`Model::parse_with_parent`]). Its meshes without bones stay where
+/// its own frames put them at rest, since nothing animates this model.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShadowModel {
+    model: Model,
+    /// The combined matrices of the model's own frames at rest.
+    combined: Vec<Mat4>,
+    meshes: Vec<SkinnedMesh>,
+    bounds: BoundingBox,
+}
+
+impl ShadowModel {
+    /// Parses a `.X` file as the shadow model of `parent`
+    /// (`CXModel::LoadFromFile(file, ParentModel)`). The meshes are as
+    /// loaded until the first [`Self::update`].
+    pub fn parse(bytes: &[u8], file_name: &str, parent: &Model) -> crate::model::Result<Self> {
+        Model::parse_with_parent(bytes, file_name, parent).map(ShadowModel::new)
+    }
+
+    /// Wraps a model loaded with [`Model::parse_with_parent`]. The meshes
+    /// are as loaded until the first [`Self::update`].
+    pub fn new(model: Model) -> ShadowModel {
+        let combined = model.combine(&model.rest_pose());
+        let meshes: Vec<SkinnedMesh> = model
+            .meshes
+            .iter()
+            .map(|mesh| SkinnedMesh {
+                vertices: mesh.vertices.clone(),
+                bounds: BoundingBox::of_points(mesh.vertices.iter().map(|v| v.position)),
+            })
+            .collect();
+        ShadowModel {
+            model,
+            combined,
+            meshes,
+            bounds: BoundingBox::default(),
+        }
+    }
+
+    /// The model: the triangles of [`Self::meshes`] are its meshes'.
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    /// Poses the meshes after the parent's update (`CXModel::Update` of
+    /// the shadow model, which the actor calls right after its model's):
+    /// a skinned mesh with `offset * the parent's combined matrix` of each
+    /// bone (identity for a bone the parent lacks, where the original
+    /// reads an unset pointer), a mesh without bones with the combined
+    /// matrix of its own frame at rest.
+    pub fn update(&mut self, parent: &AnimatedModel) {
+        for (mesh, skinned) in self.model.meshes.iter().zip(&mut self.meshes) {
+            skin_mesh(mesh, parent.combined_matrices(), &self.combined, skinned);
+        }
+        let mut bounds = BoundingBox::default();
+        for skinned in &self.meshes {
+            bounds.include(&skinned.bounds);
+        }
+        self.bounds = bounds;
+    }
+
+    /// The posed meshes after the last update, indexed like the model's
+    /// `meshes`.
+    pub fn meshes(&self) -> &[SkinnedMesh] {
+        &self.meshes
+    }
+
+    /// The box around the posed meshes and the origin after the last
+    /// update, in model space.
+    pub fn bounding_box(&self) -> BoundingBox {
+        self.bounds
+    }
+}
+
 /// Poses one mesh (`CXMesh::Update`). A skinned mesh takes, for every
-/// bone, `palette = offset * combined[bone frame]` (identity for a bone
+/// bone, `palette = offset * bones[bone frame]` (identity for a bone
 /// whose frame the model lacks, where the original reads an unset
 /// pointer) and accumulates `weight * (vertex * palette)` for the
 /// positions and `weight * (normal * palette)` for the normals of the
 /// vertices the bone weights, the normals then normalised; a vertex no
 /// bone weights keeps its loaded position (what D3DX does with it is not
-/// known). A rigid mesh moves its positions by its frame's combined
-/// matrix and keeps its normals as loaded, as the original does: a rigid
-/// mesh in a turned frame is lit as if it had not turned.
-fn skin_mesh(mesh: &Mesh, combined: &[Mat4], out: &mut SkinnedMesh) {
+/// known). A rigid mesh moves its positions by `frames[its frame]` and
+/// keeps its normals as loaded, as the original does: a rigid mesh in a
+/// turned frame is lit as if it had not turned. `bones` and `frames` are
+/// the same matrices but for a model with a parent, whose bones are the
+/// parent's.
+fn skin_mesh(mesh: &Mesh, bones: &[Mat4], frames: &[Mat4], out: &mut SkinnedMesh) {
     if out.vertices.len() != mesh.vertices.len() {
         out.vertices = mesh.vertices.clone();
     } else {
@@ -911,7 +993,7 @@ fn skin_mesh(mesh: &Mesh, combined: &[Mat4], out: &mut SkinnedMesh) {
         for bone in &mesh.bones {
             let world = bone
                 .frame
-                .and_then(|frame| combined.get(frame))
+                .and_then(|frame| bones.get(frame))
                 .copied()
                 .unwrap_or(Mat4::IDENTITY);
             let palette = bone.offset * world;
@@ -930,7 +1012,7 @@ fn skin_mesh(mesh: &Mesh, combined: &[Mat4], out: &mut SkinnedMesh) {
             vertex.normal = vertex.normal.normalized();
         }
     } else {
-        let world = combined.get(mesh.frame).copied().unwrap_or(Mat4::IDENTITY);
+        let world = frames.get(mesh.frame).copied().unwrap_or(Mat4::IDENTITY);
         for (target, source) in out.vertices.iter_mut().zip(&mesh.vertices) {
             let [x, y, z, _] = world.transform(source.position);
             target.position = Vec3::new(x, y, z);
@@ -1110,12 +1192,14 @@ AnimationSet raise_tip {
         AnimatedModel::new(model)
     }
 
+    /// `Root`'s own mesh comes before the mesh of its child frame `Tip`,
+    /// although the file writes it after.
     fn quad_of(rig: &AnimatedModel) -> &[Vertex] {
-        &rig.meshes()[1].vertices
+        &rig.meshes()[0].vertices
     }
 
     fn blade_of(rig: &AnimatedModel) -> &[Vertex] {
-        &rig.meshes()[0].vertices
+        &rig.meshes()[1].vertices
     }
 
     #[test]
@@ -1127,11 +1211,11 @@ AnimationSet raise_tip {
         assert_eq!(lift.total_frames(4800), 5);
         assert!(lift.looping);
         assert!(!rig.model().animation_set("sink").unwrap().looping);
-        assert_eq!(rig.model().meshes[0].name, "blade");
-        assert!(!rig.model().meshes[0].is_skinned());
-        assert_eq!(rig.model().meshes[1].name, "quad");
+        assert_eq!(rig.model().meshes[1].name, "blade");
+        assert!(!rig.model().meshes[1].is_skinned());
+        assert_eq!(rig.model().meshes[0].name, "quad");
         assert!(
-            rig.model().meshes[1].bones[2].frame.is_none(),
+            rig.model().meshes[0].bones[2].frame.is_none(),
             "Ghost dangles"
         );
     }
@@ -1543,6 +1627,69 @@ Frame Turned {
         assert_vec(vertices[0].position, 0.0, 1.0, 0.0);
         assert_vec(vertices[1].position, 0.0, 2.0, 0.0);
         assert_vec(vertices[0].normal, 1.0, 0.0, 0.0);
+    }
+
+    /// `CXMesh::Update` of a model with a `ParentModel`: the skinned
+    /// meshes follow the parent's frames, the others their own at rest.
+    #[test]
+    fn a_shadow_model_follows_the_bones_of_its_parent() {
+        // A triangle skinned to the parent's `Tip` (vertices 0 and 1) and
+        // to a bone the parent lacks (vertex 2), and a rigid triangle in a
+        // frame of its own, 5 units up. The file's own `Tip` frame sits
+        // elsewhere and plays no role.
+        let text = r#"xof 0303txt 0032
+Frame Tip {
+ FrameTransformMatrix { 1,0,0,0, 0,1,0,0, 0,0,1,0, 50,0,0,1;; }
+}
+Frame Low {
+ FrameTransformMatrix { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,5,0,1;; }
+ Mesh rigid {
+  3;
+  0.0;0.0;0.0;, 1.0;0.0;0.0;, 0.0;0.0;1.0;;
+  1;
+  3;0,1,2;;
+ }
+ Mesh skin {
+  3;
+  2.0;0.0;0.0;, 3.0;0.0;0.0;, 2.0;0.0;1.0;;
+  1;
+  3;0,1,2;;
+  SkinWeights { "Tip"; 2; 0,1; 1.0,1.0; 1,0,0,0, 0,1,0,0, 0,0,1,0, -2,0,0,1;; }
+  SkinWeights { "Nowhere"; 1; 2; 1.0; 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; }
+ }
+}
+"#;
+        let mut rig = new_rig();
+        let mut shadow = ShadowModel::parse(text.as_bytes(), "low.x", rig.model()).unwrap();
+        assert_eq!(shadow.model().meshes.len(), 2);
+        // As loaded until the first update.
+        assert_vec(shadow.meshes()[1].vertices[0].position, 2.0, 0.0, 0.0);
+
+        rig.play_with(0, "raise_tip", 0, 0, false);
+        rig.update(100);
+        shadow.update(&rig);
+        // The parent's Tip is at (2, 3, 0): offset (-2) then the bone.
+        let skin = &shadow.meshes()[1].vertices;
+        assert_vec(skin[0].position, 2.0, 3.0, 0.0);
+        assert_vec(skin[1].position, 3.0, 3.0, 0.0);
+        // The bone the parent lacks: identity.
+        assert_vec(skin[2].position, 2.0, 0.0, 1.0);
+        // The rigid mesh: its own frame at rest.
+        let rigid = &shadow.meshes()[0].vertices;
+        assert_vec(rigid[0].position, 0.0, 5.0, 0.0);
+        assert_vec(rigid[1].position, 1.0, 5.0, 0.0);
+        let bounds = shadow.bounding_box();
+        assert_vec(bounds.min, 0.0, 0.0, 0.0);
+        assert_vec(bounds.max, 3.0, 5.0, 1.0);
+
+        // The parent moves on, the shadow model follows at its update.
+        rig.stop(0, 0);
+        rig.play_with(0, "lift", 0, 0, false);
+        rig.update(999);
+        shadow.update(&rig);
+        let lifted = shadow.meshes()[1].vertices[0].position;
+        assert!(close(lifted.x, 2.0) && lifted.y > 9.9, "{lifted:?}");
+        assert_vec(shadow.meshes()[0].vertices[0].position, 0.0, 5.0, 0.0);
     }
 
     #[test]

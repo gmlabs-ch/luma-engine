@@ -329,6 +329,18 @@ pub enum Error {
     },
     /// Animations were merged into a model that has none.
     EmptyModel,
+    /// A `Frame` holds no object at all: the original gives up on such a
+    /// frame, and on the file when the frame is at the top level or the
+    /// last object of every frame around it.
+    EmptyFrame {
+        /// The frame's name.
+        frame: String,
+    },
+    /// A bone weights more vertices than the mesh has.
+    TooManyWeights {
+        /// The mesh's name.
+        mesh: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -354,6 +366,13 @@ impl fmt::Display for Error {
                 "animation set '{set}': a key of type {key_type} has {values} values"
             ),
             Error::EmptyModel => write!(f, "cannot merge animations into an empty model"),
+            Error::EmptyFrame { frame } => write!(f, "frame '{frame}' is empty"),
+            Error::TooManyWeights { mesh } => {
+                write!(
+                    f,
+                    "mesh '{mesh}': a bone weights more vertices than there are"
+                )
+            }
         }
     }
 }
@@ -404,9 +423,33 @@ impl Model {
         Model::from_xfile(&file, file_name)
     }
 
-    /// Builds a model from a parsed file. Fails when the file has no
-    /// top-level `Frame`, as the original does.
+    /// Builds a model from a parsed file (`CXModel::LoadFromFile`): every
+    /// top-level object is loaded under the root frame, and the first one
+    /// that fails fails the model, as does a file without a top-level
+    /// `Frame` that loads. The meshes are then put in the order the
+    /// original walks them (a frame's own meshes before those of its
+    /// child frames) and the bones are looked up.
     pub fn from_xfile(file: &XFile, file_name: &str) -> Result<Model> {
+        let mut model = Model::load_frames(file, file_name)?;
+        model.find_bones(None, true);
+        Ok(model)
+    }
+
+    /// Parses a `.X` file against a parent model (`LoadFromFile` with a
+    /// `ParentModel`, the actor's `SHADOW_MODEL`): the bones of the meshes
+    /// and the targets of the animations are looked up by name in the
+    /// **parent's** frames, so [`Bone::frame`] and [`Animation::frame`]
+    /// index `parent.frames`, not this model's. Such a model is posed by
+    /// [`ShadowModel`](crate::animation::ShadowModel), with the parent's
+    /// matrices for its skinned meshes.
+    pub fn parse_with_parent(bytes: &[u8], file_name: &str, parent: &Model) -> Result<Model> {
+        let file = XFile::parse(bytes)?;
+        let mut model = Model::load_frames(&file, file_name)?;
+        model.find_bones(Some(parent), true);
+        Ok(model)
+    }
+
+    fn load_frames(file: &XFile, file_name: &str) -> Result<Model> {
         let mut model = Model {
             frames: vec![Frame {
                 name: String::new(),
@@ -426,8 +469,38 @@ impl Model {
         if model.frames[ROOT].children.is_empty() {
             return Err(Error::NoFrame);
         }
-        model.find_bones(0);
+        model.order_meshes();
         Ok(model)
+    }
+
+    /// Puts the meshes in the order `CXFrameNode::Render`, `UpdateMeshes`
+    /// and `UpdateShadowVol` walk them: a frame's own meshes, then its
+    /// child frames in order. The frames are stored parents first in
+    /// depth-first file order, so that is the meshes frame by frame.
+    fn order_meshes(&mut self) {
+        let order: Vec<usize> = self
+            .frames
+            .iter()
+            .flat_map(|frame| frame.meshes.iter().copied())
+            .collect();
+        if order.iter().enumerate().all(|(new, &old)| new == old) {
+            return;
+        }
+        let mut old: Vec<Option<Mesh>> = std::mem::take(&mut self.meshes)
+            .into_iter()
+            .map(Some)
+            .collect();
+        self.meshes = order
+            .iter()
+            .filter_map(|&index| old.get_mut(index).and_then(Option::take))
+            .collect();
+        let mut next = 0;
+        for frame in &mut self.frames {
+            for mesh in &mut frame.meshes {
+                *mesh = next;
+                next += 1;
+            }
+        }
     }
 
     /// Adds the animation sets of another `.X` file (`MergeFromFile`):
@@ -440,7 +513,11 @@ impl Model {
         self.merge_animations_from(&file, file_name)
     }
 
-    /// [`Self::merge_animations`] from a parsed file.
+    /// [`Self::merge_animations`] from a parsed file. The first top-level
+    /// object that fails ends the merge with its error: the sets added
+    /// before it stay in the model, their animations bound to no frame
+    /// (the original looks the bones up only after a merge that
+    /// succeeded, and then for every set of the model).
     pub fn merge_animations_from(&mut self, file: &XFile, file_name: &str) -> Result<usize> {
         if self.frames[ROOT].children.is_empty() {
             return Err(Error::EmptyModel);
@@ -449,40 +526,72 @@ impl Model {
         for object in &file.objects {
             self.merge_object(file, object, file_name)?;
         }
-        self.find_bones(first);
+        self.find_bones(None, false);
         Ok(self.animation_sets.len() - first)
     }
 
+    /// `CXFrameNode::MergeFromXData`. A frame answers what its **last**
+    /// object answered, and an error when it holds none: see
+    /// [`Self::load_object`].
     fn merge_object(&mut self, file: &XFile, object: &DataObject, file_name: &str) -> Result<()> {
         match object.template.as_str() {
             "AnimationSet" => self.load_animation_set(file, object, file_name),
             "Animation" => self.load_loose_animation(file, object, file_name),
             "Frame" => {
-                for child in object.objects() {
-                    self.merge_object(file, child, file_name)?;
+                let mut result = Err(Error::EmptyFrame {
+                    frame: object.name.clone().unwrap_or_default(),
+                });
+                for child in &object.children {
+                    result = match child {
+                        xfile::Child::Object(child) => self.merge_object(file, child, file_name),
+                        xfile::Child::Reference(_) => Ok(()),
+                    };
                 }
-                Ok(())
+                result
             }
             _ => Ok(()),
         }
     }
 
+    /// `CXFrameNode::LoadFromXData`: loads one object under a frame.
+    ///
+    /// A `Frame` loads its objects in order and answers what the **last**
+    /// one answered: the original keeps the result of the last child
+    /// only. So an object that fails inside a frame is left out alone
+    /// when another object follows it, and a frame whose last object
+    /// fails, or that holds no object at all, is dropped with everything
+    /// under it and fails in turn. The animation sets and the tick rate
+    /// read inside a dropped frame stay: they belong to the model. A data
+    /// reference among the objects of a frame counts as an object that
+    /// loaded and is not followed.
     fn load_object(&mut self, file: &XFile, object: &DataObject, frame: usize) -> Result<()> {
         match object.template.as_str() {
             "Frame" => {
                 let index = self.frames.len();
+                let meshes = self.meshes.len();
+                let name = object.name.clone().unwrap_or_default();
                 self.frames.push(Frame {
-                    name: object.name.clone().unwrap_or_default(),
+                    name: name.clone(),
                     parent: Some(frame),
                     children: Vec::new(),
                     transform: Mat4::IDENTITY,
                     meshes: Vec::new(),
                 });
                 self.frames[frame].children.push(index);
-                for child in object.objects() {
-                    self.load_object(file, child, index)?;
+                let mut result = Err(Error::EmptyFrame { frame: name });
+                for child in &object.children {
+                    result = match child {
+                        xfile::Child::Object(child) => self.load_object(file, child, index),
+                        xfile::Child::Reference(_) => Ok(()),
+                    };
                 }
-                Ok(())
+                if result.is_err() {
+                    // The frame and what it holds come last in the lists.
+                    self.frames.truncate(index);
+                    self.meshes.truncate(meshes);
+                    self.frames[frame].children.pop();
+                }
+                result
             }
             "FrameTransformMatrix" => {
                 self.frames[frame].transform = read_matrix(&mut object.values())?;
@@ -549,19 +658,25 @@ impl Model {
         Ok(())
     }
 
-    /// Resolves the bone names of the meshes and of the animation sets
-    /// from `first_set` on against the frames (`FindBones`).
-    fn find_bones(&mut self, first_set: usize) {
-        let names: Vec<String> = self.frames.iter().map(|f| f.name.clone()).collect();
+    /// Looks the bones up by name (`CXModel::FindBones`): those of the
+    /// meshes when `meshes` is set, and the target of every animation of
+    /// every set, in this model's frames or, with a parent model, in the
+    /// parent's. A name no frame has leaves `None`.
+    fn find_bones(&mut self, parent: Option<&Model>, meshes: bool) {
+        let names: Vec<String> = match parent {
+            Some(parent) => parent.frames.iter().map(|f| f.name.clone()).collect(),
+            None => self.frames.iter().map(|f| f.name.clone()).collect(),
+        };
+        // The root never matches (`FindFrame`: it has no name at all).
         let find = |name: &str| -> Option<usize> { (1..names.len()).find(|&i| names[i] == name) };
-        if first_set == 0 {
+        if meshes {
             for mesh in &mut self.meshes {
                 for bone in &mut mesh.bones {
                     bone.frame = find(&bone.frame_name);
                 }
             }
         }
-        for set in &mut self.animation_sets[first_set..] {
+        for set in &mut self.animation_sets {
             for animation in &mut set.animations {
                 animation.frame = if animation.target.is_empty() {
                     None
@@ -976,15 +1091,16 @@ fn load_mesh(file: &XFile, object: &DataObject, frame: usize, model_path: &str) 
 
     let mut values = object.values();
     let vertex_count = values.count()?;
-    let mut positions = Vec::with_capacity(vertex_count as usize);
+    let mut positions = Vec::with_capacity((vertex_count as usize).min(values.remaining()));
     for _ in 0..vertex_count {
         positions.push(read_vec3(&mut values)?);
     }
     let face_count = values.count()?;
-    let mut faces: Vec<Vec<u32>> = Vec::with_capacity(face_count as usize);
+    let mut faces: Vec<Vec<u32>> =
+        Vec::with_capacity((face_count as usize).min(values.remaining()));
     for _ in 0..face_count {
         let n = values.count()?;
-        let mut face = Vec::with_capacity(n as usize);
+        let mut face = Vec::with_capacity((n as usize).min(values.remaining()));
         for _ in 0..n {
             let index = values.count()?;
             if index >= vertex_count {
@@ -1000,7 +1116,7 @@ fn load_mesh(file: &XFile, object: &DataObject, frame: usize, model_path: &str) 
     if let Some(child) = object.child("MeshNormals") {
         let mut values = child.values();
         let count = values.count()?;
-        let mut list = Vec::with_capacity(count as usize);
+        let mut list = Vec::with_capacity((count as usize).min(values.remaining()));
         for _ in 0..count {
             list.push(read_vec3(&mut values)?);
         }
@@ -1008,13 +1124,13 @@ fn load_mesh(file: &XFile, object: &DataObject, frame: usize, model_path: &str) 
         if normal_faces != face_count {
             return Err(Error::NormalsMismatch { mesh: name.clone() });
         }
-        let mut per_face = Vec::with_capacity(normal_faces as usize);
+        let mut per_face = Vec::with_capacity((normal_faces as usize).min(values.remaining()));
         for face in &faces {
             let n = values.count()?;
             if n as usize != face.len() {
                 return Err(Error::NormalsMismatch { mesh: name.clone() });
             }
-            let mut corners = Vec::with_capacity(n as usize);
+            let mut corners = Vec::with_capacity((n as usize).min(values.remaining()));
             for _ in 0..n {
                 let index = values.count()?;
                 if index >= count {
@@ -1175,7 +1291,7 @@ fn load_mesh(file: &XFile, object: &DataObject, frame: usize, model_path: &str) 
         let mut values = child.values();
         let frame_name = values.string()?;
         let count = values.count()?;
-        let mut indices = Vec::with_capacity(count as usize);
+        let mut indices = Vec::with_capacity((count as usize).min(values.remaining()));
         for _ in 0..count {
             let index = values.count()?;
             if index >= vertex_count {
@@ -1183,7 +1299,7 @@ fn load_mesh(file: &XFile, object: &DataObject, frame: usize, model_path: &str) 
             }
             indices.push(index);
         }
-        let mut weights = Vec::with_capacity(count as usize);
+        let mut weights = Vec::with_capacity((count as usize).min(values.remaining()));
         for &vertex in &indices {
             let weight = values.float()?;
             weights.push(VertexWeight { vertex, weight });
@@ -1192,6 +1308,11 @@ fn load_mesh(file: &XFile, object: &DataObject, frame: usize, model_path: &str) 
                     vertex: duplicate,
                     weight,
                 });
+            }
+            // A vertex has one weight per bone at most; a vertex listed
+            // again and again would multiply with its duplicates.
+            if weights.len() > vertices.len() {
+                return Err(Error::TooManyWeights { mesh: name.clone() });
             }
         }
         let offset = read_matrix(&mut values)?;
@@ -1208,7 +1329,7 @@ fn load_mesh(file: &XFile, object: &DataObject, frame: usize, model_path: &str) 
             let mut values = child.values();
             let count = values.count()?;
             let original_count = values.count()?;
-            let mut originals = Vec::with_capacity(count as usize);
+            let mut originals = Vec::with_capacity((count as usize).min(values.remaining()));
             for _ in 0..count {
                 originals.push(values.count()?);
             }
@@ -1668,7 +1789,7 @@ Animation {
     #[test]
     fn matrix_keys_are_decomposed() {
         let text = r#"xof 0303txt 0032
-Frame Bone { }
+Frame Bone { FrameTransformMatrix { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; } }
 AnimationSet {
  Animation {
   { Bone }
@@ -1706,7 +1827,7 @@ AnimationSet {
     #[test]
     fn rejects_duplicate_tracks_and_bad_files() {
         let dup = r#"xof 0303txt 0032
-Frame F { }
+Frame F { FrameTransformMatrix { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; } }
 AnimationSet s {
  Animation {
   { F }
@@ -1733,7 +1854,7 @@ AnimationSet s {
                 track: "matrix"
             }
         );
-        let bad_size = "xof 0303txt 0032\nFrame F { }\nAnimationSet s { Animation { AnimationKey { 0; 1; 0;3;0,0,0;;; } } }";
+        let bad_size = "xof 0303txt 0032\nFrame F { FrameTransformMatrix { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; } }\nAnimationSet s { Animation { AnimationKey { 0; 1; 0;3;0,0,0;;; } } }";
         assert_eq!(
             Model::parse(bad_size.as_bytes(), "d.x").unwrap_err(),
             Error::KeySize {
@@ -1743,7 +1864,7 @@ AnimationSet s {
             }
         );
         // Unknown key types are ignored.
-        let unknown = "xof 0303txt 0032\nFrame F { }\nAnimationSet s { Animation { { F } AnimationKey { 3; 1; 0;1;0;;; } } }";
+        let unknown = "xof 0303txt 0032\nFrame F { FrameTransformMatrix { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; } }\nAnimationSet s { Animation { { F } AnimationKey { 3; 1; 0;1;0;;; } } }";
         let model = Model::parse(unknown.as_bytes(), "d.x").unwrap();
         assert!(model.animation_sets[0].animations[0].sample(0).is_none());
 
@@ -1872,6 +1993,180 @@ Material Shared {
             Some("/game/actors/textures\\Wood.tga")
         );
         assert_eq!(mesh.materials[1].name.as_deref(), Some("Wood"));
+    }
+
+    const TRIANGLE: &str = "3; 0;0;0;, 1;0;0;, 0;0;1;; 1; 3;0,1,2;;";
+    /// A mesh whose face names a vertex it does not have.
+    const BROKEN: &str = "1; 0;0;0;; 1; 3;0,1,2;;";
+
+    fn frame_names(model: &Model) -> Vec<&str> {
+        model.frames.iter().map(|f| f.name.as_str()).collect()
+    }
+
+    /// `CXFrameNode::LoadFromXData` keeps the result of a frame's last
+    /// object only.
+    #[test]
+    fn a_frame_answers_for_its_last_object() {
+        // An object that fails before the last one is left out alone; an
+        // empty frame that is not last is dropped alone.
+        let text = format!(
+            "xof 0303txt 0032\nFrame A {{ Mesh bad {{ {BROKEN} }} Frame Empty {{ }} Frame B {{ FrameTransformMatrix {{ 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; }} }} Mesh good {{ {TRIANGLE} }} }}"
+        );
+        let model = Model::parse(text.as_bytes(), "m.x").unwrap();
+        assert_eq!(frame_names(&model), ["", "A", "B"]);
+        assert_eq!(model.frames[1].children, vec![2]);
+        assert_eq!(model.meshes.len(), 1);
+        assert_eq!(model.meshes[0].name, "good");
+        assert_eq!(model.frames[1].meshes, vec![0]);
+
+        // A frame whose last object fails is dropped with what it holds,
+        // meshes and child frames; the animation sets read inside it and
+        // the tick rate stay. Its parent goes on with the next object.
+        let text = format!(
+            "xof 0303txt 0032\nFrame A {{ Frame Lost {{ AnimTicksPerSecond {{ 30; }} AnimationSet kept {{ }} Frame Child {{ Mesh c {{ {TRIANGLE} }} }} Mesh m {{ {TRIANGLE} }} Frame Empty {{ }} }} Mesh after {{ {TRIANGLE} }} }}"
+        );
+        let model = Model::parse(text.as_bytes(), "m.x").unwrap();
+        assert_eq!(frame_names(&model), ["", "A"]);
+        assert!(model.frames[1].children.is_empty());
+        assert_eq!(model.meshes.len(), 1);
+        assert_eq!(model.meshes[0].name, "after");
+        assert_eq!(model.meshes[0].frame, 1);
+        assert_eq!(model.frames[1].meshes, vec![0]);
+        assert_eq!(model.animation_sets.len(), 1);
+        assert_eq!(model.ticks_per_second, 30);
+
+        // The failure climbs while the frame is the last object of its
+        // parent, up to the top level, which fails the file.
+        let text = "xof 0303txt 0032\nFrame A { FrameTransformMatrix { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; } Frame B { Frame C { } } }";
+        assert_eq!(
+            Model::parse(text.as_bytes(), "m.x").unwrap_err(),
+            Error::EmptyFrame { frame: "C".into() }
+        );
+        assert_eq!(
+            Model::parse(b"xof 0303txt 0032\nFrame A { }", "m.x").unwrap_err(),
+            Error::EmptyFrame { frame: "A".into() }
+        );
+        // A top-level object that fails fails the file, whatever follows.
+        let text = format!(
+            "xof 0303txt 0032\nMesh bad {{ {BROKEN} }} Frame A {{ Mesh good {{ {TRIANGLE} }} }}"
+        );
+        assert!(matches!(
+            Model::parse(text.as_bytes(), "m.x").unwrap_err(),
+            Error::VertexOutOfRange { .. }
+        ));
+        // A reference counts as an object that loaded.
+        let model = Model::parse(b"xof 0303txt 0032\nFrame A { { Other } }", "m.x").unwrap();
+        assert_eq!(frame_names(&model), ["", "A"]);
+    }
+
+    /// `CXFrameNode::Render`: a frame's own meshes, then its child frames.
+    #[test]
+    fn meshes_are_ordered_frame_by_frame() {
+        let text = format!(
+            "xof 0303txt 0032\nFrame A {{ Mesh a1 {{ {TRIANGLE} }} Frame B {{ Mesh b1 {{ {TRIANGLE} }} Frame C {{ Mesh c1 {{ {TRIANGLE} }} }} Mesh b2 {{ {TRIANGLE} }} }} Mesh a2 {{ {TRIANGLE} }} }} Mesh top {{ {TRIANGLE} }}"
+        );
+        let model = Model::parse(text.as_bytes(), "m.x").unwrap();
+        let names: Vec<&str> = model.meshes.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["top", "a1", "a2", "b1", "b2", "c1"]);
+        assert_eq!(frame_names(&model), ["", "A", "B", "C"]);
+        for (index, frame) in model.frames.iter().enumerate() {
+            for &mesh in &frame.meshes {
+                assert_eq!(model.meshes[mesh].frame, index);
+            }
+        }
+        assert_eq!(model.frames[ROOT].meshes, vec![0]);
+        assert_eq!(model.frames[1].meshes, vec![1, 2]);
+        assert_eq!(model.frames[2].meshes, vec![3, 4]);
+        assert_eq!(model.frames[3].meshes, vec![5]);
+    }
+
+    /// `CXFrameNode::MergeFromXData` has the same last-object rule, and
+    /// `MergeFromFile` looks the bones up only when the merge succeeded.
+    #[test]
+    fn a_merge_that_fails_keeps_its_sets_unbound() {
+        const SET: &str = "Animation { { Tip } AnimationKey { 2; 1; 0;3;0,0,0;;; } }";
+        let mut model = Model::parse(QUAD.as_bytes(), "q.x").unwrap();
+        let before = model.animation_sets.len();
+        // The empty frame at the top level fails the merge after `one`.
+        let text = format!(
+            "xof 0303txt 0032\nAnimationSet one {{ {SET} }} Frame Empty {{ }} AnimationSet two {{ {SET} }}"
+        );
+        assert_eq!(
+            model.merge_animations(text.as_bytes(), "a.x").unwrap_err(),
+            Error::EmptyFrame {
+                frame: "Empty".into()
+            }
+        );
+        assert_eq!(model.animation_sets.len(), before + 1);
+        assert_eq!(
+            model.animation_set("one").unwrap().animations[0].frame,
+            None
+        );
+        assert!(model.animation_set("two").is_none());
+        // Inside a frame only the last object counts; a merge that
+        // succeeds binds every set of the model, the earlier ones too.
+        let text = format!(
+            "xof 0303txt 0032\nFrame F {{ Frame Empty {{ }} AnimationSet three {{ {SET} }} }}"
+        );
+        assert_eq!(model.merge_animations(text.as_bytes(), "b.x").unwrap(), 1);
+        let tip = model.find_frame("Tip");
+        assert!(tip.is_some());
+        assert_eq!(model.animation_set("one").unwrap().animations[0].frame, tip);
+        assert_eq!(
+            model.animation_set("three").unwrap().animations[0].frame,
+            tip
+        );
+    }
+
+    /// `CXModel::FindBones` with a parent model.
+    #[test]
+    fn a_model_with_a_parent_finds_its_bones_in_the_parent() {
+        let parent = Model::parse(QUAD.as_bytes(), "q.x").unwrap();
+        // The shadow model has other frames, in another order; its mesh
+        // names the parent's bones and one the parent lacks.
+        let text = format!(
+            "xof 0303txt 0032\nFrame Tip {{ FrameTransformMatrix {{ 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; }} }} Frame Low {{ Mesh low {{ {TRIANGLE} SkinWeights {{ \"Tip\"; 1; 1; 1.0; 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; }} SkinWeights {{ \"Low\"; 1; 0; 1.0; 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; }} }} }} AnimationSet s {{ Animation {{ {{ Root }} AnimationKey {{ 2; 1; 0;3;0,0,0;;; }} }} }}"
+        );
+        let shadow = Model::parse_with_parent(text.as_bytes(), "low.x", &parent).unwrap();
+        let bones = &shadow.meshes[0].bones;
+        assert_eq!(bones[0].frame, parent.find_frame("Tip"));
+        assert_ne!(bones[0].frame, shadow.find_frame("Tip"));
+        assert_eq!(bones[1].frame, None, "the parent has no frame Low");
+        assert_eq!(
+            shadow.animation_sets[0].animations[0].frame,
+            parent.find_frame("Root")
+        );
+        // Alone, the same file finds its own frames.
+        let alone = Model::parse(text.as_bytes(), "low.x").unwrap();
+        assert_eq!(alone.meshes[0].bones[0].frame, alone.find_frame("Tip"));
+        assert_eq!(alone.meshes[0].bones[1].frame, alone.find_frame("Low"));
+    }
+
+    #[test]
+    fn hostile_files_are_refused_without_exhausting_memory_or_the_stack() {
+        // A vertex count far beyond the values of the object.
+        let text = "xof 0303txt 0032\nFrame F { Mesh { 4000000000; 0;0;0;; 1; 3;0,0,0;; } }";
+        assert!(matches!(
+            Model::parse(text.as_bytes(), "m.x").unwrap_err(),
+            Error::File(_)
+        ));
+        // Frames nested beyond any skeleton.
+        let mut text = String::from("xof 0303txt 0032\n");
+        for _ in 0..100_000 {
+            text.push_str("Frame F { ");
+        }
+        assert!(matches!(
+            Model::parse(text.as_bytes(), "m.x").unwrap_err(),
+            Error::File(_)
+        ));
+        // A bone that lists a duplicated vertex again and again.
+        let text = "xof 0303txt 0032\nFrame F { Mesh fold { 4; 0;0;0;, 1;0;0;, 1;0;1;, 2;1;0;; 2; 3;0,1,2;, 3;1,3,2;; MeshNormals { 2; 0;1;0;, 1;0;0;; 2; 3;0,0,0;, 3;1,1,1;; } SkinWeights { \"F\"; 4; 1,1,1,1; 1,1,1,1; 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; } } }";
+        assert_eq!(
+            Model::parse(text.as_bytes(), "m.x").unwrap_err(),
+            Error::TooManyWeights {
+                mesh: "fold".into()
+            }
+        );
     }
 
     #[test]

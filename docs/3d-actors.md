@@ -560,14 +560,29 @@ rejected if no top-level frame was found.
 | anything else | Ignored. |
 
 Templates are matched by **name** in Luma (D3DX matches the GUIDs of the
-registered templates). An **empty frame** (`Frame x { }`) fails the whole
-load in the original, an accident of its child loop; Luma accepts it.
+registered templates). A frame answers for its **last** object only, an
+accident of the original's child loop that Luma reproduces: an object
+that fails before the last one is left out alone, and a frame whose last
+object fails or that holds **no object at all** (`Frame x { }`) is
+dropped with what is under it and fails in turn, up to the top level,
+where a failure rejects the file ([formats/xfile.md](formats/xfile.md),
+section 2). The meshes are kept in the order the original walks them: a
+frame's own meshes before its child frames'.
 
 Merging a second file (`MergeFromFile`) takes only `AnimationSet` and
 `Animation` objects, searching the frames of the file recursively (the
 frames themselves are not added); the bones of the new animations are looked
 up by name in the existing skeleton (`FindBones`). An unnamed animation set
-takes the **file name without path and extension** as its name.
+takes the **file name without path and extension** as its name. A merge
+that fails part-way leaves the sets it had read in the model, bound to no
+frame ([formats/xfile.md](formats/xfile.md), 2.5).
+
+A model can be loaded **against a parent model** (`LoadFromFile(file,
+ParentModel)`, the `SHADOW_MODEL`): its mesh bones and animation targets
+are then looked up in the parent's frames, and its skinned meshes are
+posed with the parent's combined matrices every update
+(`Model::parse_with_parent`, `luma_3d::animation::ShadowModel`;
+[formats/xfile.md](formats/xfile.md), 2.6).
 
 ### 6.3 Meshes (what D3DX does, **[ext]**)
 

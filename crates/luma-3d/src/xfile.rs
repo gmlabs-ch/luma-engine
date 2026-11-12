@@ -27,6 +27,11 @@ use crate::xfile_binary;
 /// Length of the header: magic, version, format and float size.
 pub const HEADER_LEN: usize = 16;
 
+/// How deep data objects may nest. A skeleton is a chain of frames a few
+/// dozen deep at most; the bound keeps a hostile file from exhausting the
+/// stack of the recursive readers.
+pub(crate) const MAX_DEPTH: usize = 256;
+
 /// The storage format named by the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
@@ -318,7 +323,7 @@ fn parse_text(body: &[u8]) -> Result<(Vec<Template>, Vec<DataObject>)> {
             Token::Ident(word) if word == "template" => {
                 templates.push(lexer.template()?);
             }
-            Token::Ident(template) => objects.push(lexer.object(template)?),
+            Token::Ident(template) => objects.push(lexer.object(template, 0)?),
             other => return Err(lexer.unexpected(&other)),
         }
     }
@@ -697,7 +702,12 @@ impl Lexer<'_> {
     /// Reads a data object after its template name. The object's GUID may
     /// come before the brace (as the sample files write it) or first
     /// inside it (as the DirectX grammar puts it).
-    fn object(&mut self, template: String) -> Result<DataObject> {
+    fn object(&mut self, template: String, depth: usize) -> Result<DataObject> {
+        if depth > MAX_DEPTH {
+            return Err(self.error(ErrorKind::UnexpectedToken(
+                "an object nested too deep".to_string(),
+            )));
+        }
         let line = self.line;
         let mut name = None;
         let mut guid = None;
@@ -732,7 +742,7 @@ impl Lexer<'_> {
                 Token::Float(f) => object.values.push(Value::Float(f)),
                 Token::Str(s) => object.values.push(Value::Str(s)),
                 Token::Ident(child_template) => {
-                    let child = self.object(child_template)?;
+                    let child = self.object(child_template, depth + 1)?;
                     object.children.push(Child::Object(child));
                 }
                 Token::OpenBrace => {

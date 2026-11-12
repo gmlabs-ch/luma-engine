@@ -593,7 +593,7 @@ mod tests {
 "#;
 
     const MODEL: &str = r#"xof 0303txt 0032
-Frame Bone { }
+Frame Bone { FrameTransformMatrix { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; } }
 AnimationSet walk {
  Animation {
   { Bone }
