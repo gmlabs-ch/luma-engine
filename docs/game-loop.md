@@ -20,10 +20,11 @@ Every frame then runs, in this order (`Runtime::tick`):
 1. a game load asked last frame (`Game.LoadGame`) happens, replacing
    everything below with the saved state (see [saving.md](saving.md));
    the timer advances by the frame's duration, at most a second;
-2. a scene change asked last frame happens (`SceneShutdown`, the old
-   scene's state noted, the new scene loaded and its remembered state
-   put back, its scripts attached), with a fade from black of 200 ms
-   when asked;
+2. a scene change asked earlier happens once no transition runs
+   (`SceneShutdown`, the old scene's state noted, the new scene loaded
+   and its remembered state put back, its scripts attached), and the
+   fade from black starts when asked (see
+   [Scene changes](#scene-changes));
 3. speech sounds that ended end their sentences; the fader advances;
 4. the scripts run (`Engine::tick`);
 5. the scene's entities and the game's own (see
@@ -45,8 +46,16 @@ Every frame then runs, in this order (`Runtime::tick`):
 8. the windows note the mouse: a button held under it is pressed, a
    press released on it fires, a dragged window moves, the focused
    window is checked; the cursor is chosen and animates;
-9. the events raised during the frame reach their scripts (they run
-   next frame).
+9. the transition of a scene change advances;
+10. the events raised during the frame reach their scripts (they run
+    next frame).
+
+While a full-screen video plays only the video is updated and drawn,
+with the loading icon and the quick messages over it. The quick
+messages (`Game.Msg`, script errors) are drawn after everything else on
+every frame and last three seconds of the live clock
+(`CBGame::m_CurrentTime`), so they also go away while a menu freezes the
+game.
 
 The mouse reaches the runtime between frames (`mouse_move`,
 `mouse_left_down`, `mouse_left_up`). A button needs one frame that sees
@@ -125,10 +134,12 @@ nodes, see [3d-actors.md](3d-actors.md) section 10), the windows marked
 `IN_GAME`, the inventory box, the response box while a dialogue waits
 for a choice, the other windows (so a menu opened during a dialogue
 covers the responses, and takes the clicks over them; `CAdGame::
-DisplayContent`), the sentences (not while the game is frozen by a
-system-exclusive window such as a menu: `DisplaySentences`; they come
-back when it closes), the cursor, the fader's
-colour over everything, the loading icon (see
+DisplayContent`), the sentences (while the game is frozen by a
+system-exclusive window such as a menu, not those of freezable
+speakers, which is every object but a window's own: `DisplaySentences`;
+they come back when it closes; the accessibility pause shows them all),
+the cursor, the fader's colour over everything, the black of a scene
+change's transition, the loading icon (see
 [saving.md](saving.md#loading-and-saving-screens-loading-icon)), and
 last the messages of `Game.Msg`: short
 texts in the system font from 20 pixels down the left edge, each for
@@ -558,8 +569,37 @@ over `duration` milliseconds (500, black, opaque by default) and makes
 the script wait; `FadeIn` fades the colour away; the `Async` forms do
 not wait and the `System` forms run on the wall clock, so that a frozen
 game still fades. `GetFadeColor` reads the colour laid over the frame.
-A scene change fades in from black over 200 ms unless `ChangeScene` is
-told not to.
+
+### Scene changes
+
+`Game.ChangeScene(file, fadeOut, fadeIn)` goes through the transition
+manager (`CBTransitionMgr`, `Transition` in `fader.rs`), not through the
+fader above; both flags are on when left out.
+
+- With `fadeOut`, the screen goes to black over 200 ms with the game not
+  interactive (`Game.Interactive` reads false and comes back to what it
+  was, or to what a script set meanwhile, when the fade ends). The scene
+  changes at the start of the first frame after the fade
+  (`CAdGame::InitLoop` waits for `IsReady`); without `fadeOut`, at the
+  start of the next frame. `Game.ChangingScene` is true until then.
+- With `fadeIn`, the new scene comes back from black over 200 ms, the
+  game interactive; it starts even when the scene file failed to load.
+- The very first change of a game, while no scene is loaded, happens
+  inside the call (`CAdGame::ScheduleChangeScene`): the script goes on
+  with the scene there. Its fade-in runs; the fade-out asked with it is
+  dropped, as a transition cannot start while another runs. The same
+  holds for a change asked while a fade-in still runs: no fade-out, and
+  the change waits for the fade-in to end.
+
+The transition runs on the live clock, starting at the first frame that
+shows it, and ends once more than 200 ms have passed; it is black laid
+over the whole screen after everything else, the fader's colour and the
+cursor included, so a colour a script left with `Game.FadeOut` stays
+under it and a script waiting for the fader is not released by a scene
+change. It is not part of a saved game. A scene file that is missing
+leaves the current scene in place (the game's objects are reset and the
+scene's script properties cleared, as before any change); one that does
+not parse leaves no scene.
 
 The scene has a fader of its own (`Scene.FadeOut`, `FadeIn`, their
 `Async` forms and `Scene.GetFadeColor`, same arguments): its colour
@@ -688,7 +728,3 @@ under a shield window covering the screen, system-exclusive so that
 every script but the window's stops, with "Game paused. Press
 Ctrl+Space to resume." (`/SYSENG0040/`) in the system font at the
 bottom centre; Ctrl+Space again closes it.
-
-## Not yet
-
-- Transitions other than the fade.

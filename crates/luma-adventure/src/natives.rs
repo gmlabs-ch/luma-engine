@@ -573,7 +573,10 @@ impl World {
         match name {
             "Name" => self.name = value.get_string(self),
             "Caption" => self.caption = value.get_string(self),
-            "Interactive" => self.interactive = value.get_bool(self),
+            "Interactive" => {
+                let interactive = value.get_bool(self);
+                self.set_interactive(interactive);
+            }
             "MainObject" => self.main_object = value.as_native(),
             "Subtitles" => self.subtitles = value.get_bool(self),
             "SubtitlesSpeed" => self.subtitles_speed = value.get_int(self),
@@ -636,11 +639,19 @@ impl World {
         Some(match name {
             "ChangeScene" => {
                 let path = arg(0).get_string(self);
+                // Both fades default to on (`valFadeOut->IsNULL()?true`).
+                let fade_out = match arg(1) {
+                    Value::Null => true,
+                    v => v.get_bool(self),
+                };
                 let fade_in = match arg(2) {
                     Value::Null => true,
                     v => v.get_bool(self),
                 };
-                self.schedule_scene(&path, fade_in);
+                self.schedule_or_change_scene(ctx.engine, &path, fade_in);
+                if fade_out {
+                    self.start_fade_out_transition();
+                }
                 Return::null()
             }
             "PlayTheora" | "PlayVideo" => {

@@ -211,7 +211,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBGame::ScGetProperty` | partial | `World::game_get` (`natives.rs`). Different: `SoundBufferSize` reads 0 (WME 3 or the value set); `AutorunDisabled` always reads false; `Hwnd`, `HardwareTL`, `Direct3DDevice`, `DirectDrawInterface` are not answered (null; Windows values); `WindowsTime` counts from the game's start; `Interactive` and the others agree, `Frozen`, `FPS`, the shadow and accessibility properties included. |
 | `CBGame::ScSetProperty` | partial | `World::game_set`. Different: `Name` does not refresh the window title; `SoundBufferSize`, `AutorunDisabled` are not kept (they become script properties, and the read still gives 0 / false); `MainObject` takes any handle without the `ValidObject` check. |
 | `CBGame::ScToString` | done | `luma-adventure/src/world.rs` `Natives::to_string`: `[game object]`. |
-| `CBGame::DisplayQuickMsg` | partial | `World::update_quick_messages`, `draw_quick_messages` (`world.rs`): from y 20, left, system font, nothing without one. Different: the three seconds run on the game timer (`World::timer`), WME's on `m_CurrentTime`, the system clock, so a message stays while the game is frozen; not drawn while a video plays or the loading screen shows (`World::draw` returns early), WME draws it after every `DisplayContent`. |
+| `CBGame::DisplayQuickMsg` | done | `World::update_quick_messages` (three seconds of the live clock, so also while the game is frozen), `draw_quick_messages` (`world.rs`): from y 20, left, system font, nothing without one; updated and drawn on every frame, the frames of a video and of the loading screen included (`Runtime::tick`, `World::draw`). |
 | `CBGame::QuickMessage` | done | `World::quick_message`: five at most, the oldest goes. |
 | `CBGame::QuickMessageForm` | n/a | `printf` wrapper used by the engine's own debug output. |
 | `CBGame::RegisterObject` | replaced | `Objects::insert` (`objects.rs`): every native has a generational handle. |
@@ -277,7 +277,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBGame::GetCurrentViewportOffset` | done | `Camera::origin_x`, `origin_y` from `World::camera` (`world.rs`): the viewport's top-left, 0 without one. |
 | `CBGame::WindowLoadHook` | n/a | Base stub returning failure; `CAdGame` overrides it (adventure table). |
 | `CBGame::WindowScriptMethodHook` | n/a | Base stub returning failure; `CAdGame` overrides it (adventure table). |
-| `CBGame::SetInteractive` | done | `World::game_set` `Interactive` sets `World::interactive`. The copy into the transition manager's `m_OrigInteractive` has no counterpart (no transition manager, see `CBTransitionMgr`). |
+| `CBGame::SetInteractive` | done | `World::set_interactive` (`world.rs`), from `World::game_set` `Interactive`: sets `World::interactive` and `Transition::note_interactive` (`m_OrigInteractive`). |
 | `CBGame::ResetMousePos` | done | `World::warp_mouse` (`luma-adventure/src/input.rs`), called when `Game.MouseX` or `MouseY` is set (`World::game_set`, `natives.rs`): the front-end moves the system cursor (`World::take_cursor_warp`). |
 | `CBGame::SetResourceModule` | n/a | Windows resource DLL handle. |
 | `CBGame::DisplayContent` | n/a | Empty in the base class; `CAdGame::DisplayContent` is the frame (adventure table; `Runtime::tick` and `World::draw`). |
@@ -450,7 +450,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBQuickMsg::CBQuickMsg` | partial | `QuickMessage` (`luma-adventure/src/world.rs`): the text and its start. The start is the game timer; WME takes `m_CurrentTime`, the system clock, so its three seconds run while the game is frozen. |
+| `CBQuickMsg::CBQuickMsg` | done | `QuickMessage` (`luma-adventure/src/world.rs`), made by `World::quick_message`: the text and its start on the live clock (`World::clock`, the original's `m_CurrentTime`). |
 | `CBQuickMsg::~CBQuickMsg` | replaced | Rust ownership. |
 | `CBQuickMsg::GetText` | done | `QuickMessage::text`. |
 
@@ -576,11 +576,11 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CBTransitionMgr::CBTransitionMgr` | replaced | No transition manager: the fade of a scene change runs through the game's fader (`Runtime::tick`, `world.rs`). See `Start` and `Update` for what that loses. |
+| `CBTransitionMgr::CBTransitionMgr` | done | `Transition::default` (`luma-adventure/src/fader.rs`), `World::transition`: ready, no type, nothing to restore. |
 | `CBTransitionMgr::~CBTransitionMgr` | replaced | Rust ownership. |
-| `CBTransitionMgr::IsReady` | todo | `CAdGame::InitLoop` waits for it before changing scene (the fade-out must end first). Luma changes scene at the next frame. |
-| `CBTransitionMgr::Start` | partial | Only `TRANSITION_FADE_IN` exists, as `world.fader.fade_in(black, 200 ms, system)` in `Runtime::tick`. Missing: `TRANSITION_FADE_OUT`, which `Game.ChangeScene(file, fadeOut = true, ...)` starts with `NonInteractive` true: the screen goes to black over 200 ms with the game not interactive, and only then does the scene change; Luma's `ChangeScene` ignores its second argument and cuts. Missing: the interactive state kept in `m_OrigInteractive` and put back when a transition ends. |
-| `CBTransitionMgr::Update` | partial | The fade-in is the game fader's (`Fader::update`), not a separate black layer drawn last (`Renderer->Fade`). So it replaces whatever fade a script set: after `Game.FadeOut(...)` then `ChangeScene`, WME stays black under the script's fade until the script fades in; Luma's scene fade-in clears the fader after 200 ms and shows the scene. The fade-out branch is missing (see `Start`). |
+| `CBTransitionMgr::IsReady` | done | `Transition::is_ready`; `Runtime::tick` (`world.rs`) changes to the scheduled scene only when it is true. |
+| `CBTransitionMgr::Start` | done | `Transition::start` (`fader.rs`): nothing while one runs; a non-interactive one keeps `Game.Interactive` and turns it off. The preserve flag, once set, stays set, as the original's `else m_PreserveInteractive;` does nothing. Callers: `World::start_fade_out_transition` (`Game.ChangeScene`), `World::change_scene` (fade-in). |
+| `CBTransitionMgr::Update` | done | `Transition::update` from `World::update_transition` at the end of `Runtime::tick`, on the live clock from its first update: the black's opacity (`255 - Alpha`, truncated as the original), ready once more than 200 ms have passed, `Game.Interactive` put back; drawn by `World::draw_transition` after the fader (`World::draw`). Not updated while a full-screen video plays, as in `CAdGame::DisplayContent`. |
 
 ## `wme_base/BTreeNode.cpp`
 

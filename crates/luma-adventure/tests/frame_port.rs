@@ -56,7 +56,7 @@ enum File<'a> {
     Raw(&'a str, Vec<u8>),
 }
 
-const GAME_FILE: &str = "GAME { NAME=\"Frame\" SCRIPT=\"game.script\" }";
+const GAME_FILE: &str = "GAME { NAME=\"Frame\" SCRIPT=\"game.script\" SYSTEM_FONT=\"sys.font\" }";
 
 /// A 64x48 game whose `game.script` is `source`, with the extra files,
 /// started and run for two frames of 16 ms. Returns its directory, the
@@ -77,6 +77,12 @@ fn start_with(
     pkg.add_file("red.png", png(8, 8, RED));
     pkg.add_file("green.png", png(8, 8, GREEN));
     pkg.add_file("blue.png", png(64, 48, BLUE));
+    pkg.add_file("font.png", png(128, 128, [255, 255, 255, 255]));
+    pkg.add_file(
+        "sys.font",
+        b"FONT { IMAGE=\"font.png\" COLUMNS=16 TILE_WIDTH=8 TILE_HEIGHT=8 DEFAULT_WIDTH=6 }"
+            .to_vec(),
+    );
     for file in files {
         match file {
             File::Script(name, source) => pkg.add_file(*name, compile(source, name)),
@@ -127,12 +133,12 @@ fn no_errors(log: &[String]) {
 
 /// Raises an event on the game object and runs a frame, so that the
 /// handler of `game.script` has run.
-fn raise(runtime: &mut Runtime, event: &str) {
+fn raise(runtime: &mut Runtime, event: &str) -> Vec<String> {
     let game = runtime.world.game_id();
     runtime
         .engine
-        .apply_event(&mut runtime.world, game, event, true);
-    runtime.tick(16);
+        .apply_event(&mut runtime.world, game, event, false);
+    runtime.tick(16)
 }
 
 /// The object under a point of the screen, as the next frame sees it.
@@ -292,5 +298,187 @@ result.open = open.GetControl("wide");
     // Without the switch the button takes the mouse over its whole width.
     let open = object(&runtime, "open");
     assert_eq!(object_at(&mut runtime, 30, 34), Some(open));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+const HALL: &str = "SCENE {
+  NAME=\"Hall\"
+  LAYER { NAME=\"main\" MAIN=TRUE WIDTH=64 HEIGHT=48 }
+}";
+
+#[test]
+fn a_scene_change_fades_out_first_and_fades_in_on_its_own_layer() {
+    use luma_adventure::TransitionKind;
+    let (dir, mut runtime, log) = start(
+        r#"
+global result = new Object();
+// The first change of a game happens at once: the script goes on with
+// the scene loaded.
+Game.ChangeScene("room.scene", false, false);
+var scene = Game.Scene;
+result.now = scene.Name;
+result.changing = Game.ChangingScene;
+on "Go" {
+  Game.ChangeScene("hall.scene");
+  result.changingLater = Game.ChangingScene;
+  result.interactive = Game.Interactive;
+}
+"#,
+        &[
+            File::Text("room.scene", ROOM),
+            File::Text("hall.scene", HALL),
+        ],
+    );
+    no_errors(&log);
+    assert_eq!(result(&runtime, "now"), Value::from("Room"));
+    assert_eq!(result(&runtime, "changing"), Value::Bool(false));
+    assert!(runtime.world.transition().is_ready(), "no fade was asked");
+
+    // Both fades are on by default. The fade to black comes first, with
+    // the game not interactive, and the scene changes only when it is
+    // over.
+    raise(&mut runtime, "Go");
+    assert_eq!(result(&runtime, "changingLater"), Value::Bool(true));
+    assert_eq!(result(&runtime, "interactive"), Value::Bool(false));
+    assert_eq!(
+        runtime.world.transition().kind(),
+        Some(TransitionKind::FadeOut)
+    );
+    assert!(!runtime.world.is_interactive());
+    runtime.tick(100);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    let half = runtime.world.transition().opacity().unwrap();
+    assert!((120..=135).contains(&half), "{half}");
+    assert!(
+        runtime.world.fader().color().is_none(),
+        "the fader scripts use is left alone"
+    );
+    runtime.tick(101);
+    assert_eq!(runtime.world.transition().opacity(), Some(255));
+    assert!(runtime.world.transition().is_ready());
+    assert!(runtime.world.is_interactive(), "given back with the end");
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    // The next frame changes the scene and starts the fade from black.
+    runtime.tick(16);
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Hall");
+    assert_eq!(
+        runtime.world.transition().kind(),
+        Some(TransitionKind::FadeIn)
+    );
+    assert_eq!(runtime.world.transition().opacity(), Some(255));
+    assert!(runtime.world.is_interactive());
+    if let Some(frame) = render(&mut runtime) {
+        assert_eq!(rgb(&frame, 30, 20), (0, 0, 0), "black over everything");
+    }
+    runtime.tick(201);
+    assert!(runtime.world.transition().is_ready());
+    runtime.tick(16);
+    assert_eq!(runtime.world.transition().opacity(), None);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A window that fills the screen, for a menu.
+const MENU: &str = "WINDOW { NAME=\"menu\" X=0 Y=0 WIDTH=64 HEIGHT=48 TRANSPARENT=TRUE }";
+
+#[test]
+fn a_frozen_game_hides_the_sentences_and_keeps_the_quick_messages_running() {
+    let (dir, mut runtime, log) = start(
+        r#"
+global result = new Object();
+global menu;
+Game.ChangeScene("room.scene", false, false);
+on "Say" {
+  var scene = Game.Scene;
+  var box = scene.GetNode("box");
+  box.Talk("A long sentence that stays for a while");
+}
+on "Menu" {
+  Game.Msg("saved");
+  menu = Game.LoadWindow("menu.window");
+  menu.GoSystemExclusive();
+}
+on "Close" {
+  menu.Close();
+}
+"#,
+        &[
+            File::Text("room.scene", ROOM),
+            File::Text("menu.window", MENU),
+        ],
+    );
+    no_errors(&log);
+    runtime.world.accessibility_mut().keyboard_pause = true;
+    no_errors(&raise(&mut runtime, "Say"));
+    runtime.tick(16);
+    assert_eq!(runtime.world.sentences().len(), 1);
+    assert_eq!(runtime.world.visible_sentences().count(), 1);
+
+    // A system-exclusive window freezes the game: the sentence of a
+    // freezable speaker is not drawn, and comes back with the game.
+    no_errors(&raise(&mut runtime, "Menu"));
+    runtime.tick(16);
+    assert!(runtime.world.is_frozen());
+    assert_eq!(runtime.world.sentences().len(), 1);
+    assert_eq!(runtime.world.visible_sentences().count(), 0);
+    // A quick message lasts three seconds of the live clock, which the
+    // freeze does not stop.
+    assert_eq!(
+        runtime.world.quick_messages().len(),
+        1,
+        "{:?}",
+        runtime.world.quick_messages()
+    );
+    let timer = runtime.world.timer();
+    for _ in 0..4 {
+        runtime.tick(800);
+    }
+    assert_eq!(runtime.world.timer(), timer, "the game timer stands still");
+    assert!(runtime.world.quick_messages().is_empty());
+    raise(&mut runtime, "Close");
+    runtime.tick(16);
+    assert!(!runtime.world.is_frozen());
+    assert_eq!(runtime.world.visible_sentences().count(), 1);
+
+    // The accessibility pause freezes the game too, but shows every
+    // sentence.
+    runtime.key_down(17, None, false, false, true);
+    runtime.key_down(32, Some(' '), false, false, true);
+    runtime.key_up(32);
+    runtime.tick(16);
+    assert!(runtime.world.accessibility().paused && runtime.world.is_frozen());
+    assert_eq!(runtime.world.visible_sentences().count(), 1);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_scene_file_that_is_missing_leaves_the_scene_and_still_fades_in() {
+    let (dir, mut runtime, log) = start(
+        r#"
+global result = new Object();
+Game.ChangeScene("room.scene", false, false);
+on "Go" {
+  Game.ChangeScene("nowhere.scene", false, true);
+}
+"#,
+        &[File::Text("room.scene", ROOM)],
+    );
+    no_errors(&log);
+    let scene = runtime.world.scene_id();
+    runtime.world.set_sfx_volume(scene, 40);
+    let mut log = raise(&mut runtime, "Go");
+    log.extend(runtime.tick(16));
+    assert!(
+        log.iter().any(|l| l.contains("cannot change scene")),
+        "{log:?}"
+    );
+    // The old scene is still there with its nodes, its volume setting
+    // went back to 100, and the fade-in started all the same.
+    assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
+    assert!(runtime.world.find_node("box").is_some());
+    assert_eq!(runtime.world.sfx_volume(scene), 100);
+    assert_eq!(
+        runtime.world.transition().kind(),
+        Some(luma_adventure::TransitionKind::FadeIn)
+    );
     std::fs::remove_dir_all(dir).ok();
 }

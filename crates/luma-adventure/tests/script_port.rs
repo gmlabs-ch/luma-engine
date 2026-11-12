@@ -420,8 +420,10 @@ on "Check"
     runtime
         .engine
         .apply_event(&mut runtime.world, game, "Grab", false);
-    log.extend(runtime.tick(16));
-    log.extend(runtime.tick(16));
+    // The scene changes once the transitions of the changes have run.
+    for _ in 0..40 {
+        log.extend(runtime.tick(16));
+    }
     runtime
         .engine
         .apply_event(&mut runtime.world, game, "Check", false);
@@ -789,7 +791,11 @@ on "Check"
         runtime
             .engine
             .apply_event(&mut runtime.world, game, event, false);
-        log.extend(runtime.tick(16));
+        // The scene changes once the transitions of the changes have
+        // run.
+        for _ in 0..40 {
+            log.extend(runtime.tick(16));
+        }
     }
     log.extend(runtime.tick(16));
     no_errors(&log);

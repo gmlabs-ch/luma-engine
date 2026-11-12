@@ -95,6 +95,10 @@ pub struct SentenceDraw {
     pub width: i32,
     /// The alignment.
     pub align: TextAlign,
+    /// Whether the speaker is freezable (`CAdSentence::m_Freezable`,
+    /// from the object): its sentence is hidden while the game is
+    /// frozen.
+    pub freezable: bool,
 }
 
 impl SentenceDraw {
@@ -121,6 +125,7 @@ impl SentenceDraw {
             y,
             width: sentence.width,
             align: sentence.align,
+            freezable: true,
         })
     }
 }

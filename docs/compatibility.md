@@ -167,7 +167,7 @@ How the list was made. For every class with a script interface, the names tested
 |----------|------|-------|------|
 | `LOG` | method | **done** | Writes to the log (same as the global `LOG`). |
 | `Caption` | method | **done** | Returns the caption (CBObject.Caption; the game has one). WME also refreshes the window title; Luma's player sets the title once at start. |
-| `Msg` | method | **done** | Shows a short on-screen message for three seconds in the system font (and logs it). |
+| `Msg` | method | **done** | Shows a short on-screen message for three seconds of the live clock in the system font (and logs it). |
 | `RunScript` | method | **done** | Obsolete alias of `AttachScript` on the game (logs a warning). |
 | `LoadStringTable` | method | **done** | Loads a string table, optionally keeping the old strings. |
 | `ValidObject` | method | **done** | True when a handle still refers to a live object. |
@@ -268,7 +268,7 @@ How the list was made. For every class with a script interface, the names tested
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `ChangeScene` | method | **done** | Changes scene at the start of the next frame (scene file, fade-in flag). |
+| `ChangeScene` | method | **done** | `(file, fadeOut, fadeIn)`, both on by default: the screen fades to black over 200 ms with the game not interactive, the scene changes, and the new one fades in (`docs/game-loop.md`, Scene changes). The first change of a game happens inside the call. |
 | `LoadActor` | method | **done** | Loads a 2D actor from an `.actor` file and returns it. |
 | `LoadActor3D` | method | **done** | Loads a 3D actor (`.act3d`, X model) kept across scenes (the `3d` feature; see `docs/3d-actors.md`). `LoadActor` does the same for an `ACTOR3DX` file, as WME sniffs the keyword. |
 | `LoadEntity` | method | **done** | Loads an entity from an `.entity` file as an entity of the game, kept across scene changes (`TEMPLATE` is not followed). |

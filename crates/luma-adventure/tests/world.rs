@@ -1599,7 +1599,8 @@ fn scripts_drive_the_game_and_its_scene() {
         "the game script is attached"
     );
 
-    // Tick 1: the game script runs and schedules the scene change.
+    // Tick 1: the game script runs and changes the scene at once, no
+    // scene being loaded yet (`CAdGame::ScheduleChangeScene`).
     let log = runtime.tick(16);
     assert_eq!(result(&runtime, "greet"), Value::from("Hello"));
     assert_eq!(result(&runtime, "width"), Value::Int(32));
@@ -1608,9 +1609,12 @@ fn scripts_drive_the_game_and_its_scene() {
     assert_eq!(result(&runtime, "winVisible"), Value::Bool(false));
     assert_eq!(result(&runtime, "interactive"), Value::Bool(false));
     assert!(!runtime.world.is_interactive());
-    assert_eq!(result(&runtime, "changing"), Value::Bool(true));
-    assert_eq!(runtime.world.scheduled_scene(), Some("scenes\\room.scene"));
-    assert!(runtime.world.scene().is_none());
+    assert_eq!(result(&runtime, "changing"), Value::Bool(false));
+    assert_eq!(runtime.world.scheduled_scene(), None);
+    assert!(
+        log.iter().any(|l| l.contains("scene 'Room' loaded")),
+        "{log:?}"
+    );
     let stubs: Vec<&String> = log
         .iter()
         .filter(|l| l.contains("not implemented"))
@@ -1623,17 +1627,11 @@ fn scripts_drive_the_game_and_its_scene() {
         2,
         "the two sounds are missing: {log:?}"
     );
-    assert!(
-        log.iter().all(|l| !l.starts_with("Runtime error")),
-        "{log:?}"
-    );
 
-    // Tick 2: the scene loads, its scripts run, the lamp handler runs.
-    let log = runtime.tick(16);
-    assert!(
-        log.iter().any(|l| l.contains("scene 'Room' loaded")),
-        "{log:?}"
-    );
+    // The scene's scripts have run in the same frame; tick 2: the lamp
+    // handler runs.
+    let mut log = log;
+    log.extend(runtime.tick(16));
     assert_eq!(runtime.world.scene().unwrap().scene.name, "Room");
     assert_eq!(result(&runtime, "scene"), Value::from("Room"));
     assert_eq!(result(&runtime, "sceneSelf"), Value::from("Room"));
