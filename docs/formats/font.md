@@ -295,7 +295,15 @@ not. `StopTalk` ends it; `IsTalking` says whether one is playing.
   engine, whose `CBFontBitmap` never reads it. The texts a TrueType font
   has cached are dropped when the direction changes.
 - A TrueType font's text is cached as a rendered image per (text, width,
-  alignment, height limit); the engine keeps 30 such images per font.
+  alignment, height limit); the engine keeps 50 such images per font
+  (`NUM_CACHED_TEXTS`), a text used again counting one more use and a
+  new one replacing the least used. The original renders a text that is
+  not cached at the moment it draws it, so a frame with more than 50
+  texts in one font shows them all and renders the surplus again every
+  frame. Luma Engine renders the texts before the frame is drawn: a
+  text the frame asked for is not given up to make room, the cache
+  grows for that frame (up to 512 texts) and shrinks back to 50 when a
+  later frame no longer asks for them.
 - The `.talk` files that time talk sprites to a sound are not supported
   yet.
 - A text that does not fit the height it is given is not drawn at all,

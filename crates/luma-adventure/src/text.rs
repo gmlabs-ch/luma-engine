@@ -24,8 +24,14 @@ use luma_script::classes::utf8_to_text;
 use crate::font_face::{FaceChoice, FaceOrigin, FaceSet, choose_face, resolve_face};
 use crate::scene_view::key;
 
-/// The number of rendered texts a TrueType font keeps.
-const CACHED_TEXTS: usize = 30;
+/// The number of rendered texts a TrueType font keeps
+/// (`NUM_CACHED_TEXTS`).
+const CACHED_TEXTS: usize = 50;
+
+/// The most texts one font keeps for a single frame, whatever the frame
+/// asks for: past it the least used goes even though the frame wanted
+/// it.
+const MAX_FRAME_TEXTS: usize = 512;
 
 /// The widest image a text without a box is rendered to: wider than any
 /// screen a game draws on, so nothing visible is lost.
@@ -438,6 +444,9 @@ struct CachedText {
     offset: i32,
     texture: Option<Texture>,
     priority: u32,
+    /// Asked for since the textures were last uploaded: the frame being
+    /// put together draws it.
+    wanted: bool,
 }
 
 /// A TrueType font: the rasteriser, its glyphs, and the texts rendered.
@@ -847,7 +856,19 @@ impl TrueTypeFont {
         -(self.descender / 2.0)
     }
 
-    /// Renders a game text into the cache if it is not there.
+    /// Renders a game text into the cache if it is not there
+    /// (`CBFontTT::DrawTextD3D`, the half that finds or makes the
+    /// image). A text found is used once more (its priority goes up by
+    /// one); a new one takes the place of the least used when the cache
+    /// is full.
+    ///
+    /// The original renders a missing text when it draws it, so a frame
+    /// with more texts than the cache holds still shows them all, each
+    /// rendered again every frame. Here the texts are rendered before
+    /// the frame is drawn: one the frame asked for is never given up to
+    /// make room, the cache grows for that frame instead, and
+    /// [`upload`](Self::upload) brings it back to its size once the
+    /// frame no longer needs them.
     pub fn prepare(&mut self, text: &str, width: i32, align: TextAlign, max_height: i32) {
         if text.is_empty() {
             return;
@@ -855,11 +876,18 @@ impl TrueTypeFont {
         let found = self.texts.iter().position(|t| {
             t.text == text && t.width == width && t.align == align && t.max_height == max_height
         });
-        let next_priority = self.texts.iter().map(|t| t.priority).max().unwrap_or(0) + 1;
         if let Some(i) = found {
-            self.texts[i].priority = next_priority;
+            self.texts[i].priority = self.texts[i].priority.saturating_add(1);
+            self.texts[i].wanted = true;
             return;
         }
+        let next_priority = self
+            .texts
+            .iter()
+            .map(|t| t.priority)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
         let characters = self.characters(text);
         let (image, offset) = self.render(&characters, width, align, max_height);
         let cached = CachedText {
@@ -871,14 +899,21 @@ impl TrueTypeFont {
             offset,
             texture: None,
             priority: next_priority,
+            wanted: true,
         };
-        if self.texts.len() >= CACHED_TEXTS {
-            let oldest = (0..self.texts.len())
-                .min_by_key(|&i| self.texts[i].priority)
-                .unwrap_or(0);
-            self.texts[oldest] = cached;
-        } else {
+        if self.texts.len() < CACHED_TEXTS {
             self.texts.push(cached);
+            return;
+        }
+        // The least used text the frame does not draw goes; when the
+        // frame draws them all, the cache grows.
+        let all = self.texts.len() >= MAX_FRAME_TEXTS;
+        let least = (0..self.texts.len())
+            .filter(|&i| all || !self.texts[i].wanted)
+            .min_by_key(|&i| self.texts[i].priority);
+        match least {
+            Some(i) => self.texts[i] = cached,
+            None => self.texts.push(cached),
         }
     }
 
@@ -904,6 +939,27 @@ impl TrueTypeFont {
             if text.texture.is_none() {
                 text.texture = Some(renderer.texture("text", &text.image));
             }
+        }
+        self.end_frame();
+    }
+
+    /// The frame's texts are ready: those it did not ask for go, the
+    /// least used first, until the cache is back to its size, and the
+    /// next frame starts asking.
+    fn end_frame(&mut self) {
+        while self.texts.len() > CACHED_TEXTS {
+            let least = (0..self.texts.len())
+                .filter(|&i| !self.texts[i].wanted)
+                .min_by_key(|&i| self.texts[i].priority);
+            match least {
+                Some(i) => {
+                    self.texts.swap_remove(i);
+                }
+                None => break,
+            }
+        }
+        for text in &mut self.texts {
+            text.wanted = false;
         }
     }
 
@@ -1097,6 +1153,66 @@ pub fn default_color_key() -> Rgb {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_font::TestFont;
+
+    /// A TrueType font drawn with the test face: 20 pixels to the em
+    /// (`SIZE=15`), so every character advances by 10 pixels and a line
+    /// is 22 pixels high.
+    fn test_ttf(keys: &str, chars: &str) -> TrueTypeFont {
+        let file = format!("TTFONT {{ SIZE=15 COLOR {{255,255,255}} ALPHA=255 {keys} }}");
+        let FontFile::TrueType(def) = FontFile::parse(file.as_bytes()).unwrap() else {
+            panic!()
+        };
+        let bytes = TestFont::regular("Test", chars).build();
+        TrueTypeFont::from_bytes(def, "test.ttf", &bytes).unwrap()
+    }
+
+    const LETTERS: &str = " abcdefghijklmnopqrstuvwxyz0123456789";
+
+    #[test]
+    fn the_test_face_has_known_metrics() {
+        let mut font = test_ttf("", LETTERS);
+        assert_eq!(font.line_height, 22);
+        assert_eq!(font.measure("abc", -1), (30, 22));
+        assert_eq!(font.measure("a b", -1), (30, 22));
+        // A character the face lacks takes no room.
+        assert_eq!(font.measure("a!b", -1), (20, 22));
+    }
+
+    /// `CBFontTT::DrawTextD3D`: 50 texts are kept, and a frame that
+    /// draws more than the cache holds still gets every one of them.
+    #[test]
+    fn a_frame_with_more_texts_than_the_cache_holds_keeps_them_all() {
+        let mut font = test_ttf("", LETTERS);
+        let prepared = |font: &TrueTypeFont, text: &str| {
+            font.prepared_size(text, 100, TextAlign::Left, -1).is_some()
+        };
+        let frame = |font: &mut TrueTypeFont, texts: std::ops::Range<usize>| {
+            for i in texts {
+                font.prepare(&format!("t{i}"), 100, TextAlign::Left, -1);
+            }
+        };
+        frame(&mut font, 0..70);
+        assert!((0..70).all(|i| prepared(&font, &format!("t{i}"))));
+        font.end_frame();
+        assert_eq!(font.texts.len(), 70, "all were asked for");
+        // The same frame again renders nothing new.
+        frame(&mut font, 0..70);
+        assert_eq!(font.texts.len(), 70);
+        font.end_frame();
+        // A frame with other texts: the old ones make room, the least
+        // used first, and the cache is back to its size.
+        frame(&mut font, 0..5);
+        frame(&mut font, 100..130);
+        assert!((100..130).all(|i| prepared(&font, &format!("t{i}"))));
+        font.end_frame();
+        assert_eq!(font.texts.len(), CACHED_TEXTS);
+        assert!((0..5).all(|i| prepared(&font, &format!("t{i}"))));
+        assert!((100..130).all(|i| prepared(&font, &format!("t{i}"))));
+        // Without a frame ever ending (no renderer) the cache is bounded.
+        frame(&mut font, 1000..1000 + 2 * MAX_FRAME_TEXTS);
+        assert_eq!(font.texts.len(), MAX_FRAME_TEXTS);
+    }
 
     fn system_font() -> Option<(String, Vec<u8>)> {
         SYSTEM_FONTS
@@ -1162,10 +1278,6 @@ mod tests {
         font.prepare("Hi", 100, TextAlign::Center, -1);
         font.prepare("Hi", 100, TextAlign::Center, -1);
         assert_eq!(font.texts.len(), 1);
-        for i in 0..40 {
-            font.prepare(&format!("t{i}"), 50, TextAlign::Left, -1);
-        }
-        assert_eq!(font.texts.len(), CACHED_TEXTS);
 
         // Right-to-left lays the glyphs out from the last: "ab" comes out
         // as "ba" does left to right; the cache goes with the direction.

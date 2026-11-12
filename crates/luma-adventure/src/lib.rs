@@ -82,6 +82,8 @@ pub mod scene_view;
 pub mod settings;
 pub mod sound;
 pub mod talk;
+#[cfg(test)]
+mod test_font;
 pub mod text;
 #[cfg(not(feature = "3d"))]
 mod three_d_off;
