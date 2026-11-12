@@ -55,8 +55,8 @@ pub use scene::{
 pub use sprite::{Frame, Rect, Sprite, SubFrame};
 pub use strings::StringTable;
 pub use window::{
-    ButtonDef, ControlDef, EditDef, InventoryBoxDef, ItemDef, ResponseBoxDef, StaticDef,
-    TiledImage, VerticalAlign, WidgetDef, WindowDef,
+    ButtonDef, ControlDef, EditDef, InventoryBoxDef, ItemDef, ResponseBoxDef, ResponseBoxFile,
+    StaticDef, TiledImage, VerticalAlign, WidgetDef, WindowDef,
 };
 
 /// The name of an object whose file gives none, and of one created

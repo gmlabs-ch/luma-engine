@@ -8,7 +8,7 @@
 //! (`StartDlgBranch`/`EndDlgBranch`), one added "once per game" never
 //! again; `ResetResponse` forgets either.
 
-use luma_formats::{ResponseBoxDef, Rgba, VerticalAlign};
+use luma_formats::{ResponseBoxDef, ResponseBoxFile, Rgba, VerticalAlign, WindowDef};
 use luma_render::{DrawList, Texture};
 use luma_script::{Effect, Engine, NativeId, Return, ScriptId, Value};
 
@@ -67,6 +67,10 @@ pub struct Responses {
     pub def: Option<ResponseBoxDef>,
     /// The box's window.
     pub window: Option<NativeId>,
+    /// Whether the window is one the engine made for a box without
+    /// `WINDOW`: it only carries the buttons, and scripts do not see it
+    /// (`GetResponsesWindow` gives `null`).
+    pub window_is_own: bool,
     /// The choices added since the last `GetResponse`.
     pub pending: Vec<Response>,
     /// The buttons showing the pending choices while the box waits.
@@ -99,38 +103,68 @@ impl World {
     }
 
     /// Loads a response box definition and creates its window
-    /// (`Game.LoadResponseBox`).
+    /// (`Game.LoadResponseBox`, `RESPONSE_BOX` of the game file). The
+    /// box the game had goes first, with its window: when the file
+    /// does not load the game has no response box (`CAdResponseBox::
+    /// LoadFile`, the callers in `AdGame.cpp`).
     pub(crate) fn load_response_box_from(&mut self, engine: &mut Engine, path: &str) -> bool {
+        self.clear_responses(engine);
+        if let Some(window) = self.responses.window.take() {
+            self.unload_control(engine, window);
+        }
+        self.responses.def = None;
+        self.responses.window_is_own = false;
+        self.responses.waiting = None;
         let bytes = match self.vfs.read(path) {
             Ok(bytes) => bytes,
             Err(err) => {
-                self.log(format!("Error opening response box '{path}': {err}"));
+                self.log(format!(
+                    "CAdResponseBox::LoadFile failed for file '{path}': {err}"
+                ));
                 return false;
             }
         };
         let vfs = &self.vfs;
-        let parsed = ResponseBoxDef::parse_with(&bytes, &mut |file| vfs.read(file).ok());
+        let parsed = ResponseBoxDef::parse_checked(
+            &bytes,
+            &mut |file| vfs.read(file).ok(),
+            &mut |kind, file| match kind {
+                ResponseBoxFile::Font => crate::text::Font::load(vfs, file).is_ok(),
+                ResponseBoxFile::Cursor => vfs.read(file).is_ok(),
+            },
+        );
         let mut def = match parsed {
             Ok(def) => def,
             Err(err) => {
-                self.log(format!("Error parsing response box '{path}': {err}"));
+                self.log(format!("Error parsing RESPONSE_BOX file '{path}': {err}"));
                 return false;
             }
         };
-        self.clear_responses(engine);
-        if let Some(window_def) = def.window.take() {
-            let window = self.new_window_control(None);
-            self.apply_window_def(engine, window, window_def, None);
-            for widget in self.widgets_of(window) {
-                if let Some(b) = self.control_mut(widget).and_then(Control::button_mut) {
-                    b.listener = Some(ButtonListener::ResponseBox);
-                }
+        // A box without `WINDOW` still shows its choices, in `AREA` on
+        // the screen: an empty window of the engine's own carries the
+        // buttons.
+        let own = def.window.is_none();
+        let window_def = def.window.take().unwrap_or_else(|| WindowDef {
+            transparent: true,
+            ..WindowDef::default()
+        });
+        let window = self.new_window_control(None);
+        self.apply_window_def(engine, window, window_def, None);
+        for widget in self.widgets_of(window) {
+            if let Some(b) = self.control_mut(widget).and_then(Control::button_mut) {
+                b.listener = Some(ButtonListener::ResponseBox);
             }
-            if let Some(control) = self.control_mut(window) {
-                control.visible = false;
-            }
-            self.responses.window = Some(window);
         }
+        let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
+        if let Some(control) = self.control_mut(window) {
+            control.visible = false;
+            if own {
+                control.width = sw;
+                control.height = sh;
+            }
+        }
+        self.responses.window = Some(window);
+        self.responses.window_is_own = own;
         for font in [&def.font, &def.font_hover].into_iter().flatten() {
             self.load_font(font);
         }
@@ -139,6 +173,14 @@ impl World {
         let box_id = self.response_box_id;
         self.set_holder_filename(box_id, path);
         true
+    }
+
+    /// The box's window as scripts see it (`GetResponsesWindow`): none
+    /// for a box without `WINDOW`.
+    pub(crate) fn responses_script_window(&self) -> Option<NativeId> {
+        self.responses
+            .window
+            .filter(|_| !self.responses.window_is_own)
     }
 
     /// Adds a choice (`AddResponse`, `AddResponseOnce`,
@@ -155,6 +197,31 @@ impl World {
         font: Option<String>,
     ) {
         let expanded = self.expand(text);
+        // `CAdResponse::SetIcon`, `SetIconHover`, `SetIconPressed`,
+        // `SetFont`: a file that does not load is logged and the
+        // response goes without it (no icon makes a text choice, no
+        // font means the box's).
+        let image = |world: &mut World, file: Option<String>, setter: &str| {
+            file.filter(|f| {
+                // An image is decoded when first drawn: see that it is there.
+                let ok = world.vfs.exists(f) && world.ui.bank.add_sprite(&world.vfs, f);
+                if !ok {
+                    world.log(format!("CAdResponse::{setter} failed for file '{f}'"));
+                }
+                ok
+            })
+        };
+        let icon = image(self, icon, "SetIcon");
+        let icon_hover = image(self, icon_hover, "SetIconHover");
+        let icon_pressed = image(self, icon_pressed, "SetIconPressed");
+        let font = font.filter(|f| {
+            let ok = self.fonts.load(&self.vfs, f);
+            self.fonts.take_missing();
+            if !ok {
+                self.log(format!("CAdResponse::SetFont failed for file '{f}'"));
+            }
+            ok
+        });
         self.responses.pending.push(Response {
             id,
             text: expanded,
@@ -274,7 +341,6 @@ impl World {
             return Return::value(id);
         }
         let Some(window) = self.responses.window else {
-            self.log("Game.GetResponse: response box is not defined".to_string());
             return Return::null();
         };
         self.create_response_buttons();
@@ -288,7 +354,9 @@ impl World {
     }
 
     /// One button per pending choice, in the box's window
-    /// (`CreateButtons`): the text in the box's fonts, or the icons.
+    /// (`CreateButtons`): the text in the box's fonts (the system font
+    /// without them), or the icons. A choice higher than the area makes
+    /// the area that much higher, for good.
     fn create_response_buttons(&mut self) {
         let Some(window) = self.responses.window else {
             return;
@@ -298,16 +366,30 @@ impl World {
         };
         self.responses.scroll_offset = 0;
         let pending = self.responses.pending.clone();
-        let area_width = def.area.width() as i32;
+        let area_width = def.area.right - def.area.left;
         let screen_width = self.settings.width as i32;
+        let system_font = self.system_font.clone();
+        // The cursor of an icon choice: the box's, else the game's
+        // active cursor. A text choice has none of its own.
+        let icon_cursor = def.cursor.clone().or_else(|| self.cursors.active.clone());
         for (index, response) in pending.iter().enumerate() {
-            let hover = def.font_hover.clone();
-            let state = ButtonState {
-                listener: Some(ButtonListener::Response(index)),
-                text_align: def.text_align,
-                font_hover: hover.clone(),
-                font_press: hover,
-                ..ButtonState::default()
+            let iconic = response.icon.is_some();
+            let hover = def.font_hover.clone().or_else(|| system_font.clone());
+            let state = if iconic {
+                ButtonState {
+                    listener: Some(ButtonListener::Response(index)),
+                    image_hover: response.icon_hover.clone(),
+                    image_press: response.icon_pressed.clone(),
+                    ..ButtonState::default()
+                }
+            } else {
+                ButtonState {
+                    listener: Some(ButtonListener::Response(index)),
+                    text_align: def.text_align,
+                    font_hover: hover.clone(),
+                    font_press: hover,
+                    ..ButtonState::default()
+                }
             };
             let id = self.create_control(
                 window,
@@ -315,23 +397,26 @@ impl World {
                 Some("response"),
             );
             if let Some(icon) = &response.icon {
-                self.load_ui_image(icon);
-                for extra in [&response.icon_hover, &response.icon_pressed]
+                // Loaded when the response was added; again after a
+                // saved game.
+                for file in [Some(icon), response.icon_hover.as_ref()]
                     .into_iter()
+                    .chain([response.icon_pressed.as_ref()])
                     .flatten()
                 {
-                    self.load_ui_image(extra);
+                    self.load_ui_image(file);
                 }
                 if let Some(control) = self.control_mut(id) {
                     control.image = Some(icon.clone());
                     control.caption = response.text.clone();
-                    if let Some(b) = control.button_mut() {
-                        b.image_hover = response.icon_hover.clone();
-                        b.image_press = response.icon_pressed.clone();
-                    }
+                    control.cursor = icon_cursor.clone();
                 }
             } else {
-                let font = response.font.clone().or_else(|| def.font.clone());
+                let font = response
+                    .font
+                    .clone()
+                    .or_else(|| def.font.clone())
+                    .or_else(|| system_font.clone());
                 if let Some(font) = &font {
                     self.load_font(font);
                 }
@@ -348,10 +433,20 @@ impl World {
             if let Some(control) = self.control_mut(id) {
                 control.can_focus = false;
                 control.visible = false;
-                control.cursor = def.cursor.clone();
             }
             self.correct_size(id);
             self.responses.buttons.push(id);
+            let height = self.control(id).map_or(0, |c| c.height);
+            if let Some(def) = self.responses.def.as_mut() {
+                let area_height = def.area.bottom - def.area.top;
+                if area_height < height {
+                    def.area.bottom += height - area_height;
+                    let text = response.text.clone();
+                    self.log(format!(
+                        "Warning: Response '{text}' is too high to be displayed within response box. Correcting."
+                    ));
+                }
+            }
         }
     }
 

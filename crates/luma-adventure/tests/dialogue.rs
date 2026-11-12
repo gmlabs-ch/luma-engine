@@ -59,6 +59,18 @@ on "offerOnce"
   result.picked = Game.GetResponse(true);
 }
 on "reset"  { Game.ResetResponse(result.resetId); }
+on "askIcons"
+{
+  Game.AddResponse(1, "one", "art\missing.png", "art\nohover.png", "art\nopress.png", "fonts\missing.font");
+  Game.AddResponse(2, "two", "art\red.png", "art\blue.png");
+  Game.AddResponse(3, "three", null, null, null, "fonts\big.font");
+  result.asked = Game.GetResponse();
+}
+on "loadBox"
+{
+  result.loaded = Game.LoadResponseBox(result.boxFile);
+  result.window = Game.GetResponsesWindow();
+}
 on "ask"
 {
   Game.AddResponse(1, "one");
@@ -331,5 +343,200 @@ fn responses_need_a_response_box() {
     );
     assert_eq!(result(&runtime, "num"), Value::Null);
     assert_eq!(result(&runtime, "picked"), Value::Null);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The response buttons of the waiting box, in order.
+fn response_buttons(runtime: &Runtime) -> Vec<NativeId> {
+    let window = runtime.world.responses_window().unwrap();
+    runtime
+        .world
+        .widgets_of(window)
+        .into_iter()
+        .filter(|w| runtime.world.control(*w).unwrap().name == "response")
+        .collect()
+}
+
+fn click(runtime: &mut Runtime, x: i32, y: i32) {
+    runtime.mouse_move(x, y);
+    runtime.tick(16);
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    runtime.tick(16);
+}
+
+#[test]
+fn a_response_box_without_a_window_shows_its_choices_in_the_area() {
+    let (dir, mut runtime, log) = start(&[(
+        "responses.def",
+        b"RESPONSE_BOX { FONT=\"fonts\\sys.font\" VERTICAL_ALIGN=\"top\" AREA { 4, 6, 60, 40 } }"
+            .to_vec(),
+    )]);
+    assert!(!log.iter().any(|l| l.contains("RESPONSE_BOX")), "{log:?}");
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    // Scripts see no window.
+    assert_eq!(
+        call_native(&mut runtime, game, "GetResponsesWindow", &[]),
+        Value::Null
+    );
+    event(&mut runtime, "ask");
+    assert_eq!(
+        runtime.world.get_property(game, "ResponsesVisible"),
+        Some(Value::Bool(true))
+    );
+    let buttons = response_buttons(&runtime);
+    assert_eq!(buttons.len(), 2);
+    let first = runtime.world.control(buttons[0]).unwrap().clone();
+    let second = runtime.world.control(buttons[1]).unwrap().clone();
+    assert!(first.visible && second.visible);
+    assert_eq!(
+        (first.x, first.y),
+        (4, 6),
+        "placed in the area on the screen"
+    );
+    assert_eq!(second.y, 6 + first.height);
+    click(&mut runtime, second.x + 2, second.y + second.height / 2);
+    assert_eq!(result(&runtime, "asked"), Value::Int(2));
+    assert_eq!(
+        runtime.world.get_property(game, "ResponsesVisible"),
+        Some(Value::Bool(false))
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_choice_higher_than_the_area_makes_the_area_higher() {
+    let (dir, mut runtime, _) = start(&[(
+        "responses.def",
+        b"RESPONSE_BOX { FONT=\"fonts\\sys.font\" VERTICAL_ALIGN=\"top\" AREA { 2, 2, 60, 6 } WINDOW { X=0 Y=0 WIDTH=64 HEIGHT=48 } }"
+            .to_vec(),
+    )]);
+    let log = event(&mut runtime, "ask");
+    assert!(
+        log.iter().any(|l| l
+            == "Warning: Response 'one' is too high to be displayed within response box. Correcting."),
+        "{log:?}"
+    );
+    let buttons = response_buttons(&runtime);
+    let first = runtime.world.control(buttons[0]).unwrap();
+    assert!(first.height > 4);
+    assert!(first.visible, "the first choice fits the corrected area");
+    assert_eq!(first.y, 2);
+    // The area grew by the difference and stays so: the second choice,
+    // as high, does not correct it again and waits behind `next`.
+    assert_eq!(
+        log.iter()
+            .filter(|l| l.starts_with("Warning: Response"))
+            .count(),
+        1
+    );
+    assert!(!runtime.world.control(buttons[1]).unwrap().visible);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn response_buttons_take_the_fonts_icons_and_cursor_the_original_gives_them() {
+    let (dir, mut runtime, _) = start(&[]);
+    let log = event(&mut runtime, "askIcons");
+    for line in [
+        "CAdResponse::SetIcon failed for file 'art\\missing.png'",
+        "CAdResponse::SetIconHover failed for file 'art\\nohover.png'",
+        "CAdResponse::SetIconPressed failed for file 'art\\nopress.png'",
+        "CAdResponse::SetFont failed for file 'fonts\\missing.font'",
+    ] {
+        assert!(log.iter().any(|l| l == line), "{line}: {log:?}");
+    }
+    let buttons = response_buttons(&runtime);
+    assert_eq!(buttons.len(), 3);
+    // An icon that did not load makes a text choice, in the box's font
+    // when its own did not load; the hover font is the system font when
+    // the box names none; a text choice has no cursor of its own.
+    let one = runtime.world.control(buttons[0]).unwrap();
+    assert_eq!(one.text, "one");
+    assert_eq!(one.image, None);
+    assert_eq!(one.font.as_deref(), Some("fonts\\sys.font"));
+    assert_eq!(one.cursor, None);
+    let state = one.button().unwrap();
+    assert_eq!(state.font_hover.as_deref(), Some("fonts\\sys.font"));
+    assert_eq!(state.font_press.as_deref(), Some("fonts\\sys.font"));
+    // An icon choice: the images, the text as caption, and the game's
+    // active cursor when the box has no `CURSOR`.
+    let two = runtime.world.control(buttons[1]).unwrap();
+    assert_eq!(two.image.as_deref(), Some("art\\red.png"));
+    assert_eq!(two.text, "");
+    assert_eq!(two.caption, "two");
+    assert_eq!(two.cursor.as_deref(), Some("art\\green.png"));
+    assert_eq!(
+        two.button().unwrap().image_hover.as_deref(),
+        Some("art\\blue.png")
+    );
+    // A response's own font replaces the normal font only.
+    let three = runtime.world.control(buttons[2]).unwrap();
+    assert_eq!(three.font.as_deref(), Some("fonts\\big.font"));
+    assert_eq!(
+        three.button().unwrap().font_hover.as_deref(),
+        Some("fonts\\sys.font")
+    );
+    // Each choice is listed once for the keyboard navigation, before
+    // the window's own buttons.
+    let objects = runtime.world.access_objects();
+    assert_eq!(&objects[..3], &buttons[..]);
+    assert_eq!(objects.len(), 5, "three choices, prev and next");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_response_box_that_does_not_load_leaves_the_game_without_one() {
+    let (dir, mut runtime, _) = start(&[
+        (
+            "bad.def",
+            b"RESPONSE_BOX { AREA { 0, 0, 10, 10 } COLOUR=1 }".to_vec(),
+        ),
+        (
+            "cursor.def",
+            b"RESPONSE_BOX { CURSOR=\"art\\blue.png\" AREA { 0, 0, 30, 30 } WINDOW { NAME=\"w\" } }"
+                .to_vec(),
+        ),
+    ]);
+    // The box of the game file has a window.
+    let game = runtime.world.game_id();
+    assert_ne!(
+        call_native(&mut runtime, game, "GetResponsesWindow", &[]),
+        Value::Null
+    );
+    let old = runtime.world.responses_window().unwrap();
+    set_result(&mut runtime, "boxFile", Value::from("cursor.def"));
+    event(&mut runtime, "loadBox");
+    assert_eq!(result(&runtime, "loaded"), Value::Bool(true));
+    assert!(runtime.world.control(old).is_none(), "the old window went");
+    // The box's cursor goes to icon choices.
+    event(&mut runtime, "askIcons");
+    let buttons = response_buttons(&runtime);
+    assert_eq!(
+        runtime.world.control(buttons[1]).unwrap().cursor.as_deref(),
+        Some("art\\blue.png")
+    );
+    assert_eq!(runtime.world.control(buttons[0]).unwrap().cursor, None);
+    // A key the box does not know is a syntax error: no box is left.
+    set_result(&mut runtime, "boxFile", Value::from("bad.def"));
+    let log = event(&mut runtime, "loadBox");
+    assert_eq!(result(&runtime, "loaded"), Value::Bool(false));
+    assert_eq!(result(&runtime, "window"), Value::Null);
+    assert!(
+        log.iter()
+            .any(|l| l.starts_with("Error parsing RESPONSE_BOX file 'bad.def'")),
+        "{log:?}"
+    );
+    let log = event(&mut runtime, "offerGame");
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Game.GetResponse: response box is not defined")),
+        "{log:?}"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }

@@ -586,7 +586,12 @@ adds its choices with `Game.AddResponse(id, text)`,
 `AddResponseOnceGame` (never again), then `Game.GetResponse()` shows
 them and waits: one text button per choice in the box's fonts (or its
 icons), laid out in the area from the scroll offset, `prev` and `next`
-shown when they do not fit, the window exclusive meanwhile. The pick
+shown when they do not fit, the window exclusive meanwhile (the keys of
+the file are in [formats/window.md](formats/window.md#the-response-box)).
+The icons and the font a response names are loaded when it is added: one
+that does not load is logged (`CAdResponse::SetIcon failed for file`...)
+and left out, so a response whose icon is missing is a text choice and
+one whose font is missing uses the box's. The pick
 returns the choice's id to the script, sets `Game.LastResponse` and
 `LastResponseOrig`, and closes the box; without any choice left
 `GetResponse` returns `null` at once, and with a single one it returns
@@ -605,7 +610,10 @@ once-per-game pairs last until the game is restarted.
 lists (no id is -1), `ClearResponses` drops the
 pending ones, `GetNumResponses` counts them after weeding,
 `Game.ResponsesVisible` says whether the box waits, and
-`GetResponsesWindow` and `LoadResponseBox` serve the box itself.
+`GetResponsesWindow` and `LoadResponseBox` serve the box itself
+(`GetResponsesWindow` is `null` for a box without `WINDOW`; the box
+`LoadResponseBox` replaces goes with its window even when the new file
+does not load).
 Without a response box `AddResponse` and its variants, `GetResponse`
 and `GetNumResponses` raise a script runtime error (`response box is
 not defined`) and do nothing; `Game.LastResponse` and

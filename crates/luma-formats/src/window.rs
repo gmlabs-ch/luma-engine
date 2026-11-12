@@ -797,46 +797,129 @@ impl Default for ResponseBoxDef {
     }
 }
 
+/// A file a response box names, which must load for the keys after it
+/// to be read (see [`ResponseBoxDef::parse_checked`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseBoxFile {
+    /// `FONT` or `FONT_HOVER`.
+    Font,
+    /// `CURSOR`.
+    Cursor,
+}
+
+/// How many `TEMPLATE` files a response box may chain.
+const RESPONSE_BOX_TEMPLATE_DEPTH: u32 = 8;
+
 impl ResponseBoxDef {
     /// Parses a `.def` file: a `RESPONSE_BOX` root block.
     pub fn parse(bytes: &[u8]) -> Result<ResponseBoxDef> {
-        let doc = Document::parse(bytes)?;
-        let root = doc.get("RESPONSE_BOX").ok_or_else(|| Error::Invalid {
-            reason: "'RESPONSE_BOX' keyword expected".into(),
-        })?;
-        let mut def = ResponseBoxDef::default();
-        def.apply(root);
-        Ok(def)
+        Self::parse_with(bytes, &mut |_| None)
     }
 
     /// Parses a `.def` file as [`ResponseBoxDef::parse`] does, reading the
-    /// `TEMPLATE` files of its window's controls with `load`.
+    /// `TEMPLATE` files (the box's own and those of its window's
+    /// controls) with `load`.
     pub fn parse_with(
         bytes: &[u8],
         load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
     ) -> Result<ResponseBoxDef> {
+        Self::parse_checked(bytes, load, &mut |_, _| true)
+    }
+
+    /// Parses a `.def` file as `CAdResponseBox::LoadBuffer` reads it:
+    /// the keys in file order; a key the box does not know is a syntax
+    /// error; a `TEMPLATE` is loaded where it stands; and a template,
+    /// font or cursor that does not load (`usable` says so for fonts and
+    /// cursors) ends the reading there, the box keeping what was read
+    /// before it.
+    pub fn parse_checked(
+        bytes: &[u8],
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+        usable: &mut dyn FnMut(ResponseBoxFile, &str) -> bool,
+    ) -> Result<ResponseBoxDef> {
+        let mut def = ResponseBoxDef::default();
+        def.read_file(bytes, load, usable, 0)?;
+        Ok(def)
+    }
+
+    fn read_file(
+        &mut self,
+        bytes: &[u8],
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+        usable: &mut dyn FnMut(ResponseBoxFile, &str) -> bool,
+        depth: u32,
+    ) -> Result<bool> {
         let doc = Document::parse(bytes)?;
         let root = doc.get("RESPONSE_BOX").ok_or_else(|| Error::Invalid {
             reason: "'RESPONSE_BOX' keyword expected".into(),
         })?;
-        let mut def = ResponseBoxDef::default();
-        def.apply_with(root, load);
-        Ok(def)
+        self.read(root, load, usable, depth)
     }
 
-    /// Reads the keys of a `RESPONSE_BOX` block, overriding what is there.
+    /// Reads the keys of a `RESPONSE_BOX` block, overriding what is
+    /// there, up to the first key the box does not know; templates are
+    /// only recorded.
     pub fn apply(&mut self, node: &Node) {
         self.apply_with(node, &mut |_| None);
     }
 
     /// Reads the keys of the block, overriding what is there; `load`
-    /// reads the `TEMPLATE` files of the window's controls.
+    /// reads the `TEMPLATE` files. An unknown key ends the reading.
     pub fn apply_with(&mut self, node: &Node, load: &mut dyn FnMut(&str) -> Option<Vec<u8>>) {
+        let _ = self.read(node, load, &mut |_, _| true, 0);
+    }
+
+    /// Reads the keys in order. `Ok(false)` when a file that did not
+    /// load ended the reading early.
+    fn read(
+        &mut self,
+        node: &Node,
+        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+        usable: &mut dyn FnMut(ResponseBoxFile, &str) -> bool,
+        depth: u32,
+    ) -> Result<bool> {
         for child in node.nodes() {
             match child.key.to_ascii_uppercase().as_str() {
-                "TEMPLATE" => self.template = path(child),
-                "FONT" => self.font = path(child),
-                "FONT_HOVER" => self.font_hover = path(child),
+                "TEMPLATE" => {
+                    self.template = path(child);
+                    let Some(file) = path(child) else {
+                        return Ok(false);
+                    };
+                    if depth >= RESPONSE_BOX_TEMPLATE_DEPTH {
+                        return Ok(false);
+                    }
+                    let Some(bytes) = load(&file) else {
+                        return Ok(false);
+                    };
+                    // `LoadFile` of the template: a file that does not
+                    // parse, or that stopped early, stops this one too.
+                    match self.read_file(&bytes, load, usable, depth + 1) {
+                        Ok(true) => {}
+                        Ok(false) | Err(_) => return Ok(false),
+                    }
+                }
+                "FONT" => {
+                    let font = path(child);
+                    if !font
+                        .as_deref()
+                        .is_some_and(|f| usable(ResponseBoxFile::Font, f))
+                    {
+                        self.font = None;
+                        return Ok(false);
+                    }
+                    self.font = font;
+                }
+                "FONT_HOVER" => {
+                    let font = path(child);
+                    if !font
+                        .as_deref()
+                        .is_some_and(|f| usable(ResponseBoxFile::Font, f))
+                    {
+                        self.font_hover = None;
+                        return Ok(false);
+                    }
+                    self.font_hover = font;
+                }
                 "AREA" => {
                     if let Some(rect) = rect_of(child) {
                         self.area = rect;
@@ -849,12 +932,49 @@ impl ResponseBoxDef {
                     window.apply_with(child, load);
                     self.window = Some(window);
                 }
-                "CURSOR" => self.cursor = path(child),
-                "TEXT_ALIGN" => self.text_align = text_align(&text(child), TextAlign::Left),
-                "VERTICAL_ALIGN" => self.vertical_align = VerticalAlign::from_name(&text(child)),
-                _ => {}
+                "CURSOR" => {
+                    let cursor = path(child);
+                    if !cursor
+                        .as_deref()
+                        .is_some_and(|f| usable(ResponseBoxFile::Cursor, f))
+                    {
+                        self.cursor = None;
+                        return Ok(false);
+                    }
+                    self.cursor = cursor;
+                }
+                "TEXT_ALIGN" => {
+                    let name = text(child);
+                    self.text_align = if name.eq_ignore_ascii_case("center") {
+                        TextAlign::Center
+                    } else if name.eq_ignore_ascii_case("right") {
+                        TextAlign::Right
+                    } else {
+                        TextAlign::Left
+                    };
+                }
+                "VERTICAL_ALIGN" => {
+                    let name = text(child);
+                    self.vertical_align = if name.eq_ignore_ascii_case("top") {
+                        VerticalAlign::Top
+                    } else if name.eq_ignore_ascii_case("center") {
+                        VerticalAlign::Center
+                    } else {
+                        VerticalAlign::Bottom
+                    };
+                }
+                "EDITOR_PROPERTY" => {}
+                other => {
+                    return Err(Error::Invalid {
+                        reason: format!(
+                            "Syntax error in RESPONSE_BOX definition: unknown key {other} at line {}",
+                            child.line
+                        ),
+                    });
+                }
             }
         }
+        Ok(true)
     }
 }
 
@@ -1335,6 +1455,54 @@ impl ItemDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_response_box_is_read_key_by_key_as_the_original_reads_it() {
+        let files = |file: &str| match file {
+            "base.def" => {
+                Some(b"RESPONSE_BOX { SPACING=3 HORIZONTAL=TRUE TEXT_ALIGN=\"right\" }".to_vec())
+            }
+            "broken.def" => {
+                Some(b"RESPONSE_BOX { SPACING=9 FONT=\"gone.font\" SPACING=10 }".to_vec())
+            }
+            _ => None,
+        };
+        let usable = |_: ResponseBoxFile, file: &str| !file.starts_with("gone");
+        let parse = |text: &str| {
+            ResponseBoxDef::parse_checked(text.as_bytes(), &mut { files }, &mut { usable })
+        };
+        // The defaults, and the names the original knows: anything else
+        // is left for the text and bottom for the choices.
+        let def =
+            parse("RESPONSE_BOX { TEXT_ALIGN=\"center\" VERTICAL_ALIGN=\"middle\" }").unwrap();
+        assert_eq!(def.text_align, TextAlign::Center);
+        assert_eq!(def.vertical_align, VerticalAlign::Bottom);
+        let def =
+            parse("RESPONSE_BOX { TEXT_ALIGN=\"justify\" VERTICAL_ALIGN=\"center\" }").unwrap();
+        assert_eq!(def.text_align, TextAlign::Left);
+        assert_eq!(def.vertical_align, VerticalAlign::Center);
+        // A template is loaded where it stands: the keys before it are
+        // overridden, the keys after it override.
+        let def =
+            parse("RESPONSE_BOX { SPACING=1 TEMPLATE=\"base.def\" TEXT_ALIGN=\"left\" }").unwrap();
+        assert_eq!(def.spacing, 3);
+        assert!(def.horizontal);
+        assert_eq!(def.text_align, TextAlign::Left);
+        // A font or cursor that does not load, or a template that does
+        // not, ends the reading: the box keeps what came before.
+        let def = parse("RESPONSE_BOX { SPACING=4 FONT_HOVER=\"gone.font\" SPACING=5 }").unwrap();
+        assert_eq!((def.spacing, def.font_hover), (4, None));
+        let def = parse("RESPONSE_BOX { SPACING=4 CURSOR=\"gone.sprite\" SPACING=5 }").unwrap();
+        assert_eq!((def.spacing, def.cursor), (4, None));
+        let def = parse("RESPONSE_BOX { TEMPLATE=\"none.def\" SPACING=5 }").unwrap();
+        assert_eq!(def.spacing, 0);
+        let def = parse("RESPONSE_BOX { TEMPLATE=\"broken.def\" SPACING=5 }").unwrap();
+        assert_eq!(def.spacing, 9);
+        // A key the box does not know is a syntax error.
+        assert!(parse("RESPONSE_BOX { SPACING=4 COLOR=1 }").is_err());
+        assert!(parse("RESPONSE_BOX { EDITOR_PROPERTY { NAME=\"a\" VALUE=\"b\" } }").is_ok());
+        assert!(parse("WINDOW { }").is_err());
+    }
 
     #[test]
     fn parses_a_window_with_its_controls() {

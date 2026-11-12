@@ -258,6 +258,57 @@ window (see [game-loop.md](../game-loop.md#the-focused-window)).
 A window can be dragged by its `DRAG_RECT` while the left button is held
 there.
 
+## The response box
+
+The game names its response box (`RESPONSE_BOX` in `default.game`, a
+`.def` file; `Game.LoadResponseBox` loads another). It lists the
+choices of a dialogue (see [game-loop.md](../game-loop.md#dialogue-responses)).
+
+```
+RESPONSE_BOX
+{
+  FONT = "fonts\outline_white.font"
+  FONT_HOVER = "fonts\outline_red.font"
+  AREA { 10, 600, 1014, 760 }
+  SPACING = 2
+  VERTICAL_ALIGN = "bottom"
+
+  WINDOW
+  {
+    X = 0  Y = 0  WIDTH = 1024  HEIGHT = 768
+    BUTTON { NAME = "prev" IMAGE = "interface\up.png" X = 990 Y = 600 }
+    BUTTON { NAME = "next" IMAGE = "interface\down.png" X = 990 Y = 740 }
+  }
+}
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `TEMPLATE` | string | | Another `.def` file, read where the key stands: its keys override those before it, the keys after it override its own. |
+| `WINDOW` | block | | The box's window, drawn under the choices; its `prev` and `next` buttons scroll them. Without it the choices are shown alone, in `AREA` on the screen. |
+| `AREA` | `left, top, right, bottom` | empty | Where the choices are laid out, relative to the window. |
+| `FONT` | string | system font | Font of the text choices. |
+| `FONT_HOVER` | string | system font | Font of a text choice under the mouse or pressed. |
+| `CURSOR` | string | the game's active cursor | Cursor over an icon choice. Text choices have no cursor of their own. |
+| `HORIZONTAL` | bool | `FALSE` | Choices side by side instead of one under the other. |
+| `SPACING` | int | `0` | Pixels between choices. |
+| `TEXT_ALIGN` | `left`, `center`, `right` | `left` | Alignment of the text of a choice; any other value is `left`. |
+| `VERTICAL_ALIGN` | `top`, `center`, `bottom` | `bottom` | Where the choices sit in the area when they do not fill it; any other value is `bottom`. |
+
+The file is read as `CAdResponseBox::LoadBuffer` reads it, key by key:
+a key that is not in the table is a syntax error and the box is not
+loaded; a template, font or cursor that does not load ends the reading
+there without an error, so the box keeps the keys before it and misses
+those after it. (Templates chain up to 8 deep in Luma.) A response box
+that does not load leaves the game without one.
+
+A text choice is as wide as the area (as the screen when the area has
+no width) and as high as its text; an icon choice has the size of its
+image. A choice higher than the area makes the area higher by the
+difference, for good, with a warning in the log. The choices are laid
+out from the scroll offset while they fit; `prev` shows when the offset
+is positive, `next` when a choice did not fit.
+
 ## The inventory
 
 The game names its inventory box (`INVENTORY_BOX` in `default.game`, a

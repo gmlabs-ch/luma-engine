@@ -1142,7 +1142,7 @@ impl World {
                 Return::value(self.current_dlg_branch().map_or(Value::Null, Value::from))
             }
             "GetResponsesWindow" | "GetResponseWindow" => {
-                Return::value(native_or_null(self.responses.window))
+                Return::value(native_or_null(self.responses_script_window()))
             }
             "LoadResponseBox" => {
                 let path = arg(0).get_string(self);
