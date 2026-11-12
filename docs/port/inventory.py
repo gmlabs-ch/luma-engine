@@ -208,6 +208,8 @@ def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     core = Path(sys.argv[1]) / "src" / "engine_core"
+    if not (core / "wme_base").is_dir() or not (core / "wme_ad").is_dir():
+        sys.exit(f"no Wintermute sources under {core}: refusing to rewrite the tables")
     tables = OrderedDict((name, OrderedDict()) for name, _, _ in GROUPS)
     for directory in ("wme_ad", "wme_base"):
         for path in sorted((core / directory).glob("*.cpp"), key=lambda p: p.name.lower()):
@@ -224,6 +226,8 @@ def main():
             tables[table][file] = OrderedDict(
                 (row, old.get(row, ("unreviewed", ""))) for row, _ in rows_of(functions)
             )
+    if sum(len(rows) for files in tables.values() for rows in files.values()) == 0:
+        sys.exit("found no functions in the sources: refusing to rewrite the tables")
     write(tables, titles)
     start, end = "<!-- counts -->", "<!-- /counts -->"
     readme = HERE / "README.md"
