@@ -227,7 +227,8 @@ impl Mask {
         Mask {
             width: image.width,
             height: image.height,
-            opaque: image.pixels.chunks(4).map(|p| p[3] > 128).collect(),
+            // `CBSurfaceD3D::IsTransparentAt`: transparent below 128.
+            opaque: image.pixels.chunks(4).map(|p| p[3] >= 128).collect(),
         }
     }
 
@@ -1507,8 +1508,8 @@ impl SceneView {
                     dst: Rect::new(
                         entity.x as f32 + video.offset.0,
                         entity.y as f32 + video.offset.1,
-                        (video.texture.width as f32 * zoom).trunc(),
-                        (video.texture.height as f32 * zoom).trunc(),
+                        video.texture.width as f32 * zoom,
+                        video.texture.height as f32 * zoom,
                     ),
                     src: None,
                     tint: video.tint,
@@ -1744,14 +1745,25 @@ pub fn place_transformed<'a>(
         None => (texture.width as f32, texture.height as f32),
     };
     let (zx, zy) = (transform.scale_x / 100.0, transform.scale_y / 100.0);
+    // A scale that is negative on one axis only turns the quad the
+    // other way round, and the original culls such a quad
+    // (`D3DCULL_CCW` in `Setup2D`): nothing is drawn.
+    let (w, h) = if (zx < 0.0) != (zy < 0.0) {
+        (0.0, 0.0)
+    } else {
+        (w, h)
+    };
     let dst = if transform.is_unscaled() {
         Rect::new((x - sub.hotspot_x) as f32, (y - sub.hotspot_y) as f32, w, h)
     } else {
+        // The corner is a whole pixel (`CBSubFrame::Draw` hands ints to
+        // `DisplayTransZoom`); the size is not rounded
+        // (`CBRenderD3D::DrawSpriteEx`: `w = width * Scale.x`).
         Rect::new(
             (x as f32 - sub.hotspot_x as f32 * zx).trunc(),
             (y as f32 - sub.hotspot_y as f32 * zy).trunc(),
-            (w * zx).trunc(),
-            (h * zy).trunc(),
+            w * zx,
+            h * zy,
         )
     };
     let quad = Quad {

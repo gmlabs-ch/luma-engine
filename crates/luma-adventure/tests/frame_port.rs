@@ -1313,3 +1313,69 @@ on "Busy" {
     assert_eq!(result(&runtime, "presses"), Value::Int(1));
     std::fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn a_scaled_sprite_keeps_its_fractional_size_and_a_negative_scale_is_unset() {
+    use luma_adventure::{Mask, Transform, place_transformed};
+    // A pixel is opaque from alpha 128 on.
+    let image = Image {
+        width: 2,
+        height: 1,
+        pixels: vec![255, 255, 255, 128, 255, 255, 255, 127],
+        has_alpha_channel: true,
+    };
+    let mask = Mask::of(&image);
+    assert!(mask.is_opaque(0, 0));
+    assert!(!mask.is_opaque(1, 0));
+
+    let (dir, runtime, log) = start(
+        r#"
+global result = new Object();
+Game.ChangeScene("room.scene", false, false);
+var scene = Game.Scene;
+var box = scene.GetNode("box");
+box.Scale = 150;
+result.set = box.Scale;
+box.Scale = -5;
+result.negative = box.Scale;
+box.ScaleX = -1;
+result.negativeX = box.ScaleX;
+"#,
+        &[File::Text("room.scene", ROOM)],
+    );
+    no_errors(&log);
+    assert_eq!(result(&runtime, "set"), Value::Float(150.0));
+    assert_eq!(result(&runtime, "negative"), Value::Null);
+    assert_eq!(result(&runtime, "negativeX"), Value::Null);
+    std::fs::remove_dir_all(dir).ok();
+
+    // The quad of a scaled sub-frame: a whole-pixel corner, a size that
+    // is not rounded (needs a texture, so a graphics adapter).
+    let Ok(gpu) = Gpu::headless() else {
+        eprintln!("skipped: no graphics adapter");
+        return;
+    };
+    let renderer = Renderer::new(gpu);
+    let texture = renderer.texture(
+        "t",
+        &Image {
+            width: 3,
+            height: 3,
+            pixels: [255u8; 36].to_vec(),
+            has_alpha_channel: true,
+        },
+    );
+    let sub = luma_formats::SubFrame {
+        hotspot_x: 1,
+        hotspot_y: 1,
+        ..luma_formats::SubFrame::default()
+    };
+    let transform = Transform {
+        scale_x: 150.0,
+        scale_y: 250.0,
+        rotation: 0.0,
+    };
+    let (quad, _) = place_transformed(&sub, &texture, 10, 10, transform, Rgba::OPAQUE_WHITE);
+    assert_eq!((quad.dst.x, quad.dst.y), (8.0, 7.0), "10 - 1.5, 10 - 2.5");
+    assert_eq!((quad.dst.w, quad.dst.h), (4.5, 7.5));
+}

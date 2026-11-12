@@ -144,8 +144,8 @@ How the list was made. For every class with a script interface, the names tested
 | `Rotatable` | get/set | **done** | Whether the scene's rotation levels (and `Rotate`, `RelativeRotate`) apply; the sprite turns around its hotspot. |
 | `AlphaColor` | get/set | **done** | Tint colour and alpha (0xAARRGGBB). |
 | `BlendMode` | get/set | **done** | Blend mode (0 normal, 1 additive, 2 subtractive; another value is normal). Pipeline states of the renderer, see `docs/rendering.md`. |
-| `Scale` | get/set | **done** | Absolute scale in percent (null = use the scene's scale). |
-| `ScaleX`, `ScaleY` | get/set | **done** | Independent horizontal / vertical scale in percent (null = unset); when either is set they replace `Scale` and the scene's, the other axis at 100 (`CAdObject::GetScale`). The hit area follows. |
+| `Scale` | get/set | **done** | Absolute scale in percent (null, or a negative number, = use the scene's scale; it then reads null). |
+| `ScaleX`, `ScaleY` | get/set | **done** | Independent horizontal / vertical scale in percent (null or negative = unset); when either is set they replace `Scale` and the scene's, the other axis at 100 (`CAdObject::GetScale`). The hit area follows. |
 | `RelativeScale` | get/set | **done** | Scale adjustment in percent added to the scene's scale. |
 | `Rotate` | get/set | **done** | Absolute rotation in degrees (null = use the scene's), applied when `Rotatable`. Luma also hit-tests the sprite where it is drawn turned; WME tests it where it would be unrotated. |
 | `RelativeRotate` | get/set | **done** | Rotation added to the scene's rotation level, when `Rotatable` and no `Rotate` is set. |

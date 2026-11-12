@@ -210,7 +210,11 @@ impl BitmapFontDef {
     }
 
     /// The measured width of tile `index`: one more than the right-most
-    /// column with a pixel more than half opaque.
+    /// column with a pixel that is not fully transparent
+    /// (`CBSurfaceD3D::IsTransparentAtLite`: transparent only at alpha
+    /// 0, so the soft edge of a glyph counts). A pixel outside the image
+    /// counts too, as the original answers "not transparent" there: a
+    /// tile beyond the image is as wide as a tile.
     fn measure_tile(&self, image: &Image, index: i32) -> i32 {
         let x0 = (index % self.columns) * self.tile_width;
         let y0 = (index / self.columns) * self.tile_height;
@@ -220,7 +224,7 @@ impl BitmapFontDef {
             while col > min_col {
                 let (x, y) = (x0 + col, y0 + row);
                 let opaque =
-                    x >= 0 && y >= 0 && image.pixel(x as u32, y as u32).is_some_and(|p| p.a > 128);
+                    x >= 0 && y >= 0 && image.pixel(x as u32, y as u32).is_none_or(|p| p.a != 0);
                 if opaque {
                     min_col = min_col.max(col);
                     break;
@@ -656,8 +660,9 @@ mod tests {
         };
         let widths = def.widths(Some(&image));
         assert_eq!(&widths[..4], &[0, 3, 4, 0]);
-        // The space takes half of m + i: both are outside the image, so 0.
-        assert_eq!(widths[b' ' as usize], 0);
+        // A tile outside the image is as wide as a tile, the space too.
+        assert_eq!(widths[b'm' as usize], 4);
+        assert_eq!(widths[b' ' as usize], 4);
         let expanded = BitmapFontDef {
             expand_width: 2,
             space_width: 5,
@@ -666,6 +671,10 @@ mod tests {
         let widths = expanded.widths(Some(&image));
         assert_eq!(&widths[..4], &[2, 5, 6, 2]);
         assert_eq!(widths[b' ' as usize], 5);
+        // Any alpha above 0 is ink: the soft edge of a glyph is measured.
+        let mut soft = image.clone();
+        soft.pixels[(8 + 1) * 4 + 3] = 1;
+        assert_eq!(expanded.widths(Some(&soft))[0], 4);
     }
 
     #[test]

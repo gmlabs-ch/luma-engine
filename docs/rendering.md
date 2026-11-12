@@ -113,8 +113,14 @@ computes each layer's parallax offset (see [scene.md](formats/scene.md#camera)).
 A sprite's sub-frame is placed with its hotspot at the owner's position
 and scaled around it, by a separate factor on each axis when the object
 has a `ScaleX` or `ScaleY` (`CAdObject::GetScale`); the adventure layer
-computes the destination rectangle, with the engine's integer
-truncation, and the renderer draws it as it is.
+computes the destination rectangle and the renderer draws it as it is:
+the corner is truncated to a whole pixel (`CBSubFrame::Draw` hands
+integers on), the size is the sub-frame's times the scale, not rounded
+(`CBRenderD3D::DrawSpriteEx`), so a sprite at 150 % of 3 pixels is 4.5
+pixels wide and its last column is half covered. A scale that is
+negative on one axis only draws nothing, as the original culls the quad
+it turns over; a negative `Scale`, `ScaleX` or `ScaleY` of an object is
+"not set" and never gets that far.
 
 Rotation is a per-quad attribute: an angle in degrees and a pivot in
 logical pixels. The renderer turns the four corners of the destination

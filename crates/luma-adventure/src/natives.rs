@@ -1769,9 +1769,11 @@ impl World {
             "Rotatable" => e.rotatable = flag,
             "AlphaColor" => e.tint = Some(color_of(int)),
             "BlendMode" => e.blend_mode = BlendMode::from_int(int),
-            "Scale" => e.scale = if is_null { None } else { Some(float as f32) },
-            "ScaleX" => e.scale_x = if is_null { None } else { Some(float as f32) },
-            "ScaleY" => e.scale_y = if is_null { None } else { Some(float as f32) },
+            // A negative scale is "not set", as `null` is (the original
+            // keeps -1 for both and reads any negative value as null).
+            "Scale" => e.scale = Some(float as f32).filter(|s| !is_null && *s >= 0.0),
+            "ScaleX" => e.scale_x = Some(float as f32).filter(|s| !is_null && *s >= 0.0),
+            "ScaleY" => e.scale_y = Some(float as f32).filter(|s| !is_null && *s >= 0.0),
             "RelativeScale" => e.relative_scale = float as f32,
             "Rotate" => e.rotate = if is_null { None } else { Some(float as f32) },
             "RelativeRotate" => e.relative_rotate = float as f32,

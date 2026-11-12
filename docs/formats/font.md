@@ -56,7 +56,10 @@ text converted to the ANSI code page first (see
 [Text encoding](#text-encoding)).
 
 **Automatic widths.** For every tile, the width is one more than the
-right-most column holding a pixel with alpha above 128, scanning each row
+right-most column holding a pixel that is not fully transparent (alpha
+above 0, `IsTransparentAtLite`: the soft edge of a glyph counts; a pixel
+outside the image counts too, so a tile beyond the image is as wide as a
+tile), scanning each row
 from the right (an empty tile has width 0). `EXPAND_WIDTH` is then added
 (not below 0), and the space gets `SPACE_WIDTH`, or, when its measured
 width is 0 or equal to `EXPAND_WIDTH`, half the sum of the widths of `m`
