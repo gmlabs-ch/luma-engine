@@ -685,6 +685,7 @@ impl World {
             self.timer_delta = dt;
         }
         self.clock += dt;
+        self.fonts.set_time(self.clock);
         self.fps_time += dt;
         self.fps_frames += 1;
         if self.fps_time > 1000 {

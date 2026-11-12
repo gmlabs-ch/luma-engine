@@ -210,7 +210,9 @@ impl BitmapFontDef {
     }
 
     /// The measured width of tile `index`: one more than the right-most
-    /// column with a pixel more than half opaque.
+    /// column with a pixel that is not fully transparent
+    /// (`IsTransparentAtLite`: alpha 0), so the soft edge of a smoothed
+    /// character counts.
     fn measure_tile(&self, image: &Image, index: i32) -> i32 {
         let x0 = (index % self.columns) * self.tile_width;
         let y0 = (index / self.columns) * self.tile_height;
@@ -220,7 +222,7 @@ impl BitmapFontDef {
             while col > min_col {
                 let (x, y) = (x0 + col, y0 + row);
                 let opaque =
-                    x >= 0 && y >= 0 && image.pixel(x as u32, y as u32).is_some_and(|p| p.a > 128);
+                    x >= 0 && y >= 0 && image.pixel(x as u32, y as u32).is_some_and(|p| p.a != 0);
                 if opaque {
                     min_col = min_col.max(col);
                     break;
@@ -661,6 +663,12 @@ mod tests {
         };
         let widths = def.widths(Some(&image));
         assert_eq!(&widths[..4], &[0, 3, 4, 0]);
+        // A pixel that is barely there is ink too: only alpha 0 is
+        // transparent (`IsTransparentAtLite`).
+        let mut soft = image.clone();
+        soft.pixels[3] = 1;
+        soft.pixels[(8 + 7) * 4 + 3] = 40;
+        assert_eq!(&def.widths(Some(&soft))[..4], &[1, 4, 4, 0]);
         // The space takes half of m + i: both are outside the image, so 0.
         assert_eq!(widths[b' ' as usize], 0);
         let expanded = BitmapFontDef {

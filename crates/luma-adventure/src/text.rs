@@ -15,6 +15,7 @@
 //! page, the one of a TrueType font's `CHARSET` (see
 //! [`CodePage`](crate::code_page::CodePage)).
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -182,9 +183,39 @@ impl Font {
         align: TextAlign,
         max_height: i32,
     ) {
+        self.draw_forced(list, text, x, y, width, align, max_height, None);
+    }
+
+    /// Draws a text as [`draw`](Self::draw) does, inside a window that
+    /// forces a colour on what it draws (`ALPHA_COLOR` and `ALPHA`, the
+    /// renderer's `m_ForceAlphaColor`): a bitmap font's characters are
+    /// tinted with the colour, as every image is; a TrueType font keeps
+    /// the colours of its layers and takes the colour's opacity
+    /// (`CBFontTT::DrawTextD3D`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_forced<'a>(
+        &'a self,
+        list: &mut DrawList<'a>,
+        text: &str,
+        x: i32,
+        y: i32,
+        width: i32,
+        align: TextAlign,
+        max_height: i32,
+        force: Option<Rgba>,
+    ) {
         match self {
-            Font::Bitmap(f) => f.draw(list, text, x, y, width, align, max_height),
-            Font::TrueType(f) => f.draw(list, text, x, y, width, align, max_height),
+            Font::Bitmap(f) => f.draw(list, text, x, y, width, align, max_height, force),
+            Font::TrueType(f) => f.draw(list, text, x, y, width, align, max_height, force),
+        }
+    }
+
+    /// Tells the font the time on the clock that never stops
+    /// (`Game->m_LiveTimer`), which a bitmap font made of an animated
+    /// sprite changes its frame by.
+    pub fn set_time(&mut self, now: u64) {
+        if let Font::Bitmap(f) = self {
+            f.now = now;
         }
     }
 }
@@ -197,17 +228,46 @@ fn unbounded(width: i32) -> i32 {
     if width < 0 { i32::MAX / 2 } else { width }
 }
 
-/// A bitmap font with its tile image.
+/// The image of one frame of a bitmap font: the tiles.
+#[derive(Debug)]
+struct TileImage {
+    path: String,
+    image: Image,
+    texture: Option<Texture>,
+}
+
+/// A frame of a bitmap font's sprite.
+#[derive(Debug)]
+struct FontFrame {
+    /// The image of the frame's first sub-frame; a frame without one
+    /// draws nothing.
+    tiles: Option<TileImage>,
+    /// How long the frame stays, in milliseconds.
+    delay: u64,
+}
+
+/// A bitmap font with its tile image, or with the frames of its sprite.
 #[derive(Debug)]
 pub struct BitmapFont {
     /// The definition.
     pub def: BitmapFontDef,
     /// The width of each character.
     pub widths: [u8; 256],
-    /// The tile image's path.
+    /// The tile image's path: the first frame's for a sprite.
     pub image_path: String,
-    image: Image,
-    texture: Option<Texture>,
+    /// The frames: one for an `IMAGE`, those of the `SPRITE` otherwise.
+    frames: Vec<FontFrame>,
+    /// Whether the sprite starts again after its last frame.
+    looping: bool,
+    /// The frame characters are drawn from (`m_Sprite->m_CurrentFrame`).
+    current: Cell<usize>,
+    /// When the current frame was first drawn, on the clock that never
+    /// stops; 0 before the font has drawn anything.
+    frame_since: Cell<u64>,
+    /// Whether a sprite that does not loop has shown its last frame.
+    finished: Cell<bool>,
+    /// The clock that never stops (`Game->m_LiveTimer`).
+    now: u64,
     /// Whether the text is UTF-8 (`Game.TextEncoding`).
     utf8: bool,
     /// The ANSI code page a UTF-8 game's text is converted to.
@@ -215,49 +275,108 @@ pub struct BitmapFont {
 }
 
 impl BitmapFont {
-    /// Loads the tile image and measures the widths.
+    /// Loads the tile image, or the sprite's frames, and measures the
+    /// widths.
     pub fn load(vfs: &Vfs, def: BitmapFontDef) -> Result<BitmapFont, String> {
-        let (image_path, color_key) = match (&def.image, &def.sprite) {
-            (Some(image), _) => (image.clone(), def.transparent.unwrap_or(DEFAULT_COLOR_KEY)),
+        let decode = |path: &str, color_key: Rgb| -> Result<TileImage, String> {
+            let bytes = vfs.read(path).map_err(|e| e.to_string())?;
+            let image =
+                luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())?;
+            Ok(TileImage {
+                path: path.to_string(),
+                image,
+                texture: None,
+            })
+        };
+        let (frames, looping) = match (&def.image, &def.sprite) {
+            (Some(image), _) => {
+                let key = def.transparent.unwrap_or(DEFAULT_COLOR_KEY);
+                let frame = FontFrame {
+                    tiles: Some(decode(image, key)?),
+                    delay: 0,
+                };
+                (vec![frame], true)
+            }
             (None, Some(sprite_path)) => {
                 let bytes = vfs.read(sprite_path).map_err(|e| e.to_string())?;
                 let sprite = Sprite::parse(&bytes).map_err(|e| e.to_string())?;
-                let sub = sprite
-                    .frames
-                    .first()
-                    .and_then(|f| f.subframes.first())
-                    .ok_or_else(|| format!("{sprite_path}: no frame"))?;
-                let image = sub
-                    .image
-                    .clone()
-                    .ok_or_else(|| format!("{sprite_path}: no image"))?;
-                (image, sub.color_key)
+                // Every character is drawn from the first sub-frame of
+                // the sprite's current frame (`CBFontBitmap::DrawChar`).
+                let mut frames = Vec::with_capacity(sprite.frames.len());
+                for frame in &sprite.frames {
+                    let tiles = match frame.subframes.first() {
+                        Some(sub) => match &sub.image {
+                            Some(image) => Some(decode(image, sub.color_key)?),
+                            None => None,
+                        },
+                        None => None,
+                    };
+                    frames.push(FontFrame {
+                        tiles,
+                        delay: u64::from(frame.delay_ms),
+                    });
+                }
+                if frames.iter().all(|f| f.tiles.is_none()) {
+                    return Err(format!("{sprite_path}: no image"));
+                }
+                (frames, sprite.looping)
             }
             (None, None) => return Err("Incomplete font definition".to_string()),
         };
-        let bytes = vfs.read(&image_path).map_err(|e| e.to_string())?;
-        let image = luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())?;
-        let widths = def.widths(Some(&image));
-        Ok(BitmapFont {
-            def,
-            widths,
-            image_path,
-            image,
-            texture: None,
-            utf8: false,
-            page: CodePage::WESTERN,
-        })
+        Ok(BitmapFont::from_frames(def, frames, looping))
     }
 
     /// A font from a definition and an already decoded image (tests).
     pub fn from_image(def: BitmapFontDef, image_path: &str, image: Image) -> BitmapFont {
-        let widths = def.widths(Some(&image));
+        BitmapFont::from_images(def, vec![(image_path.to_string(), image, 0)], true)
+    }
+
+    /// A font from a definition and the already decoded images of its
+    /// sprite's frames, each with its path and its delay in
+    /// milliseconds (tests).
+    pub fn from_images(
+        def: BitmapFontDef,
+        images: Vec<(String, Image, u64)>,
+        looping: bool,
+    ) -> BitmapFont {
+        let frames = images
+            .into_iter()
+            .map(|(path, image, delay)| FontFrame {
+                tiles: Some(TileImage {
+                    path,
+                    image,
+                    texture: None,
+                }),
+                delay,
+            })
+            .collect();
+        BitmapFont::from_frames(def, frames, looping)
+    }
+
+    fn from_frames(def: BitmapFontDef, frames: Vec<FontFrame>, looping: bool) -> BitmapFont {
+        // `CBFontBitmap::GetWidths` measures the frame `WIDTHS_FRAME`
+        // names; when the sprite has no such frame, or the frame no
+        // image, nothing is measured and the widths stay 0.
+        let measured = usize::try_from(def.widths_frame)
+            .ok()
+            .and_then(|at| frames.get(at))
+            .and_then(|frame| frame.tiles.as_ref());
+        let widths = def.widths(measured.map(|tiles| &tiles.image));
+        let image_path = frames
+            .iter()
+            .find_map(|f| f.tiles.as_ref())
+            .map(|tiles| tiles.path.clone())
+            .unwrap_or_default();
         BitmapFont {
             def,
             widths,
-            image_path: image_path.to_string(),
-            image,
-            texture: None,
+            image_path,
+            frames,
+            looping,
+            current: Cell::new(0),
+            frame_since: Cell::new(0),
+            finished: Cell::new(false),
+            now: 0,
             utf8: false,
             page: CodePage::WESTERN,
         }
@@ -290,9 +409,45 @@ impl BitmapFont {
     }
 
     fn upload(&mut self, renderer: &Renderer) {
-        if self.texture.is_none() {
-            self.texture = Some(renderer.texture(&self.image_path, &self.image));
+        for tiles in self.frames.iter_mut().filter_map(|f| f.tiles.as_mut()) {
+            if tiles.texture.is_none() {
+                tiles.texture = Some(renderer.texture(&tiles.path, &tiles.image));
+            }
         }
+    }
+
+    /// The frame of the sprite the font draws from now.
+    pub fn current_frame(&self) -> usize {
+        self.current.get()
+    }
+
+    /// Moves the sprite on when its frame has been shown long enough
+    /// (`CBSprite::GetCurrentFrame`, which `DrawChar` calls for every
+    /// character it draws): the clock is the one that never stops, the
+    /// first character drawn starts the first frame's time, a sprite
+    /// that does not loop stays on its last frame. The sprite only
+    /// moves while the font draws; a frame with no delay lasts one
+    /// character.
+    fn step_frame(&self) {
+        let Some(frame) = self.frames.get(self.current.get()) else {
+            return;
+        };
+        let since = self.frame_since.get();
+        if since == 0 {
+            self.frame_since.set(self.now);
+            return;
+        }
+        if self.finished.get() || self.now < since.saturating_add(frame.delay) {
+            return;
+        }
+        if self.current.get() + 1 < self.frames.len() {
+            self.current.set(self.current.get() + 1);
+        } else if self.looping {
+            self.current.set(0);
+        } else {
+            self.finished.set(true);
+        }
+        self.frame_since.set(self.now);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -305,10 +460,8 @@ impl BitmapFont {
         width: i32,
         align: TextAlign,
         max_height: i32,
+        force: Option<Rgba>,
     ) {
-        let Some(texture) = &self.texture else {
-            return;
-        };
         let layout = self.def.layout(
             &self.widths,
             &self.codes(text),
@@ -321,13 +474,21 @@ impl BitmapFont {
         for line in &layout.lines {
             let mut cx = x + line.x;
             for &c in &line.chars {
+                self.step_frame();
+                let texture = self
+                    .frames
+                    .get(self.current.get())
+                    .and_then(|frame| frame.tiles.as_ref())
+                    .and_then(|tiles| tiles.texture.as_ref());
                 let (tx, ty, tw, th) = self.def.tile(&self.widths, c);
-                if tw > 0 {
+                if let (Some(texture), true) = (texture, tw > 0) {
                     list.push(Quad {
                         texture,
                         dst: Rect::new(cx as f32, (y + line.y) as f32, tw as f32, th as f32),
                         src: Some(Rect::new(tx as f32, ty as f32, tw as f32, th as f32)),
-                        tint: Rgba::OPAQUE_WHITE,
+                        // The image's own colours, unless a window forces
+                        // its colour on what it draws.
+                        tint: force.unwrap_or(Rgba::OPAQUE_WHITE),
                         flip_x: false,
                         flip_y: false,
                     });
@@ -1243,6 +1404,7 @@ impl TrueTypeFont {
         width: i32,
         align: TextAlign,
         max_height: i32,
+        force: Option<Rgba>,
     ) {
         let Some(cached) = self.texts.iter().find(|t| {
             t.text == text && t.width == width && t.align == align && t.max_height == max_height
@@ -1262,7 +1424,10 @@ impl TrueTypeFont {
                     cached.image.height as f32,
                 ),
                 src: None,
-                tint: layer.color,
+                tint: Rgba {
+                    a: force.map_or(layer.color.a, |forced| forced.a),
+                    ..layer.color
+                },
                 flip_x: false,
                 flip_y: false,
             });
@@ -1492,6 +1657,14 @@ impl FontBank {
         std::mem::take(&mut self.chosen)
     }
 
+    /// Tells the fonts the time on the clock that never stops (see
+    /// [`Font::set_time`]).
+    pub fn set_time(&mut self, now: u64) {
+        for font in self.fonts.values_mut() {
+            font.set_time(now);
+        }
+    }
+
     /// Uploads what every font needs.
     pub fn upload(&mut self, renderer: &Renderer) {
         for font in self.fonts.values_mut() {
@@ -1567,6 +1740,122 @@ mod tests {
         // Without a frame ever ending (no renderer) the cache is bounded.
         frame(&mut font, 1000..1000 + 2 * MAX_FRAME_TEXTS);
         assert_eq!(font.texts.len(), MAX_FRAME_TEXTS);
+    }
+
+    fn tiles(width: u32, height: u32) -> Image {
+        Image {
+            width,
+            height,
+            pixels: vec![0; (width * height * 4) as usize],
+            has_alpha_channel: true,
+        }
+    }
+
+    fn sprite_font(delays: &[u64], looping: bool) -> BitmapFont {
+        let def = BitmapFontDef {
+            sprite: Some("f.sprite".into()),
+            columns: 16,
+            tile_width: 8,
+            tile_height: 10,
+            default_width: 4,
+            ..BitmapFontDef::default()
+        };
+        let images = delays
+            .iter()
+            .enumerate()
+            .map(|(i, delay)| (format!("f{i}.png"), tiles(128, 160), *delay))
+            .collect();
+        BitmapFont::from_images(def, images, looping)
+    }
+
+    /// `CBFontBitmap::DrawChar`: the characters come from the current
+    /// frame of the font's sprite, which moves on as any sprite does
+    /// (`CBSprite::GetCurrentFrame`), on the clock that never stops.
+    #[test]
+    fn a_bitmap_font_made_of_a_sprite_is_animated() {
+        let mut font = Font::Bitmap(Box::new(sprite_font(&[100, 100, 50], true)));
+        let frame_at = |font: &mut Font, now: u64, text: &str| {
+            font.set_time(now);
+            let mut list = DrawList::new(64.0, 48.0);
+            font.draw(&mut list, text, 0, 0, 100, TextAlign::Left, -1);
+            let Font::Bitmap(f) = &*font else { panic!() };
+            f.current_frame()
+        };
+        // The first character drawn starts the first frame's time.
+        assert_eq!(frame_at(&mut font, 5000, "ab"), 0);
+        assert_eq!(frame_at(&mut font, 5099, "ab"), 0);
+        assert_eq!(frame_at(&mut font, 5100, "ab"), 1);
+        assert_eq!(frame_at(&mut font, 5199, "ab"), 1);
+        assert_eq!(frame_at(&mut font, 5200, "ab"), 2);
+        assert_eq!(frame_at(&mut font, 5250, "ab"), 0, "it loops");
+        // The sprite only moves while the font draws: a long pause is
+        // one frame.
+        assert_eq!(frame_at(&mut font, 9000, ""), 0);
+        assert_eq!(frame_at(&mut font, 9000, "a"), 1);
+        // A sprite that does not loop stays on its last frame.
+        let mut once = Font::Bitmap(Box::new(sprite_font(&[10, 10], false)));
+        assert_eq!(frame_at(&mut once, 100, "a"), 0);
+        assert_eq!(frame_at(&mut once, 110, "a"), 1);
+        assert_eq!(frame_at(&mut once, 500, "a"), 1);
+        // A frame without a delay lasts one character.
+        let mut fast = Font::Bitmap(Box::new(sprite_font(&[0, 0, 0, 0], true)));
+        assert_eq!(frame_at(&mut fast, 100, "abc"), 2);
+        // An image is one frame for ever.
+        let def = BitmapFontDef {
+            image: Some("f.png".into()),
+            columns: 16,
+            tile_width: 8,
+            tile_height: 10,
+            ..BitmapFontDef::default()
+        };
+        let mut still = Font::Bitmap(Box::new(BitmapFont::from_image(
+            def,
+            "f.png",
+            tiles(128, 160),
+        )));
+        assert_eq!(frame_at(&mut still, 100, "abc"), 0);
+        assert_eq!(frame_at(&mut still, 900, "abc"), 0);
+    }
+
+    /// `CBFontBitmap::GetWidths`: `AUTO_WIDTH` measures the frame
+    /// `WIDTHS_FRAME` names.
+    #[test]
+    fn auto_width_measures_the_frame_widths_frame_names() {
+        let def = |widths_frame| BitmapFontDef {
+            sprite: Some("f.sprite".into()),
+            columns: 16,
+            tile_width: 8,
+            tile_height: 10,
+            auto_width: true,
+            widths_frame,
+            ..BitmapFontDef::default()
+        };
+        // Frame 0 is empty; in frame 1 the tile of `a` has ink up to its
+        // column 5 and the tile of `m` up to its column 3.
+        let ink = |image: &mut Image, c: u8, column: u32| {
+            let (x, y) = (u32::from(c % 16) * 8 + column, u32::from(c / 16) * 10);
+            image.pixels[((y * 128 + x) * 4 + 3) as usize] = 255;
+        };
+        let frames = || {
+            let mut second = tiles(128, 160);
+            ink(&mut second, b'a', 5);
+            ink(&mut second, b'm', 3);
+            vec![
+                ("f0.png".to_string(), tiles(128, 160), 100),
+                ("f1.png".to_string(), second, 100),
+            ]
+        };
+        let first = BitmapFont::from_images(def(0), frames(), true);
+        assert_eq!(first.widths[usize::from(b'a')], 0);
+        let second = BitmapFont::from_images(def(1), frames(), true);
+        assert_eq!(second.widths[usize::from(b'a')], 6);
+        assert_eq!(second.widths[usize::from(b' ')], 2, "half of m and i");
+        assert_eq!(second.image_path, "f0.png");
+        // A frame the sprite does not have: nothing is measured.
+        for missing in [2, -1] {
+            let none = BitmapFont::from_images(def(missing), frames(), true);
+            assert!(none.widths.iter().all(|w| *w == 0));
+        }
     }
 
     /// A character the face lacks comes from another face of the game's

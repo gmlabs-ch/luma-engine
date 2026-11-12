@@ -177,6 +177,18 @@ fn game() -> std::path::PathBuf {
         "tt.window",
         b"WINDOW { NAME=\"t\" X=0 Y=0 WIDTH=60 HEIGHT=40 FONT=\"tt.font\" EDIT { NAME=\"name\" X=2 Y=2 WIDTH=56 HEIGHT=14 FONT=\"tt.font\" CURSOR_BLINK_RATE=0 } }".to_vec(),
     );
+    pkg.add_file(
+        "bm.font",
+        b"FONT { IMAGE=\"art\\red.png\" COLUMNS=4 TILE_WIDTH=1 TILE_HEIGHT=1 DEFAULT_WIDTH=1 }"
+            .to_vec(),
+    );
+    pkg.add_file(
+        "tint.window",
+        b"WINDOW { NAME=\"tint\" X=0 Y=0 WIDTH=60 HEIGHT=40 ALPHA_COLOR { 10,20,30 } ALPHA=128
+          STATIC { NAME=\"bm\" X=0 Y=0 WIDTH=50 HEIGHT=4 FONT=\"bm.font\" TEXT=\"ab\" }
+          STATIC { NAME=\"tt\" X=0 Y=10 WIDTH=50 HEIGHT=20 FONT=\"tt.font\" TEXT=\"cd\" } }"
+            .to_vec(),
+    );
     pkg.add_file("art\\red.png", png(4, 4, [255, 0, 0, 255]));
     pkg.add_file("art\\green.png", png(4, 4, [0, 255, 0, 255]));
     pkg.add_file(
@@ -616,6 +628,55 @@ fn an_ansi_game_is_read_in_the_code_page_of_its_system() {
         .set_property(edit, "Text", &Value::from("\u{c6}\u{f3}\u{ea}"));
     assert_eq!(runtime.world.control(edit).unwrap().text, "Жук");
     runtime.tick(16);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A window's `ALPHA_COLOR` and `ALPHA` reach the texts drawn in it
+/// (`m_ForceAlphaColor`): a bitmap font's characters take the colour, a
+/// TrueType font keeps its layers' colours and takes the opacity.
+#[test]
+fn a_windows_alpha_colour_reaches_its_texts() {
+    use luma_formats::Rgba;
+    let (dir, mut runtime, _) = start();
+    let game = runtime.world.game_id();
+    call_native(
+        &mut runtime,
+        game,
+        "LoadWindow",
+        &[Value::from("tint.window")],
+    );
+    runtime.tick(16);
+    let Ok(gpu) = luma_render::Gpu::headless() else {
+        eprintln!("skipped: no GPU adapter");
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    };
+    let renderer = luma_render::Renderer::new(gpu);
+    runtime.world.upload(&renderer);
+    let mut list = luma_render::DrawList::new(64.0, 48.0);
+    runtime.draw(&mut list, None);
+    let forced = Rgba {
+        r: 10,
+        g: 20,
+        b: 30,
+        a: 128,
+    };
+    let tinted = list.quads().iter().filter(|q| q.tint == forced).count();
+    assert_eq!(tinted, 2, "the two characters of the bitmap font");
+    if runtime.world.fonts().get("tt.font").is_some() {
+        let layer = Rgba {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 128,
+        };
+        assert!(
+            list.quads().iter().any(|q| q.tint == layer),
+            "the TrueType text keeps its colour and takes the opacity"
+        );
+    } else {
+        eprintln!("skipped: no system font to stand for the game's");
+    }
     std::fs::remove_dir_all(&dir).ok();
 }
 

@@ -34,7 +34,7 @@ FONT
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `IMAGE` | string | | The image holding the tiles. |
-| `SPRITE` | string | | A sprite instead of an image; its current frame's first sub-frame holds the tiles (an animated font). |
+| `SPRITE` | string | | A sprite instead of an image; its current frame's first sub-frame holds the tiles (an animated font, see below). |
 | `TRANSPARENT` | `r,g,b` | the engine's default key | Colour key of the image. |
 | `COLUMNS` | int | `0` | Tiles per row; required. |
 | `TILE_WIDTH`, `TILE_HEIGHT` | int | `0` | Size of a tile; required. |
@@ -55,9 +55,14 @@ codes are the bytes of the text in an ANSI game; a UTF-8 game has its
 text converted to the ANSI code page first (see
 [Text encoding](#text-encoding)).
 
-**Automatic widths.** For every tile, the width is one more than the
-right-most column holding a pixel with alpha above 128, scanning each row
-from the right (an empty tile has width 0). `EXPAND_WIDTH` is then added
+**Automatic widths** (`CBFontBitmap::GetWidths`). For every tile, the
+width is one more than the right-most column holding a pixel that is
+not fully transparent (alpha 0, or the colour key), scanning each row
+from the right: the soft edge of a smoothed character counts, and an
+empty tile has width 0. With a `SPRITE` the frame measured is the one
+`WIDTHS_FRAME` names; when the sprite has no such frame, or the frame
+no image, nothing is measured and every width is 0. `EXPAND_WIDTH` is
+then added
 (not below 0), and the space gets `SPACE_WIDTH`, or, when its measured
 width is 0 or equal to `EXPAND_WIDTH`, half the sum of the widths of `m`
 and `i`.
@@ -79,7 +84,23 @@ height is the number of lines times `TILE_HEIGHT` (one tile for empty
 text). Alignment places each line at `x`, at `x + (width - line width) /
 2`, or at `x + width - line width`.
 
-Bitmap fonts are drawn untinted: their colours are the image's.
+Bitmap fonts are drawn untinted: their colours are the image's. The
+one exception is a window with `ALPHA_COLOR` or `ALPHA`, which forces
+its colour on everything drawn in it: the characters of a bitmap font
+are tinted with it like any image, and a TrueType font keeps the
+colours of its layers and takes the colour's opacity
+(`CBFontTT::DrawTextD3D`).
+
+**Animated fonts** (`CBFontBitmap::DrawChar`). With `SPRITE`, each
+character is drawn from the image of the first sub-frame of the
+sprite's current frame; the sub-frame's own rectangle, hotspot and
+mirroring are not used, and a frame without an image draws nothing. The
+sprite moves on as any sprite does, by its frames' `DELAY` and its
+`LOOPING`, on the clock that never stops (a font is not paused with the
+game). It is asked for its frame each time a character is drawn, so
+the first character drawn starts the first frame's time, the sprite
+stands still while no text is drawn with the font, and a frame whose
+delay is 0 lasts a single character.
 
 ## TrueType fonts: `TTFONT`
 

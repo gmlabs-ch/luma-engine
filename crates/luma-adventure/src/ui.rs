@@ -549,6 +549,13 @@ impl Control {
     }
 }
 
+/// The colour a window forces on the texts drawn in it, from the tint
+/// its images are drawn with (`m_ForceAlphaColor`, set by `ALPHA_COLOR`
+/// and `ALPHA`): none when nothing is tinted.
+fn forced_color(tint: Rgba) -> Option<Rgba> {
+    (tint != Rgba::OPAQUE_WHITE).then_some(tint)
+}
+
 /// The two lines an editor shows, from the first character in view:
 /// the text alone, and the text with the caret's character at the
 /// caret.
@@ -2724,7 +2731,7 @@ impl World {
         }
         if let (Some(rect), false) = (window.title_rect, control.text.is_empty()) {
             if let Some(font) = self.window_font(id).and_then(|f| self.fonts.get(&f)) {
-                font.draw(
+                font.draw_forced(
                     list,
                     &control.text,
                     x + rect.left,
@@ -2732,6 +2739,7 @@ impl World {
                     rect.width() as i32,
                     window.title_align,
                     rect.height() as i32,
+                    forced_color(tint),
                 );
             }
         }
@@ -2866,7 +2874,7 @@ impl World {
             if let Some(font) = self.button_font(id).and_then(|f| self.fonts.get(&f)) {
                 let offset = (control.height - control.text_height) / 2;
                 let shift = i32::from(pressed);
-                font.draw(
+                font.draw_forced(
                     list,
                     &control.text,
                     x + shift,
@@ -2874,6 +2882,7 @@ impl World {
                     control.width,
                     b.text_align,
                     -1,
+                    forced_color(tint),
                 );
             }
         }
@@ -2914,7 +2923,7 @@ impl World {
                     VerticalAlign::Bottom => control.height - control.text_height,
                     VerticalAlign::Center => (control.height - control.text_height) / 2,
                 };
-                font.draw(
+                font.draw_forced(
                     list,
                     &control.text,
                     x,
@@ -2922,6 +2931,7 @@ impl World {
                     control.width,
                     s.text_align,
                     control.height,
+                    forced_color(tint),
                 );
             }
         }
