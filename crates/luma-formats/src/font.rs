@@ -6,7 +6,7 @@
 //! `BFontBitmap.cpp`, `BFontTT.cpp`, Copyright (c) 2011 Jan Nedoma). See
 //! `NOTICE` at the root of the repository.
 
-use crate::def::{Document, Node, Nodes};
+use crate::def::{Document, Node, keys, scan_int_list, token};
 use crate::error::{Error, Result};
 use crate::image::{Image, Rgb, Rgba};
 
@@ -58,18 +58,70 @@ pub enum FontFile {
 }
 
 impl FontFile {
-    /// Parses a `.font` file.
+    /// Parses a `.font` file. The first statement decides the kind
+    /// (`CBFont::IsTrueType`): `TTFONT` is a TrueType font, anything else
+    /// must be `FONT`.
     pub fn parse(bytes: &[u8]) -> Result<FontFile> {
         let doc = Document::parse(bytes)?;
-        if let Some(root) = doc.get("TTFONT") {
-            return Ok(FontFile::TrueType(TrueTypeFontDef::from_node(root)));
+        let first = doc.nodes.first().map(|node| node.key.as_str());
+        let kind = first.and_then(|key| token(&["FONT", "TTFONT"], key));
+        if kind == Some("TTFONT") {
+            return Ok(FontFile::TrueType(TrueTypeFontDef::from_node(
+                &doc.nodes[0],
+            )?));
         }
-        let root = doc.get("FONT").ok_or_else(|| Error::Invalid {
+        let root = doc.root("FONT").ok_or_else(|| Error::Invalid {
             reason: "'FONT' keyword expected".into(),
         })?;
         Ok(FontFile::Bitmap(BitmapFontDef::from_node(root)?))
     }
 }
+
+/// The keys of `CBFontBitmap::LoadBuffer`. The original lists `WIDTHS`
+/// before `WIDTHS_FRAME`, so that `WIDTHS_FRAME` is read as `WIDTHS`
+/// followed by garbage and crashes the engine; here the longer key comes
+/// first and is read as it was meant to be.
+/// The most columns, and the largest tile side in pixels, of a bitmap
+/// font's grid.
+const MAX_GRID: i32 = 4096;
+
+const BITMAP_FONT_KEYS: &[&str] = &[
+    "FONTEXT_FIX",
+    "FONT",
+    "IMAGE",
+    "TRANSPARENT",
+    "COLUMNS",
+    "TILE_WIDTH",
+    "TILE_HEIGHT",
+    "DEFAULT_WIDTH",
+    "WIDTHS_FRAME",
+    "WIDTHS",
+    "AUTO_WIDTH",
+    "SPACE_WIDTH",
+    "EXPAND_WIDTH",
+    "EDITOR_PROPERTY",
+    "SPRITE",
+    "PAINT_WHOLE_CELL",
+];
+
+/// The keys of `CBFontTT::LoadBuffer`, in the order of its table.
+const TRUETYPE_FONT_KEYS: &[&str] = &[
+    "TTFONT",
+    "SIZE",
+    "FACE",
+    "FILENAME",
+    "BOLD",
+    "ITALIC",
+    "UNDERLINE",
+    "STRIKE",
+    "CHARSET",
+    "COLOR",
+    "ALPHA",
+    "LAYER",
+];
+
+/// The keys of `CBFontTT::ParseLayer`, in the order of its table.
+const FONT_LAYER_KEYS: &[&str] = &["OFFSET_X", "OFFSET_Y", "COLOR", "ALPHA"];
 
 /// A bitmap font definition (`FONT`).
 #[derive(Debug, Clone, PartialEq)]
@@ -126,46 +178,52 @@ impl Default for BitmapFontDef {
 }
 
 impl BitmapFontDef {
+    /// `CBFontBitmap::LoadBuffer`: the keys of the `FONT` block. A key
+    /// that is not in the table is a syntax error that fails the font.
+    /// Whether the image or the sprite can be loaded is the caller's
+    /// part of the 'Incomplete font definition' test.
     fn from_node(root: &Node) -> Result<BitmapFontDef> {
         let mut def = BitmapFontDef::default();
-        for child in root.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "IMAGE" => def.image = child.as_str().map(str::to_string),
-                "SPRITE" => def.sprite = child.as_str().map(str::to_string),
+        let (mut r, mut g, mut b) = (255, 255, 255);
+        for item in keys(root, BITMAP_FONT_KEYS, "FONT") {
+            let (key, child) = item?;
+            match key {
+                "IMAGE" => def.image = Some(child.text()),
+                "SPRITE" => def.sprite = Some(child.text()),
                 "TRANSPARENT" => {
-                    let v = child.as_ints().unwrap_or_default();
-                    def.transparent = Some(Rgb {
-                        r: channel(&v, 0),
-                        g: channel(&v, 1),
-                        b: channel(&v, 2),
-                    });
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    def.transparent = Some(Rgb::from_ints(r, g, b));
                 }
                 "WIDTHS" => {
-                    let v = child.as_ints().unwrap_or_default();
-                    for w in v {
+                    // The original writes past its 256 widths when the
+                    // lists are longer; the extra ones are dropped here.
+                    for w in scan_int_list(child.as_str().unwrap_or_default()) {
                         if def.widths.len() >= 256 {
                             break;
                         }
-                        def.widths.push(w.clamp(0, 255) as u8);
+                        def.widths.push((w & 0xff) as u8);
                     }
                 }
-                "DEFAULT_WIDTH" => def.default_width = integer(child),
-                "WIDTHS_FRAME" => def.widths_frame = integer(child),
-                "COLUMNS" => def.columns = integer(child),
-                "TILE_WIDTH" => def.tile_width = integer(child),
-                "TILE_HEIGHT" => def.tile_height = integer(child),
-                "AUTO_WIDTH" => def.auto_width = boolean(child),
-                "FONTEXT_FIX" => def.fontext_fix = boolean(child),
-                "PAINT_WHOLE_CELL" => def.paint_whole_cell = boolean(child),
-                "SPACE_WIDTH" => def.space_width = integer(child),
-                "EXPAND_WIDTH" => def.expand_width = integer(child),
+                "DEFAULT_WIDTH" => child.read_int(&mut def.default_width),
+                "WIDTHS_FRAME" => child.read_int(&mut def.widths_frame),
+                "COLUMNS" => child.read_int(&mut def.columns),
+                "TILE_WIDTH" => child.read_int(&mut def.tile_width),
+                "TILE_HEIGHT" => child.read_int(&mut def.tile_height),
+                "AUTO_WIDTH" => child.read_bool(&mut def.auto_width),
+                "FONTEXT_FIX" => child.read_bool(&mut def.fontext_fix),
+                "PAINT_WHOLE_CELL" => child.read_bool(&mut def.paint_whole_cell),
+                "SPACE_WIDTH" => child.read_int(&mut def.space_width),
+                "EXPAND_WIDTH" => child.read_int(&mut def.expand_width),
                 _ => {}
             }
         }
         if def.image.is_none() && def.sprite.is_none()
-            || def.columns == 0
-            || def.tile_width == 0
-            || def.tile_height == 0
+            // A grid no image holds (the original only refuses zero; a
+            // hostile file must not make the engine measure billions of
+            // rows).
+            || !(1..=MAX_GRID).contains(&def.columns)
+            || !(1..=MAX_GRID).contains(&def.tile_width)
+            || !(1..=MAX_GRID).contains(&def.tile_height)
         {
             return Err(Error::Invalid {
                 reason: "Incomplete font definition".into(),
@@ -185,14 +243,17 @@ impl BitmapFontDef {
                     *width = self.measure_tile(image, i as i32) as u8;
                 }
             }
+            // The original stores every width in a byte: a value over 255
+            // keeps its low byte.
             if self.expand_width != 0 {
                 for width in &mut widths {
-                    *width = (i32::from(*width) + self.expand_width).clamp(0, 255) as u8;
+                    *width =
+                        (i32::from(*width).saturating_add(self.expand_width).max(0) & 0xff) as u8;
                 }
             }
             let space = if self.fontext_fix { b' ' - 1 } else { b' ' } as usize;
             if self.space_width != 0 {
-                widths[space] = self.space_width.clamp(0, 255) as u8;
+                widths[space] = (self.space_width & 0xff) as u8;
             } else if i32::from(widths[space]) == self.expand_width || widths[space] == 0 {
                 widths[space] = ((u16::from(widths[usize::from(b'm')])
                     + u16::from(widths[usize::from(b'i')]))
@@ -202,7 +263,7 @@ impl BitmapFontDef {
             for (i, width) in widths.iter_mut().enumerate() {
                 *width = match self.widths.get(i) {
                     Some(w) => *w,
-                    None => self.default_width.clamp(0, 255) as u8,
+                    None => (self.default_width & 0xff) as u8,
                 };
             }
         }
@@ -211,20 +272,25 @@ impl BitmapFontDef {
 
     /// The measured width of tile `index`: one more than the right-most
     /// column with a pixel that is not fully transparent
-    /// (`CBSurfaceD3D::IsTransparentAtLite`: transparent only at alpha
-    /// 0, so the soft edge of a glyph counts). A pixel outside the image
-    /// counts too, as the original answers "not transparent" there: a
-    /// tile beyond the image is as wide as a tile.
+    /// (`IsTransparentAtLite`: alpha 0), so the soft edge of a smoothed
+    /// character counts.
     fn measure_tile(&self, image: &Image, index: i32) -> i32 {
         let x0 = (index % self.columns) * self.tile_width;
         let y0 = (index / self.columns) * self.tile_height;
         let mut min_col = -1;
-        for row in 0..self.tile_height {
-            let mut col = self.tile_width - 1;
+        // Nothing is measured outside the image.
+        let rows = i64::from(self.tile_height).min(i64::from(image.height) - i64::from(y0));
+        let last_col =
+            i64::from(self.tile_width - 1).min(i64::from(image.width) - 1 - i64::from(x0));
+        for row in 0..rows.max(0) as i32 {
+            let mut col = last_col.max(-1) as i32;
             while col > min_col {
                 let (x, y) = (x0 + col, y0 + row);
+                // Ink is any pixel that is not fully transparent
+                // (`IsTransparentAtLite`), the soft edge of an
+                // antialiased letter included.
                 let opaque =
-                    x >= 0 && y >= 0 && image.pixel(x as u32, y as u32).is_none_or(|p| p.a != 0);
+                    x >= 0 && y >= 0 && image.pixel(x as u32, y as u32).is_some_and(|p| p.a != 0);
                 if opaque {
                     min_col = min_col.max(col);
                     break;
@@ -430,74 +496,62 @@ pub struct TrueTypeFontDef {
     pub underline: bool,
     /// `STRIKE`.
     pub strike: bool,
+    /// `CHARSET`: the Windows character set of the font, by the engine's
+    /// number (`CBFontTT::GetWindowsCharset`: 3 Baltic, 5 Eastern Europe,
+    /// 7 Greek, 10 Russian...). In a game that is not UTF-8 it decides
+    /// the code page the text's bytes are read in; 0, the default, is
+    /// the system's.
+    pub charset: i32,
     /// The layers, in drawing order; at least one.
     pub layers: Vec<FontLayer>,
 }
 
 impl TrueTypeFontDef {
-    /// The pixel size of the font.
+    /// The pixel size of the font: the point size at 96 dots per inch,
+    /// rounded to a whole pixel (`MulDiv(size, 96, 72)`).
     pub fn pixel_size(&self) -> f32 {
-        self.size as f32 * 96.0 / 72.0
+        let scaled = i64::from(self.size) * 96;
+        let rounded = if scaled >= 0 {
+            (scaled + 36) / 72
+        } else {
+            (scaled - 36) / 72
+        };
+        rounded as f32
     }
 
-    fn from_node(root: &Node) -> TrueTypeFontDef {
+    /// `CBFontTT::LoadBuffer`: the keys of the `TTFONT` block. A key that
+    /// is not in the table is a syntax error that fails the font; a
+    /// `LAYER` that cannot be read is dropped alone (the original's error
+    /// code is overwritten by the next statement).
+    fn from_node(root: &Node) -> Result<TrueTypeFontDef> {
         let mut def = TrueTypeFontDef {
-            size: 0,
+            size: 12,
             face: "Arial".to_string(),
-            filename: "arial.ttf".to_string(),
+            // No file by default (`m_FontFile` is null): the face is then
+            // looked for among the system's fonts alone.
+            filename: String::new(),
             bold: false,
             italic: false,
             underline: false,
             strike: false,
+            charset: 0,
             layers: Vec::new(),
         };
-        let mut base = Rgba {
-            r: 0,
-            g: 0,
-            b: 0,
-            a: 0,
-        };
-        for child in root.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "SIZE" => def.size = integer(child),
-                "FACE" => {
-                    if let Some(name) = child.as_str() {
-                        def.face = name.to_string();
-                    }
-                }
-                "FILENAME" => {
-                    if let Some(name) = child.as_str() {
-                        def.filename = name.to_string();
-                    }
-                }
-                "BOLD" => def.bold = boolean(child),
-                "ITALIC" => def.italic = boolean(child),
-                "UNDERLINE" => def.underline = boolean(child),
-                "STRIKE" => def.strike = boolean(child),
+        let mut base = Rgba::from_ints(0, 0, 0, 0);
+        for item in keys(root, TRUETYPE_FONT_KEYS, "TTFONT") {
+            let (key, child) = item?;
+            match key {
+                "SIZE" => child.read_int(&mut def.size),
+                "FACE" => def.face = child.text(),
+                "FILENAME" => def.filename = child.text(),
+                "BOLD" => child.read_bool(&mut def.bold),
+                "ITALIC" => child.read_bool(&mut def.italic),
+                "UNDERLINE" => child.read_bool(&mut def.underline),
+                "STRIKE" => child.read_bool(&mut def.strike),
+                "CHARSET" => child.read_int(&mut def.charset),
                 "COLOR" => color_of(child, &mut base),
-                "ALPHA" => base.a = integer(child).clamp(0, 255) as u8,
-                "LAYER" => {
-                    let mut layer = FontLayer {
-                        offset_x: 0,
-                        offset_y: 0,
-                        color: Rgba {
-                            r: 0,
-                            g: 0,
-                            b: 0,
-                            a: 0,
-                        },
-                    };
-                    for key in child.nodes() {
-                        match key.key.to_ascii_uppercase().as_str() {
-                            "OFFSET_X" => layer.offset_x = integer(key),
-                            "OFFSET_Y" => layer.offset_y = integer(key),
-                            "COLOR" => color_of(key, &mut layer.color),
-                            "ALPHA" => layer.color.a = integer(key).clamp(0, 255) as u8,
-                            _ => {}
-                        }
-                    }
-                    def.layers.push(layer);
-                }
+                "ALPHA" => alpha_of(child, &mut base),
+                "LAYER" => def.layers.extend(FontLayer::from_node(child).ok()),
                 _ => {}
             }
         }
@@ -508,27 +562,45 @@ impl TrueTypeFontDef {
                 color: base,
             });
         }
-        def
+        Ok(def)
     }
 }
 
+impl FontLayer {
+    /// `CBFontTT::ParseLayer`: any key outside its table fails the layer.
+    fn from_node(node: &Node) -> Result<FontLayer> {
+        let mut layer = FontLayer {
+            offset_x: 0,
+            offset_y: 0,
+            color: Rgba::from_ints(0, 0, 0, 0),
+        };
+        for item in keys(node, FONT_LAYER_KEYS, "LAYER") {
+            let (key, child) = item?;
+            match key {
+                "OFFSET_X" => child.read_int(&mut layer.offset_x),
+                "OFFSET_Y" => child.read_int(&mut layer.offset_y),
+                "COLOR" => color_of(child, &mut layer.color),
+                "ALPHA" => alpha_of(child, &mut layer.color),
+                _ => {}
+            }
+        }
+        Ok(layer)
+    }
+}
+
+/// `COLOR { r, g, b }` over a colour, whose alpha stays. The original's
+/// three integers are uninitialised; a short list leaves the others at 0.
 fn color_of(node: &Node, color: &mut Rgba) {
-    let v = node.as_ints().unwrap_or_default();
-    color.r = channel(&v, 0);
-    color.g = channel(&v, 1);
-    color.b = channel(&v, 2);
+    let (mut r, mut g, mut b) = (0, 0, 0);
+    node.read_ints(&mut [&mut r, &mut g, &mut b]);
+    *color = Rgba::from_ints(r, g, b, i32::from(color.a));
 }
 
-fn channel(v: &[i64], i: usize) -> u8 {
-    v.get(i).copied().unwrap_or(0).clamp(0, 255) as u8
-}
-
-fn boolean(node: &Node) -> bool {
-    node.as_bool().unwrap_or(false)
-}
-
-fn integer(node: &Node) -> i32 {
-    node.as_int().unwrap_or(0) as i32
+/// `ALPHA = a` over a colour, whose red, green and blue stay.
+fn alpha_of(node: &Node, color: &mut Rgba) {
+    let mut a = 0;
+    node.read_int(&mut a);
+    color.a = a.clamp(0, 255) as u8;
 }
 
 #[cfg(test)]
@@ -588,13 +660,13 @@ mod tests {
         assert_eq!(def.layers.len(), 2);
         assert_eq!((def.layers[0].offset_x, def.layers[0].offset_y), (1, -1));
         assert_eq!(def.layers[1].color.r, 255);
-        assert_eq!(def.pixel_size(), 20.0 * 96.0 / 72.0);
+        assert_eq!(def.pixel_size(), 27.0, "20 points at 96 dpi, rounded");
         let FontFile::TrueType(plain) =
             FontFile::parse(b"TTFONT { SIZE=12 COLOR { 9, 8, 7 } ALPHA=100 }").unwrap()
         else {
             panic!()
         };
-        assert_eq!(plain.filename, "arial.ttf");
+        assert_eq!(plain.filename, "", "no font file without `FILENAME`");
         assert_eq!(plain.face, "Arial", "the typeface without `FACE`");
         assert_eq!(plain.layers.len(), 1);
         assert_eq!(
@@ -632,6 +704,75 @@ mod tests {
         );
     }
 
+    /// `CBFontBitmap::LoadBuffer`: the tables, the defaults and what a
+    /// key outside them does.
+    #[test]
+    fn font_keys_follow_the_original() {
+        // A key outside the table fails the font.
+        assert!(
+            FontFile::parse(b"FONT { IMAGE=\"a\" COLUMNS=4 TILE_WIDTH=4 TILE_HEIGHT=4 BOGUS=1 }")
+                .is_err()
+        );
+        assert!(FontFile::parse(b"TTFONT { SIZE=10 BOGUS=1 }").is_err());
+        // The root block is the first statement.
+        assert!(
+            FontFile::parse(
+                b"NAME=\"x\"\nFONT { IMAGE=\"a\" COLUMNS=4 TILE_WIDTH=4 TILE_HEIGHT=4 }"
+            )
+            .is_err()
+        );
+        // `WIDTHS_FRAME` is read as meant (the original takes it for
+        // `WIDTHS` and crashes), next to `WIDTHS`.
+        let FontFile::Bitmap(def) = FontFile::parse(
+            b"FONT { SPRITE=\"f.sprite\" COLUMNS=4 TILE_WIDTH=4 TILE_HEIGHT=4 WIDTHS_FRAME=2 WIDTHS { 300, 2 } DEFAULT_WIDTH=260 }",
+        )
+        .unwrap() else {
+            panic!("bitmap expected");
+        };
+        assert_eq!(def.widths_frame, 2);
+        // Widths are bytes: 300 keeps its low byte, 44.
+        assert_eq!(def.widths, [44, 2]);
+        assert_eq!(def.widths(None)[5], 4, "260 as a byte");
+
+        // TrueType: `SIZE` is 12 by default, `CHARSET` is read, a layer
+        // with a key of its own that is not known is dropped alone.
+        let FontFile::TrueType(def) = FontFile::parse(
+            b"TTFONT { CHARSET=5 COLOR { 1,2,3 } ALPHA=9 LAYER { BOGUS=1 } LAYER { OFFSET_X=2 COLOR { 4,5,6 } } }",
+        )
+        .unwrap() else {
+            panic!("truetype expected");
+        };
+        assert_eq!(def.size, 12);
+        assert_eq!(def.charset, 5);
+        assert_eq!(def.layers.len(), 1);
+        assert_eq!(def.layers[0].offset_x, 2);
+        assert_eq!(def.layers[0].color, Rgba::from_ints(4, 5, 6, 0));
+    }
+
+    /// `CBFontBitmap::GetWidths`: a pixel is ink unless it is fully
+    /// transparent.
+    #[test]
+    fn a_faint_pixel_counts_for_the_width() {
+        let mut pixels = vec![0u8; 4 * 4 * 4];
+        // One pixel of alpha 1 in column 2 of the only tile.
+        pixels[(4 + 2) * 4 + 3] = 1;
+        let image = Image {
+            width: 4,
+            height: 4,
+            pixels,
+            has_alpha_channel: true,
+        };
+        let def = BitmapFontDef {
+            image: Some("f.png".into()),
+            columns: 1,
+            tile_width: 4,
+            tile_height: 4,
+            auto_width: true,
+            ..BitmapFontDef::default()
+        };
+        assert_eq!(def.widths(Some(&image))[0], 3);
+    }
+
     #[test]
     fn measures_widths_from_an_image() {
         // Two columns of 4x4 tiles, two rows; tile 1 has pixels up to
@@ -660,9 +801,14 @@ mod tests {
         };
         let widths = def.widths(Some(&image));
         assert_eq!(&widths[..4], &[0, 3, 4, 0]);
-        // A tile outside the image is as wide as a tile, the space too.
-        assert_eq!(widths[b'm' as usize], 4);
-        assert_eq!(widths[b' ' as usize], 4);
+        // A pixel that is barely there is ink too: only alpha 0 is
+        // transparent (`IsTransparentAtLite`).
+        let mut soft = image.clone();
+        soft.pixels[3] = 1;
+        soft.pixels[(8 + 7) * 4 + 3] = 40;
+        assert_eq!(&def.widths(Some(&soft))[..4], &[1, 4, 4, 0]);
+        // The space takes half of m + i: both are outside the image, so 0.
+        assert_eq!(widths[b' ' as usize], 0);
         let expanded = BitmapFontDef {
             expand_width: 2,
             space_width: 5,
@@ -671,10 +817,6 @@ mod tests {
         let widths = expanded.widths(Some(&image));
         assert_eq!(&widths[..4], &[2, 5, 6, 2]);
         assert_eq!(widths[b' ' as usize], 5);
-        // Any alpha above 0 is ink: the soft edge of a glyph is measured.
-        let mut soft = image.clone();
-        soft.pixels[(8 + 1) * 4 + 3] = 1;
-        assert_eq!(expanded.widths(Some(&soft))[0], 4);
     }
 
     #[test]
@@ -729,5 +871,89 @@ mod tests {
         assert_eq!(TextAlign::from_code(-1), TextAlign::Left);
         assert_eq!(TextAlign::Center.start_x(10, 100, 20), 50);
         assert_eq!(TextAlign::Right.start_x(10, 100, 20), 90);
+    }
+
+    #[test]
+    fn refuses_grids_outside_one_to_four_thousand_ninety_six() {
+        let font = |extra: &str| {
+            format!("FONT {{ IMAGE=\"f.png\" COLUMNS=16 TILE_WIDTH=8 TILE_HEIGHT=10 {extra} }}")
+        };
+        assert!(FontFile::parse(font("").as_bytes()).is_ok());
+        for (key, value) in [
+            ("TILE_HEIGHT", "2000000000"),
+            ("TILE_WIDTH", "2000000000"),
+            ("COLUMNS", "2000000000"),
+            ("COLUMNS", "5000"),
+            ("TILE_WIDTH", "4097"),
+            ("TILE_HEIGHT", "-1"),
+            ("TILE_WIDTH", "-5"),
+            ("COLUMNS", "-16"),
+            ("COLUMNS", "0"),
+        ] {
+            // The last assignment wins.
+            let text = font(&format!("{key}={value}"));
+            assert!(
+                FontFile::parse(text.as_bytes()).is_err(),
+                "{key}={value} must be refused"
+            );
+        }
+        let text = font("COLUMNS=4096 TILE_WIDTH=4096 TILE_HEIGHT=4096");
+        assert!(FontFile::parse(text.as_bytes()).is_ok(), "the limit itself");
+    }
+
+    #[test]
+    fn measuring_a_grid_larger_than_the_image_stays_inside_it() {
+        let mut pixels = vec![0u8; 4 * 4 * 4];
+        pixels[(4 + 2) * 4 + 3] = 255; // row 1, column 2
+        let image = Image {
+            width: 4,
+            height: 4,
+            pixels,
+            has_alpha_channel: true,
+        };
+        let def = BitmapFontDef {
+            image: Some("f.png".into()),
+            columns: 4096,
+            tile_width: 4096,
+            tile_height: 4096,
+            auto_width: true,
+            ..BitmapFontDef::default()
+        };
+        let started = std::time::Instant::now();
+        let widths = def.widths(Some(&image));
+        assert!(started.elapsed().as_secs() < 5);
+        assert_eq!(widths[0], 3, "tile 0 overlaps the image");
+        assert_eq!(widths[1], 0, "tile 1 lies wholly outside it");
+        assert_eq!(widths[255], 0);
+    }
+
+    #[test]
+    fn a_huge_expand_width_does_not_overflow() {
+        for expand in [i32::MAX, i32::MIN] {
+            let def = BitmapFontDef {
+                image: Some("f.png".into()),
+                columns: 16,
+                tile_width: 8,
+                tile_height: 10,
+                auto_width: true,
+                expand_width: expand,
+                ..BitmapFontDef::default()
+            };
+            let image = Image {
+                width: 8,
+                height: 10,
+                pixels: vec![255; 8 * 10 * 4],
+                has_alpha_channel: true,
+            };
+            def.widths(Some(&image));
+            def.widths(None);
+        }
+        let FontFile::Bitmap(def) = FontFile::parse(
+            b"FONT { IMAGE=\"f.png\" COLUMNS=16 TILE_WIDTH=8 TILE_HEIGHT=10 AUTO_WIDTH=TRUE EXPAND_WIDTH=2147483647 }",
+        )
+        .unwrap() else {
+            panic!("bitmap expected");
+        };
+        def.widths(None);
     }
 }

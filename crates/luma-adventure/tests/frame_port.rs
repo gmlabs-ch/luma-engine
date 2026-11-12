@@ -411,7 +411,7 @@ on "Close" {
     no_errors(&raise(&mut runtime, "Say"));
     runtime.tick(16);
     assert_eq!(runtime.world.sentences().len(), 1);
-    assert_eq!(runtime.world.visible_sentences().count(), 1);
+    assert_eq!(runtime.world.displayed_sentences().count(), 1);
 
     // A system-exclusive window freezes the game: the sentence of a
     // freezable speaker is not drawn, and comes back with the game.
@@ -419,7 +419,7 @@ on "Close" {
     runtime.tick(16);
     assert!(runtime.world.is_frozen());
     assert_eq!(runtime.world.sentences().len(), 1);
-    assert_eq!(runtime.world.visible_sentences().count(), 0);
+    assert_eq!(runtime.world.displayed_sentences().count(), 0);
     // A quick message lasts three seconds of the live clock, which the
     // freeze does not stop.
     assert_eq!(
@@ -437,7 +437,7 @@ on "Close" {
     raise(&mut runtime, "Close");
     runtime.tick(16);
     assert!(!runtime.world.is_frozen());
-    assert_eq!(runtime.world.visible_sentences().count(), 1);
+    assert_eq!(runtime.world.displayed_sentences().count(), 1);
 
     // The accessibility pause freezes the game too, but shows every
     // sentence.
@@ -446,7 +446,7 @@ on "Close" {
     runtime.key_up(32);
     runtime.tick(16);
     assert!(runtime.world.accessibility().paused && runtime.world.is_frozen());
-    assert_eq!(runtime.world.visible_sentences().count(), 1);
+    assert_eq!(runtime.world.displayed_sentences().count(), 1);
     std::fs::remove_dir_all(dir).ok();
 }
 
@@ -637,8 +637,9 @@ result.set = Game.SetCursor("green.png");
 result.now = Game.GetCursor();
 var sprite = Game.GetCursorObject();
 result.object = (sprite != null);
-// A sprite that does not load leaves no cursor.
-result.bad = Game.SetCursor("missing.sprite");
+// A sprite that does not load leaves no cursor (a file that is not
+// there would load as the placeholder image; this one does not parse).
+result.bad = Game.SetCursor("broken.sprite");
 result.afterBad = Game.HasCursor();
 result.objectAfterBad = Game.GetCursorObject();
 Game.SetCursor("red.png");
@@ -659,17 +660,20 @@ result.layerRemoved = layer.HasCursor();
 
 // The active and the wait cursor go when their sprite does not load.
 Game.SetActiveCursor("red.png");
-result.activeBad = Game.SetActiveCursor("missing.sprite");
+result.activeBad = Game.SetActiveCursor("broken.sprite");
 result.activeLeft = Game.HasActiveCursor();
 Game.SetWaitCursor("red.png");
-result.waitBad = Game.SetWaitCursor("missing.sprite");
+result.waitBad = Game.SetWaitCursor("broken.sprite");
 result.waitLeft = Game.GetWaitCursor();
 
 on "Busy" {
   Game.Interactive = false;
 }
 "#,
-        &[File::Text("room.scene", ROOM)],
+        &[
+            File::Text("room.scene", ROOM),
+            File::Text("broken.sprite", "SPRITE { NO_SUCH_KEY=1 }"),
+        ],
     );
     assert!(
         !log.iter().any(|l| l.starts_with("Runtime error")),

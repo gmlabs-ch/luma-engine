@@ -292,7 +292,14 @@ fn reports_missing_games_and_packages() {
     fs::write(empty.join("bad.dcp"), b"not a package at all").unwrap();
     let out = luma(&["list", empty.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("not a WME package"));
+    // A file that is not a package is ignored, as the engine does, and
+    // said so.
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        stderr.contains("not a WME package") && stderr.contains("Ignoring"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("no .dcp package found"), "{stderr}");
     fs::remove_dir_all(&empty).unwrap();
 }
 
@@ -319,7 +326,7 @@ fn dump_prints_canonical_form_from_disk_and_from_packages() {
         "SPRITE {\n  LOOPING = TRUE\n  FRAME {\n    HOTSPOT { 1, 2 }\n  }\n}\n"
     );
 
-    fs::write(&file, "SPRITE {\n  BROKEN = \"\n").unwrap();
+    fs::write(&file, "SPRITE {\n  = \"broken\"\n}").unwrap();
     let out = luma(&["dump", file.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("line 2"));

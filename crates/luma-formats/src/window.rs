@@ -7,20 +7,21 @@
 //! `UITiledImage.cpp`, `AdInventoryBox.cpp`, `AdItem.cpp`, Copyright (c)
 //! 2011 Jan Nedoma). See `NOTICE` at the root of the repository.
 
-use crate::def::{Document, Node, Nodes};
+use crate::def::{Document, Node, document_keys, keys};
 use crate::error::{Error, Result};
 use crate::font::TextAlign;
-use crate::image::{Rgb, Rgba};
+use crate::image::Rgba;
 use crate::scene::Property;
 use crate::sprite::Rect;
+use crate::template::Files;
 
-/// How many `TEMPLATE` files a control may chain.
-const TEMPLATE_DEPTH: u32 = 8;
-
-/// How many `TEMPLATE` files a control may read in all: a file may name
-/// several templates, each naming several, and a game file must not be
-/// able to make the engine read without end.
-const TEMPLATE_LOADS: u32 = 32;
+/// The root block a file must start with, or the original's
+/// `'<KEY>' keyword expected` error.
+fn root_of<'a>(doc: &'a Document, key: &str) -> Result<&'a Node> {
+    doc.root(key).ok_or_else(|| Error::Invalid {
+        reason: format!("'{key}' keyword expected"),
+    })
+}
 
 /// Vertical placement of a text in its box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,37 +79,19 @@ fn text_align(name: &str, other: TextAlign) -> TextAlign {
     }
 }
 
-fn rect_of(node: &Node) -> Option<Rect> {
-    let v = node.as_ints()?;
-    if v.len() < 4 {
-        return None;
-    }
-    Some(Rect {
-        left: v[0] as i32,
-        top: v[1] as i32,
-        right: v[2] as i32,
-        bottom: v[3] as i32,
-    })
-}
-
-fn rgb_of(node: &Node) -> Option<Rgb> {
-    let v = node.as_ints()?;
-    if v.len() < 3 {
-        return None;
-    }
-    Some(Rgb {
-        r: v[0].clamp(0, 255) as u8,
-        g: v[1].clamp(0, 255) as u8,
-        b: v[2].clamp(0, 255) as u8,
-    })
-}
-
-fn text(node: &Node) -> String {
-    node.as_str().unwrap_or_default().to_string()
+/// `ScanStr(params, "%d,%d,%d,%d", &rect.left, ...)`: the numbers the
+/// value gives go over the rectangle, the others stay.
+fn read_rect(node: &Node, rect: &mut Rect) {
+    node.read_ints(&mut [
+        &mut rect.left,
+        &mut rect.top,
+        &mut rect.right,
+        &mut rect.bottom,
+    ]);
 }
 
 fn path(node: &Node) -> Option<String> {
-    node.as_str().filter(|s| !s.is_empty()).map(str::to_string)
+    Some(node.text())
 }
 
 /// The engine turns `|` into a line break when a control's text is set
@@ -131,28 +114,46 @@ pub struct TiledImage {
 }
 
 impl TiledImage {
-    /// Parses a `.tiled` file: a `TILED_IMAGE` root block.
+    /// Parses a `.tiled` file: a `TILED_IMAGE` root block. No other file
+    /// is read.
     pub fn parse(bytes: &[u8]) -> Result<TiledImage> {
+        TiledImage::parse_with(bytes, &mut Files::none())
+    }
+
+    /// Parses a `.tiled` file, reading the `TEMPLATE` files it names
+    /// through `files`.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<TiledImage> {
         let doc = Document::parse(bytes)?;
-        let root = doc.get("TILED_IMAGE").ok_or_else(|| Error::Invalid {
-            reason: "'TILED_IMAGE' keyword expected".into(),
-        })?;
         let mut tiled = TiledImage::default();
-        tiled.apply(root);
+        tiled.apply_with(root_of(&doc, "TILED_IMAGE")?, files)?;
         Ok(tiled)
     }
 
     /// Reads the keys of a `TILED_IMAGE` block, overriding what is
-    /// there. `HORIZONTAL_TILES` with `VERTICAL_TILES` lay out the nine
-    /// tiles from three column widths and three row heights.
-    pub fn apply(&mut self, node: &Node) {
+    /// there. No `TEMPLATE` file is read.
+    pub fn apply(&mut self, node: &Node) -> Result<()> {
+        self.apply_with(node, &mut Files::none())
+    }
+
+    /// `CUITiledImage::LoadBuffer`: reads the keys of a `TILED_IMAGE`
+    /// block in order, overriding what is there. A `TEMPLATE` loads the
+    /// named `.tiled` file where the key stands (one that cannot be
+    /// loaded is skipped). `HORIZONTAL_TILES` with `VERTICAL_TILES` lay
+    /// out the nine tiles from three column widths and three row heights
+    /// (a number that is missing is 0). A key that is not in the table
+    /// is a syntax error.
+    pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
         let mut horizontal: Option<[i32; 3]> = None;
         let mut vertical: Option<[i32; 3]> = None;
-        for child in node.nodes() {
-            let key = child.key.to_ascii_uppercase();
-            let (row, col) = match key.as_str() {
+        for item in keys(node, TILED_IMAGE_KEYS, "TILED_IMAGE") {
+            let (key, child) = item?;
+            let (row, col) = match key {
                 "TEMPLATE" => {
-                    self.template = path(child);
+                    let name = child.text();
+                    let _ = files.template(&name, |doc, files| {
+                        self.apply_with(root_of(doc, "TILED_IMAGE")?, files)
+                    });
+                    self.template = Some(name);
                     continue;
                 }
                 "IMAGE" => {
@@ -160,14 +161,13 @@ impl TiledImage {
                     continue;
                 }
                 "HORIZONTAL_TILES" | "VERTICAL_TILES" => {
-                    let v = child.as_ints().unwrap_or_default();
-                    if v.len() >= 3 {
-                        let sizes = [v[0] as i32, v[1] as i32, v[2] as i32];
-                        if key == "HORIZONTAL_TILES" {
-                            horizontal = Some(sizes);
-                        } else {
-                            vertical = Some(sizes);
-                        }
+                    let mut sizes = [0, 0, 0];
+                    let [a, b, c] = &mut sizes;
+                    child.read_ints(&mut [a, b, c]);
+                    if key == "HORIZONTAL_TILES" {
+                        horizontal = Some(sizes);
+                    } else {
+                        vertical = Some(sizes);
                     }
                     continue;
                 }
@@ -182,9 +182,7 @@ impl TiledImage {
                 "DOWN_RIGHT" => (2, 2),
                 _ => continue,
             };
-            if let Some(rect) = rect_of(child) {
-                self.tiles[row][col] = rect;
-            }
+            read_rect(child, &mut self.tiles[row][col]);
         }
         if let (Some(h), Some(v)) = (horizontal, vertical) {
             let xs = [0, h[0], h[0] + h[1], h[0] + h[1] + h[2]];
@@ -200,6 +198,7 @@ impl TiledImage {
                 }
             }
         }
+        Ok(())
     }
 
     /// Fills the tiles left empty with thirds of an image of the given
@@ -317,29 +316,266 @@ impl ControlDef {
     /// Reads a common key; `false` when the key is not a common one.
     fn apply_key(&mut self, key: &str, child: &Node) -> bool {
         match key {
-            "NAME" => self.name = text(child),
-            "CAPTION" => self.caption = text(child),
-            "X" => self.x = child.as_int().unwrap_or(0) as i32,
-            "Y" => self.y = child.as_int().unwrap_or(0) as i32,
-            "WIDTH" => self.width = child.as_int().unwrap_or(0) as i32,
-            "HEIGHT" => self.height = child.as_int().unwrap_or(0) as i32,
+            "NAME" => self.name = child.text(),
+            "CAPTION" => self.caption = child.text(),
+            "X" => child.read_int(&mut self.x),
+            "Y" => child.read_int(&mut self.y),
+            "WIDTH" => child.read_int(&mut self.width),
+            "HEIGHT" => child.read_int(&mut self.height),
             "BACK" => self.back = path(child),
             "IMAGE" => self.image = path(child),
             "FONT" => self.font = path(child),
             "CURSOR" => self.cursor = path(child),
-            "VISIBLE" => self.visible = child.as_bool().unwrap_or(true),
-            "DISABLED" => self.disabled = child.as_bool().unwrap_or(false),
-            "PARENT_NOTIFY" => self.parent_notify = child.as_bool().unwrap_or(false),
-            "SCRIPT" => {
-                if let Some(p) = path(child) {
-                    self.scripts.push(p);
-                }
-            }
+            "VISIBLE" => child.read_bool(&mut self.visible),
+            "DISABLED" => child.read_bool(&mut self.disabled),
+            "PARENT_NOTIFY" => child.read_bool(&mut self.parent_notify),
+            "SCRIPT" => self.scripts.push(child.text()),
             _ => return false,
         }
         true
     }
 }
+
+/// Loads a control's `TEMPLATE` file where the key stands (`LoadFile`
+/// on the control itself). A template that cannot be loaded fails the
+/// control: these loaders stop at the first error.
+fn control_template(
+    files: &mut Files<'_>,
+    name: &str,
+    root: &str,
+    apply: impl FnOnce(&Node, &mut Files<'_>) -> Result<()>,
+) -> Result<()> {
+    files.template(name, |doc, files| apply(root_of(doc, root)?, files))
+}
+
+/// The keys of `CUIButton::LoadBuffer`, in the order of its table.
+const BUTTON_KEYS: &[&str] = &[
+    "BUTTON",
+    "TEMPLATE",
+    "DISABLED",
+    "VISIBLE",
+    "FOCUSABLE",
+    "BACK_HOVER",
+    "BACK_PRESS",
+    "BACK_DISABLE",
+    "BACK_FOCUS",
+    "BACK",
+    "CENTER_IMAGE",
+    "IMAGE_HOVER",
+    "IMAGE_PRESS",
+    "IMAGE_DISABLE",
+    "IMAGE_FOCUS",
+    "IMAGE",
+    "FONT_HOVER",
+    "FONT_PRESS",
+    "FONT_DISABLE",
+    "FONT_FOCUS",
+    "FONT",
+    "TEXT_ALIGN",
+    "TEXT",
+    "X",
+    "Y",
+    "WIDTH",
+    "HEIGHT",
+    "CURSOR",
+    "NAME",
+    "EVENTS",
+    "SCRIPT",
+    "CAPTION",
+    "PARENT_NOTIFY",
+    "PRESSED",
+    "PIXEL_PERFECT",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CUIText::LoadBuffer`, in the order of its table.
+const STATIC_KEYS: &[&str] = &[
+    "STATIC",
+    "TEMPLATE",
+    "DISABLED",
+    "VISIBLE",
+    "BACK",
+    "IMAGE",
+    "FONT",
+    "TEXT_ALIGN",
+    "VERTICAL_ALIGN",
+    "TEXT",
+    "X",
+    "Y",
+    "WIDTH",
+    "HEIGHT",
+    "CURSOR",
+    "NAME",
+    "SCRIPT",
+    "CAPTION",
+    "PARENT_NOTIFY",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CUIEdit::LoadBuffer`, in the order of its table.
+const EDIT_KEYS: &[&str] = &[
+    "TEMPLATE",
+    "DISABLED",
+    "VISIBLE",
+    "BACK",
+    "IMAGE",
+    "FONT_SELECTED",
+    "FONT",
+    "TEXT",
+    "X",
+    "Y",
+    "WIDTH",
+    "HEIGHT",
+    "CURSOR_BLINK_RATE",
+    "CURSOR",
+    "FRAME_WIDTH",
+    "NAME",
+    "SCRIPT",
+    "PARENT_NOTIFY",
+    "MAX_LENGTH",
+    "EDITOR_PROPERTY",
+    "EDIT",
+    "CAPTION",
+];
+
+/// The keys of `CUIEntity::LoadBuffer`, in the order of its table.
+const ENTITY_CONTAINER_KEYS: &[&str] = &[
+    "ENTITY_CONTAINER",
+    "TEMPLATE",
+    "DISABLED",
+    "VISIBLE",
+    "X",
+    "Y",
+    "NAME",
+    "ENTITY",
+    "SCRIPT",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CUIWindow::LoadBuffer`, in the order of its table, then
+/// the one `CAdGame::WindowLoadHook` adds.
+const WINDOW_KEYS: &[&str] = &[
+    "WINDOW",
+    "ALPHA_COLOR",
+    "ALPHA",
+    "TEMPLATE",
+    "DISABLED",
+    "VISIBLE",
+    "BACK_INACTIVE",
+    "BACK",
+    "IMAGE_INACTIVE",
+    "IMAGE",
+    "FONT_INACTIVE",
+    "FONT",
+    "TITLE_ALIGN",
+    "TITLE_RECT",
+    "TITLE",
+    "DRAG_RECT",
+    "X",
+    "Y",
+    "WIDTH",
+    "HEIGHT",
+    "FADE_ALPHA",
+    "FADE_COLOR",
+    "CURSOR",
+    "NAME",
+    "BUTTON",
+    "STATIC",
+    "TRANSPARENT",
+    "SCRIPT",
+    "CAPTION",
+    "PARENT_NOTIFY",
+    "MENU",
+    "IN_GAME",
+    "CLIP_CONTENTS",
+    "PAUSE_MUSIC",
+    "EDITOR_PROPERTY",
+    "EDIT",
+    "ENTITY_CONTAINER",
+];
+
+/// The keys of `CUITiledImage::LoadBuffer`, in the order of its table.
+const TILED_IMAGE_KEYS: &[&str] = &[
+    "TILED_IMAGE",
+    "TEMPLATE",
+    "IMAGE",
+    "UP_LEFT",
+    "UP_RIGHT",
+    "UP_MIDDLE",
+    "DOWN_LEFT",
+    "DOWN_RIGHT",
+    "DOWN_MIDDLE",
+    "MIDDLE_LEFT",
+    "MIDDLE_RIGHT",
+    "MIDDLE_MIDDLE",
+    "VERTICAL_TILES",
+    "HORIZONTAL_TILES",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CAdResponseBox::LoadBuffer`, in the order of its table.
+const RESPONSE_BOX_KEYS: &[&str] = &[
+    "RESPONSE_BOX",
+    "TEMPLATE",
+    "FONT_HOVER",
+    "FONT",
+    "AREA",
+    "HORIZONTAL",
+    "SPACING",
+    "WINDOW",
+    "CURSOR",
+    "TEXT_ALIGN",
+    "VERTICAL_ALIGN",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CAdInventoryBox::LoadBuffer`, in the order of its table.
+const INVENTORY_BOX_KEYS: &[&str] = &[
+    "INVENTORY_BOX",
+    "TEMPLATE",
+    "WINDOW",
+    "EXCLUSIVE",
+    "ALWAYS_VISIBLE",
+    "AREA",
+    "SPACING",
+    "ITEM_WIDTH",
+    "ITEM_HEIGHT",
+    "SCROLL_BY",
+    "NAME",
+    "CAPTION",
+    "HIDE_SELECTED",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CAdItem::LoadBuffer`, in the order of its table.
+const ITEM_KEYS: &[&str] = &[
+    "ITEM",
+    "TEMPLATE",
+    "CURSOR_HOVER",
+    "CURSOR_COMBINED",
+    "CURSOR",
+    "NAME",
+    "IMAGE_HOVER",
+    "IMAGE",
+    "EVENTS",
+    "SCRIPT",
+    "CAPTION",
+    "PROPERTY",
+    "EDITOR_PROPERTY",
+    "FONT",
+    "ALPHA_COLOR",
+    "ALPHA",
+    "TALK_SPECIAL",
+    "TALK",
+    "SPRITE_HOVER",
+    "SPRITE",
+    "DISPLAY_AMOUNT",
+    "AMOUNT_OFFSET_X",
+    "AMOUNT_OFFSET_Y",
+    "AMOUNT_ALIGN",
+    "AMOUNT_STRING",
+    "AMOUNT",
+];
 
 /// A button (`BUTTON`): images, backgrounds and fonts per state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -416,67 +652,41 @@ impl Default for ButtonDef {
 }
 
 impl ButtonDef {
-    /// Parses a `.button` file: a `BUTTON` root block.
+    /// Parses a `.button` file: a `BUTTON` root block. No other file is
+    /// read: a `TEMPLATE` key fails the button.
     pub fn parse(bytes: &[u8]) -> Result<ButtonDef> {
         let doc = Document::parse(bytes)?;
-        let root = doc.get("BUTTON").ok_or_else(|| Error::Invalid {
-            reason: "'BUTTON' keyword expected".into(),
-        })?;
         let mut button = ButtonDef::default();
-        button.apply(root);
+        button.apply(root_of(&doc, "BUTTON")?)?;
         Ok(button)
     }
 
-    /// Reads the keys of a `BUTTON` block, overriding what is there.
-    /// A `TEMPLATE` is only recorded; see [`ButtonDef::apply_with`].
-    pub fn apply(&mut self, node: &Node) {
-        self.apply_with(node, &mut |_| None, 0);
+    /// Reads the keys of a `BUTTON` block, overriding what is there. No
+    /// `TEMPLATE` file is read; see [`ButtonDef::apply_with`].
+    pub fn apply(&mut self, node: &Node) -> Result<()> {
+        self.apply_with(node, &mut Files::none())
     }
 
-    /// Reads the keys of a `BUTTON` block in order, overriding what is
-    /// there. A `TEMPLATE` names a file of the same kind that `load`
-    /// reads: its keys are applied where the `TEMPLATE` key stands, as
-    /// the original engine loads the file in place, so the keys after it
-    /// override the template and the keys before it are overridden.
-    /// `depth` is the length of the template chain so far.
-    pub fn apply_with(
-        &mut self,
-        node: &Node,
-        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
-        depth: u32,
-    ) {
-        let mut left = TEMPLATE_LOADS;
-        self.apply_counted(node, load, depth, &mut left);
-    }
-
-    /// `apply_with`, with the template files the control may still read.
-    fn apply_counted(
-        &mut self,
-        node: &Node,
-        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
-        depth: u32,
-        left: &mut u32,
-    ) {
-        for child in node.nodes() {
-            let key = child.key.to_ascii_uppercase();
-            if self.base.apply_key(&key, child) {
+    /// `CUIButton::LoadBuffer`: reads the keys of a `BUTTON` block in
+    /// order, overriding what is there. A `TEMPLATE` names a file of the
+    /// same kind read through `files`: its keys are applied where the
+    /// `TEMPLATE` key stands, as the original engine loads the file in
+    /// place, so the keys after it override the template and the keys
+    /// before it are overridden. A key that is not in the table, or a
+    /// template that cannot be loaded, fails the button.
+    pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(node, BUTTON_KEYS, "BUTTON") {
+            let (key, child) = item?;
+            if self.base.apply_key(key, child) {
                 continue;
             }
-            match key.as_str() {
+            match key {
                 "TEMPLATE" => {
-                    let file = path(child);
-                    if let Some(file) = file
-                        .as_deref()
-                        .filter(|_| depth < TEMPLATE_DEPTH && *left > 0)
-                    {
-                        *left -= 1;
-                        if let Some(doc) = load(file).and_then(|b| Document::parse(&b).ok()) {
-                            if let Some(root) = doc.get("BUTTON") {
-                                self.apply_counted(root, load, depth + 1, left);
-                            }
-                        }
-                    }
-                    self.template = file;
+                    let file = child.text();
+                    control_template(files, &file, "BUTTON", |root, files| {
+                        self.apply_with(root, files)
+                    })?;
+                    self.template = Some(file);
                 }
                 "BACK_HOVER" => self.back_hover = path(child),
                 "BACK_PRESS" => self.back_press = path(child),
@@ -490,15 +700,16 @@ impl ButtonDef {
                 "FONT_PRESS" => self.font_press = path(child),
                 "FONT_DISABLE" => self.font_disable = path(child),
                 "FONT_FOCUS" => self.font_focus = path(child),
-                "TEXT" => self.text = control_text(&text(child)),
-                "TEXT_ALIGN" => self.text_align = text_align(&text(child), TextAlign::Center),
-                "CENTER_IMAGE" => self.center_image = child.as_bool().unwrap_or(false),
-                "PRESSED" => self.pressed = child.as_bool().unwrap_or(false),
-                "FOCUSABLE" => self.focusable = child.as_bool().unwrap_or(false),
-                "PIXEL_PERFECT" => self.pixel_perfect = child.as_bool().unwrap_or(false),
+                "TEXT" => self.text = control_text(&child.text()),
+                "TEXT_ALIGN" => self.text_align = text_align(&child.text(), TextAlign::Center),
+                "CENTER_IMAGE" => child.read_bool(&mut self.center_image),
+                "PRESSED" => child.read_bool(&mut self.pressed),
+                "FOCUSABLE" => child.read_bool(&mut self.focusable),
+                "PIXEL_PERFECT" => child.read_bool(&mut self.pixel_perfect),
                 _ => {}
             }
         }
+        Ok(())
     }
 
     /// The image the size is corrected from: the normal one, else the
@@ -543,74 +754,48 @@ impl Default for StaticDef {
 }
 
 impl StaticDef {
-    /// Parses a `.static` file: a `STATIC` root block.
+    /// Parses a `.static` file: a `STATIC` root block. No other file is
+    /// read: a `TEMPLATE` key fails the control.
     pub fn parse(bytes: &[u8]) -> Result<StaticDef> {
         let doc = Document::parse(bytes)?;
-        let root = doc.get("STATIC").ok_or_else(|| Error::Invalid {
-            reason: "'STATIC' keyword expected".into(),
-        })?;
         let mut def = StaticDef::default();
-        def.apply(root);
+        def.apply(root_of(&doc, "STATIC")?)?;
         Ok(def)
     }
 
-    /// Reads the keys of a `STATIC` block, overriding what is there.
-    /// A `TEMPLATE` is only recorded; see [`StaticDef::apply_with`].
-    pub fn apply(&mut self, node: &Node) {
-        self.apply_with(node, &mut |_| None, 0);
+    /// Reads the keys of a `STATIC` block, overriding what is there. No
+    /// `TEMPLATE` file is read; see [`StaticDef::apply_with`].
+    pub fn apply(&mut self, node: &Node) -> Result<()> {
+        self.apply_with(node, &mut Files::none())
     }
 
-    /// Reads the keys of a `STATIC` block in order, overriding what is
-    /// there. A `TEMPLATE` names a file of the same kind that `load`
-    /// reads: its keys are applied where the `TEMPLATE` key stands, as
-    /// the original engine loads the file in place, so the keys after it
-    /// override the template and the keys before it are overridden.
-    /// `depth` is the length of the template chain so far.
-    pub fn apply_with(
-        &mut self,
-        node: &Node,
-        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
-        depth: u32,
-    ) {
-        let mut left = TEMPLATE_LOADS;
-        self.apply_counted(node, load, depth, &mut left);
-    }
-
-    /// `apply_with`, with the template files the control may still read.
-    fn apply_counted(
-        &mut self,
-        node: &Node,
-        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
-        depth: u32,
-        left: &mut u32,
-    ) {
-        for child in node.nodes() {
-            let key = child.key.to_ascii_uppercase();
-            if self.base.apply_key(&key, child) {
+    /// `CUIText::LoadBuffer`: reads the keys of a `STATIC` block in
+    /// order, overriding what is there; a `TEMPLATE` is loaded in place
+    /// (see [`ButtonDef::apply_with`]). A key that is not in the table,
+    /// or a template that cannot be loaded, fails the control.
+    pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(node, STATIC_KEYS, "STATIC") {
+            let (key, child) = item?;
+            if self.base.apply_key(key, child) {
                 continue;
             }
-            match key.as_str() {
+            match key {
                 "TEMPLATE" => {
-                    let file = path(child);
-                    if let Some(file) = file
-                        .as_deref()
-                        .filter(|_| depth < TEMPLATE_DEPTH && *left > 0)
-                    {
-                        *left -= 1;
-                        if let Some(doc) = load(file).and_then(|b| Document::parse(&b).ok()) {
-                            if let Some(root) = doc.get("STATIC") {
-                                self.apply_counted(root, load, depth + 1, left);
-                            }
-                        }
-                    }
-                    self.template = file;
+                    let file = child.text();
+                    control_template(files, &file, "STATIC", |root, files| {
+                        self.apply_with(root, files)
+                    })?;
+                    self.template = Some(file);
                 }
-                "TEXT" => self.text = control_text(&text(child)),
-                "TEXT_ALIGN" => self.text_align = text_align(&text(child), TextAlign::Center),
-                "VERTICAL_ALIGN" => self.vertical_align = VerticalAlign::from_name(&text(child)),
+                "TEXT" => self.text = control_text(&child.text()),
+                "TEXT_ALIGN" => self.text_align = text_align(&child.text(), TextAlign::Center),
+                "VERTICAL_ALIGN" => {
+                    self.vertical_align = VerticalAlign::from_name(&child.text());
+                }
                 _ => {}
             }
         }
+        Ok(())
     }
 }
 
@@ -643,84 +828,54 @@ impl Default for EditDef {
             font_selected: None,
             max_length: -1,
             frame_width: 0,
-            cursor_blink_rate: 600,
+            cursor_blink_rate: 530,
         }
     }
 }
 
 impl EditDef {
-    /// Parses an `.edit` file: an `EDIT` root block.
+    /// Parses an `.edit` file: an `EDIT` root block. No other file is
+    /// read: a `TEMPLATE` key fails the control.
     pub fn parse(bytes: &[u8]) -> Result<EditDef> {
         let doc = Document::parse(bytes)?;
-        let root = doc.get("EDIT").ok_or_else(|| Error::Invalid {
-            reason: "'EDIT' keyword expected".into(),
-        })?;
         let mut def = EditDef::default();
-        def.apply(root);
+        def.apply(root_of(&doc, "EDIT")?)?;
         Ok(def)
     }
 
-    /// Reads the keys of an `EDIT` block, overriding what is there.
-    /// A `TEMPLATE` is only recorded; see [`EditDef::apply_with`].
-    pub fn apply(&mut self, node: &Node) {
-        self.apply_with(node, &mut |_| None, 0);
+    /// Reads the keys of an `EDIT` block, overriding what is there. No
+    /// `TEMPLATE` file is read; see [`EditDef::apply_with`].
+    pub fn apply(&mut self, node: &Node) -> Result<()> {
+        self.apply_with(node, &mut Files::none())
     }
 
-    /// Reads the keys of an `EDIT` block in order, overriding what is
-    /// there. A `TEMPLATE` names a file of the same kind that `load`
-    /// reads: its keys are applied where the `TEMPLATE` key stands, as
-    /// the original engine loads the file in place, so the keys after it
-    /// override the template and the keys before it are overridden.
-    /// `depth` is the length of the template chain so far.
-    pub fn apply_with(
-        &mut self,
-        node: &Node,
-        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
-        depth: u32,
-    ) {
-        let mut left = TEMPLATE_LOADS;
-        self.apply_counted(node, load, depth, &mut left);
-    }
-
-    /// `apply_with`, with the template files the control may still read.
-    fn apply_counted(
-        &mut self,
-        node: &Node,
-        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
-        depth: u32,
-        left: &mut u32,
-    ) {
-        for child in node.nodes() {
-            let key = child.key.to_ascii_uppercase();
-            if self.base.apply_key(&key, child) {
+    /// `CUIEdit::LoadBuffer`: reads the keys of an `EDIT` block in order,
+    /// overriding what is there; a `TEMPLATE` is loaded in place (see
+    /// [`ButtonDef::apply_with`]). A key that is not in the table, or a
+    /// template that cannot be loaded, fails the control.
+    pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(node, EDIT_KEYS, "EDIT") {
+            let (key, child) = item?;
+            if self.base.apply_key(key, child) {
                 continue;
             }
-            match key.as_str() {
+            match key {
                 "TEMPLATE" => {
-                    let file = path(child);
-                    if let Some(file) = file
-                        .as_deref()
-                        .filter(|_| depth < TEMPLATE_DEPTH && *left > 0)
-                    {
-                        *left -= 1;
-                        if let Some(doc) = load(file).and_then(|b| Document::parse(&b).ok()) {
-                            if let Some(root) = doc.get("EDIT") {
-                                self.apply_counted(root, load, depth + 1, left);
-                            }
-                        }
-                    }
-                    self.template = file;
+                    let file = child.text();
+                    control_template(files, &file, "EDIT", |root, files| {
+                        self.apply_with(root, files)
+                    })?;
+                    self.template = Some(file);
                 }
-                "TEXT" => self.text = control_text(&text(child)),
+                "TEXT" => self.text = control_text(&child.text()),
                 "FONT_SELECTED" => self.font_selected = path(child),
-                "MAX_LENGTH" => self.max_length = child.as_int().unwrap_or(-1) as i32,
-                "FRAME_WIDTH" => self.frame_width = child.as_int().unwrap_or(0) as i32,
-                "CURSOR_BLINK_RATE" => {
-                    self.cursor_blink_rate = child.as_int().unwrap_or(600) as i32;
-                }
+                "MAX_LENGTH" => child.read_int(&mut self.max_length),
+                "FRAME_WIDTH" => child.read_int(&mut self.frame_width),
+                "CURSOR_BLINK_RATE" => child.read_int(&mut self.cursor_blink_rate),
                 _ => {}
             }
         }
+        Ok(())
     }
 }
 
@@ -798,63 +953,78 @@ impl Default for ResponseBoxDef {
 }
 
 impl ResponseBoxDef {
-    /// Parses a `.def` file: a `RESPONSE_BOX` root block.
+    /// Parses a `.def` file: a `RESPONSE_BOX` root block. No other file
+    /// is read.
     pub fn parse(bytes: &[u8]) -> Result<ResponseBoxDef> {
+        ResponseBoxDef::parse_with(bytes, &mut Files::none())
+    }
+
+    /// Parses a `.def` file, reading the `TEMPLATE` files it names (its
+    /// own and those of its window and controls) through `files`.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<ResponseBoxDef> {
         let doc = Document::parse(bytes)?;
-        let root = doc.get("RESPONSE_BOX").ok_or_else(|| Error::Invalid {
-            reason: "'RESPONSE_BOX' keyword expected".into(),
-        })?;
         let mut def = ResponseBoxDef::default();
-        def.apply(root);
+        def.apply_with(root_of(&doc, "RESPONSE_BOX")?, files)?;
         Ok(def)
     }
 
-    /// Parses a `.def` file as [`ResponseBoxDef::parse`] does, reading the
-    /// `TEMPLATE` files of its window's controls with `load`.
-    pub fn parse_with(
-        bytes: &[u8],
-        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
-    ) -> Result<ResponseBoxDef> {
-        let doc = Document::parse(bytes)?;
-        let root = doc.get("RESPONSE_BOX").ok_or_else(|| Error::Invalid {
-            reason: "'RESPONSE_BOX' keyword expected".into(),
-        })?;
-        let mut def = ResponseBoxDef::default();
-        def.apply_with(root, load);
-        Ok(def)
+    /// Reads the keys of a `RESPONSE_BOX` block, overriding what is
+    /// there. No `TEMPLATE` file is read.
+    pub fn apply(&mut self, node: &Node) -> Result<()> {
+        self.apply_with(node, &mut Files::none())
     }
 
-    /// Reads the keys of a `RESPONSE_BOX` block, overriding what is there.
-    pub fn apply(&mut self, node: &Node) {
-        self.apply_with(node, &mut |_| None);
-    }
-
-    /// Reads the keys of the block, overriding what is there; `load`
-    /// reads the `TEMPLATE` files of the window's controls.
-    pub fn apply_with(&mut self, node: &Node, load: &mut dyn FnMut(&str) -> Option<Vec<u8>>) {
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "TEMPLATE" => self.template = path(child),
+    /// `CAdResponseBox::LoadBuffer`: reads the keys of the block in
+    /// order, overriding what is there. A `TEMPLATE` loads the named file
+    /// where the key stands. A window that cannot be read leaves the box
+    /// without one, and a template that cannot be loaded is skipped (the
+    /// original's error code is overwritten by the next statement); a
+    /// key that is not in the table is a syntax error.
+    pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(node, RESPONSE_BOX_KEYS, "RESPONSE_BOX") {
+            let (key, child) = item?;
+            match key {
+                "TEMPLATE" => {
+                    let name = child.text();
+                    let _ = files.template(&name, |doc, files| {
+                        self.apply_with(root_of(doc, "RESPONSE_BOX")?, files)
+                    });
+                    self.template = Some(name);
+                }
                 "FONT" => self.font = path(child),
                 "FONT_HOVER" => self.font_hover = path(child),
-                "AREA" => {
-                    if let Some(rect) = rect_of(child) {
-                        self.area = rect;
-                    }
-                }
-                "HORIZONTAL" => self.horizontal = child.as_bool().unwrap_or(false),
-                "SPACING" => self.spacing = child.as_int().unwrap_or(0) as i32,
+                "AREA" => read_rect(child, &mut self.area),
+                "HORIZONTAL" => child.read_bool(&mut self.horizontal),
+                "SPACING" => child.read_int(&mut self.spacing),
                 "WINDOW" => {
                     let mut window = WindowDef::default();
-                    window.apply_with(child, load);
-                    self.window = Some(window);
+                    self.window = window.apply_with(child, files).is_ok().then_some(window);
                 }
                 "CURSOR" => self.cursor = path(child),
-                "TEXT_ALIGN" => self.text_align = text_align(&text(child), TextAlign::Left),
-                "VERTICAL_ALIGN" => self.vertical_align = VerticalAlign::from_name(&text(child)),
+                "TEXT_ALIGN" => {
+                    let name = child.text();
+                    self.text_align = if name.eq_ignore_ascii_case("center") {
+                        TextAlign::Center
+                    } else if name.eq_ignore_ascii_case("right") {
+                        TextAlign::Right
+                    } else {
+                        TextAlign::Left
+                    };
+                }
+                "VERTICAL_ALIGN" => {
+                    let name = child.text();
+                    self.vertical_align = if name.eq_ignore_ascii_case("top") {
+                        VerticalAlign::Top
+                    } else if name.eq_ignore_ascii_case("center") {
+                        VerticalAlign::Center
+                    } else {
+                        VerticalAlign::Bottom
+                    };
+                }
                 _ => {}
             }
         }
+        Ok(())
     }
 }
 
@@ -868,20 +1038,50 @@ pub struct EntityContainerDef {
     pub base: ControlDef,
     /// `ENTITY`: the entity file shown.
     pub entity: Option<String>,
+    /// The last `TEMPLATE` file named; it was applied where the key
+    /// stands.
+    pub template: Option<String>,
 }
 
 impl EntityContainerDef {
-    /// Applies the keys of an `ENTITY_CONTAINER` block.
-    pub fn apply(&mut self, node: &Node) {
-        for child in node.nodes() {
-            let key = child.key.to_ascii_uppercase();
-            if self.base.apply_key(&key, child) {
+    /// Parses a container file: an `ENTITY_CONTAINER` root block.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<EntityContainerDef> {
+        let doc = Document::parse(bytes)?;
+        let mut def = EntityContainerDef::default();
+        def.apply_with(root_of(&doc, "ENTITY_CONTAINER")?, files)?;
+        Ok(def)
+    }
+
+    /// Applies the keys of an `ENTITY_CONTAINER` block. No `TEMPLATE`
+    /// file is read.
+    pub fn apply(&mut self, node: &Node) -> Result<()> {
+        self.apply_with(node, &mut Files::none())
+    }
+
+    /// `CUIEntity::LoadBuffer`: reads the keys of the block in order. A
+    /// `TEMPLATE` loads the named container file where the key stands.
+    /// A key that is not in the table (the size, image and caption keys
+    /// of the other controls are not), or a template that cannot be
+    /// loaded, fails the container.
+    pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(node, ENTITY_CONTAINER_KEYS, "ENTITY_CONTAINER") {
+            let (key, child) = item?;
+            if self.base.apply_key(key, child) {
                 continue;
             }
-            if key == "ENTITY" {
-                self.entity = path(child);
+            match key {
+                "TEMPLATE" => {
+                    let file = child.text();
+                    control_template(files, &file, "ENTITY_CONTAINER", |root, files| {
+                        self.apply_with(root, files)
+                    })?;
+                    self.template = Some(file);
+                }
+                "ENTITY" => self.entity = path(child),
+                _ => {}
             }
         }
+        Ok(())
     }
 }
 
@@ -891,8 +1091,8 @@ impl EntityContainerDef {
 pub struct WindowDef {
     /// The common keys.
     pub base: ControlDef,
-    /// A `.window` file loaded first (`TEMPLATE`), to be merged by the
-    /// caller.
+    /// The last `TEMPLATE` file named; it was applied where the key
+    /// stands.
     pub template: Option<String>,
     /// Background, image and font while the window is not focused.
     pub back_inactive: Option<String>,
@@ -918,6 +1118,9 @@ pub struct WindowDef {
     pub clip_contents: bool,
     /// `GoSystemExclusive` pauses the music too.
     pub pause_music: bool,
+    /// A `FADE_COLOR` or `FADE_ALPHA` key was read, in this block or in
+    /// a template: the window fades the screen under it.
+    pub fade_background: bool,
     /// The screen is tinted with this colour under the window.
     pub fade_color: Option<Rgba>,
     /// A colour multiplied with the window and its controls.
@@ -943,6 +1146,7 @@ impl Default for WindowDef {
             in_game: false,
             clip_contents: false,
             pause_music: true,
+            fade_background: false,
             fade_color: None,
             alpha_color: None,
             widgets: Vec::new(),
@@ -951,109 +1155,142 @@ impl Default for WindowDef {
 }
 
 impl WindowDef {
-    /// Parses a `.window` file: a `WINDOW` root block.
+    /// Parses a `.window` file: a `WINDOW` root block. No other file is
+    /// read: a `TEMPLATE` key fails the window.
     pub fn parse(bytes: &[u8]) -> Result<WindowDef> {
+        WindowDef::parse_with(bytes, &mut Files::none())
+    }
+
+    /// Parses a `.window` file, reading the `TEMPLATE` files it names
+    /// (its own, and those of its controls and nested windows) through
+    /// `files`.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<WindowDef> {
         let doc = Document::parse(bytes)?;
-        let root = doc.get("WINDOW").ok_or_else(|| Error::Invalid {
-            reason: "'WINDOW' keyword expected".into(),
-        })?;
         let mut window = WindowDef::default();
-        window.apply(root);
+        window.apply_with(root_of(&doc, "WINDOW")?, files)?;
         Ok(window)
     }
 
-    /// The `TEMPLATE` file a `WINDOW` block names, if any.
-    pub fn template_of(node: &Node) -> Option<String> {
-        node.nodes()
-            .iter()
-            .find(|child| child.key.eq_ignore_ascii_case("TEMPLATE"))
-            .and_then(path)
-    }
-
     /// Reads the keys of a `WINDOW` block, overriding what is there;
-    /// the controls are appended. The controls' `TEMPLATE` files are
-    /// only recorded; see [`WindowDef::apply_with`].
-    pub fn apply(&mut self, node: &Node) {
-        self.apply_with(node, &mut |_| None);
+    /// the controls are appended. No `TEMPLATE` file is read; see
+    /// [`WindowDef::apply_with`].
+    pub fn apply(&mut self, node: &Node) -> Result<()> {
+        self.apply_with(node, &mut Files::none())
     }
 
-    /// Reads the keys of a `WINDOW` block, overriding what is there; the
-    /// controls are appended, and the `TEMPLATE` files of the buttons,
-    /// statics and editors (of nested windows too) are read with `load`
-    /// and applied in place. The window's own `TEMPLATE` is only
-    /// recorded: the caller loads it first.
-    pub fn apply_with(&mut self, node: &Node, load: &mut dyn FnMut(&str) -> Option<Vec<u8>>) {
-        let mut fade_rgb: Option<Rgb> = None;
-        let mut fade_alpha: i32 = 255;
-        let mut alpha_rgb: Option<Rgb> = None;
-        let mut alpha: i32 = 255;
-        for child in node.nodes() {
-            let key = child.key.to_ascii_uppercase();
-            if self.base.apply_key(&key, child) {
+    /// `CUIWindow::LoadBuffer`: reads the keys of a `WINDOW` block in
+    /// order, overriding what is there; the controls are appended. A
+    /// `TEMPLATE` (of the window, of a nested window, of a control) is
+    /// read through `files` and applied where the key stands, so the
+    /// template's controls come before those that follow the key.
+    ///
+    /// A key that is not in the table, a control that cannot be read or
+    /// a template that cannot be loaded fails the window. The tint and
+    /// the fade are put together at the end from this block's own
+    /// `ALPHA_COLOR`, `ALPHA`, `FADE_COLOR` and `FADE_ALPHA`, all 0 by
+    /// default: those of a template are replaced.
+    pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        let (mut fade_r, mut fade_g, mut fade_b, mut fade_a) = (0, 0, 0, 0);
+        // Whether this block names a fade of its own.
+        let mut faded = false;
+        let (mut r, mut g, mut b, mut alpha) = (0, 0, 0, 0);
+        // Whether this block names a tint of its own.
+        let mut tinted = false;
+        for item in keys(node, WINDOW_KEYS, "WINDOW") {
+            let (key, child) = item?;
+            if self.base.apply_key(key, child) {
                 continue;
             }
-            match key.as_str() {
-                "TEMPLATE" => self.template = path(child),
+            match key {
+                "TEMPLATE" => {
+                    let file = child.text();
+                    control_template(files, &file, "WINDOW", |root, files| {
+                        self.apply_with(root, files)
+                    })?;
+                    self.template = Some(file);
+                }
                 "BACK_INACTIVE" => self.back_inactive = path(child),
                 "IMAGE_INACTIVE" => self.image_inactive = path(child),
                 "FONT_INACTIVE" => self.font_inactive = path(child),
-                "TITLE" => self.title = control_text(&text(child)),
-                "TITLE_ALIGN" => self.title_align = text_align(&text(child), TextAlign::Center),
-                "TITLE_RECT" => self.title_rect = rect_of(child).filter(|r| !r.is_empty()),
-                "DRAG_RECT" => self.drag_rect = rect_of(child).filter(|r| !r.is_empty()),
-                "TRANSPARENT" => self.transparent = child.as_bool().unwrap_or(false),
-                "MENU" => self.menu = child.as_bool().unwrap_or(false),
-                "IN_GAME" => self.in_game = child.as_bool().unwrap_or(false),
-                "CLIP_CONTENTS" => self.clip_contents = child.as_bool().unwrap_or(false),
-                "PAUSE_MUSIC" => self.pause_music = child.as_bool().unwrap_or(true),
-                "FADE_COLOR" => fade_rgb = rgb_of(child),
-                "FADE_ALPHA" => fade_alpha = child.as_int().unwrap_or(255) as i32,
-                "ALPHA_COLOR" => alpha_rgb = rgb_of(child),
-                "ALPHA" => alpha = child.as_int().unwrap_or(255) as i32,
+                "TITLE" => self.title = control_text(&child.text()),
+                "TITLE_ALIGN" => self.title_align = text_align(&child.text(), TextAlign::Center),
+                "TITLE_RECT" => {
+                    let mut rect = self.title_rect.unwrap_or_default();
+                    read_rect(child, &mut rect);
+                    self.title_rect = (!rect.is_empty()).then_some(rect);
+                }
+                "DRAG_RECT" => {
+                    let mut rect = self.drag_rect.unwrap_or_default();
+                    read_rect(child, &mut rect);
+                    self.drag_rect = (!rect.is_empty()).then_some(rect);
+                }
+                "TRANSPARENT" => child.read_bool(&mut self.transparent),
+                "MENU" => child.read_bool(&mut self.menu),
+                "IN_GAME" => child.read_bool(&mut self.in_game),
+                "CLIP_CONTENTS" => child.read_bool(&mut self.clip_contents),
+                "PAUSE_MUSIC" => child.read_bool(&mut self.pause_music),
+                "FADE_COLOR" => {
+                    child.read_ints(&mut [&mut fade_r, &mut fade_g, &mut fade_b]);
+                    self.fade_background = true;
+                    faded = true;
+                }
+                "FADE_ALPHA" => {
+                    child.read_int(&mut fade_a);
+                    self.fade_background = true;
+                    faded = true;
+                }
+                "ALPHA_COLOR" => {
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    tinted = true;
+                }
+                "ALPHA" => {
+                    child.read_int(&mut alpha);
+                    tinted = true;
+                }
                 "BUTTON" => {
                     let mut def = ButtonDef::default();
-                    def.apply_with(child, load, 0);
+                    def.apply_with(child, files)?;
                     self.widgets.push(WidgetDef::Button(Box::new(def)));
                 }
                 "STATIC" => {
                     let mut def = StaticDef::default();
-                    def.apply_with(child, load, 0);
+                    def.apply_with(child, files)?;
                     self.widgets.push(WidgetDef::Static(def));
                 }
                 "EDIT" => {
                     let mut def = EditDef::default();
-                    def.apply_with(child, load, 0);
+                    def.apply_with(child, files)?;
                     self.widgets.push(WidgetDef::Edit(def));
                 }
                 "WINDOW" => {
                     let mut def = WindowDef::default();
-                    def.apply_with(child, load);
+                    def.apply_with(child, files)?;
                     self.widgets.push(WidgetDef::Window(Box::new(def)));
                 }
                 "ENTITY_CONTAINER" => {
                     let mut def = EntityContainerDef::default();
-                    def.apply(child);
+                    def.apply_with(child, files)?;
                     self.widgets.push(WidgetDef::EntityContainer(def));
                 }
                 _ => {}
             }
         }
-        if let Some(rgb) = fade_rgb {
-            self.fade_color = Some(Rgba {
-                r: rgb.r,
-                g: rgb.g,
-                b: rgb.b,
-                a: fade_alpha.clamp(0, 255) as u8,
-            });
+        // An alpha without a colour means white at that alpha; nothing at
+        // all means no tint. A block that names neither keeps the tint
+        // it has, a template's, and the same holds for the fade. (The
+        // original computes both again from this block alone and loses
+        // the template's.)
+        if tinted {
+            if alpha != 0 && r == 0 && g == 0 && b == 0 {
+                (r, g, b) = (255, 255, 255);
+            }
+            let tint = Rgba::from_ints(r, g, b, alpha);
+            self.alpha_color = (tint != Rgba::from_ints(0, 0, 0, 0)).then_some(tint);
         }
-        if let Some(rgb) = alpha_rgb {
-            self.alpha_color = Some(Rgba {
-                r: rgb.r,
-                g: rgb.g,
-                b: rgb.b,
-                a: alpha.clamp(0, 255) as u8,
-            });
+        if faded {
+            self.fade_color = Some(Rgba::from_ints(fade_r, fade_g, fade_b, fade_a));
         }
+        Ok(())
     }
 
     /// The control named `name`, ignoring case, among the direct
@@ -1115,66 +1352,68 @@ impl Default for InventoryBoxDef {
 }
 
 impl InventoryBoxDef {
-    /// Parses a `.def` file: an `INVENTORY_BOX` root block.
+    /// Parses a `.def` file: an `INVENTORY_BOX` root block. No other file
+    /// is read: a `TEMPLATE` key fails the box.
     pub fn parse(bytes: &[u8]) -> Result<InventoryBoxDef> {
-        let doc = Document::parse(bytes)?;
-        let root = doc.get("INVENTORY_BOX").ok_or_else(|| Error::Invalid {
-            reason: "'INVENTORY_BOX' keyword expected".into(),
-        })?;
-        let mut def = InventoryBoxDef::default();
-        def.apply(root);
-        Ok(def)
+        InventoryBoxDef::parse_with(bytes, &mut Files::none())
     }
 
-    /// Parses a `.def` file as [`InventoryBoxDef::parse`] does, reading the
-    /// `TEMPLATE` files of its window's controls with `load`.
-    pub fn parse_with(
-        bytes: &[u8],
-        load: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
-    ) -> Result<InventoryBoxDef> {
+    /// Parses a `.def` file, reading the `TEMPLATE` files it names (its
+    /// own and those of its window and controls) through `files`.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<InventoryBoxDef> {
         let doc = Document::parse(bytes)?;
-        let root = doc.get("INVENTORY_BOX").ok_or_else(|| Error::Invalid {
-            reason: "'INVENTORY_BOX' keyword expected".into(),
-        })?;
         let mut def = InventoryBoxDef::default();
-        def.apply_with(root, load);
+        def.apply_with(root_of(&doc, "INVENTORY_BOX")?, files)?;
         Ok(def)
     }
 
     /// Reads the keys of an `INVENTORY_BOX` block, overriding what is
-    /// there.
-    pub fn apply(&mut self, node: &Node) {
-        self.apply_with(node, &mut |_| None);
+    /// there. No `TEMPLATE` file is read.
+    pub fn apply(&mut self, node: &Node) -> Result<()> {
+        self.apply_with(node, &mut Files::none())
     }
 
-    /// Reads the keys of the block, overriding what is there; `load`
-    /// reads the `TEMPLATE` files of the window's controls.
-    pub fn apply_with(&mut self, node: &Node, load: &mut dyn FnMut(&str) -> Option<Vec<u8>>) {
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "TEMPLATE" => self.template = path(child),
-                "NAME" => self.name = text(child),
-                "CAPTION" => self.caption = text(child),
+    /// `CAdInventoryBox::LoadBuffer`: reads the keys of the block in
+    /// order, overriding what is there. A `TEMPLATE` loads the named file
+    /// where the key stands. A key that is not in the table, a window
+    /// that cannot be read or a template that cannot be loaded fails the
+    /// box. `EXCLUSIVE` starts false in every file read, and
+    /// `ALWAYS_VISIBLE` is that of this block alone: a template's is
+    /// replaced.
+    pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        let mut always_visible = false;
+        self.exclusive = false;
+        for item in keys(node, INVENTORY_BOX_KEYS, "INVENTORY_BOX") {
+            let (key, child) = item?;
+            match key {
+                "TEMPLATE" => {
+                    let name = child.text();
+                    files.template(&name, |doc, files| {
+                        self.apply_with(root_of(doc, "INVENTORY_BOX")?, files)
+                    })?;
+                    self.template = Some(name);
+                }
+                "NAME" => self.name = child.text(),
+                "CAPTION" => self.caption = child.text(),
                 "WINDOW" => {
+                    self.window = None;
                     let mut window = WindowDef::default();
-                    window.apply_with(child, load);
+                    window.apply_with(child, files)?;
                     self.window = Some(window);
                 }
-                "AREA" => {
-                    if let Some(rect) = rect_of(child) {
-                        self.area = rect;
-                    }
-                }
-                "ITEM_WIDTH" => self.item_width = child.as_int().unwrap_or(50) as i32,
-                "ITEM_HEIGHT" => self.item_height = child.as_int().unwrap_or(50) as i32,
-                "SPACING" => self.spacing = child.as_int().unwrap_or(0) as i32,
-                "SCROLL_BY" => self.scroll_by = child.as_int().unwrap_or(1) as i32,
-                "HIDE_SELECTED" => self.hide_selected = child.as_bool().unwrap_or(false),
-                "EXCLUSIVE" => self.exclusive = child.as_bool().unwrap_or(false),
-                "ALWAYS_VISIBLE" => self.always_visible = child.as_bool().unwrap_or(false),
+                "AREA" => read_rect(child, &mut self.area),
+                "ITEM_WIDTH" => child.read_int(&mut self.item_width),
+                "ITEM_HEIGHT" => child.read_int(&mut self.item_height),
+                "SPACING" => child.read_int(&mut self.spacing),
+                "SCROLL_BY" => child.read_int(&mut self.scroll_by),
+                "HIDE_SELECTED" => child.read_bool(&mut self.hide_selected),
+                "EXCLUSIVE" => child.read_bool(&mut self.exclusive),
+                "ALWAYS_VISIBLE" => child.read_bool(&mut always_visible),
                 _ => {}
             }
         }
+        self.always_visible = always_visible;
+        Ok(())
     }
 
     /// Columns and rows of items the area holds
@@ -1240,8 +1479,9 @@ pub struct ItemDef {
     pub scripts: Vec<String>,
     /// Script properties.
     pub properties: Vec<Property>,
-    /// Tint and opacity.
-    pub alpha_color: Option<Rgba>,
+    /// Tint and opacity (`m_AlphaColor`); opaque white leaves the item
+    /// as it is.
+    pub alpha_color: Rgba,
 }
 
 impl Default for ItemDef {
@@ -1266,69 +1506,115 @@ impl Default for ItemDef {
             talk_special: Vec::new(),
             scripts: Vec::new(),
             properties: Vec::new(),
-            alpha_color: None,
+            alpha_color: Rgba::OPAQUE_WHITE,
         }
     }
 }
 
 impl ItemDef {
-    /// Parses an `.items` file: every `ITEM` root block.
+    /// Parses an `.items` file: every `ITEM` root block. An error is
+    /// returned when the file has one; see [`ItemDef::parse_all_with`]
+    /// for the items read all the same.
     pub fn parse_all(bytes: &[u8]) -> Result<Vec<ItemDef>> {
-        let doc = Document::parse(bytes)?;
-        Ok(doc
-            .get_all("ITEM")
-            .map(|node| {
-                let mut item = ItemDef::default();
-                item.apply(node);
-                item
-            })
-            .collect())
+        let (items, error) = ItemDef::parse_all_with(bytes, &mut Files::none());
+        match error {
+            Some(err) => Err(err),
+            None => Ok(items),
+        }
     }
 
-    /// Reads the keys of an `ITEM` block, overriding what is there.
-    pub fn apply(&mut self, node: &Node) {
-        let mut alpha_rgb: Option<Rgb> = None;
-        let mut alpha: i32 = 255;
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "TEMPLATE" => self.template = path(child),
-                "NAME" => self.name = text(child),
-                "CAPTION" => self.caption = text(child),
+    /// `CAdGame::LoadItemsBuffer`: the `ITEM` blocks of an `.items` file,
+    /// in order, reading their `TEMPLATE` files through `files`. An item
+    /// that cannot be read is left out and the others are kept; the
+    /// error returned with them is the syntax error that ended the file
+    /// (a statement that is not an `ITEM`), which fails the load after
+    /// the items before it were added.
+    pub fn parse_all_with(bytes: &[u8], files: &mut Files<'_>) -> (Vec<ItemDef>, Option<Error>) {
+        let doc = match Document::parse(bytes) {
+            Ok(doc) => doc,
+            Err(err) => return (Vec::new(), Some(err.into())),
+        };
+        let mut items = Vec::new();
+        for entry in document_keys(&doc, &["ITEM"], "ITEMS") {
+            match entry {
+                Ok((_, node)) => {
+                    let mut item = ItemDef::default();
+                    if item.apply_with(node, files).is_ok() {
+                        items.push(item);
+                    }
+                }
+                Err(err) => return (items, Some(err.into())),
+            }
+        }
+        (items, None)
+    }
+
+    /// Reads the keys of an `ITEM` block, overriding what is there. No
+    /// `TEMPLATE` file is read.
+    pub fn apply(&mut self, node: &Node) -> Result<()> {
+        self.apply_with(node, &mut Files::none())
+    }
+
+    /// `CAdItem::LoadBuffer`: reads the keys of an `ITEM` block in order,
+    /// overriding what is there. A `TEMPLATE` loads the named item file
+    /// where the key stands. A key that is not in the table or a template
+    /// that cannot be loaded fails the item. The tint is put together at
+    /// the end from this block's `ALPHA_COLOR` (0,0,0 by default) and
+    /// `ALPHA` (255 by default): a black colour with an alpha means
+    /// white, so `ALPHA` alone makes the item translucent.
+    pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        let (mut r, mut g, mut b, mut alpha) = (0, 0, 0, 255);
+        // Whether this block names a tint of its own.
+        let mut tinted = false;
+        for item in keys(node, ITEM_KEYS, "ITEM") {
+            let (key, child) = item?;
+            match key {
+                "TEMPLATE" => {
+                    let name = child.text();
+                    files.template(&name, |doc, files| {
+                        self.apply_with(root_of(doc, "ITEM")?, files)
+                    })?;
+                    self.template = Some(name);
+                }
+                "NAME" => self.name = child.text(),
+                "CAPTION" => self.caption = child.text(),
                 "IMAGE" | "SPRITE" => self.sprite = path(child),
                 "IMAGE_HOVER" | "SPRITE_HOVER" => self.sprite_hover = path(child),
                 "CURSOR" => self.cursor = path(child),
                 "CURSOR_HOVER" => self.cursor_hover = path(child),
-                "CURSOR_COMBINED" => self.cursor_combined = child.as_bool().unwrap_or(true),
+                "CURSOR_COMBINED" => child.read_bool(&mut self.cursor_combined),
                 "FONT" => self.font = path(child),
-                "AMOUNT" => self.amount = child.as_int().unwrap_or(0) as i32,
-                "DISPLAY_AMOUNT" => self.display_amount = child.as_bool().unwrap_or(false),
-                "AMOUNT_OFFSET_X" => self.amount_offset_x = child.as_int().unwrap_or(0) as i32,
-                "AMOUNT_OFFSET_Y" => self.amount_offset_y = child.as_int().unwrap_or(0) as i32,
-                "AMOUNT_ALIGN" => self.amount_align = text_align(&text(child), TextAlign::Center),
-                "AMOUNT_STRING" => self.amount_string = Some(text(child)),
-                "TALK" => self.talk.extend(path(child)),
-                "TALK_SPECIAL" => self.talk_special.extend(path(child)),
-                "SCRIPT" => self.scripts.extend(path(child)),
-                "PROPERTY" => {
-                    let name = child.get_str("NAME").unwrap_or_default().to_string();
-                    let value = child.get_str("VALUE").unwrap_or_default().to_string();
-                    if !name.is_empty() {
-                        self.properties.push(Property { name, value });
-                    }
+                "AMOUNT" => child.read_int(&mut self.amount),
+                "DISPLAY_AMOUNT" => child.read_bool(&mut self.display_amount),
+                "AMOUNT_OFFSET_X" => child.read_int(&mut self.amount_offset_x),
+                "AMOUNT_OFFSET_Y" => child.read_int(&mut self.amount_offset_y),
+                "AMOUNT_ALIGN" => {
+                    self.amount_align = text_align(&child.text(), TextAlign::Center);
                 }
-                "ALPHA_COLOR" => alpha_rgb = rgb_of(child),
-                "ALPHA" => alpha = child.as_int().unwrap_or(255) as i32,
+                "AMOUNT_STRING" => self.amount_string = Some(child.text()),
+                "TALK" => self.talk.push(child.text()),
+                "TALK_SPECIAL" => self.talk_special.push(child.text()),
+                "SCRIPT" => self.scripts.push(child.text()),
+                "PROPERTY" => self.properties.extend(Property::from_node(child)),
+                "ALPHA_COLOR" => {
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    tinted = true;
+                }
+                "ALPHA" => {
+                    child.read_int(&mut alpha);
+                    tinted = true;
+                }
                 _ => {}
             }
         }
-        if let Some(rgb) = alpha_rgb {
-            self.alpha_color = Some(Rgba {
-                r: rgb.r,
-                g: rgb.g,
-                b: rgb.b,
-                a: alpha.clamp(0, 255) as u8,
-            });
+        // An item that names no tint keeps the one it has: a template's.
+        if tinted {
+            if alpha != 0 && r == 0 && g == 0 && b == 0 {
+                (r, g, b) = (255, 255, 255);
+            }
+            self.alpha_color = Rgba::from_ints(r, g, b, alpha);
         }
+        Ok(())
     }
 }
 
@@ -1579,11 +1865,12 @@ ITEM { NAME = "key" SPRITE = "items\key.sprite" CURSOR_COMBINED = FALSE AMOUNT =
         }
     }
 
-    fn window_with(src: &str, mut load: impl FnMut(&str) -> Option<Vec<u8>>) -> WindowDef {
-        let doc = Document::parse(src.as_bytes()).unwrap();
-        let mut window = WindowDef::default();
-        window.apply_with(doc.get("WINDOW").unwrap(), &mut load);
-        window
+    fn try_window(src: &str, mut load: impl FnMut(&str) -> Option<Vec<u8>>) -> Result<WindowDef> {
+        WindowDef::parse_with(src.as_bytes(), &mut Files::new(&mut load))
+    }
+
+    fn window_with(src: &str, load: impl FnMut(&str) -> Option<Vec<u8>>) -> WindowDef {
+        try_window(src, load).unwrap_or_else(|e| panic!("{e}\n{src}"))
     }
 
     fn first_button(window: &WindowDef) -> &ButtonDef {
@@ -1642,69 +1929,44 @@ ITEM { NAME = "key" SPRITE = "items\key.sprite" CURSOR_COMBINED = FALSE AMOUNT =
         assert_eq!(b.base.height, 12);
     }
 
+    /// The original recurses until the stack is gone; here the chain is
+    /// cut and the control fails, as any template that does not load.
     #[test]
-    fn a_template_naming_itself_stops_at_the_depth_cap() {
+    fn a_template_naming_itself_stops_at_the_depth_bound() {
         let mut loads = 0;
         let src = r#"BUTTON { TEMPLATE="self.button" FONT="f.font" }"#;
-        let window = window_with(r#"WINDOW { BUTTON { TEMPLATE="self.button" } }"#, |name| {
+        let result = try_window(r#"WINDOW { BUTTON { TEMPLATE="self.button" } }"#, |name| {
             loads += 1;
             (name == "self.button").then(|| src.as_bytes().to_vec())
         });
-        assert_eq!(loads, TEMPLATE_DEPTH as usize);
-        let b = first_button(&window);
-        assert_eq!(b.base.font.as_deref(), Some("f.font"));
-        assert_eq!(b.template.as_deref(), Some("self.button"));
+        assert!(result.is_err());
+        assert_eq!(loads, crate::template::TEMPLATE_DEPTH as usize);
     }
 
+    /// `CUIButton::LoadBuffer` stops at the first error: a template that
+    /// is missing, is of another kind or has a syntax error fails the
+    /// button, and the button fails its window.
     #[test]
-    fn many_template_lines_stop_at_the_load_budget() {
-        let mut loads = 0;
-        let src = format!(
-            "BUTTON {{ {} FONT=\"f.font\" }}",
-            "TEMPLATE=\"self.button\" ".repeat(50)
-        );
-        let window = window_with(r#"WINDOW { BUTTON { TEMPLATE="self.button" } }"#, |name| {
-            loads += 1;
-            (name == "self.button").then(|| src.as_bytes().to_vec())
-        });
-        assert!(loads <= TEMPLATE_LOADS as usize, "{loads} loads");
-        assert!(loads > 0);
-        let b = first_button(&window);
-        assert_eq!(b.base.font.as_deref(), Some("f.font"));
-        assert_eq!(b.template.as_deref(), Some("self.button"));
-    }
-
-    #[test]
-    fn a_missing_template_keeps_the_own_keys() {
-        let window = window_with(
+    fn a_template_that_does_not_load_fails_the_window() {
+        let missing = try_window(
             r#"WINDOW { BUTTON { TEMPLATE="gone.button" NAME="yes" WIDTH=70 } }"#,
             |_| None,
         );
-        let b = first_button(&window);
-        assert_eq!(b.base.name, "yes");
-        assert_eq!(b.base.width, 70);
-        assert_eq!(b.template.as_deref(), Some("gone.button"));
-    }
-
-    #[test]
-    fn a_template_of_the_wrong_kind_is_ignored() {
-        let window = window_with(
+        assert!(missing.is_err());
+        let wrong_kind = try_window(
             r#"WINDOW { BUTTON { TEMPLATE="t.static" NAME="yes" } }"#,
             files(&[("t.static", r#"STATIC { FONT="f.font" WIDTH=30 }"#)]),
         );
-        let b = first_button(&window);
-        assert_eq!(b.base.name, "yes");
-        assert!(b.base.font.is_none());
-        assert_eq!(b.base.width, 0);
-    }
-
-    #[test]
-    fn an_unparsable_template_is_ignored() {
-        let window = window_with(
+        assert!(wrong_kind.is_err());
+        let bad = try_window(
             r#"WINDOW { BUTTON { TEMPLATE="t.button" NAME="yes" } }"#,
-            files(&[("t.button", "BUTTON {")]),
+            files(&[("t.button", "BUTTON { BOGUS=1 }")]),
         );
-        assert_eq!(first_button(&window).base.name, "yes");
+        assert!(bad.is_err());
+        // Without a reader every template is missing.
+        assert!(
+            WindowDef::parse(br#"WINDOW { BUTTON { TEMPLATE="t.button" NAME="yes" } }"#).is_err()
+        );
     }
 
     #[test]
@@ -1756,25 +2018,285 @@ ITEM { NAME = "key" SPRITE = "items\key.sprite" CURSOR_COMBINED = FALSE AMOUNT =
         assert_eq!(b.base.name, "n");
     }
 
+    /// `CUIWindow::LoadBuffer TEMPLATE`: the template file is loaded into
+    /// the window where the key stands, in a root window and in a nested
+    /// one: keys before it are overridden, keys after it override, and
+    /// its controls come before those that follow.
     #[test]
-    fn plain_apply_records_the_template_without_loading_it() {
-        let window =
-            WindowDef::parse(br#"WINDOW { BUTTON { TEMPLATE="t.button" NAME="yes" } }"#).unwrap();
-        let b = first_button(&window);
-        assert_eq!(b.template.as_deref(), Some("t.button"));
-        assert_eq!(b.base.name, "yes");
-        assert!(b.base.font.is_none());
-        assert_eq!(b.base.height, 0);
+    fn a_window_template_is_loaded_in_place() {
+        let template = r#"WINDOW { NAME="tpl" X=1 Y=2 MENU=TRUE BUTTON { NAME="from_tpl" } }"#;
+        let window = window_with(
+            r#"WINDOW {
+  X=50 WIDTH=9
+  BUTTON { NAME="before" }
+  TEMPLATE="t.window"
+  Y=60
+  BUTTON { NAME="after" }
+  WINDOW { NAME="mine" TEMPLATE="t.window" TRANSPARENT=TRUE }
+}"#,
+            files(&[("t.window", template)]),
+        );
+        assert_eq!(window.base.name, "tpl");
+        assert_eq!((window.base.x, window.base.y), (1, 60));
+        assert_eq!(window.base.width, 9);
+        assert!(window.menu);
+        let names: Vec<&str> = window
+            .widgets
+            .iter()
+            .map(|w| w.base().name.as_str())
+            .collect();
+        assert_eq!(names, ["before", "from_tpl", "after", "tpl"]);
+        let WidgetDef::Window(inner) = &window.widgets[3] else {
+            panic!("window expected");
+        };
+        assert!(inner.menu && inner.transparent);
+        assert_eq!(inner.widgets.len(), 1);
     }
 
+    /// `CUIWindow::LoadBuffer`: the tint and the fade are computed at the
+    /// end of a block from its own keys, which all default to 0.
     #[test]
-    fn the_window_template_is_read_from_its_node() {
-        let doc = Document::parse(br#"WINDOW { NAME="w" TEMPLATE="t.window" }"#).unwrap();
-        assert_eq!(
-            WindowDef::template_of(doc.get("WINDOW").unwrap()).as_deref(),
-            Some("t.window")
+    fn window_tint_and_fade_follow_the_original() {
+        let get = |src: &str| WindowDef::parse(src.as_bytes()).unwrap();
+        // Nothing: no tint, no fade.
+        let w = get("WINDOW { }");
+        assert_eq!((w.alpha_color, w.fade_color), (None, None));
+        // `ALPHA` alone: white at that alpha.
+        let w = get("WINDOW { ALPHA=128 }");
+        assert_eq!(w.alpha_color, Some(Rgba::from_ints(255, 255, 255, 128)));
+        // `ALPHA_COLOR` alone: alpha 0.
+        let w = get("WINDOW { ALPHA_COLOR { 10,20,30 } }");
+        assert_eq!(w.alpha_color, Some(Rgba::from_ints(10, 20, 30, 0)));
+        // Black with an alpha becomes white.
+        let w = get("WINDOW { ALPHA_COLOR { 0,0,0 } ALPHA=200 }");
+        assert_eq!(w.alpha_color, Some(Rgba::from_ints(255, 255, 255, 200)));
+        // `FADE_ALPHA` alone turns the fade on, black at that alpha.
+        let w = get("WINDOW { FADE_ALPHA=100 }");
+        assert_eq!(w.fade_color, Some(Rgba::from_ints(0, 0, 0, 100)));
+        // `FADE_COLOR` alone: alpha 0.
+        let w = get("WINDOW { FADE_COLOR { 1,2,3 } }");
+        assert_eq!(w.fade_color, Some(Rgba::from_ints(1, 2, 3, 0)));
+
+        // A template's tint and fade stay when the outer block names
+        // none (the original loses them), and are replaced when it does.
+        let w = window_with(
+            r#"WINDOW { TEMPLATE="t.window" }"#,
+            files(&[(
+                "t.window",
+                "WINDOW { ALPHA=128 FADE_COLOR { 9,9,9 } FADE_ALPHA=77 }",
+            )]),
         );
-        let doc = Document::parse(br#"WINDOW { NAME="w" }"#).unwrap();
-        assert_eq!(WindowDef::template_of(doc.get("WINDOW").unwrap()), None);
+        assert_eq!(w.alpha_color, Some(Rgba::from_ints(255, 255, 255, 128)));
+        assert_eq!(w.fade_color, Some(Rgba::from_ints(9, 9, 9, 77)));
+        let w = window_with(
+            r#"WINDOW { TEMPLATE="t.window" ALPHA=10 FADE_ALPHA=20 }"#,
+            files(&[(
+                "t.window",
+                "WINDOW { ALPHA=128 FADE_COLOR { 9,9,9 } FADE_ALPHA=77 }",
+            )]),
+        );
+        assert_eq!(w.alpha_color, Some(Rgba::from_ints(255, 255, 255, 10)));
+        assert_eq!(w.fade_color, Some(Rgba::from_ints(0, 0, 0, 20)));
+    }
+
+    /// A key outside the loader's table is a syntax error; a control
+    /// that fails makes its window fail.
+    #[test]
+    fn an_unknown_key_fails_the_control_and_its_window() {
+        assert!(WindowDef::parse(b"WINDOW { BOGUS=1 }").is_err());
+        assert!(WindowDef::parse(b"WINDOW { BUTTON { BOGUS=1 } }").is_err());
+        // `FOCUSABLE` is a button key, `VERTICAL_ALIGN` a static key.
+        assert!(WindowDef::parse(b"WINDOW { STATIC { FOCUSABLE=TRUE } }").is_err());
+        assert!(WindowDef::parse(b"WINDOW { BUTTON { VERTICAL_ALIGN=top } }").is_err());
+        assert!(WindowDef::parse(b"WINDOW { EDIT { TEXT_ALIGN=left } }").is_err());
+        // A container has no size, image or caption keys.
+        assert!(
+            WindowDef::parse(b"WINDOW { ENTITY_CONTAINER { NAME=\"c\" X=1 ENTITY=\"e.entity\" } }")
+                .is_ok()
+        );
+        assert!(WindowDef::parse(b"WINDOW { ENTITY_CONTAINER { WIDTH=10 } }").is_err());
+        // The editor's keys are accepted.
+        assert!(WindowDef::parse(b"WINDOW { EDITOR_PROPERTY { NAME=\"a\" VALUE=\"b\" } }").is_ok());
+    }
+
+    /// `CUIEntity::LoadBuffer TEMPLATE`.
+    #[test]
+    fn an_entity_container_template_is_loaded_in_place() {
+        let window = window_with(
+            r#"WINDOW { ENTITY_CONTAINER { X=5 TEMPLATE="c.def" NAME="mine" } }"#,
+            files(&[(
+                "c.def",
+                r#"ENTITY_CONTAINER { NAME="tpl" X=1 Y=2 ENTITY="e.entity" }"#,
+            )]),
+        );
+        let WidgetDef::EntityContainer(c) = &window.widgets[0] else {
+            panic!("container expected");
+        };
+        assert_eq!(c.base.name, "mine");
+        assert_eq!((c.base.x, c.base.y), (1, 2));
+        assert_eq!(c.entity.as_deref(), Some("e.entity"));
+    }
+
+    /// `CUITiledImage::LoadBuffer`: the template is applied where the key
+    /// stands, a template that does not load is skipped, a short tile
+    /// list reads zeros and an unknown key is a syntax error.
+    #[test]
+    fn tiled_image_templates_and_tile_lists() {
+        let mut load = files(&[(
+            "base.tiled",
+            r#"TILED_IMAGE { IMAGE="base.png" UP_LEFT { 0,0,5,5 } }"#,
+        )]);
+        let tiled = TiledImage::parse_with(
+            br#"TILED_IMAGE { IMAGE="mine.png" UP_LEFT { 1,1,2,2 } TEMPLATE="base.tiled" UP_RIGHT { 7,0,9,5 } }"#,
+            &mut Files::new(&mut load),
+        )
+        .unwrap();
+        assert_eq!(tiled.image.as_deref(), Some("base.png"));
+        assert_eq!(
+            tiled.tile(0, 0).right,
+            5,
+            "the template overrides what was before"
+        );
+        assert_eq!(tiled.tile(0, 2).left, 7);
+
+        let tiled =
+            TiledImage::parse(br#"TILED_IMAGE { TEMPLATE="gone.tiled" IMAGE="a.png" }"#).unwrap();
+        assert_eq!(tiled.image.as_deref(), Some("a.png"));
+
+        let tiled =
+            TiledImage::parse(b"TILED_IMAGE { HORIZONTAL_TILES { 4 } VERTICAL_TILES { 3,3,3 } }")
+                .unwrap();
+        assert_eq!(tiled.tile(0, 0).right, 4);
+        assert_eq!(tiled.tile(0, 1).width(), 0);
+        assert_eq!(tiled.tile(2, 0).bottom, 9);
+
+        assert!(TiledImage::parse(b"TILED_IMAGE { BOGUS=1 }").is_err());
+    }
+
+    /// `CAdResponseBox::LoadBuffer`: alignment values, the template in
+    /// place, and what a failure does (nothing but drop the piece).
+    #[test]
+    fn response_box_follows_the_original() {
+        let def = ResponseBoxDef::parse(b"RESPONSE_BOX { }").unwrap();
+        assert_eq!(def.text_align, TextAlign::Left);
+        assert_eq!(def.vertical_align, VerticalAlign::Bottom);
+        assert!(def.window.is_none());
+
+        let def = ResponseBoxDef::parse(
+            b"RESPONSE_BOX { TEXT_ALIGN=\"center\" VERTICAL_ALIGN=\"center\" }",
+        )
+        .unwrap();
+        assert_eq!(def.text_align, TextAlign::Center);
+        assert_eq!(def.vertical_align, VerticalAlign::Center);
+        let def = ResponseBoxDef::parse(b"RESPONSE_BOX { TEXT_ALIGN=\"x\" VERTICAL_ALIGN=\"x\" }")
+            .unwrap();
+        assert_eq!(def.text_align, TextAlign::Left);
+        assert_eq!(
+            def.vertical_align,
+            VerticalAlign::Bottom,
+            "anything else is bottom"
+        );
+        let def = ResponseBoxDef::parse(b"RESPONSE_BOX { VERTICAL_ALIGN=\"top\" }").unwrap();
+        assert_eq!(def.vertical_align, VerticalAlign::Top);
+
+        // A window that cannot be read is dropped, the box goes on.
+        let def = ResponseBoxDef::parse(b"RESPONSE_BOX { WINDOW { BOGUS=1 } SPACING=4 }").unwrap();
+        assert!(def.window.is_none());
+        assert_eq!(def.spacing, 4);
+        assert!(ResponseBoxDef::parse(b"RESPONSE_BOX { BOGUS=1 }").is_err());
+
+        let mut load = files(&[(
+            "base.def",
+            r#"RESPONSE_BOX { FONT="base.font" SPACING=9 HORIZONTAL=TRUE }"#,
+        )]);
+        let def = ResponseBoxDef::parse_with(
+            br#"RESPONSE_BOX { FONT="mine.font" TEMPLATE="base.def" SPACING=2 }"#,
+            &mut Files::new(&mut load),
+        )
+        .unwrap();
+        assert_eq!(def.font.as_deref(), Some("base.font"));
+        assert_eq!(def.spacing, 2);
+        assert!(def.horizontal);
+        // A template that cannot be loaded is skipped.
+        let def =
+            ResponseBoxDef::parse(br#"RESPONSE_BOX { TEMPLATE="gone.def" SPACING=2 }"#).unwrap();
+        assert_eq!(def.spacing, 2);
+    }
+
+    /// `CAdInventoryBox::LoadBuffer`: the template in place, the flags
+    /// that are reset by every file, and the failures that fail the box.
+    #[test]
+    fn inventory_box_follows_the_original() {
+        let base = r#"INVENTORY_BOX { NAME="base" SPACING=9 EXCLUSIVE=TRUE ALWAYS_VISIBLE=TRUE WINDOW { NAME="w" } }"#;
+        let served = [("base.def", base)];
+        let mut load = files(&served);
+        let def = InventoryBoxDef::parse_with(
+            br#"INVENTORY_BOX { SPACING=1 ITEM_WIDTH=20 TEMPLATE="base.def" NAME="mine" }"#,
+            &mut Files::new(&mut load),
+        )
+        .unwrap();
+        assert_eq!(def.name, "mine");
+        assert_eq!(def.spacing, 9);
+        assert_eq!(def.item_width, 20);
+        assert!(def.exclusive, "the template's flag stays");
+        assert!(!def.always_visible, "the outer file's own value counts");
+        assert_eq!(def.window.as_ref().map(|w| w.base.name.as_str()), Some("w"));
+
+        assert!(InventoryBoxDef::parse(br#"INVENTORY_BOX { TEMPLATE="gone.def" }"#).is_err());
+        assert!(InventoryBoxDef::parse(b"INVENTORY_BOX { WINDOW { BOGUS=1 } }").is_err());
+        assert!(InventoryBoxDef::parse(b"INVENTORY_BOX { BOGUS=1 }").is_err());
+    }
+
+    /// `CAdItem::LoadBuffer`, `CAdGame::LoadItemsBuffer`.
+    #[test]
+    fn items_follow_the_original() {
+        let one = |src: &str| {
+            let mut items = ItemDef::parse_all(src.as_bytes()).unwrap();
+            assert_eq!(items.len(), 1);
+            items.remove(0)
+        };
+        // No tint key: opaque white.
+        assert_eq!(one("ITEM { }").alpha_color, Rgba::OPAQUE_WHITE);
+        // `ALPHA` alone: translucent white.
+        assert_eq!(
+            one("ITEM { ALPHA=100 }").alpha_color,
+            Rgba::from_ints(255, 255, 255, 100)
+        );
+        // Black with an alpha is white: no tint.
+        assert_eq!(
+            one("ITEM { ALPHA_COLOR { 0,0,0 } }").alpha_color,
+            Rgba::OPAQUE_WHITE
+        );
+        assert_eq!(
+            one("ITEM { ALPHA_COLOR { 9,8,7 } ALPHA=0 }").alpha_color,
+            Rgba::from_ints(9, 8, 7, 0)
+        );
+
+        // A template is an item file, loaded where the key stands.
+        let mut load = files(&[(
+            "base.item",
+            r#"ITEM { NAME="base" CAPTION="Base" SPRITE="base.sprite" ALPHA=50 TALK="t.sprite" }"#,
+        )]);
+        let (items, error) = ItemDef::parse_all_with(
+            br#"ITEM { CAPTION="Mine" TEMPLATE="base.item" NAME="mine" }"#,
+            &mut Files::new(&mut load),
+        );
+        assert!(error.is_none());
+        let item = &items[0];
+        assert_eq!(item.name, "mine");
+        assert_eq!(item.caption, "Base");
+        assert_eq!(item.sprite.as_deref(), Some("base.sprite"));
+        assert_eq!(item.talk, ["t.sprite"]);
+        assert_eq!(item.alpha_color, Rgba::from_ints(255, 255, 255, 50));
+
+        // An item that fails is left out; a statement that is not an
+        // `ITEM` ends the file with an error, after the items before it.
+        let (items, error) = ItemDef::parse_all_with(
+            br#"ITEM { NAME="a" } ITEM { NAME="b" BOGUS=1 } ITEM { TEMPLATE="gone" NAME="c" } ITEM { NAME="d" } OTHER { } ITEM { NAME="e" }"#,
+            &mut Files::none(),
+        );
+        let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["a", "d"]);
+        assert!(error.is_some());
     }
 }

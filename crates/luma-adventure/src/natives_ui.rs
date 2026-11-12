@@ -103,11 +103,19 @@ impl World {
                 _ => return None,
             },
             ControlKind::Edit(e) => match name {
-                "SelStart" => Value::Int(e.sel_start.min(c.text.len()) as i32),
-                "SelEnd" => Value::Int(e.sel_end.min(c.text.len()) as i32),
+                // Character indexes, and the number the editor holds:
+                // past the text until it is next drawn.
+                "SelStart" => {
+                    let index = crate::ui::selection_index(&c.text, e.sel_start);
+                    Value::Int(i32::try_from(index).unwrap_or(i32::MAX))
+                }
+                "SelEnd" => {
+                    let index = crate::ui::selection_index(&c.text, e.sel_end);
+                    Value::Int(i32::try_from(index).unwrap_or(i32::MAX))
+                }
                 "FrameWidth" => Value::Int(e.frame_width),
                 "MaxLength" => Value::Int(e.max_length),
-                "CursorChar" => Value::from(e.cursor_char.clone()),
+                "CursorChar" => Value::from(self.game_text(&e.cursor_char)),
                 "CursorBlinkRate" => Value::Int(e.cursor_blink_rate),
                 _ => return None,
             },
@@ -201,8 +209,11 @@ impl World {
                         _ => false,
                     },
                     ControlKind::Button(b) => match name {
+                        // A number that is no alignment is the first
+                        // one, left.
                         "TextAlign" => {
-                            b.text_align = text_align_of(int);
+                            b.text_align =
+                                TextAlign::from_code(if (0..=2).contains(&int) { int } else { 0 });
                             true
                         }
                         "Focusable" => {
@@ -220,28 +231,34 @@ impl World {
                         _ => false,
                     },
                     ControlKind::Static(s) => match name {
+                        // A number that is no alignment is the first
+                        // one: left, top.
                         "TextAlign" => {
-                            s.text_align = text_align_of(int);
+                            s.text_align =
+                                TextAlign::from_code(if (0..=2).contains(&int) { int } else { 0 });
                             true
                         }
                         "VerticalAlign" => {
-                            // A code outside 0..2 is the top (0).
-                            s.vertical_align = if (0..=2).contains(&int) {
-                                VerticalAlign::from_code(int)
-                            } else {
-                                VerticalAlign::from_code(0)
-                            };
+                            s.vertical_align =
+                                VerticalAlign::from_code(if (0..=2).contains(&int) {
+                                    int
+                                } else {
+                                    0
+                                });
                             true
                         }
                         _ => false,
                     },
                     ControlKind::Edit(e) => match name {
+                        // Character indexes, kept inside the text.
                         "SelStart" => {
-                            e.sel_start = int.max(0) as usize;
+                            let index = (int.max(0) as usize).min(c.text.chars().count());
+                            e.sel_start = crate::ui::selection_offset(&c.text, index);
                             true
                         }
                         "SelEnd" => {
-                            e.sel_end = int.max(0) as usize;
+                            let index = (int.max(0) as usize).min(c.text.chars().count());
+                            e.sel_end = crate::ui::selection_offset(&c.text, index);
                             true
                         }
                         "FrameWidth" => {
@@ -252,9 +269,11 @@ impl World {
                             e.max_length = int;
                             true
                         }
+                        // The whole string is kept (`SetCursorChar`): it
+                        // is measured whole and its first character
+                        // drawn.
                         "CursorChar" => {
-                            e.cursor_char =
-                                text.chars().next().map(String::from).unwrap_or_default();
+                            e.cursor_char = edit_text;
                             true
                         }
                         "CursorBlinkRate" => {
@@ -571,15 +590,5 @@ impl World {
         }
         w.widgets.insert(to.min(w.widgets.len()), moved);
         true
-    }
-}
-
-/// The alignment of a `TextAlign` code set by a script: a code outside
-/// 0..2 is left (0), as the original resets it.
-fn text_align_of(code: i32) -> TextAlign {
-    if (0..=2).contains(&code) {
-        TextAlign::from_code(code)
-    } else {
-        TextAlign::Left
     }
 }

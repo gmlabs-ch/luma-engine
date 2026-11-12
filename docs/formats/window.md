@@ -57,9 +57,20 @@ adds its own. Texts (`TEXT`, `TITLE`) go through the string table
 
 ## Keys common to every control
 
+Each kind of control has its own table of keys, and a key outside it is a
+syntax error that fails the control: `FOCUSABLE` is a button key,
+`VERTICAL_ALIGN` a static key, and an `ENTITY_CONTAINER` only knows
+`NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, `ENTITY` and
+`TEMPLATE`. The loaders of windows and controls stop at the first error:
+a control that fails makes its window fail, and `Game.LoadWindow` then
+returns null. A background (`BACK*`), a font (`FONT*`), a cursor or an
+image that cannot be loaded is such an error, and so is the `ENTITY` of
+a container. An image file that does not exist is not: the engine shows
+its placeholder for it.
+
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `TEMPLATE` | string | | Another file of the same kind (`.button`, `.static`, `.edit`, `.window`), loaded in place where the key stands: the keys that follow override it, the keys before it are overridden. Templates chain, up to 8 deep and 32 files per control in Luma. A window's own template is loaded first and the window's controls are added to the template's. A template that cannot be read is logged and skipped. The controls of the window inside a `.def` response box or inventory box file take their templates the same way. |
+| `TEMPLATE` | string | | Another file of the same kind (`.button`, `.static`, `.edit`, `.window`), loaded in place where the key stands: the keys that follow override it, the keys before it are overridden. A window's template (a root window's or a nested one's) brings its controls where the key stands, after the controls declared before it. Templates chain, up to 8 deep and 1024 files per load in Luma. **A template that cannot be loaded fails the control, and a control that fails makes its window fail.** The controls of the window inside a `.def` response box or inventory box file take their templates the same way. |
 | `NAME` | string | `<unnamed>` | Name used by scripts (`GetWidget`, `PARENT_NOTIFY`). |
 | `CAPTION` | string | `""` | Free caption. |
 | `X`, `Y` | int | `0` | Position, relative to the parent window. |
@@ -93,10 +104,10 @@ height. A `BACK` tiled image then rounds the size down to whole tiles.
 | `IN_GAME` | bool | `FALSE` | Drawn with the scene, under the sentences and the other windows. |
 | `CLIP_CONTENTS` | bool | `FALSE` | The window's back, image, title and controls are drawn and take the mouse inside the window's rectangle only (see [game-loop.md](../game-loop.md#viewports)). |
 | `PAUSE_MUSIC` | bool | `TRUE` | `GoSystemExclusive` pauses the music too. |
-| `FADE_COLOR` | `r, g, b` | | The screen is tinted with this colour under the window. |
-| `FADE_ALPHA` | int | `255` | The tint's opacity. |
-| `ALPHA_COLOR` | `r, g, b` | | A colour multiplied with the window and its controls. |
-| `ALPHA` | int | `255` | Its opacity. |
+| `FADE_COLOR` | `r, g, b` | `0, 0, 0` | The screen is tinted with this colour under the window. Either `FADE_COLOR` or `FADE_ALPHA` turns the fade on. |
+| `FADE_ALPHA` | int | `0` | The tint's opacity: `FADE_COLOR` alone shows nothing, `FADE_ALPHA` alone darkens with black. |
+| `ALPHA_COLOR` | `r, g, b` | `0, 0, 0` | A colour multiplied with the window and its controls. |
+| `ALPHA` | int | `0` | Its opacity. `ALPHA` alone (or with a black colour) means white at that alpha, the way to make a window translucent; `ALPHA_COLOR` alone has alpha 0, which hides the window's images. With neither key there is no tint. |
 | `BUTTON`, `STATIC`, `EDIT`, `WINDOW` | block | | A control, in drawing order. |
 | `ENTITY_CONTAINER` | block | | A control showing an entity: `NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, and `ENTITY`, an `.entity` file (an `ENTITY` block as in a scene). The entity stands at the container's position, whatever the `X` and `Y` of its file (its `X` and `Y` read that screen position), with its own sprite and animation; it takes the mouse through its `REGION` (in screen coordinates) and its sprite when it is active and registrable and the container is enabled, is not updated while the container is hidden, and its own scripts get the mouse events; `GetEntity` hands it to scripts, `SetEntity` loads another file (the old entity and its scripts go first, so a file that does not load leaves the container empty); the entity's `SceneIndependent` is on, and it goes with its container when the window is unloaded. OpenQuest's verb bar is made of them. The entity's scripts do not pause when the game freezes unless a script sets the container's `Freezable` to `true`; `CreateEntityContainer(name)` on a window makes an empty one at runtime. |
 
@@ -146,17 +157,23 @@ height; a button without image nor text is 100 by 100.
 | `VERTICAL_ALIGN` | `top`, `center`, `bottom` | `center` | Vertical placement of the text in the height. |
 
 A static never catches the mouse. `SizeToFit` sets its size to its
-text; `HeightToFit` only its height.
+text (the width of the text on one line, then its height in that
+width); `HeightToFit` only its height. Both need the static's own
+`FONT` and a text; an empty text set by a script counts: it is 0 wide
+and as high as the font makes an empty text (one line of a bitmap font,
+0 for a TrueType font). A file's empty `TEXT` is not told from none in
+Luma Engine. A script setting `TextAlign` or `VerticalAlign` to a
+number that is no alignment gets the first one (left, top).
 
 ## `EDIT`
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `TEXT` | string | | The text being edited. |
-| `FONT_SELECTED` | string | | The font of the selected part of the text. |
+| `TEXT` | string | | The text being edited, expanded through the string table. |
+| `FONT_SELECTED` | string | the editor's `FONT` | The font of the selected part of the text. |
 | `MAX_LENGTH` | int | `-1` | Longest text accepted; `-1` for no limit. |
 | `FRAME_WIDTH` | int | `0` | Margin between the frame and the text. |
-| `CURSOR_BLINK_RATE` | int | `600` | Milliseconds between blinks of the caret. |
+| `CURSOR_BLINK_RATE` | int | `530` | Milliseconds between blinks of the caret. The original takes its default from Windows (`GetCaretBlinkTime`), 530 on a system left as installed. A negative rate never blinks; `0` changes the caret every frame. |
 
 An editor can take the focus (`Tab` moves it between the focusable
 controls of a window) and reads the keys: printable characters are
@@ -169,16 +186,42 @@ the right edge, `Backspace` deletes the character after the caret and
 `Delete` the one before, `Home` and `End` swap, and a typed character
 leaves the caret before it, as the original engine's editor does.
 
-The editor shows its text on one line, from the first character that
-keeps the caret inside the box, at `FRAME_WIDTH` from the left and the
-top of the control, with the caret's character at the caret while it
-blinks on. The original engine (`CUIEdit::Display`) draws the parts
-before and after the caret separately, each in the width left up to
-the right edge of the box and one line high, so that a text longer
-than the box stops at the last word that fits; Luma Engine draws the
-line whole, without a box (a font width of `-1`, see
-[font.md](font.md#truetype-fonts-ttfont)), so the end of a text longer
-than the box runs past its right edge.
+The editor shows its text on one line, at `FRAME_WIDTH` from the left
+and the top of the control (`CUIEdit::Display`):
+
+- **The parts.** The text before the selection, the selection, and the
+  text after it are drawn one after the other; the selection in
+  `FONT_SELECTED`, the rest in `FONT` (the game's system font without
+  one). The caret stands where the selection ends, the end the keys
+  move: after a selection made from left to right, before one made from
+  right to left.
+- **The right frame.** Each part is drawn in the room left up to
+  `FRAME_WIDTH` from the right edge, one letter high (the taller letter
+  of the two fonts): a bitmap font stops before the first character
+  that does not fit, a TrueType font before the last space that fits or
+  the first character that does not. Nothing runs past the frame.
+- **The first character shown.** When the text from the first character
+  shown up to the caret (the selection measured in its own font) is
+  wider than the box less the frames and the caret, the first character
+  shown moves on one by one until it fits; it never passes the caret.
+- **The caret.** `CursorChar` is measured whole and its first character
+  is drawn. While the editor has the focus the caret keeps its room,
+  whether it shows or not, so the text after it does not move when it
+  blinks. It changes each time `CURSOR_BLINK_RATE` milliseconds have
+  passed since it last did; the first frame of a new editor hides it.
+- **Right to left** (`Game.TextRTL`): the line starts after the room the
+  parts and the caret leave, so it sits against the right frame.
+
+One defect of the original is not reproduced: its TrueType font ignores
+the length `GetTextWidth` is given, so the editor measures every part as
+all the text that follows it, and a caret inside the text is drawn far
+to the right of its place. Luma Engine measures the parts themselves, as
+the original's bitmap fonts do.
+
+`SelStart` and `SelEnd` are character indexes. They hold the number
+they were given until the editor is next drawn: 10000 in a new editor,
+and a position past the end after a shorter `Text`; drawing brings them
+inside the text.
 
 The text of an editor is made of characters, and the caret moves by
 whole characters. In a UTF-8 game (`Game.TextEncoding` 1) a script
@@ -194,7 +237,7 @@ that the image fills any size.
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `TEMPLATE` | string | Another `.tiled` file loaded first. |
+| `TEMPLATE` | string | Another `.tiled` file, loaded where the key stands: it overrides the keys before it. One that cannot be loaded is skipped. |
 | `IMAGE` | string | The image. |
 | `UP_LEFT`, `UP_MIDDLE`, `UP_RIGHT`, `MIDDLE_LEFT`, `MIDDLE_MIDDLE`, `MIDDLE_RIGHT`, `DOWN_LEFT`, `DOWN_MIDDLE`, `DOWN_RIGHT` | `left, top, right, bottom` | The tiles in the image. |
 | `HORIZONTAL_TILES` | `w1, w2, w3` | With `VERTICAL_TILES`, the widths of the three columns, from which the nine tiles follow. |
@@ -268,6 +311,58 @@ window (see [game-loop.md](../game-loop.md#the-focused-window)).
 A window can be dragged by its `DRAG_RECT` while the left button is held
 there.
 
+## The response box
+
+The game names its response box (`RESPONSE_BOX` in `default.game`, a
+`.def` file; `Game.LoadResponseBox` loads another). It lists the
+choices of a dialogue (see [game-loop.md](../game-loop.md#dialogue-responses)).
+
+```
+RESPONSE_BOX
+{
+  FONT = "fonts\outline_white.font"
+  FONT_HOVER = "fonts\outline_red.font"
+  AREA { 10, 600, 1014, 760 }
+  SPACING = 2
+  VERTICAL_ALIGN = "bottom"
+
+  WINDOW
+  {
+    X = 0  Y = 0  WIDTH = 1024  HEIGHT = 768
+    BUTTON { NAME = "prev" IMAGE = "interface\up.png" X = 990 Y = 600 }
+    BUTTON { NAME = "next" IMAGE = "interface\down.png" X = 990 Y = 740 }
+  }
+}
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `TEMPLATE` | string | | Another `.def` file, read where the key stands: its keys override those before it, the keys after it override its own. |
+| `WINDOW` | block | | The box's window, drawn under the choices; its `prev` and `next` buttons scroll them. Without it the choices are shown alone, in `AREA` on the screen. |
+| `AREA` | `left, top, right, bottom` | empty | Where the choices are laid out, relative to the window. |
+| `FONT` | string | system font | Font of the text choices. |
+| `FONT_HOVER` | string | system font | Font of a text choice under the mouse or pressed. |
+| `CURSOR` | string | the game's active cursor | Cursor over an icon choice. Text choices have no cursor of their own. |
+| `HORIZONTAL` | bool | `FALSE` | Choices side by side instead of one under the other. |
+| `SPACING` | int | `0` | Pixels between choices. |
+| `TEXT_ALIGN` | `left`, `center`, `right` | `left` | Alignment of the text of a choice; any other value is `left`. |
+| `VERTICAL_ALIGN` | `top`, `center`, `bottom` | `bottom` | Where the choices sit in the area when they do not fill it; any other value is `bottom`. |
+
+The file is read as `CAdResponseBox::LoadBuffer` reads it, key by key:
+a key that is not in the table is a syntax error and the box is not
+loaded. A template, a font, a cursor or a window that does not load is
+skipped and the reading goes on (the original's error code is
+overwritten by the next statement): the box then has no such font,
+cursor or window. A response box that does not load leaves the game
+without one.
+
+A text choice is as wide as the area (as the screen when the area has
+no width) and as high as its text; an icon choice has the size of its
+image. A choice higher than the area makes the area higher by the
+difference, for good, with a warning in the log. The choices are laid
+out from the scroll offset while they fit; `prev` shows when the offset
+is positive, `next` when a choice did not fit.
+
 ## The inventory
 
 The game names its inventory box (`INVENTORY_BOX` in `default.game`, a
@@ -293,7 +388,7 @@ INVENTORY_BOX
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `TEMPLATE` | string | | Another `.def` file loaded first. |
+| `TEMPLATE` | string | | Another `.def` file, loaded where the key stands. One that cannot be loaded fails the box. `EXCLUSIVE` starts again at `FALSE` in every file read, and `ALWAYS_VISIBLE` is that of the outer file alone. |
 | `WINDOW` | block | | The box's window, drawn under the items; its `prev` and `next` buttons scroll, its `close` button hides the box. |
 | `AREA` | `left, top, right, bottom` | empty | Where the items are laid out, relative to the window. |
 | `ITEM_WIDTH`, `ITEM_HEIGHT` | int | `50` | The cell of one item. |
@@ -309,7 +404,10 @@ columns by the same count of rows of the area, from the scroll offset;
 remain after the page. Each item is drawn at its cell's top-left corner
 (its sprite's hotspot there) and is an active object through its sprite.
 
-The items file is a list of `ITEM` blocks:
+The items file is a list of `ITEM` blocks. An item that cannot be read (a
+key outside the table, a template that does not load) is left out and the
+file goes on; a top-level statement that is not an `ITEM` ends the file
+with an error, after the items before it were added:
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
@@ -322,10 +420,24 @@ The items file is a list of `ITEM` blocks:
 | `CURSOR_COMBINED` | bool | `TRUE` | The item's cursor is drawn over the normal cursor instead of replacing it. |
 | `FONT` | string | | Font of the item's speech and amount. |
 | `AMOUNT`, `DISPLAY_AMOUNT`, `AMOUNT_OFFSET_X`, `AMOUNT_OFFSET_Y`, `AMOUNT_ALIGN`, `AMOUNT_STRING` | | | A count drawn on the item. |
-| `TALK`, `TALK_SPECIAL` | string | | Talk sprites, as for entities. |
+| `TALK`, `TALK_SPECIAL` | string | | Talk sprites, as for entities: an item says sentences (`Talk`) and plays animations (`PlayAnim`) like an entity. |
 | `SCRIPT` | string | | A script attached to the item; repeatable. |
 | `PROPERTY` | block | | A script property. |
-| `ALPHA_COLOR`, `ALPHA` | | | Tint and opacity. |
+| `ALPHA_COLOR`, `ALPHA` | | `0, 0, 0` and `255` | Tint and opacity. A black colour with an alpha means white: `ALPHA` alone makes the item translucent, and `ALPHA_COLOR { 0,0,0 }` is no tint. |
+| `TEMPLATE` | string | | An item file (an `ITEM` root block), loaded where the key stands. One that cannot be loaded fails the item. |
+
+An item is a talking object like an entity (`CAdItem` is a
+`CAdTalkHolder`): `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`,
+`ForceTalkAnim`, `PlayAnim`, `PlayAnimAsync`, `Reset`, `AddTalkSprite`,
+`SetTalkSprite` and `RemoveTalkSprite` work on it as on an entity (see
+[font.md](font.md#speech)), with its `TALK` and `TALK_SPECIAL` sprites
+and a `.talk` definition beside the speech file. The sentence is placed
+from where the box last drew the item, the middle of its sprite's top
+edge. An item is updated only while the inventory box draws it
+(`CAdInventoryBox::Display` calls `CAdItem::Update`): while the box is
+hidden, or the item scrolled out of it or not taken, its animation and
+its sentence stand still, the text is not shown, and a script waiting
+for it keeps waiting, as in the original.
 
 `Game.TakeItem(name, after)` puts the item in the inventory (again, if
 it was there, after the named item or at the end); `DropItem` takes it

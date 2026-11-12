@@ -315,7 +315,7 @@ impl Actor3dDef {
                 "FONT" => self.font = Some(text(child)),
                 "CURSOR" => self.cursor = Some(text(child)),
                 "SCRIPT" => self.scripts.push(text(child)),
-                "PROPERTY" => self.properties.extend(Property::from_node(child)?),
+                "PROPERTY" => self.properties.extend(Property::from_node(child)),
                 "EDITOR_PROPERTY" | "EVENTS" => {}
                 "ACTIVE" => self.active = boolean(child),
                 "INTERACTIVE" | "REGISTRABLE" => self.interactive = boolean(child),
@@ -910,7 +910,10 @@ ANIMATION { LOOPING = TRUE }
         assert!(!walk.looping);
         assert_eq!(walk.events.len(), 3);
         assert_eq!(walk.events[2].frame, 1);
-        assert!(AnimationDef::parse_file(b"ANIMATION { NAME = ").is_err());
+        // A text that is not closed runs to the end (`CBParser::GetSubText`);
+        // one that does not start with a key is a syntax error.
+        assert!(AnimationDef::parse_file(b"ANIMATION { NAME = ").is_ok());
+        assert!(AnimationDef::parse_file(b"{ ANIMATION").is_err());
     }
 
     #[test]

@@ -540,7 +540,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBSurfaceD3D::GetPixel` | todo | Reads a pixel of a surface as A, R, G, B. Reached from scripts through `CBSubFrame::GetPixel` (the sub-frame object's pixel methods, to be confirmed in the game table) and from the tile loader. Luma has no pixel read on a sprite image. |
 | `CBSurfaceD3D::PutPixel` | todo | Writes a pixel (alpha kept when the `A` argument is not above 0). Reached from scripts through `CBSubFrame::PutPixel` and used by the video renderers (replaced there by `write_texture`). Luma cannot modify a sprite image. |
 | `CBSurfaceD3D::ComparePixel` | n/a | Never called by the engine. |
-| `CBSurfaceD3D::IsTransparentAtLite` | done | Used by `CBFontBitmap::GetWidths` (`AUTO_WIDTH`): `luma-formats/src/font.rs` `measure_tile` counts a pixel unless its alpha is 0, and a pixel outside the image too (the original answers "not transparent" there). |
+| `CBSurfaceD3D::IsTransparentAtLite` | done | Used by `CBFontBitmap::GetWidths` (`AUTO_WIDTH`): `luma-formats/src/font.rs` `measure_tile` counts a pixel unless its alpha is 0. Its "not transparent" answer outside the image is never reached: `GetWidths` skips the pixels outside the image itself, as `measure_tile` stays inside it. |
 | `CBSurfaceD3D::Invalidate` | replaced | Frees the texture of a surface not used for its lifetime; Luma frees textures with their bank (scene change, object removal). Memory only. |
 | `CBSurfaceD3D::ReleaseTiles` | n/a | Tiles of oversized images; no texture-size subdivision in Luma. |
 | `CBSurfaceD3D::PrepareToDraw` | replaced | See `CBSurface::PrepareToDraw`. |

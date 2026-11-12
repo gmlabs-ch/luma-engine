@@ -119,24 +119,56 @@ restarts the stream from the beginning.
 
 ## Where packages are found
 
-At startup the engine scans every file matching `*.dcp` in its package
-search paths:
+At startup the engine (`CBFileManager::InitPaths`, `RegisterPackages`)
+scans every file matching `*.dcp` in its package search paths, in this
+order:
 
 1. the game's directory (`./`);
-2. the `data` sub-directory;
-3. on macOS, the application bundle and its `Contents/Resources` folder;
-4. any extra paths listed under `PackagePaths` in the `[Resource]` section
-   of the game's `wme.ini` or registry settings.
+2. the paths listed under `PackagePaths` in the `[Resource]` section of
+   the game's `wme.ini` (or of the registry), separated by `;`;
+3. the `data` sub-directory.
 
-A package whose file name starts with `xdevice_` is device-specific
-(`xdevice_iphone.dcp`, `xdevice_ipad.dcp`, ...) and is only loaded by the
-matching device type.
+WME Lite adds the macOS application bundle and device-specific packages
+(`xdevice_iphone.dcp`...); Wintermute 1.x, which Luma follows, has
+neither.
+
+A file that cannot be opened, or whose header is not a package's (wrong
+magic numbers, a version above `0x200`), is logged and **ignored**: the
+game starts with the other packages. A version below `0x200` is accepted
+with a warning. `Vfs::open_game` does the same and keeps the lines in
+`Vfs::warnings`.
 
 A package can also be **bound to the game executable**: the package bytes
 are appended to the `.exe`, and the engine locates them by scanning the
 executable for the 8-byte signature `DE AD C0 DE 4A 55 4E 4B` (`Magic1`
 followed by `Magic2`), starting one megabyte into the file. Every offset in
-such a package is relative to the start of the embedded header.
+such a package is relative to the start of the embedded header. The bound
+package is registered **last**, after the `.dcp` files. The original scans
+its own executable, which is the game's; Luma scans every `*.exe` of the
+game directory.
+
+### Where a package's data is read from
+
+The engine does not keep the file it read a directory from. To read an
+entry it opens `<name>.dcp`, `name` being the **name stored in the
+directory record**, in the first package search path that has such a file
+(`CBFileManager::OpenPackage`), and reads at the entry's offset there.
+This is how a master index works: its directories carry the names of the
+other packages, and its entries point into their files. It also means
+that the original cannot read a package whose file was renamed.
+
+Luma does the same (`Vfs::add_package`), with one addition: when no file
+has the directory's name, the data is read from the file the directory
+came from, so a renamed package still works. A bound package is always
+read from its executable.
+
+### Paths of `wme.ini`
+
+`CustomPaths` (loose files) and `PackagePaths` (packages) are read from
+the `[Resource]` section of `wme.ini` in the game directory. Luma only
+accepts paths that stay inside the game directory; an absolute path or
+one that climbs out with `..` is refused and reported: the file comes
+with the game and must not make the engine read elsewhere.
 
 ## Resolution
 
@@ -148,10 +180,35 @@ the later one replaces the earlier one only if its package has a **lower
 entry wins. Packages are registered in directory listing order, which the
 engine leaves to the operating system.
 
-When a file is requested, the engine looks first for a **loose file** on
-disk, in the game directory and in the paths listed under `CustomPaths`,
-then in the package table. Loose files therefore always shadow packaged
-ones, which is how patches and translations are commonly distributed.
+When a file is requested (`CBFileManager::OpenFileRaw`), the engine
+looks:
+
+1. for a **loose file** on disk, in the paths listed under `CustomPaths`,
+   then in the game directory. The `data` sub-directory is a directory of
+   packages only: a loose file there is not found;
+2. in the package table;
+3. in its **built-in resources** (`CBResourceFile`): a few files linked
+   into the executable, named like any other file. They are the fallback
+   system font `system_font.fnt` with its image `system_font.bmp`, the
+   placeholders `invalid.bmp` and `invalid_debug.bmp` shown for a missing
+   image or sprite, the default shadow `shadow.png`, and the waypoint
+   marker `wpt.sprite` with `wpt.bmp`. A resource name is matched whole,
+   ignoring case, without any directory.
+
+Loose files therefore always shadow packaged ones, which is how patches
+and translations are commonly distributed, and a game can replace a
+built-in file by shipping one of the same name.
+
+Luma's built-in files have the same names and roles but are its own:
+images generated in code (`luma-adventure/src/resources.rs`), the font
+from a 5x7 dot-matrix alphabet drawn for Luma. The original's bitmaps are
+not copied; they are in the engine's repository under its MIT licence,
+but nothing there says where the font's glyphs come from.
+
+A name is relative to the game directory. The original also opens an
+absolute path, or one that leaves the game directory, straight from the
+disk; Luma refuses both (a game's files are untrusted), and resolves a
+`..` that stays inside the game directory.
 
 ### Compressed loose files
 
@@ -166,7 +223,9 @@ also uses for save games:
 |     12 |    4 | `CompSize`   | Size of the zlib stream. |
 |     16 |    4 | `UncompSize` | Size of the inflated data. |
 
-Any other loose file is read as is.
+Any other loose file is read as is. A container that cannot be inflated
+is passed over: the engine goes on to the package table and the built-in
+resources.
 
 ## Notes for implementers
 
@@ -175,6 +234,9 @@ Any other loose file is read as is.
   When extracting, convert `\` to the host separator and reject names with
   `..` components.
 - `Offset + CompLength` (or `+ Length` when stored) must not exceed the
-  package size; `Length` of a compressed entry must match the inflated size.
+  size of the file the data is read from, which for a master index is
+  not the file that holds the directory: check it when the entry is read,
+  before allocating. `Length` of a compressed entry must match the
+  inflated size.
 - `NumDirs`, `NumEntries` and the Pascal string lengths are trusted by the
   original engine; a reader should bound them by the file size.

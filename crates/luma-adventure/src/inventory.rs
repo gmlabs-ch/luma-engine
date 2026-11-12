@@ -13,15 +13,29 @@ use luma_script::{Engine, NativeId, Value};
 use crate::input::HitArea;
 use crate::objects::Kind;
 use crate::scene_view::AnimState;
+use crate::talk::Sentence;
 use crate::ui::{ButtonListener, Control};
 use crate::world::World;
+
+/// What an item is doing (`CAdObject::m_State` of a `CAdItem`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum ItemState {
+    /// Nothing: it shows its sprite, or its hover sprite.
+    #[default]
+    Ready,
+    /// A sprite `PlayAnim` started plays.
+    PlayingAnim,
+    /// It says a sentence.
+    Talking,
+}
 
 /// An item of the game (`CAdItem`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Item {
     /// The definition, which scripts modify.
     pub def: ItemDef,
-    /// The sprite shown this frame: the hover one under the mouse.
+    /// The sprite shown this frame: the hover one under the mouse, a
+    /// played animation, a talk sprite.
     pub current_sprite: Option<String>,
     /// The animation of the sprite shown.
     pub anim: Option<AnimState>,
@@ -29,6 +43,180 @@ pub struct Item {
     pub x: i32,
     /// See `x`.
     pub y: i32,
+    /// What the item is doing. An item is a talk holder like an entity
+    /// (`CAdItem` derives from `CAdTalkHolder`): it says sentences and
+    /// plays animations, while the inventory box shows it.
+    pub state: ItemState,
+    /// The sprite `PlayAnim` plays (`m_AnimSprite`).
+    pub anim_sprite: Option<String>,
+    /// The sentence being said.
+    pub sentence: Option<Sentence>,
+    /// The talk sprite being played (`m_TempSprite2`).
+    pub talk_sprite: Option<String>,
+    /// Whether the sentence is shown this frame.
+    pub show_sentence: bool,
+    /// The sprite `ForceTalkAnim` asked for, played as the first stance.
+    pub forced_talk: Option<String>,
+    /// Whether the scripts waiting for the item may go on (`m_Ready`).
+    pub ready: bool,
+}
+
+impl Item {
+    /// An item at rest.
+    pub fn new(def: ItemDef) -> Item {
+        Item {
+            def,
+            current_sprite: None,
+            anim: None,
+            x: 0,
+            y: 0,
+            state: ItemState::Ready,
+            anim_sprite: None,
+            sentence: None,
+            talk_sprite: None,
+            show_sentence: false,
+            forced_talk: None,
+            ready: true,
+        }
+    }
+
+    /// Whether the item's animation is at the end of `path`.
+    fn anim_done(&self, path: &str) -> bool {
+        self.anim
+            .as_ref()
+            .is_some_and(|a| a.sprite == crate::scene_view::key(path) && a.finished)
+    }
+
+    /// The talk sprite for a stance (`CAdTalkHolder::GetTalkStance`):
+    /// the special or generic sprite whose `NAME` is the stance, else a
+    /// random generic one, else the item's sprite.
+    fn talk_stance(
+        &self,
+        bank: &crate::scene_view::SpriteBank,
+        stance: Option<&str>,
+        random: u32,
+    ) -> Option<String> {
+        if let Some(name) = stance {
+            let found = self
+                .def
+                .talk_special
+                .iter()
+                .chain(&self.def.talk)
+                .find(|s| bank.sprite_name_is(s, name));
+            if let Some(path) = found {
+                return Some(path.clone());
+            }
+        }
+        if self.def.talk.is_empty() {
+            self.def.sprite.clone()
+        } else {
+            Some(self.def.talk[random as usize % self.def.talk.len()].clone())
+        }
+    }
+
+    /// One frame of the item (`CAdItem::Update`), run while the
+    /// inventory box shows it: a played animation ends, a sentence goes
+    /// on, and the sprite to show is chosen.
+    fn update(
+        &mut self,
+        bank: &crate::scene_view::SpriteBank,
+        active: bool,
+        timer: u64,
+        random: u32,
+    ) {
+        let mut current: Option<String> = None;
+        if self.state == ItemState::Ready {
+            self.anim_sprite = None;
+        }
+        if self.state == ItemState::PlayingAnim {
+            if let Some(path) = self.anim_sprite.clone() {
+                // A sprite that is not loaded has nothing to play.
+                if self.anim_done(&path) || bank.sprite(&path).is_none() {
+                    self.state = ItemState::Ready;
+                    current = Some(path);
+                }
+            }
+        }
+        if self.state != ItemState::Talking {
+            self.show_sentence = false;
+            if let Some(sentence) = &mut self.sentence {
+                sentence.finish();
+            }
+        }
+        if current.is_none() {
+            current = self.def.sprite.clone();
+        }
+        match self.state {
+            ItemState::PlayingAnim => current = self.anim_sprite.clone(),
+            ItemState::Ready => {
+                if self.anim_sprite.is_none() {
+                    current = if active && self.def.sprite_hover.is_some() {
+                        self.def.sprite_hover.clone()
+                    } else {
+                        self.def.sprite.clone()
+                    };
+                }
+            }
+            ItemState::Talking => {
+                self.show_sentence = false;
+                let shown_done = self.talk_sprite.clone().filter(|p| self.anim_done(p));
+                let mut definition_sprite_done = false;
+                let mut time_is_up = true;
+                if let Some(sentence) = &mut self.sentence {
+                    if let Some(path) = &shown_done {
+                        sentence.note_sprite_finished(path);
+                    }
+                    let frame = sentence.update_talk(timer, luma_formats::Direction::Down);
+                    if let Some(crate::talk::TalkFrame {
+                        sprite: Some(path),
+                        reset,
+                        finished,
+                    }) = frame
+                    {
+                        let other = self
+                            .anim
+                            .as_ref()
+                            .is_none_or(|a| a.sprite != crate::scene_view::key(&path));
+                        if finished {
+                            definition_sprite_done = true;
+                        } else if reset || other {
+                            self.anim = Some(AnimState::new(&path));
+                        }
+                        self.talk_sprite = Some(path);
+                    }
+                    time_is_up = sentence.time_is_up(timer);
+                }
+                let done = definition_sprite_done
+                    || self
+                        .talk_sprite
+                        .as_deref()
+                        .is_none_or(|p| self.anim_done(p));
+                if time_is_up {
+                    if let Some(sentence) = &mut self.sentence {
+                        sentence.finish();
+                    }
+                    self.talk_sprite = None;
+                    self.state = ItemState::Ready;
+                } else if done {
+                    let stance = self.sentence.as_mut().and_then(Sentence::next_stance);
+                    self.talk_sprite = self
+                        .forced_talk
+                        .take()
+                        .or_else(|| self.talk_stance(bank, stance.as_deref(), random));
+                    if let Some(path) = &self.talk_sprite {
+                        self.anim = Some(AnimState::new(path));
+                        current = Some(path.clone());
+                    }
+                    self.show_sentence = true;
+                } else {
+                    current = self.talk_sprite.clone();
+                    self.show_sentence = true;
+                }
+            }
+        }
+        self.ready = self.state == ItemState::Ready;
+        self.current_sprite = current;
+    }
 }
 
 /// The items and the box (`CAdInventory`, `CAdInventoryBox`).
@@ -207,12 +395,12 @@ impl World {
                 return false;
             }
         };
-        let defs = match ItemDef::parse_all(&bytes) {
-            Ok(defs) => defs,
-            Err(err) => {
-                self.log(format!("Error parsing ITEMS file '{path}': {err}"));
-                return false;
-            }
+        // `CAdGame::LoadItemsBuffer`: the items that load are added even
+        // when the file ends on a syntax error, which fails the load.
+        let (defs, error) = {
+            let vfs = &self.vfs;
+            let mut read = |file: &str| vfs.read(file).ok();
+            ItemDef::parse_all_with(&bytes, &mut luma_formats::Files::new(&mut read))
         };
         if !merge {
             let ids: Vec<NativeId> = self.inventory.items.iter().map(|(id, _)| *id).collect();
@@ -227,6 +415,10 @@ impl World {
                 }
             }
             self.add_item(engine, def);
+        }
+        if let Some(err) = error {
+            self.log(format!("Error parsing ITEMS file '{path}': {err}"));
+            return false;
         }
         true
     }
@@ -283,18 +475,9 @@ impl World {
             self.load_font(font);
         }
         let id = self.objects.insert(Kind::Item);
-        let properties = def.properties.clone();
         let scripts = def.scripts.clone();
-        self.inventory.items.push((
-            id,
-            Item {
-                def,
-                current_sprite: None,
-                anim: None,
-                x: 0,
-                y: 0,
-            },
-        ));
+        let properties = def.properties.clone();
+        self.inventory.items.push((id, Item::new(def)));
         self.apply_properties(id, &properties);
         for script in scripts {
             self.attach(engine, id, &script);
@@ -333,7 +516,8 @@ impl World {
             }
         };
         let vfs = &self.vfs;
-        let parsed = InventoryBoxDef::parse_with(&bytes, &mut |file| vfs.read(file).ok());
+        let mut read = |file: &str| vfs.read(file).ok();
+        let parsed = InventoryBoxDef::parse_with(&bytes, &mut luma_formats::Files::new(&mut read));
         let mut def = match parsed {
             Ok(def) => def,
             Err(err) => {
@@ -343,18 +527,26 @@ impl World {
         };
         if let Some(window_def) = def.window.take() {
             let window = self.new_window_control(None);
-            self.apply_window_def(engine, window, window_def, None);
+            if !self.apply_window_def(engine, window, window_def, None) {
+                // A window that fails fails the box
+                // (`CAdInventoryBox::LoadBuffer`).
+                self.log(format!("Error loading INVENTORY_BOX definition '{path}'"));
+                self.unload_object(engine, window);
+                return false;
+            }
             for widget in self.widgets_of(window) {
                 if let Some(b) = self.control_mut(widget).and_then(Control::button_mut) {
                     b.listener = Some(ButtonListener::Inventory);
                 }
             }
             self.inventory.window = Some(window);
-            if def.exclusive {
-                let close =
-                    self.new_button_control(Some(window), "close", ButtonListener::Inventory);
-                self.inventory.close_button = Some(close);
-            }
+        }
+        // An exclusive box has its `close` button under the whole screen,
+        // with or without a window.
+        if def.exclusive {
+            let close =
+                self.new_button_control(self.inventory.window, "close", ButtonListener::Inventory);
+            self.inventory.close_button = Some(close);
         }
         self.inventory.visible = def.always_visible;
         self.inventory.def = Some(def);
@@ -537,6 +729,11 @@ impl World {
     /// buttons follow the pages, the window and the items under the
     /// mouse update.
     pub(crate) fn update_inventory(&mut self, engine: &mut Engine) {
+        // An item is updated, and its sentence shown, only while the
+        // box draws it (`CAdInventoryBox::Display`).
+        for (_, item) in &mut self.inventory.items {
+            item.show_sentence = false;
+        }
         if !self.box_shown() {
             return;
         }
@@ -574,17 +771,14 @@ impl World {
         let active = self.active_object();
         let timer = self.timer();
         let cells = self.item_cells();
+        let random = self.next_random();
         let World { inventory, ui, .. } = self;
         for (id, x, y) in cells {
             let Some((_, item)) = inventory.items.iter_mut().find(|(i, _)| *i == id) else {
                 continue;
             };
-            let sprite = if active == Some(id) && item.def.sprite_hover.is_some() {
-                item.def.sprite_hover.clone()
-            } else {
-                item.def.sprite.clone()
-            };
-            item.current_sprite = sprite.clone();
+            item.update(&ui.bank, active == Some(id), timer, random);
+            let sprite = item.current_sprite.clone();
             item.x = x;
             item.y = y;
             let Some(path) = sprite else {
@@ -599,6 +793,134 @@ impl World {
                 anim.step(&loaded.sprite, timer);
             }
         }
+    }
+
+    /// Makes an item say a sentence already placed by [`World::talk`]
+    /// (`CAdObject::Talk`); `forced` is the sprite `ForceTalkAnim` named.
+    pub(crate) fn item_talk(&mut self, id: NativeId, sentence: Sentence, forced: Option<String>) {
+        let mut sprites: Vec<String> = sentence
+            .talk
+            .iter()
+            .flat_map(|t| t.def.sprite_paths())
+            .map(str::to_string)
+            .collect();
+        if let Some(item) = self.item(id) {
+            sprites.extend(item.def.talk.iter().cloned());
+            sprites.extend(item.def.talk_special.iter().cloned());
+        }
+        for sprite in sprites {
+            self.ui.bank.add_sprite(&self.vfs, &sprite);
+        }
+        if let Some(item) = self.item_mut(id) {
+            item.sentence = Some(sentence);
+            item.forced_talk = forced;
+            item.talk_sprite = None;
+            item.state = ItemState::Talking;
+            item.ready = false;
+        }
+    }
+
+    /// Ends an item's sentence (`StopTalk`); whether one was being said.
+    pub(crate) fn item_stop_talk(&mut self, id: NativeId) -> bool {
+        let Some(item) = self.item_mut(id) else {
+            return false;
+        };
+        if let Some(sentence) = &mut item.sentence {
+            sentence.finish();
+        }
+        if item.state == ItemState::Talking {
+            item.state = ItemState::Ready;
+            item.ready = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Plays a sprite in place of an item's own (`CAdObject::PlayAnim`);
+    /// `false` when the file does not load.
+    pub(crate) fn item_play_anim(&mut self, id: NativeId, path: &str) -> bool {
+        if !self.ui.bank.add_sprite(&self.vfs, path) {
+            return false;
+        }
+        let Some(item) = self.item_mut(id) else {
+            return false;
+        };
+        item.anim_sprite = Some(path.to_string());
+        item.anim = Some(AnimState::new(path));
+        item.state = ItemState::PlayingAnim;
+        item.ready = false;
+        true
+    }
+
+    /// Ends what an item is doing (`CAdObject::Reset`): a played
+    /// animation is dropped, a sentence finished, and the scripts
+    /// waiting for the item go on.
+    pub(crate) fn item_reset(&mut self, id: NativeId) {
+        let Some(item) = self.item_mut(id) else {
+            return;
+        };
+        match item.state {
+            ItemState::PlayingAnim => item.anim_sprite = None,
+            ItemState::Talking => {
+                if let Some(sentence) = &mut item.sentence {
+                    sentence.finish();
+                }
+            }
+            ItemState::Ready => {}
+        }
+        item.state = ItemState::Ready;
+        item.ready = true;
+    }
+
+    /// `AddTalkSprite`, `SetTalkSprite` and `RemoveTalkSprite` on an
+    /// item (`CAdTalkHolder::ScCallMethod`); `false` when the file does
+    /// not load.
+    pub(crate) fn item_talk_sprite(
+        &mut self,
+        id: NativeId,
+        method: &str,
+        path: &str,
+        special: bool,
+    ) -> bool {
+        use crate::scene_view::key;
+        let remove = method == "RemoveTalkSprite";
+        if !remove && !self.ui.bank.add_sprite(&self.vfs, path) {
+            return false;
+        }
+        let Some(item) = self.item_mut(id) else {
+            return false;
+        };
+        let own = item.def.sprite.clone();
+        let playing = item.talk_sprite.clone();
+        let list = if special {
+            &mut item.def.talk_special
+        } else {
+            &mut item.def.talk
+        };
+        let was_played = |file: &str| playing.as_deref().is_some_and(|p| key(p) == key(file));
+        match method {
+            "AddTalkSprite" => list.push(path.to_string()),
+            "RemoveTalkSprite" => {
+                if let Some(i) = list.iter().position(|p| key(p) == key(path)) {
+                    let gone = list.remove(i);
+                    // The item shows its own sprite until the next stance.
+                    if was_played(&gone) {
+                        item.talk_sprite = own;
+                    }
+                }
+            }
+            _ => {
+                let played_old = list.iter().any(|p| was_played(p));
+                list.clear();
+                list.push(path.to_string());
+                if played_old {
+                    item.talk_sprite = Some(path.to_string());
+                    item.anim = Some(AnimState::new(path));
+                }
+            }
+        }
+        true
     }
 
     /// A press of one of the box's buttons (`CAdInventoryBox::Listen`).
@@ -665,7 +987,7 @@ impl World {
                 continue;
             };
             let frame = item.anim.as_ref().map_or(0, |a| a.current_frame);
-            let tint = item.def.alpha_color.unwrap_or(Rgba::OPAQUE_WHITE);
+            let tint = item.def.alpha_color;
             self.draw_ui_image(list, path, frame, x, y, tint);
             if item.def.display_amount {
                 let width = self.sprite_size_loaded(path).map_or(0, |(w, _)| w);

@@ -34,7 +34,7 @@ FONT
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `IMAGE` | string | | The image holding the tiles. |
-| `SPRITE` | string | | A sprite instead of an image; its current frame's first sub-frame holds the tiles (an animated font). |
+| `SPRITE` | string | | A sprite instead of an image; its current frame's first sub-frame holds the tiles (an animated font, see below). |
 | `TRANSPARENT` | `r,g,b` | the engine's default key | Colour key of the image. |
 | `COLUMNS` | int | `0` | Tiles per row; required. |
 | `TILE_WIDTH`, `TILE_HEIGHT` | int | `0` | Size of a tile; required. |
@@ -45,8 +45,14 @@ FONT
 | `EXPAND_WIDTH` | int | `0` | With `AUTO_WIDTH`, added to every measured width. |
 | `FONTEXT_FIX` | bool | `FALSE` | The tiles are shifted by one: character `c` is in tile `c - 1`. |
 | `PAINT_WHOLE_CELL` | bool | `FALSE` | Draw the full tile instead of the measured width. |
-| `WIDTHS_FRAME` | int | `0` | With `SPRITE`, the frame measured by `AUTO_WIDTH`. |
+| `WIDTHS_FRAME` | int | `0` | With `SPRITE`, the frame measured by `AUTO_WIDTH`. The original lists `WIDTHS` before `WIDTHS_FRAME` in its table, so that it reads this key as `WIDTHS` followed by garbage and crashes; Luma reads it as it was meant. |
 | `EDITOR_PROPERTY` | block | | Editor state, ignored. |
+
+A key outside these tables is a syntax error that fails the font; so is
+one in a `TTFONT` block, while a `LAYER` with a key of its own that is
+not `OFFSET_X`, `OFFSET_Y`, `COLOR` or `ALPHA` is left out alone. The
+first statement of the file decides the kind: `TTFONT`, else `FONT`.
+Widths are bytes: a value over 255 keeps its low byte.
 
 Character `c` (a code from 0 to 255) is tile number `c`, row `c /
 COLUMNS`, column `c % COLUMNS`, drawn from the image at `(column *
@@ -55,12 +61,14 @@ codes are the bytes of the text in an ANSI game; a UTF-8 game has its
 text converted to the ANSI code page first (see
 [Text encoding](#text-encoding)).
 
-**Automatic widths.** For every tile, the width is one more than the
-right-most column holding a pixel that is not fully transparent (alpha
-above 0, `IsTransparentAtLite`: the soft edge of a glyph counts; a pixel
-outside the image counts too, so a tile beyond the image is as wide as a
-tile), scanning each row
-from the right (an empty tile has width 0). `EXPAND_WIDTH` is then added
+**Automatic widths** (`CBFontBitmap::GetWidths`). For every tile, the
+width is one more than the right-most column holding a pixel that is
+not fully transparent (alpha 0, or the colour key), scanning each row
+from the right: the soft edge of a smoothed character counts, and an
+empty tile has width 0. With a `SPRITE` the frame measured is the one
+`WIDTHS_FRAME` names; when the sprite has no such frame, or the frame
+no image, nothing is measured and every width is 0. `EXPAND_WIDTH` is
+then added
 (not below 0), and the space gets `SPACE_WIDTH`, or, when its measured
 width is 0 or equal to `EXPAND_WIDTH`, half the sum of the widths of `m`
 and `i`.
@@ -82,7 +90,23 @@ height is the number of lines times `TILE_HEIGHT` (one tile for empty
 text). Alignment places each line at `x`, at `x + (width - line width) /
 2`, or at `x + width - line width`.
 
-Bitmap fonts are drawn untinted: their colours are the image's.
+Bitmap fonts are drawn untinted: their colours are the image's. The
+one exception is a window with `ALPHA_COLOR` or `ALPHA`, which forces
+its colour on everything drawn in it: the characters of a bitmap font
+are tinted with it like any image, and a TrueType font keeps the
+colours of its layers and takes the colour's opacity
+(`CBFontTT::DrawTextD3D`).
+
+**Animated fonts** (`CBFontBitmap::DrawChar`). With `SPRITE`, each
+character is drawn from the image of the first sub-frame of the
+sprite's current frame; the sub-frame's own rectangle, hotspot and
+mirroring are not used, and a frame without an image draws nothing. The
+sprite moves on as any sprite does, by its frames' `DELAY` and its
+`LOOPING`, on the clock that never stops (a font is not paused with the
+game). It is asked for its frame each time a character is drawn, so
+the first character drawn starts the first frame's time, the sprite
+stands still while no text is drawn with the font, and a frame whose
+delay is 0 lasts a single character.
 
 ## TrueType fonts: `TTFONT`
 
@@ -102,12 +126,12 @@ TTFONT
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `SIZE` | int | `0` | Size in points, at 96 dpi: the pixel size is `SIZE * 96 / 72`. |
+| `SIZE` | int | `12` | Size in points, at 96 dpi: the pixel size is `SIZE * 96 / 72` rounded to a whole pixel (`MulDiv`). |
 | `FACE` | string | `Arial` | The family name of the typeface the text is drawn with (see [Choosing the face](#choosing-the-face)). |
-| `FILENAME` | string | `arial.ttf` | A font file among the game's files, made available to the engine: it is drawn with when `FACE` names its typeface. |
+| `FILENAME` | string | none | A font file among the game's files, made available to the engine: it is drawn with when `FACE` names its typeface. Without the key no file of the game is registered. |
 | `BOLD`, `ITALIC` | bool | `FALSE` | The weight and the slant of the face. |
-| `UNDERLINE`, `STRIKE` | bool | `FALSE` | `UNDERLINE` draws a line under the text; `STRIKE` is read and ignored. |
-| `CHARSET` | int | `0` | The Windows character set of the font, ignored: every face is addressed by Unicode character. |
+| `UNDERLINE`, `STRIKE` | bool | `FALSE` | A line under, or through, every line of the text (see [Metrics](#metrics)). |
+| `CHARSET` | int | `0` | The Windows character set of the font: in an ANSI game, the code page the text's bytes are read in (see [Code pages](#code-pages)). |
 | `COLOR` | `r,g,b` | `0,0,0` | Colour of the text when no `LAYER` is given. |
 | `ALPHA` | int | `0` | Opacity of that colour. |
 | `LAYER` | block, repeatable | | A layer: `OFFSET_X`, `OFFSET_Y` (default `0`), `COLOR`, `ALPHA` (default black, transparent). Layers are drawn in file order, each the whole text moved by its offset and tinted with its colour; an outline is four dark layers under a light one. |
@@ -124,12 +148,18 @@ its typeface: a font file that asks for `FACE = "Arial"`, `BOLD = TRUE`
 and ships another typeface as `FILENAME` is drawn in Arial Bold on any
 system that has Arial. Many games rely on it.
 
+Registering is for the whole process (`CBFontStorage::RegisterTTFont`):
+once any font has brought a file, the `FACE` of every other font can
+name its typeface.
+
 Luma Engine does the same in three steps; the rules for choosing among
 the faces found are its own, GDI's font mapper not being documented:
 
-1. **The game's file.** When `FILENAME` is among the game's files and
-   one of its faces has `FACE` as a family name (compared without
-   case), the file is used.
+1. **The game's files.** Each `FILENAME` is read once and kept for all
+   the fonts. When the font's own file has a face with `FACE` as a
+   family name (compared without case), that file is used; else the
+   first other file registered that has one. A font loaded before the
+   file that holds its typeface is given it when that file arrives.
 2. **The system's fonts.** Otherwise the fonts installed on the system
    are searched for the family `FACE`; when the system lacks it, for
    the families that stand for it: Liberation Sans, Arimo, Helvetica,
@@ -154,24 +184,78 @@ slants each glyph by a fifth of its height about the baseline. A bold
 face is never made lighter nor an italic one upright.
 
 The engine logs the file each TrueType font is drawn with, and what it
-imitates. A character the chosen face lacks is skipped: it is not
-looked up in the game's file or in another font, where Windows would
-substitute one.
+imitates.
 
-**Metrics.** The line height is the font's line spacing in pixels,
-rounded up, plus 2. Text is rendered to an image as wide as the box:
-each line is placed `line height - descender` below its top, glyphs at
-their bearings, advancing by the integer part of each advance plus the
-integer part of the kerning with the previous glyph; the whole image is
-then drawn `text offset` higher, where the offset is the largest bearing
-of the last line (the engine's own quirk, kept so that layouts match).
+**Missing characters.** A character the chosen face lacks is drawn with
+another face that has it, where Windows substitutes a font too (which
+one is Luma Engine's own rule): the other faces of the font's own file,
+then those of the game's other font files, then the fonts of the
+system, where the usual text families (Arial, Liberation Sans,
+Helvetica, DejaVu Sans, Noto Sans, Segoe UI, Tahoma...) and the large
+CJK families are looked at before the rest, the regular upright face of
+a family first. In the family found, the face nearest to the font's
+`BOLD` and `ITALIC` that has the character is used, and what it lacks is
+imitated. The glyph keeps its own advance; no kerning is applied across
+two faces. The system's fonts are searched once per character, and a
+face found is parsed once for all the fonts. A character no font has is
+skipped and takes no room.
 
-**Line breaking** (`CBFontTT::WrapText`). Characters are added to the
-line until one would exceed the width; the line then breaks at the last
-space, or before the current character when there is none, and the
-space is dropped. `\n` breaks too. Lines beyond the maximum height are
-dropped. The text width is the widest line, the height the number of
-lines times the line height.
+### Metrics
+
+The line height is the font's line spacing in pixels, rounded up, plus
+2. Text is rendered to an image as wide as the box: each line has its
+baseline `line height - descender` below its top, glyphs at their
+bearings, advancing by the integer part of each advance plus the integer
+part of the kerning with the previous glyph; the image is drawn with its
+top left corner at the text's position, moved by each layer's offset.
+
+These metrics are Luma Engine's own (they come from WME Lite) and are
+kept on purpose: the original measures and draws with GDI, whose line is
+the font's cell height (ascent plus descent, no line gap, no 2 pixels),
+whose pixel size is a whole number and whose widths are GDI's. A text is
+therefore not placed pixel for pixel as the original places it; what
+agrees is the layout: where lines break, which are dropped, how they are
+aligned.
+
+`UNDERLINE` and `STRIKE` draw a line across each line of the text, from
+its first glyph to the end of its width. Their place and thickness are
+the font's own, as for GDI: the underline position and thickness of the
+`post` table, the strike-out position and size of the `OS/2` table,
+scaled to the pixel size (at least one pixel thick). A font without
+them gets an underline half the descent under the baseline and a
+strike-through a quarter of the pixel size above it, a fourteenth of the
+size thick.
+
+**Line breaking** (`CBFontTT::FormatText`). A line takes characters
+while the text up to them fits the width:
+
+- `\n` ends the line;
+- when a character does not fit, the line ends before the last space
+  that fitted, and that space is dropped; when no space fitted, it ends
+  before the character (in the middle of a word, or before a space,
+  which then starts the next line and is the first place that line
+  breaks at);
+- a first character that does not fit ends the text: nothing more is
+  drawn;
+- a line that would pass the maximum height is dropped with all that
+  follows;
+- after a line that held a space, one more character is skipped: the
+  space the line broke at, or the line break that ended it. A second
+  line break right after is then skipped with it, so two line breaks in
+  a row leave an empty line after a line without a space and none after
+  a line with one. This is how the original's loop behaves, texts were
+  laid out with it, and it is reproduced.
+
+The text height is the number of lines times the line height (0 for an
+empty text). The text width is that of the whole text on one line
+(`CBFontTT::GetTextWidth` gives the text to GDI in one piece); a line
+break counts for nothing in it.
+
+One defect of the original is not reproduced: the first line is tested
+against a width left over from measuring the letters "Ay", so a text
+that starts with a line break, in a box narrower than those two
+letters, makes it read before the start of the text. Luma Engine gives
+such a text an empty first line.
 
 A negative width means no box, for both kinds of font: the text is one
 line of any length (`\n` still breaks it), drawn from the left whatever
@@ -180,8 +264,7 @@ wide as its widest line (at most 4096 pixels). This is a convention of
 Luma Engine for the callers that place a line themselves, the editors;
 the original engine always gives its fonts a width.
 
-Glyphs the font lacks are skipped. Kerning is applied when the font has
-a `kern` table.
+Kerning is applied when the font has a `kern` table.
 
 ## Text encoding
 
@@ -200,16 +283,15 @@ where characters matter:
   (`CBTextUtils::ConvertToNative`). In a UTF-8 game the bytes are
   decoded as UTF-8; a sequence that is not valid UTF-8 becomes U+FFFD
   (the original engine draws such a text as ANSI or not at all,
-  depending on the Windows version). In an ANSI game each byte is a
-  Windows-1252 character: Latin-1, plus the typographic quotes, dashes,
-  `€`, `œ` and the others at `0x80` to `0x9F`. The original engine
-  uses the code page of the system it runs on; Luma Engine always uses
-  Windows-1252, the one western games are written in.
+  depending on the Windows version). In an ANSI game the bytes are
+  read in the code page of the font's `CHARSET` (see
+  [Code pages](#code-pages)).
 - **Bitmap fonts** have one tile per byte. In an ANSI game the bytes of
   the text are the tile numbers. In a UTF-8 game the text is decoded and
-  each character converted to its Windows-1252 byte, `?` for the
-  characters the code page lacks (`CBTextUtils::Utf8ToAnsi`): a bitmap
-  font cannot show Cyrillic or Greek text.
+  each character converted to its byte, or bytes, in the game's ANSI
+  code page, `?` for the characters the code page lacks
+  (`CBTextUtils::Utf8ToAnsi`): a bitmap font laid out for Windows-1251
+  shows Cyrillic text when that is the game's code page.
 - **Scripts** count characters: the `Length` of a string and the
   positions of the `String` class are bytes in an ANSI game, the
   characters the bytes encode in a UTF-8 game (see
@@ -226,6 +308,59 @@ A string that holds a character beyond U+00FF cannot be bytes; it is
 taken as characters already. The texts a TrueType font has cached are
 dropped when the encoding changes.
 
+### Code pages
+
+The bytes of an ANSI game's text stand for characters through a Windows
+code page. The original engine leaves this to Windows in two places:
+
+- **A TrueType font's text.** GDI reads the bytes a font is given in
+  the code page of the font's character set, which `CHARSET` chooses
+  (`CBFontTT::GetWindowsCharset`):
+
+  | `CHARSET` | Character set | Code page |
+  |-----------|---------------|-----------|
+  | `1` | default | the system's |
+  | `2` | OEM | the system's DOS code page; read as the system's ANSI one |
+  | `3` | Baltic | 1257 |
+  | `4` | Traditional Chinese (Big5) | 950 |
+  | `5` | Eastern Europe | 1250 |
+  | `6` | Simplified Chinese (GB2312) | 936 |
+  | `7` | Greek | 1253 |
+  | `8` | Korean (Hangul) | 949 |
+  | `9` | Macintosh | 10000 (Mac Roman) |
+  | `10` | Russian | 1251 |
+  | `11` | Japanese (Shift-JIS) | 932 |
+  | `12` | Symbol | byte `b` from `0x20` is the character U+F000 + `b`, where symbol fonts keep their glyphs |
+  | `13` | Turkish | 1254 |
+  | `14` | Vietnamese | 1258 |
+  | `15` | Korean (Johab) | 1361; not read, taken as the system's |
+  | `16` | Arabic | 1256 |
+  | `17` | Hebrew | 1255 |
+  | `18` | Thai | 874 |
+  | any other, `0` | ANSI | 1252 |
+
+- **Everywhere else** (`CBTextUtils::AnsiToUnicode`, `Utf8ToAnsi`): the
+  ANSI code page of the system the game runs on (`CP_ACP`). It reads
+  the text given to the screen reader, converts a UTF-8 game's text for
+  its bitmap fonts and its editors, and is the code page the keyboard's
+  characters arrive in (`Keyboard.KeyCode` of a typed `ж` is 230 on a
+  Cyrillic system).
+
+Luma Engine has no system code page to ask. The game's ANSI code page
+is, in order: the one the front-end sets (`luma-player --code-page
+1251`); the one the first TrueType font loaded with a `CHARSET` of a
+language names (a game whose fonts say Russian was made for a Cyrillic
+system; the Macintosh and symbol sets say nothing); Windows-1252. That
+the fonts tell the system's code page is Luma Engine's inference, not
+something the original does.
+
+A byte, or pair of bytes, a code page does not define becomes U+FFFD
+(the control codes Windows passes through stay). Converting back, a
+character the code page lacks is `?`; Windows also replaces some by a
+look-alike (`Ā` by `A`), which Luma Engine does not. The original cuts
+the converted text to as many bytes as it has characters, losing the
+end of a text in a two-byte code page; that defect is not reproduced.
+
 ## Where fonts are used
 
 | Use | Font |
@@ -236,13 +371,15 @@ dropped when the encoding changes.
 
 ## Speech
 
-`Talk(text, sound, duration, stances, align)` on an actor or entity shows
+`Talk(text, sound, duration, stances, align)` on an actor, an entity or
+an inventory item (see [window.md](window.md#the-inventory)) shows
 the text above the object and plays its talk sprites until the sentence
 ends. The text is expanded through the string table.
 
 - **Font.** The object's own (`FONT` in its file, or `SetFont`), else
-  the game's system font. The original engine loads the font with the
-  object; Luma loads it when the object first talks.
+  the game's system font. The font is loaded with the object; one that
+  does not load leaves the object without a font of its own (`GetFont`
+  is then null).
 - **Height.** The object's height is the largest hotspot `y` of the
   frame it shows, of the sprite it shows (a talk sprite or a played
   animation, not only its base sprite), scaled with the object
@@ -260,11 +397,18 @@ ends. The text is expanded through the string table.
   `SubtitlesPosRelative` is false), centred on the object when
   `SubtitlesPosXCenter`, and clamped to the screen. The position is kept
   in scene coordinates and follows the scroll, unless the mods are
-  absolute.
+  absolute. "On screen" counts the scene's viewport: a scene position
+  is turned into a screen position by taking off the scroll offset less
+  the viewport's origin (`CAdScene::GetOffsetLeft`, `GetOffsetTop`),
+  when the sentence is placed and again when it is drawn.
 - **Stances.** The `stances` argument lists talk sprite names separated
   by commas, one per sprite played in turn; a name that is not a talk
   sprite, or no name, picks a random `TALK` sprite (a `TALK_SPECIAL`
-  sprite only by name). Actors use the sprite of their direction. When
+  sprite only by name). The name of an entity's talk sprite is the
+  `NAME` key of its `.sprite` file, compared without case, not its
+  file name: a plain image, or a sprite without `NAME`, answers to no
+  stance. An actor's is the `NAME` of the sprite set.
+  Actors use the sprite of their direction. When
   the sprite finishes before the sentence, the next stance starts.
   `ForceTalkAnim(file)` names a sprite file played as the first stance
   of the next sentence only (the stance list still advances under it);
@@ -275,10 +419,20 @@ ends. The text is expanded through the string table.
   replaced plays the new one at once). On actors these three methods
   load the file and nothing else: in Wintermute 1.x an actor's talk
   sets (`CAdActor::m_TalkSprites`) hide the list the methods edit.
+- **Talk definition.** When the sentence has a speech file and the
+  game has a file of the same name with the extension `.talk`, that
+  definition times the sprites of the sentence and replaces the stances
+  while it gives a sprite: see [talk.md](talk.md). A 3D actor ignores
+  it (the original computes the sprite and never shows it).
 - **Skipping.** A left click (or right, or both, per `TALK_SKIP_BUTTON`)
   while the game is not interactive ends every sentence older than 300
   milliseconds.
 - `Game.Subtitles` switches the text off; the talk sprites still play.
+- While the game is frozen (a system-exclusive window) the text of a
+  freezable object's sentence is not drawn; a sentence of an object
+  that is not freezable still is (`CAdGame::DisplaySentences`).
+- A saved game keeps the sentences being said, with their talk
+  definition; the speech sound starts again at the position it had.
 - The text is drawn centred by default; `align` is 0 left, 1 right, 2
   centre.
 
@@ -288,17 +442,41 @@ not. `StopTalk` ends it; `IsTalking` says whether one is playing.
 ## Notes for implementers
 
 - Bitmap fonts index tiles by byte; in a UTF-8 game, characters outside
-  Windows-1252 draw as `?` (see [Text encoding](#text-encoding)).
-- Right-to-left text (`Game.TextRTL`, turned on by a string table's
-  `@right-to-left` entry or by a script) makes a TrueType font lay each
-  line's glyphs out from the last to the first, the reading order GDI
-  gives the original engine with `ETO_RTLREADING`; there is no
-  bidirectional algorithm, so a run of another direction inside a line
-  is reversed with it. Bitmap fonts ignore the flag, as in the original
-  engine, whose `CBFontBitmap` never reads it. The texts a TrueType font
-  has cached are dropped when the direction changes.
+  the game's ANSI code page draw as `?` (see [Code pages](#code-pages)).
+- Right-to-left scripts. The original gives each line of a TrueType
+  text to GDI (`ExtTextOut`), which puts Hebrew and Arabic letters in
+  the order they are read and joins Arabic letters; with `Game.TextRTL`
+  (turned on by a string table's `@right-to-left` entry or by a script)
+  it passes `ETO_RTLREADING`, and the whole line is read from the
+  right. Luma Engine does this itself, by rules of its own that stand
+  for Windows':
+  - each line, once broken (lines break by the widths of the characters
+    in the order they are written, as in the original), is put in
+    drawing order by the Unicode bidirectional algorithm: runs of
+    right-to-left letters are reversed and their brackets mirrored,
+    numbers and Latin words keep their order; the line is read from
+    the right with `Game.TextRTL` and from the left without;
+  - Arabic letters take the form their neighbours call for (isolated,
+    final, initial, medial, and the single sign of a lam followed by an
+    alef), from the Unicode presentation forms, Persian letters
+    included; a form the font lacks while it has the plain letter is
+    left as the letter. Other scripts that need shaping (Indic, Thai
+    marks) are drawn letter by letter.
+
+  Bitmap fonts ignore all of it, as in the original engine, whose
+  `CBFontBitmap` never reads the flag and draws one tile per byte. The
+  texts a TrueType font has cached are dropped when the direction
+  changes.
 - A TrueType font's text is cached as a rendered image per (text, width,
-  alignment, height limit); the engine keeps 30 such images per font.
+  alignment, height limit); the engine keeps 50 such images per font
+  (`NUM_CACHED_TEXTS`), a text used again counting one more use and a
+  new one replacing the least used. The original renders a text that is
+  not cached at the moment it draws it, so a frame with more than 50
+  texts in one font shows them all and renders the surplus again every
+  frame. Luma Engine renders the texts before the frame is drawn: a
+  text the frame asked for is not given up to make room, the cache
+  grows for that frame (up to 512 texts) and shrinks back to 50 when a
+  later frame no longer asks for them.
 - The `.talk` files that time talk sprites to a sound are not supported
   yet.
 - A text that does not fit the height it is given is not drawn at all,

@@ -6,10 +6,11 @@
 //! Copyright (c) 2011 Jan Nedoma). See `NOTICE` at the root of the
 //! repository.
 
-use crate::def::{Document, Node, Nodes};
+use crate::def::{Document, Node, keys};
 use crate::error::{Error, Result};
 use crate::image::{BlendMode, Rgb, Rgba};
 use crate::sprite::Rect;
+use crate::template::Files;
 
 /// A point in scene coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -130,7 +131,7 @@ pub struct Scene {
     pub name: String,
     /// Caption shown by the interface.
     pub caption: String,
-    /// Scene file loaded first (`TEMPLATE`), to be merged by the caller.
+    /// The last `TEMPLATE` file named; it was applied where the key stands.
     pub template: Option<String>,
     /// Scripts attached to the scene.
     pub scripts: Vec<String>,
@@ -193,7 +194,7 @@ pub struct Layer {
     pub name: String,
     /// Caption.
     pub caption: String,
-    /// Layer file loaded first (`TEMPLATE`).
+    /// The last `TEMPLATE` file named; it was applied where the key stands.
     pub template: Option<String>,
     /// The main layer: gives the scene its size and holds the floor.
     pub main: bool,
@@ -260,7 +261,7 @@ pub struct Entity {
     pub name: String,
     /// Caption shown when the mouse is over the entity.
     pub caption: String,
-    /// Entity file loaded first (`TEMPLATE`).
+    /// The last `TEMPLATE` file named; it was applied where the key stands.
     pub template: Option<String>,
     /// Normal or sound.
     pub kind: EntityKind,
@@ -392,7 +393,7 @@ pub struct Region {
     pub name: String,
     /// Caption.
     pub caption: String,
-    /// Region file loaded first (`TEMPLATE`).
+    /// The last `TEMPLATE` file named; it was applied where the key stands.
     pub template: Option<String>,
     /// Takes part in blocking, scaling, tinting and hit tests.
     pub active: bool,
@@ -488,7 +489,7 @@ impl Region {
 pub struct WaypointGroup {
     /// Name used by scripts.
     pub name: String,
-    /// Waypoint file loaded first (`TEMPLATE`).
+    /// The last `TEMPLATE` file named; it was applied where the key stands.
     pub template: Option<String>,
     /// The waypoints.
     pub points: Vec<Point>,
@@ -531,71 +532,352 @@ pub struct RotationLevel {
     pub rotation: f32,
 }
 
+/// The keys of `CAdScene::LoadBuffer`, in the order of its table.
+const SCENE_KEYS: &[&str] = &[
+    "SCENE",
+    "TEMPLATE",
+    "NAME",
+    "LAYER",
+    "WAYPOINTS",
+    "EVENTS",
+    "CURSOR",
+    "GEOMETRY",
+    "CAMERA",
+    "ENTITY",
+    "SCALE_LEVEL",
+    "ROTATION_LEVEL",
+    "EDITOR_MARGIN_H",
+    "EDITOR_MARGIN_V",
+    "EDITOR_COLOR_FRAME",
+    "EDITOR_COLOR_ENTITY_SEL",
+    "EDITOR_COLOR_REGION_SEL",
+    "EDITOR_COLOR_DECORATION_SEL",
+    "EDITOR_COLOR_BLOCKED_SEL",
+    "EDITOR_COLOR_WAYPOINTS_SEL",
+    "EDITOR_COLOR_REGION",
+    "EDITOR_COLOR_DECORATION",
+    "EDITOR_COLOR_BLOCKED",
+    "EDITOR_COLOR_ENTITY",
+    "EDITOR_COLOR_WAYPOINTS",
+    "EDITOR_COLOR_SCALE",
+    "EDITOR_SHOW_REGIONS",
+    "EDITOR_SHOW_DECORATION",
+    "EDITOR_SHOW_BLOCKED",
+    "EDITOR_SHOW_ENTITIES",
+    "EDITOR_SHOW_SCALE",
+    "SCRIPT",
+    "CAPTION",
+    "PROPERTY",
+    "VIEWPORT",
+    "PERSISTENT_STATE_SPRITES",
+    "PERSISTENT_STATE",
+    "EDITOR_PROPERTY",
+    "EDITOR_SHOW_GEOMETRY",
+    "EDITOR_RESOLUTION_WIDTH",
+    "EDITOR_RESOLUTION_HEIGHT",
+    "FOV_OVERRIDE",
+    "WAYPOINT_HEIGHT",
+    "NEAR_CLIPPING_PLANE",
+    "FAR_CLIPPING_PLANE",
+    "2D_PATHFINDING",
+    "MAX_SHADOW_TYPE",
+    "SCROLL_3D_COMPATIBILITY",
+    "AMBIENT_LIGHT_COLOR",
+];
+
+/// The keys of `CAdLayer::LoadBuffer`, in the order of its table.
+const LAYER_KEYS: &[&str] = &[
+    "LAYER",
+    "TEMPLATE",
+    "NAME",
+    "WIDTH",
+    "HEIGHT",
+    "MAIN",
+    "ENTITY",
+    "REGION",
+    "ACTIVE",
+    "EDITOR_SELECTED",
+    "SCRIPT",
+    "CAPTION",
+    "PROPERTY",
+    "CLOSE_UP",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CAdEntity::LoadBuffer`, in the order of its table.
+const ENTITY_KEYS: &[&str] = &[
+    "ENTITY",
+    "SPRITE",
+    "X",
+    "Y",
+    "TEMPLATE",
+    "NAME",
+    "SCALABLE",
+    "REGISTRABLE",
+    "INTERACTIVE",
+    "SHADOWABLE",
+    "COLORABLE",
+    "ACTIVE",
+    "EVENTS",
+    "FONT",
+    "TALK_SPECIAL",
+    "TALK",
+    "CURSOR",
+    "REGION",
+    "BLOCKED_REGION",
+    "EDITOR_SELECTED",
+    "SCRIPT",
+    "SOUND_START_TIME",
+    "SOUND_VOLUME",
+    "SOUND_PANNING",
+    "SOUND",
+    "SUBTYPE",
+    "CAPTION",
+    "PROPERTY",
+    "WAYPOINTS",
+    "IGNORE_ITEMS",
+    "ROTABLE",
+    "ROTATABLE",
+    "ALPHA_COLOR",
+    "SCALE",
+    "RELATIVE_SCALE",
+    "ALPHA",
+    "EDITOR_PROPERTY",
+    "ITEM",
+    "WALK_TO_X",
+    "WALK_TO_Y",
+    "WALK_TO_DIR",
+    "SAVE_STATE",
+];
+
+/// The keys of `CBRegion::LoadBuffer` (the region of an entity, a blocked
+/// region), in the order of its table.
+const BASE_REGION_KEYS: &[&str] = &[
+    "REGION",
+    "TEMPLATE",
+    "NAME",
+    "ACTIVE",
+    "POINT",
+    "CAPTION",
+    "SCRIPT",
+    "EDITOR_SELECTED_POINT",
+    "PROPERTY",
+];
+
+/// The keys of `CAdRegion::LoadBuffer` (a region of a layer), in the
+/// order of its table.
+const SCENE_REGION_KEYS: &[&str] = &[
+    "REGION",
+    "TEMPLATE",
+    "NAME",
+    "ACTIVE",
+    "ZOOM",
+    "SCALE",
+    "BLOCKED",
+    "DECORATION",
+    "POINT",
+    "ALPHA_COLOR",
+    "ALPHA",
+    "EDITOR_SELECTED_POINT",
+    "EDITOR_SELECTED",
+    "SCRIPT",
+    "CAPTION",
+    "PROPERTY",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CAdWaypointGroup::LoadBuffer`, in the order of its table.
+const WAYPOINTS_KEYS: &[&str] = &[
+    "WAYPOINTS",
+    "TEMPLATE",
+    "NAME",
+    "POINT",
+    "EDITOR_SELECTED_POINT",
+    "EDITOR_SELECTED",
+    "PROPERTY",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CAdScaleLevel::LoadBuffer`, in the order of its table.
+const SCALE_LEVEL_KEYS: &[&str] = &["SCALE_LEVEL", "TEMPLATE", "Y", "SCALE", "EDITOR_PROPERTY"];
+
+/// The keys of `CAdRotLevel::LoadBuffer`, in the order of its table.
+const ROTATION_LEVEL_KEYS: &[&str] = &[
+    "ROTATION_LEVEL",
+    "TEMPLATE",
+    "X",
+    "ROTATION",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CBScriptHolder::ParseProperty`, in the order of its
+/// table.
+const PROPERTY_KEYS: &[&str] = &["PROPERTY", "NAME", "VALUE"];
+
+/// The root block a file must start with, or the original's
+/// `'<KEY>' keyword expected` error.
+fn root_of<'a>(doc: &'a Document, key: &str) -> Result<&'a Node> {
+    doc.root(key).ok_or_else(|| Error::Invalid {
+        reason: format!("'{key}' keyword expected"),
+    })
+}
+
 impl Scene {
-    /// Parses a `.scene` file.
+    /// Parses a `.scene` file. No other file is read: a `TEMPLATE` key
+    /// fails to load, which the original engine ignores.
     pub fn parse(bytes: &[u8]) -> Result<Scene> {
-        Scene::from_document(&Document::parse(bytes)?)
+        Scene::parse_with(bytes, &mut Files::none())
+    }
+
+    /// Parses a `.scene` file, reading the `TEMPLATE` files it names
+    /// through `files`.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<Scene> {
+        Scene::from_document_with(&Document::parse(bytes)?, files)
     }
 
     /// Builds a scene from a parsed document with a `SCENE` root block.
     pub fn from_document(doc: &Document) -> Result<Scene> {
-        let root = doc.get("SCENE").ok_or_else(|| Error::Invalid {
-            reason: "'SCENE' keyword expected".into(),
-        })?;
-        let mut scene = Scene {
+        Scene::from_document_with(doc, &mut Files::none())
+    }
+
+    /// Builds a scene from a parsed document whose first statement is the
+    /// `SCENE` block, reading the `TEMPLATE` files it names through
+    /// `files`.
+    pub fn from_document_with(doc: &Document, files: &mut Files<'_>) -> Result<Scene> {
+        let mut scene = Scene::default();
+        scene.load(root_of(doc, "SCENE")?, files)?;
+        Ok(scene)
+    }
+
+    /// What `CAdScene::Cleanup` leaves of a scene: its name and its
+    /// script properties.
+    fn cleanup(&mut self) {
+        *self = Scene {
+            name: std::mem::take(&mut self.name),
+            properties: std::mem::take(&mut self.properties),
             persistent_state_sprites: true,
             max_shadow_type: 2,
             ..Scene::default()
         };
-        for node in root.nodes() {
-            match node.key.to_ascii_uppercase().as_str() {
-                "NAME" => scene.name = text(node),
-                "CAPTION" => scene.caption = text(node),
-                "TEMPLATE" => scene.template = node.as_str().map(str::to_string),
-                "SCRIPT" => scene.scripts.extend(node.as_str().map(str::to_string)),
-                "PROPERTY" => scene.properties.extend(Property::from_node(node)?),
-                "PERSISTENT_STATE" => scene.persistent_state = boolean(node),
-                "PERSISTENT_STATE_SPRITES" => scene.persistent_state_sprites = boolean(node),
-                "CURSOR" => scene.cursor = node.as_str().map(str::to_string),
-                "CAMERA" => scene.camera = node.as_str().map(str::to_string),
-                "GEOMETRY" => scene.geometry = node.as_str().map(str::to_string),
-                "FOV_OVERRIDE" => scene.fov_override = float(node),
-                "NEAR_CLIPPING_PLANE" => scene.near_clipping_plane = float(node),
-                "FAR_CLIPPING_PLANE" => scene.far_clipping_plane = float(node),
-                "WAYPOINT_HEIGHT" => scene.waypoint_height = float(node),
-                "2D_PATHFINDING" => scene.pathfinding_2d = boolean(node),
-                "MAX_SHADOW_TYPE" => scene.max_shadow_type = integer(node).clamp(0, 3) as u8,
-                "SCROLL_3D_COMPATIBILITY" => scene.scroll_3d_compatibility = boolean(node),
-                "AMBIENT_LIGHT_COLOR" => {
-                    let v = ints(node);
-                    scene.ambient_light_color = Rgb {
-                        r: clamp_channel(v.first().copied().unwrap_or(0)),
-                        g: clamp_channel(v.get(1).copied().unwrap_or(0)),
-                        b: clamp_channel(v.get(2).copied().unwrap_or(0)),
-                    };
+    }
+
+    /// `CAdScene::LoadBuffer`: empties the scene, then applies the keys of
+    /// the block in order. A key that is not in the table is a syntax
+    /// error that fails the load. A layer, waypoint group, level or
+    /// entity that cannot be read is dropped alone, and so is a
+    /// `TEMPLATE` that cannot be loaded: the original sets an error code
+    /// that the next statement overwrites.
+    fn load(&mut self, root: &Node, files: &mut Files<'_>) -> Result<()> {
+        self.cleanup();
+        let mut camera: Option<String> = None;
+        let mut waypoint_height = -1.0f32;
+        for item in keys(root, SCENE_KEYS, "SCENE") {
+            let (key, node) = item?;
+            match key {
+                "TEMPLATE" => {
+                    // `LoadFile` on the scene itself: everything read so
+                    // far is dropped, the template's keys apply, and the
+                    // keys that follow go over them.
+                    let name = node.text();
+                    let _ = files
+                        .template(&name, |doc, files| self.load(root_of(doc, "SCENE")?, files));
+                    self.template = Some(name);
                 }
+                "NAME" => self.name = node.text(),
+                "CAPTION" => self.caption = node.text(),
+                "SCRIPT" => self.scripts.push(node.text()),
+                "PROPERTY" => self.properties.extend(Property::from_node(node)),
                 "VIEWPORT" => {
-                    let v = ints(node);
-                    scene.viewport = Some(Rect {
-                        left: get(&v, 0, 0),
-                        top: get(&v, 1, 0),
-                        right: get(&v, 2, 0),
-                        bottom: get(&v, 3, 0),
-                    });
+                    let mut rect = self.viewport.unwrap_or_default();
+                    node.read_ints(&mut [
+                        &mut rect.left,
+                        &mut rect.top,
+                        &mut rect.right,
+                        &mut rect.bottom,
+                    ]);
+                    self.viewport = Some(rect);
+                    // The original's `case` has no `break` and goes on to
+                    // read the viewport's text as `PERSISTENT_STATE`: a
+                    // defect, not reproduced.
                 }
-                "LAYER" => scene.layers.push(Layer::from_node(node)?),
-                "ENTITY" => scene.free_entities.push(Entity::from_node(node, true)?),
-                "WAYPOINTS" => scene.waypoint_groups.push(WaypointGroup::from_node(node)?),
-                "SCALE_LEVEL" => scene.scale_levels.push(ScaleLevel::from_node(node)),
-                "ROTATION_LEVEL" => scene.rotation_levels.push(RotationLevel::from_node(node)),
+                "PERSISTENT_STATE" => node.read_bool(&mut self.persistent_state),
+                "PERSISTENT_STATE_SPRITES" => node.read_bool(&mut self.persistent_state_sprites),
+                "CURSOR" => self.cursor = Some(node.text()),
+                "CAMERA" => camera = Some(node.text()),
+                "GEOMETRY" => {
+                    // A new geometry starts with its own camera and
+                    // waypoint height.
+                    self.geometry = Some(node.text());
+                    self.camera = None;
+                    self.waypoint_height = None;
+                }
+                "FOV_OVERRIDE" => self.fov_override = float(node).or(self.fov_override),
+                "NEAR_CLIPPING_PLANE" => {
+                    self.near_clipping_plane = float(node).or(self.near_clipping_plane);
+                }
+                "FAR_CLIPPING_PLANE" => {
+                    self.far_clipping_plane = float(node).or(self.far_clipping_plane);
+                }
+                "WAYPOINT_HEIGHT" => node.read_float(&mut waypoint_height),
+                "2D_PATHFINDING" => node.read_bool(&mut self.pathfinding_2d),
+                "MAX_SHADOW_TYPE" => {
+                    let mut kind = 0;
+                    node.read_int(&mut kind);
+                    self.max_shadow_type = kind.clamp(0, 3) as u8;
+                }
+                "SCROLL_3D_COMPATIBILITY" => node.read_bool(&mut self.scroll_3d_compatibility),
+                "AMBIENT_LIGHT_COLOR" => {
+                    let (mut r, mut g, mut b) = (0, 0, 0);
+                    node.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    self.ambient_light_color = Rgb::from_ints(r, g, b);
+                }
+                "LAYER" => self.layers.extend(Layer::from_node(node, files).ok()),
+                "ENTITY" => {
+                    let mut entity = Entity::default();
+                    if entity.load(node, files).is_ok() {
+                        self.free_entities.push(entity);
+                    }
+                }
+                "WAYPOINTS" => {
+                    let mut group = WaypointGroup::default();
+                    if group.load(node, files).is_ok() {
+                        self.waypoint_groups.push(group);
+                    }
+                }
+                "SCALE_LEVEL" => {
+                    let mut level = ScaleLevel { y: 0, scale: 100.0 };
+                    if level.load(node, files).is_ok() {
+                        self.scale_levels.push(level);
+                    }
+                }
+                "ROTATION_LEVEL" => {
+                    let mut level = RotationLevel {
+                        x: 0,
+                        rotation: 0.0,
+                    };
+                    if level.load(node, files).is_ok() {
+                        self.rotation_levels.push(level);
+                    }
+                }
+                // `SCENE`, `EVENTS` and the editor's keys are accepted
+                // and mean nothing to the engine.
                 _ => {}
             }
         }
-        scene.scale_levels.sort_by_key(|level| level.y);
-        scene.rotation_levels.sort_by_key(|level| level.x);
-        Ok(scene)
+        // The camera and the waypoint height named by this file reach the
+        // geometry only when there is one by the end of the file.
+        if self.geometry.is_some() {
+            if let Some(camera) = camera.filter(|name| !name.is_empty()) {
+                self.camera = Some(camera);
+            }
+            if waypoint_height >= 0.0 {
+                self.waypoint_height = Some(waypoint_height);
+            }
+        }
+        self.scale_levels.sort_by_key(|level| level.y);
+        self.rotation_levels.sort_by_key(|level| level.x);
+        Ok(())
     }
-
     /// The main layer: the last one flagged `MAIN`, if any.
     pub fn main_layer(&self) -> Option<&Layer> {
         self.layers.iter().rev().find(|layer| layer.main)
@@ -797,32 +1079,63 @@ impl Scene {
 }
 
 impl Layer {
-    fn from_node(node: &Node) -> Result<Layer> {
+    /// Parses a layer file: a `LAYER` root block.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<Layer> {
+        let doc = Document::parse(bytes)?;
+        Layer::from_node(root_of(&doc, "LAYER")?, files)
+    }
+
+    fn from_node(node: &Node, files: &mut Files<'_>) -> Result<Layer> {
         let mut layer = Layer::default();
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "NAME" => layer.name = text(child),
-                "CAPTION" => layer.caption = text(child),
-                "TEMPLATE" => layer.template = child.as_str().map(str::to_string),
-                "MAIN" => layer.main = boolean(child),
-                "WIDTH" => layer.width = integer(child),
-                "HEIGHT" => layer.height = integer(child),
-                "ACTIVE" => layer.active = boolean(child),
-                "CLOSE_UP" => layer.close_up = boolean(child),
-                "SCRIPT" => layer.scripts.extend(child.as_str().map(str::to_string)),
-                "PROPERTY" => layer.properties.extend(Property::from_node(child)?),
-                "ENTITY" => layer
-                    .nodes
-                    .push(SceneNode::Entity(Box::new(Entity::from_node(
-                        child, false,
-                    )?))),
-                "REGION" => layer
-                    .nodes
-                    .push(SceneNode::Region(Region::from_node(child, true)?)),
+        layer.load(node, files)?;
+        Ok(layer)
+    }
+
+    /// `CAdLayer::LoadBuffer`: the keys of the block in order, over what
+    /// the layer holds. A region or an entity that cannot be read is
+    /// dropped alone.
+    fn load(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(node, LAYER_KEYS, "LAYER") {
+            let (key, child) = item?;
+            match key {
+                "TEMPLATE" => {
+                    // `LoadFile` on the layer itself: the template's keys
+                    // go over what was read, its nodes are appended.
+                    let name = child.text();
+                    let _ = files
+                        .template(&name, |doc, files| self.load(root_of(doc, "LAYER")?, files));
+                    self.template = Some(name);
+                }
+                "NAME" => self.name = child.text(),
+                "CAPTION" => self.caption = child.text(),
+                "MAIN" => child.read_bool(&mut self.main),
+                "WIDTH" => child.read_int(&mut self.width),
+                "HEIGHT" => child.read_int(&mut self.height),
+                "ACTIVE" => child.read_bool(&mut self.active),
+                "CLOSE_UP" => child.read_bool(&mut self.close_up),
+                "SCRIPT" => self.scripts.push(child.text()),
+                "PROPERTY" => self.properties.extend(Property::from_node(child)),
+                "ENTITY" => {
+                    // The entities of a layer do not follow the scene's
+                    // scale unless they say so.
+                    let mut entity = Entity {
+                        scalable: false,
+                        ..Entity::default()
+                    };
+                    if entity.load(child, files).is_ok() {
+                        self.nodes.push(SceneNode::Entity(Box::new(entity)));
+                    }
+                }
+                "REGION" => {
+                    let mut region = Region::default();
+                    if region.load(child, true, files).is_ok() {
+                        self.nodes.push(SceneNode::Region(region));
+                    }
+                }
                 _ => {}
             }
         }
-        Ok(layer)
+        Ok(())
     }
 
     /// The entities of the layer, in order.
@@ -843,213 +1156,359 @@ impl Layer {
 }
 
 impl Entity {
-    /// Parses an `.entity` file: an `ENTITY` root block.
+    /// Parses an `.entity` file: an `ENTITY` root block. No other file is
+    /// read: a `TEMPLATE` key fails to load, which the original ignores.
     pub fn parse(bytes: &[u8]) -> Result<Entity> {
-        Entity::from_document(&Document::parse(bytes)?)
+        Entity::parse_with(bytes, &mut Files::none())
+    }
+
+    /// Parses an `.entity` file, reading the `TEMPLATE` files it names
+    /// through `files`.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<Entity> {
+        Entity::from_document_with(&Document::parse(bytes)?, files)
     }
 
     /// Builds an entity from a parsed document with an `ENTITY` root
     /// block, scalable by default.
     pub fn from_document(doc: &Document) -> Result<Entity> {
-        let root = doc.get("ENTITY").ok_or_else(|| Error::Invalid {
-            reason: "'ENTITY' keyword expected".into(),
-        })?;
-        Entity::from_node(root, true)
+        Entity::from_document_with(doc, &mut Files::none())
     }
 
-    fn from_node(node: &Node, scalable: bool) -> Result<Entity> {
-        let mut entity = Entity {
-            scalable,
-            ..Entity::default()
-        };
-        let (mut r, mut g, mut b, mut alpha) = (0i64, 0i64, 0i64, 0i64);
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "NAME" => entity.name = text(child),
-                "CAPTION" => entity.caption = text(child),
-                "TEMPLATE" => entity.template = child.as_str().map(str::to_string),
-                "ACTIVE" => entity.active = boolean(child),
-                "X" => entity.x = integer(child),
-                "Y" => entity.y = integer(child),
-                "SPRITE" => entity.sprite = child.as_str().map(str::to_string),
-                "TALK" => entity
-                    .talk_sprites
-                    .extend(child.as_str().map(str::to_string)),
-                "TALK_SPECIAL" => entity
-                    .talk_special_sprites
-                    .extend(child.as_str().map(str::to_string)),
-                "FONT" => entity.font = child.as_str().map(str::to_string),
-                "ITEM" => entity.item = child.as_str().map(str::to_string),
-                "SCALABLE" => entity.scalable = boolean(child),
-                "SCALE" => entity.scale = Some(integer(child) as f32),
-                "RELATIVE_SCALE" => entity.relative_scale = integer(child) as f32,
-                "ROTATABLE" | "ROTABLE" => entity.rotatable = boolean(child),
-                "INTERACTIVE" | "REGISTRABLE" => entity.interactive = boolean(child),
-                "COLORABLE" | "SHADOWABLE" => entity.colorable = boolean(child),
+    /// Builds an entity from a parsed document whose first statement is
+    /// the `ENTITY` block, reading `TEMPLATE` files through `files`.
+    pub fn from_document_with(doc: &Document, files: &mut Files<'_>) -> Result<Entity> {
+        let mut entity = Entity::default();
+        entity.load(root_of(doc, "ENTITY")?, files)?;
+        Ok(entity)
+    }
+
+    /// `CAdEntity::LoadBuffer`: the keys of the block in order, over what
+    /// the entity holds. A region or a waypoint group that cannot be read
+    /// leaves the entity without one.
+    fn load(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        let (mut r, mut g, mut b, mut alpha) = (0, 0, 0, 0);
+        // Whether this block names a tint of its own.
+        let mut tinted = false;
+        for item in keys(node, ENTITY_KEYS, "ENTITY") {
+            let (key, child) = item?;
+            match key {
+                "TEMPLATE" => {
+                    // `LoadFile` on the entity itself. (The original then
+                    // answers the template's name as the entity's file;
+                    // the entity keeps its own here.)
+                    let name = child.text();
+                    let _ = files.template(&name, |doc, files| {
+                        self.load(root_of(doc, "ENTITY")?, files)
+                    });
+                    self.template = Some(name);
+                }
+                "NAME" => self.name = child.text(),
+                "CAPTION" => self.caption = child.text(),
+                "ACTIVE" => child.read_bool(&mut self.active),
+                "X" => child.read_int(&mut self.x),
+                "Y" => child.read_int(&mut self.y),
+                "SPRITE" => self.sprite = Some(child.text()),
+                "TALK" => self.talk_sprites.push(child.text()),
+                "TALK_SPECIAL" => self.talk_special_sprites.push(child.text()),
+                "FONT" => self.font = Some(child.text()),
+                "ITEM" => self.item = Some(child.text()),
+                "SCALABLE" => child.read_bool(&mut self.scalable),
+                "SCALE" => {
+                    let mut scale = 0;
+                    child.read_int(&mut scale);
+                    self.scale = Some(scale as f32);
+                }
+                "RELATIVE_SCALE" => {
+                    let mut scale = 0;
+                    child.read_int(&mut scale);
+                    self.relative_scale = scale as f32;
+                }
+                "ROTABLE" | "ROTATABLE" => child.read_bool(&mut self.rotatable),
+                "REGISTRABLE" | "INTERACTIVE" => child.read_bool(&mut self.interactive),
+                "SHADOWABLE" | "COLORABLE" => child.read_bool(&mut self.colorable),
                 "ALPHA_COLOR" => {
-                    let v = ints(child);
-                    r = v.first().copied().unwrap_or(0);
-                    g = v.get(1).copied().unwrap_or(0);
-                    b = v.get(2).copied().unwrap_or(0);
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    tinted = true;
                 }
-                "ALPHA" => alpha = child.as_int().unwrap_or(0),
-                "CURSOR" => entity.cursor = child.as_str().map(str::to_string),
-                "REGION" => entity.region = Some(Region::from_node(child, false)?),
+                "ALPHA" => {
+                    child.read_int(&mut alpha);
+                    tinted = true;
+                }
+                "CURSOR" => self.cursor = Some(child.text()),
+                "REGION" => {
+                    let mut region = Region::default();
+                    self.region = region.load(child, false, files).is_ok().then_some(region);
+                }
                 "BLOCKED_REGION" => {
-                    entity.blocked_region = Some(Region::from_node(child, false)?);
+                    let mut region = Region::default();
+                    self.blocked_region =
+                        region.load(child, false, files).is_ok().then_some(region);
                 }
-                "WAYPOINTS" => entity.waypoints = Some(WaypointGroup::from_node(child)?),
-                "WALK_TO_X" => entity.walk_to_x = integer(child),
-                "WALK_TO_Y" => entity.walk_to_y = integer(child),
+                "WAYPOINTS" => {
+                    let mut group = WaypointGroup::default();
+                    self.waypoints = group.load(child, files).is_ok().then_some(group);
+                }
+                "WALK_TO_X" => child.read_int(&mut self.walk_to_x),
+                "WALK_TO_Y" => child.read_int(&mut self.walk_to_y),
                 "WALK_TO_DIR" => {
-                    entity.walk_to_dir = Direction::from_code(child.as_int().unwrap_or(0));
+                    let mut dir = 0;
+                    child.read_int(&mut dir);
+                    self.walk_to_dir = Direction::from_code(i64::from(dir));
                 }
-                "SCRIPT" => entity.scripts.extend(child.as_str().map(str::to_string)),
-                "PROPERTY" => entity.properties.extend(Property::from_node(child)?),
-                "IGNORE_ITEMS" => entity.ignore_items = boolean(child),
-                "SAVE_STATE" => entity.save_state = boolean(child),
+                "SCRIPT" => self.scripts.push(child.text()),
+                "PROPERTY" => self.properties.extend(Property::from_node(child)),
+                "IGNORE_ITEMS" => child.read_bool(&mut self.ignore_items),
+                "SAVE_STATE" => child.read_bool(&mut self.save_state),
                 "SUBTYPE" => {
                     if child
                         .as_str()
                         .is_some_and(|s| s.eq_ignore_ascii_case("sound"))
                     {
-                        entity.kind = EntityKind::Sound;
-                        entity.sprite = None;
-                        entity.scalable = false;
-                        entity.rotatable = false;
-                        entity.interactive = false;
-                        entity.colorable = false;
+                        self.kind = EntityKind::Sound;
+                        self.sprite = None;
+                        self.scalable = false;
+                        self.rotatable = false;
+                        self.interactive = false;
+                        self.colorable = false;
                     }
                 }
-                "SOUND" => entity.sound = child.as_str().map(str::to_string),
-                "SOUND_START_TIME" => entity.sound_start_ms = integer(child),
-                "SOUND_VOLUME" => entity.sound_volume = integer(child),
-                "SOUND_PANNING" => entity.sound_panning = boolean(child),
+                "SOUND" => self.sound = Some(child.text()),
+                "SOUND_START_TIME" => child.read_int(&mut self.sound_start_ms),
+                "SOUND_VOLUME" => child.read_int(&mut self.sound_volume),
+                "SOUND_PANNING" => child.read_bool(&mut self.sound_panning),
                 _ => {}
             }
         }
-        if alpha != 0 && r == 0 && g == 0 && b == 0 {
-            (r, g, b) = (255, 255, 255);
+        // A block that names no tint keeps the one it has: a template's.
+        // (The original computes it again from this block alone and
+        // loses the template's.)
+        if tinted {
+            if alpha != 0 && r == 0 && g == 0 && b == 0 {
+                (r, g, b) = (255, 255, 255);
+            }
+            let tint = Rgba::from_ints(r, g, b, alpha);
+            self.tint = (tint != Rgba::from_ints(0, 0, 0, 0)).then_some(tint);
         }
-        if (r, g, b, alpha) != (0, 0, 0, 0) {
-            entity.tint = Some(Rgba {
-                r: clamp_channel(r),
-                g: clamp_channel(g),
-                b: clamp_channel(b),
-                a: clamp_channel(alpha),
-            });
-        }
-        Ok(entity)
+        Ok(())
     }
 }
 
 impl Region {
-    /// Parses a region block. Scene regions (`scene == true`) read the
-    /// blocking, decoration, scale and tint keys; the hotspot of an entity
-    /// reads only the base keys, like the engine.
+    /// Parses a region file: a `REGION` root block, with the keys of a
+    /// layer's region (`scene == true`) or of an entity's.
+    pub fn parse_with(bytes: &[u8], scene: bool, files: &mut Files<'_>) -> Result<Region> {
+        let doc = Document::parse(bytes)?;
+        let mut region = Region::default();
+        region.load(root_of(&doc, "REGION")?, scene, files)?;
+        Ok(region)
+    }
+
+    /// Parses a region block. Regions of a layer (`scene == true`) know
+    /// the blocking, decoration, scale and tint keys
+    /// (`CAdRegion::LoadBuffer`); the regions of an entity only the base
+    /// keys (`CBRegion::LoadBuffer`), and any other key is a syntax
+    /// error. No `TEMPLATE` file is read.
     pub fn from_node(node: &Node, scene: bool) -> Result<Region> {
         let mut region = Region::default();
-        let (mut r, mut g, mut b, mut alpha) = (255i64, 255i64, 255i64, 255i64);
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "NAME" => region.name = text(child),
-                "CAPTION" => region.caption = text(child),
-                "TEMPLATE" => region.template = child.as_str().map(str::to_string),
-                "ACTIVE" => region.active = boolean(child),
-                "POINT" => {
-                    let v = ints(child);
-                    region.points.push(Point {
-                        x: get(&v, 0, 0),
-                        y: get(&v, 1, 0),
+        region.load(node, scene, &mut Files::none())?;
+        Ok(region)
+    }
+
+    /// `LoadBuffer`: the points are dropped first, then the keys of the
+    /// block apply in order.
+    fn load(&mut self, node: &Node, scene: bool, files: &mut Files<'_>) -> Result<()> {
+        self.points.clear();
+        let (mut r, mut g, mut b, mut alpha) = (255, 255, 255, 255);
+        // Whether this block names a tint of its own.
+        let mut tinted = false;
+        let (table, what) = if scene {
+            (SCENE_REGION_KEYS, "REGION")
+        } else {
+            (BASE_REGION_KEYS, "REGION")
+        };
+        for item in keys(node, table, what) {
+            let (key, child) = item?;
+            match key {
+                "TEMPLATE" => {
+                    // `LoadFile` on the region itself: the template's
+                    // points replace those read so far.
+                    let name = child.text();
+                    let _ = files.template(&name, |doc, files| {
+                        self.load(root_of(doc, "REGION")?, scene, files)
                     });
+                    self.template = Some(name);
                 }
-                "SCRIPT" => region.scripts.extend(child.as_str().map(str::to_string)),
-                "PROPERTY" => region.properties.extend(Property::from_node(child)?),
-                "BLOCKED" if scene => region.blocked = boolean(child),
-                "DECORATION" if scene => region.decoration = boolean(child),
-                "SCALE" | "ZOOM" if scene => {
-                    let zoom = integer(child);
-                    region.zoom = (zoom != 0).then_some(zoom as f32);
+                "NAME" => self.name = child.text(),
+                "CAPTION" => self.caption = child.text(),
+                "ACTIVE" => child.read_bool(&mut self.active),
+                "POINT" => self.points.push(Point::from_node(child)),
+                "SCRIPT" => self.scripts.push(child.text()),
+                "PROPERTY" => self.properties.extend(Property::from_node(child)),
+                "BLOCKED" => child.read_bool(&mut self.blocked),
+                "DECORATION" => child.read_bool(&mut self.decoration),
+                "SCALE" | "ZOOM" => {
+                    let mut zoom = 0;
+                    child.read_int(&mut zoom);
+                    self.zoom = (zoom != 0).then_some(zoom as f32);
                 }
-                "ALPHA_COLOR" if scene => {
-                    let v = ints(child);
-                    r = v.first().copied().unwrap_or(255);
-                    g = v.get(1).copied().unwrap_or(255);
-                    b = v.get(2).copied().unwrap_or(255);
+                "ALPHA_COLOR" => {
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    tinted = true;
                 }
-                "ALPHA" if scene => alpha = child.as_int().unwrap_or(255),
+                "ALPHA" => {
+                    child.read_int(&mut alpha);
+                    tinted = true;
+                }
                 _ => {}
             }
         }
-        region.tint = Rgba {
-            r: clamp_channel(r),
-            g: clamp_channel(g),
-            b: clamp_channel(b),
-            a: clamp_channel(alpha),
-        };
-        Ok(region)
+        // A block that names no tint keeps the one it has: a template's.
+        if scene && tinted {
+            self.tint = Rgba::from_ints(r, g, b, alpha);
+        }
+        Ok(())
+    }
+}
+
+impl Point {
+    /// A `POINT { x, y }`; a coordinate that is missing is 0 (the
+    /// original leaves it uninitialised).
+    fn from_node(node: &Node) -> Point {
+        let mut point = Point::default();
+        node.read_ints(&mut [&mut point.x, &mut point.y]);
+        point
     }
 }
 
 impl WaypointGroup {
+    /// Parses a waypoint file: a `WAYPOINTS` root block.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<WaypointGroup> {
+        let doc = Document::parse(bytes)?;
+        let mut group = WaypointGroup::default();
+        group.load(root_of(&doc, "WAYPOINTS")?, files)?;
+        Ok(group)
+    }
+
     /// Parses a `WAYPOINTS` block (a scene's, or the private one of an
-    /// actor definition).
+    /// actor definition). No `TEMPLATE` file is read.
     pub fn from_node(node: &Node) -> Result<WaypointGroup> {
         let mut group = WaypointGroup::default();
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "NAME" => group.name = text(child),
-                "TEMPLATE" => group.template = child.as_str().map(str::to_string),
-                "POINT" => {
-                    let v = ints(child);
-                    group.points.push(Point {
-                        x: get(&v, 0, 0),
-                        y: get(&v, 1, 0),
+        group.load(node, &mut Files::none())?;
+        Ok(group)
+    }
+
+    /// `CAdWaypointGroup::LoadBuffer`: the keys of the block in order;
+    /// the points are added to those the group has.
+    pub(crate) fn load(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(node, WAYPOINTS_KEYS, "WAYPOINTS") {
+            let (key, child) = item?;
+            match key {
+                "TEMPLATE" => {
+                    let name = child.text();
+                    let _ = files.template(&name, |doc, files| {
+                        self.load(root_of(doc, "WAYPOINTS")?, files)
                     });
+                    self.template = Some(name);
                 }
-                "PROPERTY" => group.properties.extend(Property::from_node(child)?),
+                "NAME" => self.name = child.text(),
+                "POINT" => self.points.push(Point::from_node(child)),
+                "PROPERTY" => self.properties.extend(Property::from_node(child)),
                 _ => {}
             }
         }
-        Ok(group)
+        Ok(())
     }
 }
 
 impl ScaleLevel {
-    fn from_node(node: &Node) -> ScaleLevel {
-        ScaleLevel {
-            y: node.get_int("Y").unwrap_or(0) as i32,
-            scale: node.get_int("SCALE").unwrap_or(100) as f32,
+    /// Parses a scale level file: a `SCALE_LEVEL` root block.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<ScaleLevel> {
+        let doc = Document::parse(bytes)?;
+        let mut level = ScaleLevel { y: 0, scale: 100.0 };
+        level.load(root_of(&doc, "SCALE_LEVEL")?, files)?;
+        Ok(level)
+    }
+
+    /// `CAdScaleLevel::LoadBuffer`.
+    fn load(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(node, SCALE_LEVEL_KEYS, "SCALE_LEVEL") {
+            let (key, child) = item?;
+            match key {
+                "TEMPLATE" => {
+                    let _ = files.template(&child.text(), |doc, files| {
+                        self.load(root_of(doc, "SCALE_LEVEL")?, files)
+                    });
+                }
+                "Y" => child.read_int(&mut self.y),
+                "SCALE" => {
+                    let mut scale = 0;
+                    child.read_int(&mut scale);
+                    self.scale = scale as f32;
+                }
+                _ => {}
+            }
         }
+        Ok(())
     }
 }
 
 impl RotationLevel {
-    fn from_node(node: &Node) -> RotationLevel {
-        RotationLevel {
-            x: node.get_int("X").unwrap_or(0) as i32,
-            rotation: node.get_int("ROTATION").unwrap_or(0) as f32,
+    /// Parses a rotation level file: a `ROTATION_LEVEL` root block.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<RotationLevel> {
+        let doc = Document::parse(bytes)?;
+        let mut level = RotationLevel {
+            x: 0,
+            rotation: 0.0,
+        };
+        level.load(root_of(&doc, "ROTATION_LEVEL")?, files)?;
+        Ok(level)
+    }
+
+    /// `CAdRotLevel::LoadBuffer`.
+    fn load(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(node, ROTATION_LEVEL_KEYS, "ROTATION_LEVEL") {
+            let (key, child) = item?;
+            match key {
+                "TEMPLATE" => {
+                    let _ = files.template(&child.text(), |doc, files| {
+                        self.load(root_of(doc, "ROTATION_LEVEL")?, files)
+                    });
+                }
+                "X" => child.read_int(&mut self.x),
+                "ROTATION" => {
+                    let mut rotation = 0;
+                    child.read_int(&mut rotation);
+                    self.rotation = rotation as f32;
+                }
+                _ => {}
+            }
         }
+        Ok(())
     }
 }
 
 impl Property {
-    /// A `PROPERTY` block needs both `NAME` and `VALUE`.
-    pub fn from_node(node: &Node) -> Result<Option<Property>> {
-        let name = node.get_str("NAME");
-        let value = node.get_str("VALUE");
-        match (name, value) {
-            (Some(name), Some(value)) => Ok(Some(Property {
-                name: name.to_string(),
-                value: value.to_string(),
-            })),
-            _ => Err(Error::Invalid {
-                reason: format!("PROPERTY at line {} needs both NAME and VALUE", node.line),
-            }),
+    /// `CBScriptHolder::ParseProperty`: a `PROPERTY { NAME VALUE }` block.
+    /// The last `NAME` and the last `VALUE` count. A block with another
+    /// key, or without one of the two, sets nothing: the original logs it
+    /// and the loader that called it goes on.
+    pub fn from_node(node: &Node) -> Option<Property> {
+        let mut name = None;
+        let mut value = None;
+        for item in keys(node, PROPERTY_KEYS, "PROPERTY") {
+            let (key, child) = item.ok()?;
+            match key {
+                "NAME" => name = Some(child.text()),
+                "VALUE" => value = Some(child.text()),
+                _ => {}
+            }
         }
+        Some(Property {
+            name: name?,
+            value: value?,
+        })
     }
 }
-
 /// Linear interpolation between the level before `at` (strictly) and the
 /// level at or after it; `outside` when either is missing. `levels` must
 /// be sorted.
@@ -1074,36 +1533,10 @@ fn interpolate(levels: impl Iterator<Item = (i32, f32)>, at: i32, outside: f32) 
     v0 + (v1 - v0) * ((at - p0) as f32 / span)
 }
 
-fn text(node: &Node) -> String {
-    node.as_str().unwrap_or("").to_string()
-}
-
-fn boolean(node: &Node) -> bool {
-    node.as_bool().unwrap_or(false)
-}
-
-fn integer(node: &Node) -> i32 {
-    node.as_int()
-        .unwrap_or(0)
-        .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
-}
-
+/// `ScanStr(params, "%f", ...)` for a value kept as an option: `None`
+/// when the value is empty.
 fn float(node: &Node) -> Option<f32> {
     node.as_float().map(|f| f as f32)
-}
-
-fn ints(node: &Node) -> Vec<i64> {
-    node.as_ints().unwrap_or_default()
-}
-
-fn get(values: &[i64], index: usize, default: i32) -> i32 {
-    values.get(index).map_or(default, |&v| {
-        v.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
-    })
-}
-
-fn clamp_channel(v: i64) -> u8 {
-    v.clamp(0, 255) as u8
 }
 
 #[cfg(test)]
@@ -1210,7 +1643,6 @@ SCENE {
       REGION {
         NAME="<unnamed>"
         ACTIVE=TRUE
-        BLOCKED=TRUE
         POINT {1150,184}
         POINT {1186,176}
         POINT {1220,192}
@@ -1333,7 +1765,7 @@ SCENE {
         );
         let hotspot = console.region.as_ref().unwrap();
         assert_eq!(hotspot.points.len(), 4);
-        assert!(!hotspot.blocked, "entity regions ignore BLOCKED");
+        assert!(!hotspot.blocked);
 
         let hum = main.entities().nth(2).unwrap();
         assert_eq!(hum.kind, EntityKind::Sound);
@@ -1542,14 +1974,214 @@ SCENE {
         assert_eq!(Direction::Down.code(), 4);
     }
 
+    fn serve<'a>(files: &'a [(&'a str, &'a str)]) -> impl FnMut(&str) -> Option<Vec<u8>> + 'a {
+        move |name| {
+            files
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, body)| body.as_bytes().to_vec())
+        }
+    }
+
+    /// `CAdScene::LoadBuffer TEMPLATE`: the template is loaded into the
+    /// scene where the key stands, after dropping what was read so far
+    /// (`Cleanup`, which keeps the name and the script properties).
+    #[test]
+    fn a_scene_template_is_loaded_in_place() {
+        let files = [(
+            "base.scene",
+            r#"SCENE { CAPTION="Base" SCRIPT="base.script" PERSISTENT_STATE=TRUE
+  LAYER { NAME="base_layer" MAIN=TRUE WIDTH=100 HEIGHT=50 }
+  SCALE_LEVEL { Y=10 SCALE=50 }
+}"#,
+        )];
+        let mut read = serve(&files);
+        let scene = Scene::parse_with(
+            br#"SCENE { NAME="mine" SCRIPT="dropped.script" CURSOR="dropped.sprite"
+  PROPERTY { NAME="kept" VALUE="1" }
+  LAYER { NAME="dropped" }
+  TEMPLATE="base.scene"
+  SCRIPT="mine.script"
+  LAYER { NAME="top" }
+}"#,
+            &mut Files::new(&mut read),
+        )
+        .unwrap();
+        assert_eq!(scene.name, "mine");
+        assert_eq!(scene.caption, "Base");
+        assert_eq!(scene.scripts, ["base.script", "mine.script"]);
+        assert_eq!(scene.cursor, None);
+        assert_eq!(scene.properties.len(), 1);
+        assert!(scene.persistent_state);
+        let layers: Vec<&str> = scene.layers.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(layers, ["base_layer", "top"]);
+        assert_eq!(scene.scale_levels.len(), 1);
+        assert_eq!((scene.width(), scene.height()), (100, 50));
+
+        // A template that cannot be read changes nothing.
+        let scene =
+            Scene::parse(br#"SCENE { LAYER { NAME="kept" } TEMPLATE="gone.scene" }"#).unwrap();
+        assert_eq!(scene.layers.len(), 1);
+    }
+
+    /// `TEMPLATE` in a layer, a region, a waypoint group, a level and an
+    /// entity: each loads the named file into itself where the key
+    /// stands.
+    #[test]
+    fn templates_of_the_parts_of_a_scene() {
+        let files = [
+            (
+                "l.layer",
+                r#"LAYER { NAME="tpl" WIDTH=640 HEIGHT=480 ENTITY { NAME="from_tpl" } }"#,
+            ),
+            (
+                "r.region",
+                r#"REGION { NAME="tpl" BLOCKED=TRUE ALPHA=10 POINT {1,1} POINT {2,2} POINT {3,3} }"#,
+            ),
+            ("w.wpt", r#"WAYPOINTS { NAME="tpl" POINT {5,6} }"#),
+            ("s.level", "SCALE_LEVEL { Y=40 SCALE=60 }"),
+            ("r.level", "ROTATION_LEVEL { X=30 ROTATION=15 }"),
+            (
+                "e.entity",
+                r#"ENTITY { NAME="tpl" X=7 Y=8 ALPHA=99 SPRITE="tpl.sprite" SCRIPT="tpl.script" }"#,
+            ),
+        ];
+        let mut read = serve(&files);
+        let scene = Scene::parse_with(
+            br#"SCENE {
+  LAYER { WIDTH=1 ENTITY { NAME="first" } TEMPLATE="l.layer" HEIGHT=99
+    REGION { POINT {9,9} TEMPLATE="r.region" POINT {4,4} NAME="mine" }
+    ENTITY { X=1 TEMPLATE="e.entity" Y=50 SCRIPT="mine.script" }
+  }
+  WAYPOINTS { POINT {1,2} TEMPLATE="w.wpt" POINT {7,8} }
+  SCALE_LEVEL { TEMPLATE="s.level" SCALE=70 }
+  ROTATION_LEVEL { X=1 TEMPLATE="r.level" }
+}"#,
+            &mut Files::new(&mut read),
+        )
+        .unwrap();
+        let layer = &scene.layers[0];
+        assert_eq!(layer.name, "tpl");
+        assert_eq!((layer.width, layer.height), (640, 99));
+        let names: Vec<&str> = layer.entities().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["first", "from_tpl", "tpl"]);
+
+        let region = layer.regions().next().unwrap();
+        assert_eq!(region.name, "mine");
+        assert!(region.blocked);
+        // The template's points replace those read before it.
+        assert_eq!(region.points.len(), 4);
+        assert_eq!(region.points[0], Point { x: 1, y: 1 });
+        assert_eq!(region.tint, Rgba::from_ints(255, 255, 255, 10));
+
+        let entity = layer.entities().nth(2).unwrap();
+        assert_eq!((entity.x, entity.y), (7, 50));
+        assert_eq!(entity.sprite.as_deref(), Some("tpl.sprite"));
+        assert_eq!(entity.scripts, ["tpl.script", "mine.script"]);
+        assert_eq!(entity.tint, Some(Rgba::from_ints(255, 255, 255, 99)));
+
+        let group = &scene.waypoint_groups[0];
+        assert_eq!(group.name, "tpl");
+        assert_eq!(group.points.len(), 3);
+        assert_eq!(scene.scale_levels[0], ScaleLevel { y: 40, scale: 70.0 });
+        assert_eq!(
+            scene.rotation_levels[0],
+            RotationLevel {
+                x: 30,
+                rotation: 15.0
+            }
+        );
+    }
+
+    /// A part that cannot be read is dropped alone: the original sets an
+    /// error code that the next statement overwrites.
+    #[test]
+    fn a_part_that_fails_is_dropped_alone() {
+        let scene = Scene::parse(
+            br#"SCENE {
+  LAYER { NAME="bad" BOGUS=1 }
+  LAYER { NAME="good"
+    REGION { NAME="bad" BOGUS=1 }
+    REGION { NAME="good" }
+    ENTITY { NAME="bad" BOGUS=1 }
+    ENTITY { NAME="hotspot"
+      REGION { POINT {1,1} BLOCKED=TRUE }
+      BLOCKED_REGION { POINT {1,1} }
+      WAYPOINTS { BOGUS=1 }
+    }
+  }
+  WAYPOINTS { BOGUS=1 }
+  SCALE_LEVEL { BOGUS=1 }
+  ROTATION_LEVEL { BOGUS=1 }
+  ENTITY { BOGUS=1 }
+  PROPERTY { NAME="no value" }
+  PROPERTY { NAME="a" VALUE="1" OTHER="x" }
+  PROPERTY { NAME="a" NAME="b" VALUE="1" VALUE="2" }
+  NAME="after"
+}"#,
+        )
+        .unwrap();
+        assert_eq!(scene.name, "after");
+        assert_eq!(scene.layers.len(), 1);
+        let layer = &scene.layers[0];
+        assert_eq!(layer.regions().count(), 1);
+        assert_eq!(layer.entities().count(), 1);
+        let entity = layer.entities().next().unwrap();
+        // `BLOCKED` is not a key of an entity's region (`CBRegion`).
+        assert!(entity.region.is_none());
+        assert!(entity.blocked_region.is_some());
+        assert!(entity.waypoints.is_none());
+        assert!(scene.waypoint_groups.is_empty());
+        assert!(scene.scale_levels.is_empty() && scene.rotation_levels.is_empty());
+        assert!(scene.free_entities.is_empty());
+        // A property needs a name and a value; the last of each counts.
+        assert_eq!(
+            scene.properties,
+            vec![Property {
+                name: "b".into(),
+                value: "2".into()
+            }]
+        );
+    }
+
+    /// `CAdScene::LoadBuffer VIEWPORT`: the original's `case` has no
+    /// `break` and reads the viewport as `PERSISTENT_STATE` too; that
+    /// defect is not reproduced.
+    #[test]
+    fn a_viewport_leaves_the_persistent_state_alone() {
+        let scene =
+            Scene::parse(b"SCENE { PERSISTENT_STATE=TRUE VIEWPORT { 0,0,800,600 } }").unwrap();
+        assert!(scene.persistent_state);
+        let scene = Scene::parse(b"SCENE { VIEWPORT { 1,0,800,600 } }").unwrap();
+        assert!(!scene.persistent_state);
+        let rect = scene.viewport.unwrap();
+        assert_eq!((rect.left, rect.right, rect.bottom), (1, 800, 600));
+    }
+
+    /// `CAdEntity::LoadBuffer SOUND`: the volume and the start time
+    /// count wherever they stand (the original only takes those read
+    /// before `SOUND`).
+    #[test]
+    fn an_entity_sound_takes_its_values_in_any_order() {
+        for text in [
+            "ENTITY { SOUND=\"a.ogg\" SOUND_START_TIME=500 SOUND_VOLUME=40 }",
+            "ENTITY { SOUND_START_TIME=500 SOUND_VOLUME=40 SOUND=\"a.ogg\" }",
+        ] {
+            let entity = Entity::parse(text.as_bytes()).unwrap();
+            assert_eq!(entity.sound.as_deref(), Some("a.ogg"));
+            assert_eq!((entity.sound_volume, entity.sound_start_ms), (40, 500));
+        }
+    }
+
     #[test]
     fn rejects_bad_files() {
         let err = Scene::parse(b"SPRITE { }").unwrap_err();
         assert!(matches!(err, Error::Invalid { .. }), "{err}");
-        let err = Scene::parse(b"SCENE { PROPERTY { NAME=\"a\" } }").unwrap_err();
-        assert!(err.to_string().contains("PROPERTY"), "{err}");
-        let err = Scene::parse(b"SCENE { LAYER {").unwrap_err();
+        let err = Scene::parse(b"SCENE { BOGUS=1 }").unwrap_err();
         assert!(matches!(err, Error::Syntax(_)), "{err}");
+        // The root block must be the first statement.
+        let err = Scene::parse(b"NAME=\"x\"\nSCENE { }").unwrap_err();
+        assert!(matches!(err, Error::Invalid { .. }), "{err}");
         let err = Entity::parse(b"SCENE { }").unwrap_err();
         assert!(matches!(err, Error::Invalid { .. }), "{err}");
     }
@@ -1603,7 +2235,8 @@ SCENE {
                 r: 255,
                 g: 20,
                 b: 0
-            }
+            },
+            "each number kept within 0 to 255"
         );
     }
 

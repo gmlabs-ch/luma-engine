@@ -32,7 +32,6 @@ impl World {
                 | Kind::EntityRegion(_)
                 | Kind::Layer(_)
                 | Kind::WaypointGroup(_)
-                | Kind::ResponseBox
                 | Kind::Emitter(_)
                 | Kind::Attachment3D(_)
                 | Kind::Fader
@@ -48,6 +47,9 @@ impl World {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Game) => self.cursors.normal.clone(),
             Some(Kind::Scene) => self.scene.as_ref().and_then(|v| v.scene.cursor.clone()),
+            // The response box's is the `CURSOR` of its definition, the
+            // one its icon choices show.
+            Some(Kind::ResponseBox) => self.responses.def.as_ref().and_then(|d| d.cursor.clone()),
             Some(kind) if Self::keeps_cursor_in_state(kind) => {
                 self.object_state(id).and_then(|s| s.cursor.clone())
             }
@@ -72,6 +74,10 @@ impl World {
             Some(Kind::Game) => self.cursors.normal = value,
             Some(Kind::Scene) => match self.scene.as_mut() {
                 Some(view) => view.scene.cursor = value,
+                None => return false,
+            },
+            Some(Kind::ResponseBox) => match self.responses.def.as_mut() {
+                Some(def) => def.cursor = value,
                 None => return false,
             },
             Some(kind) if Self::keeps_cursor_in_state(&kind) => match self.object_state_mut(id) {

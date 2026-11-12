@@ -245,7 +245,7 @@ How the list was made. For every class with a script interface, the names tested
 | `AcceleratedMode` | get | **done** | True when GPU accelerated; Luma reads true. |
 | `Accelerated` | get | **done** | Alias of `AcceleratedMode`. |
 | `TextEncoding` | get/set | **done** | Text encoding of the game: 0 ANSI, 1 UTF-8, set by each string table loaded (byte order mark) and by the script, clamped as WME does. The fonts, the `String` class, the editors and the screen reader read the game's text in this encoding (see `docs/formats/font.md`, Text encoding). |
-| `TextRTL` | get/set | **done** | Right-to-left text, set by a string table's `@right-to-left` and by scripts, saved. TrueType fonts lay each line's glyphs out from the last (WME passes `ETO_RTLREADING` to GDI; Luma has no bidirectional algorithm, so mixed-direction runs are not reordered), bitmap fonts are unaffected as in WME, and editors mirror `Backspace`, `Delete`, `Home` and `End`, keep the caret before a typed character and set their text against the right edge. |
+| `TextRTL` | get/set | **done** | Right-to-left text, set by a string table's `@right-to-left` and by scripts, saved. TrueType fonts read each line from the right (WME passes `ETO_RTLREADING` to GDI; Luma orders the line with the Unicode bidirectional algorithm and joins Arabic letters, see [formats/font.md](formats/font.md#notes-for-implementers)), bitmap fonts are unaffected as in WME, and editors mirror `Backspace`, `Delete`, `Home` and `End`, keep the caret before a typed character and set their text against the right edge. |
 | `SoundBufferSize` | get/set | **no-op** | DirectSound buffer length in seconds; the audio backend manages its buffers. |
 | `SuspendedRendering` | get/set | **done** | While true the front-end presents no frame and the window keeps the last one, as WME's `CBSubFrame::Display` draws nothing and its loop skips the flip; the game runs on. `luma-player` honours it, headless runs ignore it. Saved. |
 | `SuppressScriptErrors` | get/set | **done** | While true a script runtime error only goes to the log; otherwise the quick message `Script runtime error. View log for details.` is shown too, as in WME. Saved. |
@@ -307,7 +307,7 @@ How the list was made. For every class with a script interface, the names tested
 | `TalkSkipButton` | get/set | **done** | Mouse button that skips speech (0 left, 1 right, 2 both, 3 none; a value set outside 0..3 is brought to the nearer end). |
 | `VideoSkipButton` | get/set | **done** | Mouse button that skips videos. |
 | `ChangingScene` | get | **done** | True while a scene change is pending. |
-| `StartupScene` | get/set | **done** | Scene loaded at startup (from `default.game`); `null` when none, settable, saved with the game. |
+| `StartupScene` | get/set | **done** | The `STARTUP_SCENE` of `default.game`, a name for the game's scripts (the engine does not load it by itself); `null` when none, settable, saved with the game. |
 
 ### Window hook defined in CAdGame (`CAdGame::WindowScriptMethodHook`)
 
@@ -470,12 +470,12 @@ How the list was made. For every class with a script interface, the names tested
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `SetSprite` | method | **done** | Sets the object's default sprite. |
+| `SetSprite` | method | **done** | Sets the object's default sprite; null takes it away; a file that does not load leaves the object without one. |
 | `GetSprite` | method | **done** | File of the current default sprite. |
 | `GetSpriteObject` | method | **done** | The default sprite as a script object: an entity's sprite, the sprite `SetSprite` gave an actor, an item's image. |
-| `AddTalkSprite` | method | **done** | Adds a sprite to the talk animation set (file, "ex" flag). On actors and items the file is loaded and nothing else, as in WME (an actor's own sprite sets hide the list; items do not talk). |
-| `RemoveTalkSprite` | method | **done** | Removes a talk sprite (entities). |
-| `SetTalkSprite` | method | **done** | Replaces the talk sprite set with one sprite (entities). |
+| `AddTalkSprite` | method | **done** | Adds a sprite to the talk animation set (file, "ex" flag). On entities and items. On actors the file is loaded and nothing else, as in WME (an actor's own sprite sets hide the list). |
+| `RemoveTalkSprite` | method | **done** | Removes a talk sprite (entities, items); the object's own sprite takes the place of the one being played. |
+| `SetTalkSprite` | method | **done** | Replaces the talk sprite set with one sprite (entities, items). |
 | `Type` | get | **done** | Class name of the object. |
 
 ### CAdActor (2D walking character)
@@ -697,8 +697,8 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 |----------|------|-------|------|
 | `SetSelectedFont` | method | **done** | Font for the selected text. |
 | `Type` | get | **done** | `editor`. |
-| `SelStart`, `SelEnd` | get/set | **done** | Selection range. |
-| `CursorBlinkRate`, `CursorChar` | get/set | **done** | Caret blink time and caret character. |
+| `SelStart`, `SelEnd` | get/set | **done** | Selection range, in characters; `SelEnd` is where the caret is. |
+| `CursorBlinkRate`, `CursorChar` | get/set | **done** | Caret blink time and caret string (its first character is drawn). |
 | `FrameWidth` | get/set | **done** | Width of the border around the text. |
 | `MaxLength` | get/set | **done** | Maximum text length. |
 | `Text` | get/set | **done** | Edited text. |

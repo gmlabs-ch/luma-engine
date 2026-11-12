@@ -7,7 +7,7 @@
 
 use std::fs::File;
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
@@ -135,6 +135,10 @@ impl<T: Read + Seek + Send> ReadSeek for T {}
 /// An open package: its parsed directory table and a handle to read data.
 pub struct Package {
     label: String,
+    /// The file the package was opened from, when it was a file.
+    path: Option<PathBuf>,
+    /// The package is appended to an executable.
+    bound: bool,
     header: Header,
     directories: Vec<Directory>,
     source: Mutex<Box<dyn ReadSeek>>,
@@ -155,7 +159,9 @@ impl Package {
     pub fn open(path: impl AsRef<Path>) -> Result<Package> {
         let path = path.as_ref();
         let file = File::open(path)?;
-        Self::from_reader_at(file, path.display().to_string(), 0)
+        let mut package = Self::from_reader_at(file, path.display().to_string(), 0)?;
+        package.path = Some(path.to_path_buf());
+        Ok(package)
     }
 
     /// Opens a package bound to an executable: scans `path` for the package
@@ -168,7 +174,10 @@ impl Package {
         let base = find_signature(&mut file)?.ok_or_else(|| Error::NotAPackage {
             source: label.clone(),
         })?;
-        Self::from_reader_at(file, label, base)
+        let mut package = Self::from_reader_at(file, label, base)?;
+        package.path = Some(path.to_path_buf());
+        package.bound = true;
+        Ok(package)
     }
 
     /// Parses a package from any seekable reader. `label` names the source
@@ -195,10 +204,23 @@ impl Package {
         let (header, directories) = parser.parse()?;
         Ok(Package {
             label,
+            path: None,
+            bound: false,
             header,
             directories,
             source: Mutex::new(Box::new(reader)),
         })
+    }
+
+    /// The file the package was opened from, when it was opened from one.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    /// Whether the package is bound to an executable
+    /// ([`Package::open_embedded`]).
+    pub fn is_bound(&self) -> bool {
+        self.bound
     }
 
     /// Path or label the package was opened from.
@@ -227,22 +249,52 @@ impl Package {
         self.entries().find(|e| e.key == key)
     }
 
-    /// Reads and, when needed, decompresses an entry.
+    /// Reads and, when needed, decompresses an entry from the file the
+    /// package was opened from.
     pub fn read(&self, entry: &Entry) -> Result<Vec<u8>> {
-        let stored = {
-            let mut source = self
-                .source
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            source.seek(SeekFrom::Start(entry.offset))?;
-            let mut stored = vec![0; entry.stored_length() as usize];
-            source.read_exact(&mut stored)?;
-            stored
-        };
+        let mut source = self
+            .source
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self::read_entry(&mut *source, entry)
+    }
+
+    /// Reads and, when needed, decompresses an entry from `source`
+    /// (`CBPackage::Read`): the package file itself, or the file a master
+    /// index names. An entry that does not fit in the source is an error
+    /// before anything is allocated.
+    pub fn read_entry<R: Read + Seek + ?Sized>(source: &mut R, entry: &Entry) -> Result<Vec<u8>> {
+        let stored_length = u64::from(entry.stored_length());
+        let end = source.seek(SeekFrom::End(0))?;
+        if entry
+            .offset
+            .checked_add(stored_length)
+            .is_none_or(|last| last > end)
+        {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!(
+                    "entry {:?} ends beyond the end of its package file",
+                    entry.name
+                ),
+            )));
+        }
+        source.seek(SeekFrom::Start(entry.offset))?;
+        let mut stored = vec![0; stored_length as usize];
+        source.read_exact(&mut stored)?;
         if !entry.is_compressed() {
             return Ok(stored);
         }
         let declared = u64::from(entry.length);
+        if declared > max_inflated(stored.len()) {
+            return Err(Error::Decompress {
+                name: entry.name.clone(),
+                reason: format!(
+                    "{declared} bytes cannot come out of {} compressed bytes",
+                    stored.len()
+                ),
+            });
+        }
         let mut data = Vec::new();
         ZlibDecoder::new(stored.as_slice())
             .take(declared + 1)
@@ -382,13 +434,10 @@ impl<R: Read + Seek> Parser<'_, R> {
         } else {
             length
         };
-        let end = self.base + offset + u64::from(stored);
-        if end > self.file_len {
-            return Err(self.corrupt(format!(
-                "entry {name:?} ends at {end}, beyond the end of the file ({})",
-                self.file_len
-            )));
-        }
+        // Where the data ends is not checked here: the entries of a master
+        // index live in other files. `Package::read_entry` checks it
+        // against the file it reads.
+        let _ = stored;
         Ok(Entry {
             key: normalize_name(&name),
             name,
@@ -452,6 +501,13 @@ impl<R: Read + Seek> Parser<'_, R> {
 fn c_string(raw: &[u8]) -> String {
     let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
     raw[..end].iter().map(|&b| char::from(b)).collect()
+}
+
+/// The most bytes a zlib stream of `stored` bytes can inflate to: deflate
+/// never does better than about 1032 to 1. A file that declares more is
+/// refused before anything is allocated for it.
+pub(crate) fn max_inflated(stored: usize) -> u64 {
+    (stored as u64).saturating_mul(1032).saturating_add(1024)
 }
 
 #[cfg(test)]
@@ -579,8 +635,13 @@ mod tests {
         let mut bytes = sample().build();
         let offset_pos = offset_field(&bytes, "default.game");
         bytes[offset_pos..offset_pos + 4].copy_from_slice(&0xFFFF_FFF0u32.to_le_bytes());
-        let err = Package::from_reader(Cursor::new(bytes), "range").unwrap_err();
-        assert!(matches!(err, Error::Corrupt { .. }), "{err}");
+        // An entry whose data is not in the file: the directory is read
+        // (a master index lists the files of other packages), reading
+        // the entry is an error, and nothing is allocated for it.
+        let pkg = Package::from_reader(Cursor::new(bytes), "range").unwrap();
+        let err = pkg.read_file("default.game").unwrap_err();
+        assert!(matches!(err, Error::Io(_)), "{err}");
+        assert_eq!(pkg.read_file("sounds\\beep.ogg").unwrap().len(), 5);
     }
 
     /// Position of the `Offset` field of the entry named `name` in a
@@ -658,5 +719,34 @@ mod tests {
         assert_eq!(c_string(b"abc\0def"), "abc");
         assert_eq!(c_string(b"abc"), "abc");
         assert_eq!(c_string(b"\xE9t\xE9"), "été");
+    }
+
+    #[test]
+    fn refuses_an_entry_declaring_more_than_its_stream_can_hold() {
+        let pkg = open(&sample());
+        let mut entry = pkg.find("scenes\\Room\\room.scene").unwrap().clone();
+        assert!(entry.is_compressed());
+        entry.length = u32::MAX; // about 4 GiB over a few stored bytes
+        let started = std::time::Instant::now();
+        assert!(matches!(pkg.read(&entry), Err(Error::Decompress { .. })));
+        assert!(started.elapsed().as_secs() < 5, "refused before inflating");
+    }
+
+    #[test]
+    fn still_inflates_a_highly_compressible_entry() {
+        let mut b = PackageBuilder::new("data");
+        b.add_file("zeros.bin", vec![0u8; 1 << 20]);
+        let pkg = open(&b);
+        let entry = pkg.find("zeros.bin").unwrap();
+        assert!(entry.is_compressed());
+        assert!(entry.stored_length() < 4096);
+        assert_eq!(pkg.read(entry).unwrap(), vec![0u8; 1 << 20]);
+    }
+
+    #[test]
+    fn max_inflated_is_generous_and_never_overflows() {
+        assert_eq!(max_inflated(0), 1024);
+        assert_eq!(max_inflated(10), 10 * 1032 + 1024);
+        assert!(max_inflated(usize::MAX) >= u64::from(u32::MAX));
     }
 }

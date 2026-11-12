@@ -13,6 +13,7 @@ files only (see the clean-room rule in [CONTRIBUTING.md](../../CONTRIBUTING.md))
 | Compiled scripts (`.script`) | [script.md](script.md) | Loader and disassembler in `luma-script` |
 | Game definition (`default.game`) and string tables (`string.tab`) | [game.md](game.md) | Implemented in `luma-formats` |
 | Actors (`.actor`) | [actor.md](actor.md) | Implemented in `luma-formats`; walking in `luma-adventure` |
+| Talk definitions (`.talk`) and sprite sets (`.spriteset`) | [talk.md](talk.md), [actor.md](actor.md#spriteset) | Implemented in `luma-formats`; played in `luma-adventure` |
 | Fonts (`.font`, bitmap and TrueType) and speech | [font.md](font.md) | Implemented in `luma-formats`; rendering and `Talk` in `luma-adventure` |
 | Windows and controls (`.window`), tiled images, inventory (`.def`, `.items`) | [window.md](window.md) | Implemented in `luma-formats`; display, input and the inventory in `luma-adventure` |
 | Scene geometry of 3D scenes (`.3ds`, `.geometry`) | [geometry.md](geometry.md) | Implemented in `luma-3d` (feature `3d`); the scene's 3D keys in `luma-formats` |

@@ -300,6 +300,16 @@ pub(crate) fn key(path: &str) -> String {
     path.replace('\\', "/").to_ascii_lowercase()
 }
 
+/// The file an image is read from: itself, or the engine's placeholder
+/// when it does not exist (`CBSurfaceStorage::AddSurface`).
+fn placeholder_for<'a>(vfs: &Vfs, image: &'a str) -> &'a str {
+    if !vfs.exists(image) && vfs.exists(crate::resources::INVALID_IMAGE) {
+        crate::resources::INVALID_IMAGE
+    } else {
+        image
+    }
+}
+
 fn texture_key(path: &str, color_key: Rgb) -> String {
     format!(
         "{}|{},{},{}",
@@ -316,9 +326,12 @@ impl SpriteBank {
         SpriteBank::default()
     }
 
-    /// Loads a sprite definition if it is not loaded yet. A missing or
-    /// broken sprite is recorded in [`SpriteBank::missing`], not an
-    /// error. Returns whether the sprite is available.
+    /// Loads a sprite definition if it is not loaded yet
+    /// (`CBSprite::LoadFile`). A file that does not exist is replaced by
+    /// the engine's placeholder image and the sprite loads; the miss is
+    /// recorded in [`SpriteBank::missing`] all the same, for the log. A
+    /// sprite file that cannot be parsed is recorded there too, and is
+    /// not available. Returns whether the sprite is available.
     pub fn add_sprite(&mut self, vfs: &Vfs, path: &str) -> bool {
         let k = key(path);
         if self.sprites.contains_key(&k) {
@@ -327,7 +340,13 @@ impl SpriteBank {
         if self.missing.iter().any(|(p, _)| key(p) == k) {
             return false;
         }
-        let sprite = if Sprite::is_image_path(path) {
+        let sprite = if !vfs.exists(path) && vfs.exists(crate::resources::INVALID_IMAGE) {
+            self.missing.push((
+                path.to_string(),
+                "file not found, the placeholder image is shown".to_string(),
+            ));
+            Sprite::from_image(crate::resources::INVALID_IMAGE)
+        } else if Sprite::is_image_path(path) {
             Sprite::from_image(path)
         } else {
             match vfs
@@ -352,6 +371,15 @@ impl SpriteBank {
         true
     }
 
+    /// Whether a loaded sprite has this `NAME` (the key of its `.sprite`
+    /// file), without regard to case. A sprite without a name, or one
+    /// that is not loaded, has none.
+    pub fn sprite_name_is(&self, path: &str, name: &str) -> bool {
+        self.sprites.get(&key(path)).is_some_and(|loaded| {
+            !loaded.sprite.name.is_empty() && loaded.sprite.name.eq_ignore_ascii_case(name)
+        })
+    }
+
     /// Decodes and uploads the images of every loaded sprite that has no
     /// texture yet. Safe to call every frame.
     pub fn upload(&mut self, vfs: &Vfs, renderer: &Renderer) {
@@ -368,7 +396,7 @@ impl SpriteBank {
                 continue;
             }
             let decoded = vfs
-                .read(&image)
+                .read(placeholder_for(vfs, &image))
                 .map_err(|e| e.to_string())
                 .and_then(|bytes| {
                     luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
@@ -415,9 +443,12 @@ impl SpriteBank {
             if self.missing.iter().any(|(p, _)| *p == path) {
                 return None;
             }
-            let decoded = vfs.read(path).map_err(|e| e.to_string()).and_then(|bytes| {
-                luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
-            });
+            let decoded = vfs
+                .read(placeholder_for(vfs, path))
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| {
+                    luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
+                });
             match decoded {
                 Ok(image) => {
                     self.masks.insert(k.clone(), Mask::of(&image));
@@ -704,10 +735,15 @@ impl SceneView {
     /// [`SceneView::upload`].
     pub fn load(vfs: &Vfs, path: &str) -> Result<SceneView> {
         let bytes = vfs.read(path)?;
-        let scene = Scene::parse(&bytes).map_err(|source| Error::Format {
-            path: path.to_string(),
-            source,
-        })?;
+        // The `TEMPLATE` files of the scene and of its parts are read
+        // where the keys stand (`CAdScene::LoadBuffer`).
+        let mut read = |file: &str| vfs.read(file).ok();
+        let scene = Scene::parse_with(&bytes, &mut luma_formats::Files::new(&mut read)).map_err(
+            |source| Error::Format {
+                path: path.to_string(),
+                source,
+            },
+        )?;
         let mut view = SceneView {
             scene,
             path: path.to_string(),
@@ -815,6 +851,9 @@ impl SceneView {
         for (r, talk) in &self.talks {
             paths.extend(talk.sprite.clone());
             paths.extend(talk.forced.clone());
+            if let Some(playback) = &talk.sentence.talk {
+                paths.extend(playback.def.sprite_paths().into_iter().map(str::to_string));
+            }
             if let Some(e) = self.entity(*r) {
                 paths.extend(e.talk_sprites.iter().cloned());
                 paths.extend(e.talk_special_sprites.iter().cloned());
@@ -1058,8 +1097,9 @@ impl SceneView {
     }
 
     /// Removes a talk sprite from an entity (`RemoveTalkSprite`), by file
-    /// name; an entity playing it goes back to its own sprite until the
-    /// next stance.
+    /// name; an entity playing it shows its own sprite in its place
+    /// (`m_TempSprite2 = m_Sprite`) until that sprite has played or the
+    /// sentence ends.
     pub fn remove_talk_sprite(&mut self, r: EntityRef, path: &str, special: bool) {
         let Some(entity) = self.entity_mut(r) else {
             return;
@@ -1069,12 +1109,14 @@ impl SceneView {
         } else {
             &mut entity.talk_sprites
         };
-        if let Some(i) = list.iter().position(|p| key(p) == key(path)) {
-            list.remove(i);
-        }
+        let Some(i) = list.iter().position(|p| key(p) == key(path)) else {
+            return;
+        };
+        list.remove(i);
+        let own = entity.sprite.clone();
         if let Some(talk) = self.talks.get_mut(&r) {
             if talk.sprite.as_deref().is_some_and(|p| key(p) == key(path)) {
-                talk.sprite = None;
+                talk.sprite = own;
             }
         }
     }
@@ -1170,6 +1212,8 @@ impl SceneView {
     /// The talk sprite of an entity for a stance
     /// (`CAdTalkHolder::GetTalkStance`): the special or generic sprite of
     /// that name, else a random generic one, else the entity's sprite.
+    /// The name of a talk sprite is the `NAME` of its `.sprite` file; a
+    /// sprite without one (a plain image) answers to no stance.
     fn talk_stance(&self, r: EntityRef, stance: Option<&str>, random: u32) -> Option<String> {
         let entity = self.entity(r)?;
         if let Some(name) = stance {
@@ -1177,7 +1221,7 @@ impl SceneView {
                 .talk_special_sprites
                 .iter()
                 .chain(&entity.talk_sprites)
-                .find(|s| sprite_name(s).eq_ignore_ascii_case(name));
+                .find(|s| self.bank.sprite_name_is(s, name));
             if let Some(path) = found {
                 return Some(path.clone());
             }
@@ -1198,6 +1242,37 @@ impl SceneView {
             if self.in_inactive_layer(r) {
                 continue;
             }
+            let mut definition_sprite_done = false;
+            // `m_Sentence->Update()`: the sprite the `.talk` definition
+            // gives for this moment replaces the talk stance
+            // (`m_TempSprite2`); an entity faces down for it.
+            if let Some(talk) = self.talks.get_mut(&r) {
+                let shown_done = talk.sprite.as_deref().filter(|p| {
+                    self.anims
+                        .get(&r)
+                        .is_some_and(|a| a.sprite == key(p) && a.finished)
+                });
+                if let Some(path) = shown_done {
+                    talk.sentence.note_sprite_finished(path);
+                }
+                let frame = talk
+                    .sentence
+                    .update_talk(timer, luma_formats::Direction::Down);
+                if let Some(crate::talk::TalkFrame {
+                    sprite: Some(path),
+                    reset,
+                    finished,
+                }) = frame
+                {
+                    if finished {
+                        // Played to its end: the stances take the frame.
+                        definition_sprite_done = true;
+                    } else if reset || self.anims.get(&r).is_none_or(|a| a.sprite != key(&path)) {
+                        self.anims.insert(r, AnimState::new(&path));
+                    }
+                    talk.sprite = Some(path);
+                }
+            }
             let (time_is_up, sprite_done) = {
                 let talk = &self.talks[&r];
                 let done = talk.sprite.as_deref().is_none_or(|p| {
@@ -1205,7 +1280,10 @@ impl SceneView {
                         .get(&r)
                         .is_some_and(|a| a.sprite == key(p) && a.finished)
                 });
-                (talk.sentence.time_is_up(timer), done)
+                (
+                    talk.sentence.time_is_up(timer),
+                    done || definition_sprite_done,
+                )
             };
             if time_is_up {
                 self.talks.remove(&r);
@@ -1607,11 +1685,17 @@ impl SceneView {
     }
 }
 
-/// The name of a sprite file, for talk stances: its file name without
-/// directory and extension.
-fn sprite_name(path: &str) -> &str {
-    let file = path.rsplit(['\\', '/']).next().unwrap_or(path);
-    file.rsplit_once('.').map_or(file, |(name, _)| name)
+/// Whether a sprite file loads, as `CBSprite::LoadFile` answers: a file
+/// that is not there does (the `invalid.bmp` placeholder takes its
+/// place), an image does, and a sprite definition does when it parses.
+pub(crate) fn sprite_file_loads(vfs: &Vfs, path: &str) -> bool {
+    if Sprite::is_image_path(path) {
+        return true;
+    }
+    match vfs.read(path) {
+        Ok(bytes) => Sprite::parse(&bytes).is_ok(),
+        Err(_) => true,
+    }
 }
 
 /// The regions of a scene's main layer containing a point, as

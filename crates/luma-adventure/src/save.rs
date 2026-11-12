@@ -37,7 +37,7 @@ use crate::world::World;
 pub const MAGIC: &[u8; 8] = b"LUMASAVE";
 
 /// The version of the file layout written.
-pub const VERSION: u32 = 17;
+pub const VERSION: u32 = 20;
 
 /// The extension of the slot files, `save000.dsv` and up.
 pub const SAVE_EXTENSION: &str = "dsv";
@@ -394,9 +394,9 @@ impl World {
     /// The directory the game was opened from.
     pub fn game_directory(&self) -> PathBuf {
         self.vfs
-            .directories()
-            .first()
-            .cloned()
+            .game_directory()
+            .map(Path::to_path_buf)
+            .or_else(|| self.vfs.directories().first().cloned())
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
@@ -456,8 +456,10 @@ impl World {
 
     /// The file of a slot (`GetSaveSlotFilename`).
     pub fn save_slot_path(&mut self, slot: i32) -> PathBuf {
+        // `SAVED_GAME_EXT` of the settings, `dsv` by default.
+        let extension = self.settings.save_extension().to_string();
         self.checked_save_directory()
-            .join(format!("save{slot:03}.{SAVE_EXTENSION}"))
+            .join(format!("save{slot:03}.{extension}"))
     }
 
     /// Whether a slot holds a saved game (`IsSaveSlotUsed`).
@@ -629,6 +631,7 @@ impl World {
                 }
             }
         }
+        self.restore_speech();
         if self.ui.frozen {
             self.sounds.audio.pause_all(state.music_frozen);
         }
@@ -726,6 +729,18 @@ impl World {
         for (_, item) in &self.inventory.items {
             images.extend(item.def.sprite.clone());
             images.extend(item.def.sprite_hover.clone());
+            // What a talking or animated item shows.
+            images.extend(item.def.talk.iter().cloned());
+            images.extend(item.def.talk_special.iter().cloned());
+            images.extend(item.anim_sprite.clone());
+            images.extend(item.talk_sprite.clone());
+            images.extend(item.forced_talk.clone());
+            if let Some(sentence) = &item.sentence {
+                fonts.extend(sentence.font.clone());
+                if let Some(talk) = &sentence.talk {
+                    images.extend(talk.def.sprite_paths().into_iter().map(str::to_string));
+                }
+            }
             fonts.extend(item.def.font.clone());
             cursors.extend(item.def.cursor.clone());
             cursors.extend(item.def.cursor_hover.clone());

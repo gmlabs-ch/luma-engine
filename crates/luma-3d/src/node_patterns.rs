@@ -327,7 +327,7 @@ mod tests {
         assert!(NodePatterns::parse(b"NOT_GEOMETRY { }").is_err());
         assert!(NodePatterns::parse(b"GEOMETRY { NODE { NAME = \"x\" COLOR = 1 } }").is_err());
         assert!(NodePatterns::parse(b"GEOMETRY { OTHER = 1 }").is_err());
-        assert!(NodePatterns::parse(b"GEOMETRY { NODE { NAME = ").is_err());
+        assert!(NodePatterns::parse(b"{ GEOMETRY").is_err());
         assert_eq!(NodePatterns::load(None), NodePatterns::standard());
         assert_eq!(
             NodePatterns::load(Some(b"GEOMETRY { OTHER = 1 }")),

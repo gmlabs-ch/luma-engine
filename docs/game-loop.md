@@ -12,8 +12,10 @@ resolution (the largest that keeps the window at most 1280 points wide,
 or `--scale <n>`; the frame is letterboxed when the window has another
 shape, see [rendering.md](rendering.md#coordinates)), or runs full
 screen (see [Window or full screen](#window-or-full-screen)), loads
-`default.game`, attaches the game's scripts and schedules its
-`STARTUP_SCENE`; `--load <slot>` or `--savegame <file>` then loads a
+`default.game` and attaches the game's scripts. No scene is loaded by
+the engine: the game's script opens the first one
+(`Game.ChangeScene(Game.StartupScene)`), `STARTUP_SCENE` being only the
+name kept for it. `--load <slot>` or `--savegame <file>` then loads a
 saved game before the first frame, as the original's `-savegame` does.
 Every frame then runs, in this order (`Runtime::tick`):
 
@@ -420,7 +422,9 @@ hidden over the window.
 An object's own cursor comes from its `CURSOR` key, or from `SetCursor`
 on the object; `false` when the sprite does not load, and the object is
 then left without a cursor, the old one being dropped first
-(`CBObject::SetCursor`). Every object has the methods: on the game they
+(`CBObject::SetCursor`). A file that is not there does load, as the
+placeholder image (see [formats/sprite.md](formats/sprite.md)); it is a
+definition that does not parse that fails. Every object has the methods: on the game they
 act on the normal cursor (`Game.SetCursor(file)` changes the `CURSOR`
 of the game file, `Game.RemoveCursor()` leaves none), on the scene on
 its `CURSOR`; items, regions, layers, waypoint groups and the response
@@ -659,24 +663,52 @@ A conversation's choices go through the **response box**
 (`RESPONSE_BOX` in the game file, a `.def` file with `FONT`,
 `FONT_HOVER`, `AREA`, `HORIZONTAL`, `SPACING`, `TEXT_ALIGN`,
 `VERTICAL_ALIGN`, `CURSOR` and a `WINDOW` with `prev` and `next`
-buttons), as the original engine's `CAdResponseBox` does. The script
+buttons), as the original engine's `CAdResponseBox` does. `TEXT_ALIGN`
+is `center`, `right` or (anything else) left; `VERTICAL_ALIGN` is `top`,
+`center` or (anything else, and by default) bottom. A choice is hovered
+and pressed in `FONT_HOVER`, the system font without one; `CURSOR` is
+the cursor of the icon choices. A box without `WINDOW`, or whose window
+does not load, lays its choices out in `AREA` on the screen; an area
+lower than a choice grows to its height. The script
 adds its choices with `Game.AddResponse(id, text)`,
 `AddResponseOnce` (not offered again in the current dialogue branch) or
 `AddResponseOnceGame` (never again), then `Game.GetResponse()` shows
 them and waits: one text button per choice in the box's fonts (or its
 icons), laid out in the area from the scroll offset, `prev` and `next`
-shown when they do not fit, the window exclusive meanwhile. The pick
+shown when they do not fit, the window exclusive meanwhile (the keys of
+the file are in [formats/window.md](formats/window.md#the-response-box)).
+The icons and the font a response names are loaded when it is added: one
+that does not load is logged (`CAdResponse::SetIcon failed for file`...)
+and left out, so a response whose icon does not load (a sprite file
+that does not parse) is a text choice and one whose font does not load
+uses the box's. A missing icon file loads, as the `invalid.bmp`
+placeholder, and makes an icon choice. The pick
 returns the choice's id to the script, sets `Game.LastResponse` and
 `LastResponseOrig`, and closes the box; without any choice left
 `GetResponse` returns `null` at once, and with a single one it returns
 it at once when asked to (`GetResponse(true)`). `StartDlgBranch` and
 `EndDlgBranch` name the branch the once-only choices are remembered in
 (qualified by the script file and event, as the original does; the
-innermost without a name); when the last branch ends they are
-forgotten. `ResetResponse(id)` forgets one, `ClearResponses` drops the
+innermost without a name). Both kinds of once-only choice are
+remembered as a pair, the id and the innermost branch open when it was
+chosen (`CAdResponseContext`; no branch is a context of its own), and a
+choice is left out only when its id was chosen in the branch open now,
+the names compared without regard to case: the same id offered from
+another branch is another choice, also for `AddResponseOnceGame`. When
+the last branch ends the once-per-branch pairs are forgotten; the
+once-per-game pairs last until the game is restarted.
+`ResetResponse(id)` forgets the pair of the branch open now, in both
+lists (no id is -1), `ClearResponses` drops the
 pending ones, `GetNumResponses` counts them after weeding,
 `Game.ResponsesVisible` says whether the box waits, and
-`GetResponsesWindow` and `LoadResponseBox` serve the box itself.
+`GetResponsesWindow` and `LoadResponseBox` serve the box itself
+(`GetResponsesWindow` is `null` for a box without `WINDOW`; the box
+`LoadResponseBox` replaces goes with its window even when the new file
+does not load).
+Without a response box `AddResponse` and its variants, `GetResponse`
+and `GetNumResponses` raise a script runtime error (`response box is
+not defined`) and do nothing; `Game.LastResponse` and
+`LastResponseOrig` are empty strings until a choice is made.
 
 The windows and their controls are found under the mouse even when
 `Game.Interactive` is off (`NonIntMouseEvents`); the scene's objects are
@@ -697,7 +729,7 @@ and a front-end can set them through `World::accessibility_mut`.
 Scripts read them as `Game.AccTTSEnabled`, `AccTTSTalk`,
 `AccTTSCaptions`, `AccTTSKeypress`, `AccKeyboardEnabled`,
 `AccKeyboardCursorSkip` and `AccKeyboardPause`, read only, as in the
-original. A game whose `default.game` says `ALLOW_ACCESSIBILITY_TAB =
+original. A game whose `startup.settings` says `ALLOW_ACCESSIBILITY_TAB =
 FALSE` keeps speech, keyboard play and the pause off whatever the file
 says, as the original forces them off.
 
