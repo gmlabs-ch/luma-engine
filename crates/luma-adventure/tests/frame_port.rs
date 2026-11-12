@@ -1074,3 +1074,242 @@ result.moverX = mover.X;
     assert_eq!(result(&runtime, "moverX"), Value::Int(5));
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// A window at (2, 2): a pixel-perfect button whose 8x8 image is centred
+/// in its 20x20 rectangle, an animated button with a hover image, and an
+/// entity container at (30, 4) whose entity file says X=50 Y=50.
+const PANEL: &str = "WINDOW {
+  NAME=\"panel\" X=2 Y=2 WIDTH=60 HEIGHT=44 SCRIPT=\"panel.script\"
+  BUTTON { NAME=\"exact\" X=0 Y=0 WIDTH=20 HEIGHT=20 IMAGE=\"red.png\" CENTER_IMAGE=TRUE PIXEL_PERFECT=TRUE PARENT_NOTIFY=TRUE }
+  BUTTON { NAME=\"anim\" X=0 Y=24 WIDTH=8 HEIGHT=8 IMAGE=\"blink.sprite\" IMAGE_HOVER=\"green.png\" }
+  ENTITY_CONTAINER { NAME=\"box\" X=30 Y=4 ENTITY=\"badge.entity\" }
+}";
+
+fn panel(script: &str) -> (std::path::PathBuf, Runtime) {
+    let (dir, runtime, log) = start(
+        script,
+        &[
+            File::Text("panel.window", PANEL),
+            File::Text("blink.sprite", BLINK),
+            File::Text(
+                "badge.entity",
+                "ENTITY { NAME=\"badge\" X=50 Y=50 SPRITE=\"green.png\" SCRIPT=\"badge.script\" }",
+            ),
+            File::Script("badge.script", "on \"Never\" { }"),
+            File::Script(
+                "panel.script",
+                r#"
+global result;
+on "exact" {
+  result.presses = result.presses + 1;
+}
+"#,
+            ),
+        ],
+    );
+    no_errors(&log);
+    (dir, runtime)
+}
+
+const PANEL_SCRIPT: &str = r#"
+global result = new Object();
+result.presses = 0;
+global panel = Game.LoadWindow("panel.window");
+result.window = panel;
+result.exact = panel.GetControl("exact");
+result.anim = panel.GetControl("anim");
+global box = panel.GetControl("box");
+global badge = box.GetEntity();
+result.badge = badge;
+result.independent = badge.SceneIndependent;
+"#;
+
+#[test]
+fn a_pixel_perfect_button_takes_the_mouse_where_its_image_is_drawn() {
+    let (dir, mut runtime) = panel(PANEL_SCRIPT);
+    let exact = object(&runtime, "exact");
+    let window = object(&runtime, "window");
+    // The 8x8 image is centred in the 20x20 button at (2, 2): drawn at
+    // (8, 8). The corner of the button's rectangle is the window's.
+    assert_eq!(object_at(&mut runtime, 12, 12), Some(exact));
+    assert_eq!(object_at(&mut runtime, 4, 4), Some(window));
+    assert_eq!(object_at(&mut runtime, 17, 12), Some(window));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_buttons_hidden_images_start_again_and_press_needs_a_live_button() {
+    let script = format!(
+        "{PANEL_SCRIPT}{}",
+        r#"
+on "PressDisabled" {
+  var b = panel.GetControl("exact");
+  b.Disabled = true;
+  b.Press();
+}
+on "PressEnabled" {
+  var b = panel.GetControl("exact");
+  b.Disabled = false;
+  b.Press();
+}
+on "Align" {
+  var b = panel.GetControl("exact");
+  b.TextAlign = 7;
+  result.align = b.TextAlign;
+  var made = panel.CreateButton("made");
+  result.madeAlign = made.TextAlign;
+}
+"#
+    );
+    let (dir, mut runtime) = panel(&script);
+    let anim = object(&runtime, "anim");
+    let frame = |runtime: &Runtime| {
+        runtime
+            .world
+            .control(anim)
+            .and_then(|c| c.anim.as_ref())
+            .map_or(0, |a| a.current_frame)
+    };
+    // The image runs while it shows; under the mouse the hover image
+    // takes its place and the plain one is put back to its first frame.
+    runtime.mouse_move(60, 44);
+    runtime.tick(16);
+    runtime.tick(50);
+    assert_eq!(frame(&runtime), 1);
+    runtime.mouse_move(4, 28);
+    runtime.tick(1);
+    runtime.tick(1);
+    assert_eq!(frame(&runtime), 0, "reset while the hover image shows");
+
+    // `Press()` does nothing on a disabled button, and fires an enabled
+    // one a tenth of a second later.
+    no_errors(&raise(&mut runtime, "PressDisabled"));
+    for _ in 0..3 {
+        runtime.tick(60);
+    }
+    assert_eq!(result(&runtime, "presses"), Value::Int(0));
+    no_errors(&raise(&mut runtime, "PressEnabled"));
+    for _ in 0..3 {
+        runtime.tick(60);
+    }
+    assert_eq!(result(&runtime, "presses"), Value::Int(1));
+
+    // An alignment outside 0..2 is left; a button made by a script is
+    // centred.
+    no_errors(&raise(&mut runtime, "Align"));
+    assert_eq!(result(&runtime, "align"), Value::Int(0));
+    assert_eq!(result(&runtime, "madeAlign"), Value::Int(2));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_containers_entity_stands_at_the_container_and_goes_with_it() {
+    let script = format!(
+        "{PANEL_SCRIPT}{}",
+        r#"
+on "Read" {
+  result.x = badge.X;
+  result.y = badge.Y;
+}
+on "Bad" {
+  result.bad = box.SetEntity("missing.entity");
+  result.left = box.GetEntity();
+  result.old = Game.ValidObject(badge);
+}
+on "Reload" {
+  result.reloaded = box.SetEntity("badge.entity");
+  badge = box.GetEntity();
+  result.badge = badge;
+}
+on "Unload" {
+  Game.UnloadObject(panel);
+  result.gone = Game.ValidObject(badge);
+}
+"#
+    );
+    let (dir, mut runtime) = panel(&script);
+    assert_eq!(result(&runtime, "independent"), Value::Bool(true));
+    let badge = object(&runtime, "badge");
+    // The container is at (30, 4) of the window at (2, 2): the entity
+    // stands there, not 50 pixels further as its file says.
+    runtime.tick(16);
+    no_errors(&raise(&mut runtime, "Read"));
+    assert_eq!(result(&runtime, "x"), Value::Int(32));
+    assert_eq!(result(&runtime, "y"), Value::Int(6));
+    assert_eq!(object_at(&mut runtime, 34, 8), Some(badge));
+    // A file that does not load leaves the container empty: the old
+    // entity went first.
+    no_errors(&raise(&mut runtime, "Bad"));
+    assert_eq!(result(&runtime, "bad"), Value::Bool(false));
+    assert_eq!(result(&runtime, "left"), Value::Null);
+    assert_eq!(result(&runtime, "old"), Value::Bool(false));
+    // The window takes its container's entity and its scripts with it.
+    no_errors(&raise(&mut runtime, "Reload"));
+    assert_eq!(result(&runtime, "reloaded"), Value::Bool(true));
+    let badge = object(&runtime, "badge");
+    assert!(!runtime.engine.scripts_of(badge).is_empty());
+    no_errors(&raise(&mut runtime, "Unload"));
+    assert_eq!(result(&runtime, "gone"), Value::Bool(false));
+    assert!(runtime.engine.scripts_of(badge).is_empty());
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_window_shows_its_title_only_with_a_font_of_its_own() {
+    let (dir, mut runtime, log) = start(
+        r#"
+global result = new Object();
+Game.LoadWindow("plain.window");
+Game.LoadWindow("titled.window");
+"#,
+        &[
+            File::Text(
+                "plain.window",
+                "WINDOW { NAME=\"plain\" X=0 Y=0 WIDTH=30 HEIGHT=20 TITLE=\"MMM\" TITLE_RECT { 0, 0, 30, 10 } }",
+            ),
+            File::Text(
+                "titled.window",
+                "WINDOW { NAME=\"titled\" X=0 Y=24 WIDTH=30 HEIGHT=20 FONT=\"sys.font\" TITLE=\"MMM\" TITLE_RECT { 0, 0, 30, 10 } }",
+            ),
+        ],
+    );
+    no_errors(&log);
+    runtime.tick(16);
+    if let Some(frame) = render(&mut runtime) {
+        // The font's image is white: a glyph is a white block.
+        assert_eq!(rgb(&frame, 2, 2), (0, 0, 0), "no font, no title");
+        assert_eq!(rgb(&frame, 2, 26), (255, 255, 255), "the title");
+    }
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn buttons_are_dead_while_the_game_is_not_interactive_and_runs() {
+    let script = format!(
+        "{PANEL_SCRIPT}{}",
+        r#"
+on "Busy" {
+  Game.Interactive = false;
+}
+"#
+    );
+    let (dir, mut runtime) = panel(&script);
+    let click = |runtime: &mut Runtime| {
+        runtime.mouse_move(12, 12);
+        runtime.tick(16);
+        runtime.mouse_left_down();
+        runtime.tick(16);
+        runtime.mouse_left_up();
+        runtime.tick(16);
+        runtime.tick(16);
+        runtime.tick(16);
+    };
+    click(&mut runtime);
+    assert_eq!(result(&runtime, "presses"), Value::Int(1));
+    // Not interactive: the button neither hovers nor fires
+    // (`m_Interactive || m_State == GAME_SEMI_FROZEN`).
+    no_errors(&raise(&mut runtime, "Busy"));
+    click(&mut runtime);
+    assert_eq!(result(&runtime, "presses"), Value::Int(1));
+    std::fs::remove_dir_all(dir).ok();
+}

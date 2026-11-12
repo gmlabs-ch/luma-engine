@@ -423,6 +423,17 @@ impl HitArea {
         }
     }
 
+    /// A polygon given in screen coordinates (the region of a window
+    /// container's entity).
+    pub(crate) fn polygon(owner: NativeId, points: Vec<Point>) -> HitArea {
+        HitArea {
+            owner,
+            layer_offset: (0, 0),
+            shape: HitShape::Polygon(points),
+            clip: None,
+        }
+    }
+
     /// The projected bounding rectangle of a 3D actor, in the
     /// coordinates of the layer it is drawn in.
     #[cfg_attr(not(feature = "3d"), allow(dead_code))]

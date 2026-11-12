@@ -84,7 +84,7 @@ height. A `BACK` tiled image then rounds the size down to whole tiles.
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `BACK_INACTIVE`, `IMAGE_INACTIVE`, `FONT_INACTIVE` | string | | Used instead of `BACK`, `IMAGE`, `FONT` while the window is not the focused one. |
-| `TITLE` | string | `""` | Text drawn in `TITLE_RECT` with the window's font; also the window's `Text` property. |
+| `TITLE` | string | `""` | Text drawn in `TITLE_RECT` with the window's own `FONT` (`FONT_INACTIVE` while it is not focused); a window without a font draws no title, there is no fall back to the system font. Also the window's `Text` property. |
 | `TITLE_ALIGN` | `left`, `right`, `center` | `left` | Alignment of the title. |
 | `TITLE_RECT` | `{ left, top, right, bottom }` | empty | Where the title is drawn, relative to the window; no title without it. |
 | `DRAG_RECT` | `{ left, top, right, bottom }` | empty | The area by which the mouse drags the window. |
@@ -98,7 +98,7 @@ height. A `BACK` tiled image then rounds the size down to whole tiles.
 | `ALPHA_COLOR` | `r, g, b` | | A colour multiplied with the window and its controls. |
 | `ALPHA` | int | `255` | Its opacity. |
 | `BUTTON`, `STATIC`, `EDIT`, `WINDOW` | block | | A control, in drawing order. |
-| `ENTITY_CONTAINER` | block | | A control showing an entity: `NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, and `ENTITY`, an `.entity` file (an `ENTITY` block as in a scene). The entity is drawn at the container's position with its own sprite and animation, takes the mouse through its sprite when it is active and registrable and the container is enabled, and its own scripts get the mouse events; `GetEntity` hands it to scripts, `SetEntity` loads another file. OpenQuest's verb bar is made of them. The entity's scripts do not pause when the game freezes unless a script sets the container's `Freezable` to `true`; `CreateEntityContainer(name)` on a window makes an empty one at runtime. |
+| `ENTITY_CONTAINER` | block | | A control showing an entity: `NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, and `ENTITY`, an `.entity` file (an `ENTITY` block as in a scene). The entity stands at the container's position, whatever the `X` and `Y` of its file (its `X` and `Y` read that screen position), with its own sprite and animation; it takes the mouse through its `REGION` (in screen coordinates) and its sprite when it is active and registrable and the container is enabled, is not updated while the container is hidden, and its own scripts get the mouse events; `GetEntity` hands it to scripts, `SetEntity` loads another file (the old entity and its scripts go first, so a file that does not load leaves the container empty); the entity's `SceneIndependent` is on, and it goes with its container when the window is unloaded. OpenQuest's verb bar is made of them. The entity's scripts do not pause when the game freezes unless a script sets the container's `Freezable` to `true`; `CreateEntityContainer(name)` on a window makes an empty one at runtime. |
 
 A window with a `TITLE` but no `TITLE_RECT` shows no title. The title
 is laid out in the rectangle's width and height
@@ -118,15 +118,23 @@ whose size is `0` after the correction has the width of its image or
 | `TEXT` | string | | The label, drawn centred vertically. |
 | `TEXT_ALIGN` | `left`, `right`, `center` | `center` | Alignment of the label. |
 | `CENTER_IMAGE` | bool | `FALSE` | The image is centred in the button instead of drawn at its corner. |
-| `PRESSED` | bool | `FALSE` | Stays drawn pressed. |
+| `PRESSED` | bool | `FALSE` | Stays drawn in its pressed state (images, background, font), without the one-pixel shift of a real press. |
 | `FOCUSABLE` | bool | `FALSE` | Can take the keyboard focus. |
-| `PIXEL_PERFECT` | bool | `FALSE` | Only the opaque pixels of the image catch the mouse; else the whole rectangle does. |
+| `PIXEL_PERFECT` | bool | `FALSE` | Only the opaque pixels of the image drawn catch the mouse (the state's image, else the plain one, where it is drawn: centred with `CENTER_IMAGE`, shifted while pressed); a button without a plain `IMAGE` also takes the mouse over its whole rectangle, as every button does without this key. |
 
 The state shown, in order: disabled; pressed (the mouse is held on it,
-or `PRESSED`); hovered (it is the active object, while the game is
-interactive); focused; normal. A state without its own image, background
-or font uses the normal one. Pressed, the image and the text shift by
-one pixel. The height of a button with a text is at least the text's
+`Press()` was called, or `PRESSED`); hovered (it is the active object,
+while the game is interactive or the response box waits for a pick: a
+button is dead while `Game.Interactive` is off otherwise); focused;
+normal. A state without its own image, background or font uses the
+normal one. While the mouse holds it, and for the tenth of a second
+after `Press()`, the text shifts by one pixel, and the image too when
+the button shows a background. The images of the states not shown are
+put back to their first frame, so an animated image starts again each
+time its state comes back. `Press()` does nothing on a hidden or
+disabled button. A label is centred unless `TEXT_ALIGN` says otherwise
+(also for a button a script creates); a `TextAlign` outside 0..2 set by
+a script is left. The height of a button with a text is at least the text's
 height; a button without image nor text is 100 by 100.
 
 ## `STATIC`
@@ -195,8 +203,10 @@ that the image fills any size.
 A tile left empty is a third of the image. A tiled image of width `W`
 and height `H` draws `(W - left - right) / middle` columns and
 `(H - top - bottom) / middle` rows of the middle tile, rounding down
-(the engine advances the rows by the tile's width, which only matters
-for non-square middle tiles). `CorrectSize` reduces a control to the size
+(the original advances the rows by the middle tile's width, a slip
+that misplaces them when that tile is not square; Luma advances by its
+height). The right edge of the middle rows is placed after
+`MIDDLE_LEFT`'s width, the right corners after `UP_LEFT`'s. `CorrectSize` reduces a control to the size
 those tiles cover.
 
 ## Display and input
@@ -210,7 +220,7 @@ inventory, before the sentences and the cursor. A window shows its
 `_INACTIVE` background, image and font while it is not the focused one.
 
 A visible window that is not `TRANSPARENT` is an active object over its
-whole rectangle (through its image's pixels when it has one); its
+whole rectangle (through the pixels of the image it shows when it has one: `IMAGE_INACTIVE` while it is not focused); its
 controls are drawn after it, offset by its position, and a control
 drawn later is found first under the mouse. A button is an active
 object over its rectangle unless `PIXEL_PERFECT`. A click on a button

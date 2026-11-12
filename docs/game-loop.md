@@ -678,10 +678,13 @@ pending ones, `GetNumResponses` counts them after weeding,
 `Game.ResponsesVisible` says whether the box waits, and
 `GetResponsesWindow` and `LoadResponseBox` serve the box itself.
 
-While the box waits (the original's semi-frozen state), and while an
-exclusive window is up, the windows and their controls take the mouse
-even when `Game.Interactive` is off, so a choice can be picked during
-the actors' lines; the scene's objects do not.
+The windows and their controls are found under the mouse even when
+`Game.Interactive` is off (`NonIntMouseEvents`); the scene's objects are
+not. A button however hovers and fires only while the game is
+interactive or the box waits (the original's semi-frozen state, which
+only the response box sets), so a choice can be picked during the
+actors' lines, and a system-exclusive window, which makes the game
+interactive while it freezes it, works as a menu.
 
 ## Accessibility
 

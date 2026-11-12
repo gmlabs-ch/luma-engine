@@ -342,7 +342,8 @@ shadow image and light position every object keeps (`SetShadowImage`,
 sound keeps for its later plays and moved the sound event from the
 sound to its object. Version 17, after 16, added the cursor of its own
 that every object keeps (`SetCursor` on an item, a region, a layer, a
-waypoint group, the response box).
+waypoint group, the response box) and the regions an entity stood in
+when it last moved, for its `ActorEntry` and `ActorLeave` events.
 
 ## Checking a game
 

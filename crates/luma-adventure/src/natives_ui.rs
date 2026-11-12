@@ -202,7 +202,7 @@ impl World {
                     },
                     ControlKind::Button(b) => match name {
                         "TextAlign" => {
-                            b.text_align = TextAlign::from_code(int);
+                            b.text_align = text_align_of(int);
                             true
                         }
                         "Focusable" => {
@@ -221,11 +221,16 @@ impl World {
                     },
                     ControlKind::Static(s) => match name {
                         "TextAlign" => {
-                            s.text_align = TextAlign::from_code(int);
+                            s.text_align = text_align_of(int);
                             true
                         }
                         "VerticalAlign" => {
-                            s.vertical_align = VerticalAlign::from_code(int);
+                            // A code outside 0..2 is the top (0).
+                            s.vertical_align = if (0..=2).contains(&int) {
+                                VerticalAlign::from_code(int)
+                            } else {
+                                VerticalAlign::from_code(0)
+                            };
                             true
                         }
                         _ => false,
@@ -406,7 +411,11 @@ impl World {
                     v => Some(v.get_string(self)),
                 };
                 let kind = match name {
-                    "CreateButton" => ControlKind::Button(Box::default()),
+                    // A button's label is centred (`CUIButton::CUIButton`).
+                    "CreateButton" => ControlKind::Button(Box::new(crate::ui::ButtonState {
+                        text_align: TextAlign::Center,
+                        ..Default::default()
+                    })),
                     "CreateStatic" => ControlKind::Static(StaticState::default()),
                     "CreateEditor" => ControlKind::Edit(Box::default()),
                     _ => ControlKind::Window(Box::default()),
@@ -562,5 +571,15 @@ impl World {
         }
         w.widgets.insert(to.min(w.widgets.len()), moved);
         true
+    }
+}
+
+/// The alignment of a `TextAlign` code set by a script: a code outside
+/// 0..2 is left (0), as the original resets it.
+fn text_align_of(code: i32) -> TextAlign {
+    if (0..=2).contains(&code) {
+        TextAlign::from_code(code)
+    } else {
+        TextAlign::Left
     }
 }

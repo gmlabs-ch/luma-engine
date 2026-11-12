@@ -552,10 +552,10 @@ impl World {
         self.interactive
     }
 
-    /// Whether a window holds the game (`GAME_SEMI_FROZEN`,
-    /// `GAME_FROZEN`): an exclusive window is up or the response box
-    /// waits for a pick. Clicks then reach the windows even while the
-    /// game is not interactive.
+    /// Whether a window holds the game: an exclusive window is up or
+    /// the response box waits for a pick. Of these only the response box
+    /// is the original's `GAME_SEMI_FROZEN` ([`World::is_running`] and
+    /// the buttons' hover rule test it alone).
     pub fn semi_frozen(&self) -> bool {
         self.responses_visible()
             || self.ui.controls.values().any(|c| {
