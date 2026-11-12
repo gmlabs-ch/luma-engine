@@ -70,6 +70,23 @@ impl Floor<'_> {
         walkable
     }
 
+    /// [`Floor::is_walkable_at`] without the other objects' polygons
+    /// (`IsWalkableAt(x, y)` with its default arguments): inside a
+    /// walkable region of the main layer that no earlier `BLOCKED`
+    /// region overrides.
+    pub fn is_walkable_on_regions(&self, x: i32, y: i32) -> bool {
+        let mut walkable = false;
+        for region in self.scene.main_layer().into_iter().flat_map(Layer::regions) {
+            if region.active && !region.decoration && region.contains(x, y) {
+                if region.blocked {
+                    return false;
+                }
+                walkable = true;
+            }
+        }
+        walkable
+    }
+
     /// The length of the straight line between two points when nothing
     /// blocks it (`CAdScene::GetPointsDist`): the line is sampled one
     /// pixel at a time along its longer axis, and its length is that
@@ -168,7 +185,10 @@ impl Floor<'_> {
             (_, Some(oy)) => corrected.y += oy,
             (None, None) => {}
         }
-        if self.is_walkable_at(corrected.x, corrected.y) {
+        // The last test does not look at the other objects (the
+        // original calls `IsWalkableAt` with its default arguments): a
+        // corrected point inside another object's polygon is kept.
+        if self.is_walkable_on_regions(corrected.x, corrected.y) {
             corrected
         } else {
             self.correct_target_along_line(start, corrected)

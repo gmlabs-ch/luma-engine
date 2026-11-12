@@ -568,7 +568,10 @@ impl World {
         match name {
             "Name" => self.name = value.get_string(self),
             "Caption" => self.caption = value.get_string(self),
-            "Interactive" => self.interactive = value.get_bool(self),
+            "Interactive" => {
+                let interactive = value.get_bool(self);
+                self.set_interactive(interactive);
+            }
             "MainObject" => self.main_object = value.as_native(),
             "Subtitles" => self.subtitles = value.get_bool(self),
             "SubtitlesSpeed" => self.subtitles_speed = value.get_int(self),
@@ -631,11 +634,19 @@ impl World {
         Some(match name {
             "ChangeScene" => {
                 let path = arg(0).get_string(self);
+                // Both fades default to on (`valFadeOut->IsNULL()?true`).
+                let fade_out = match arg(1) {
+                    Value::Null => true,
+                    v => v.get_bool(self),
+                };
                 let fade_in = match arg(2) {
                     Value::Null => true,
                     v => v.get_bool(self),
                 };
-                self.schedule_scene(&path, fade_in);
+                self.schedule_or_change_scene(ctx.engine, &path, fade_in);
+                if fade_out {
+                    self.start_fade_out_transition();
+                }
                 Return::null()
             }
             "PlayTheora" | "PlayVideo" => {
@@ -1022,7 +1033,15 @@ impl World {
                     arg(2).get_int(self),
                     arg(3).get_int(self),
                 );
-                self.scene_viewport = Some((x, y, w.max(0), h.max(0)));
+                // A size of zero or less is the screen's, and the
+                // rectangle is kept on the screen (`CBViewport::SetRect`).
+                let (sw, sh) = (self.settings().width as i32, self.settings().height as i32);
+                let w = if w <= 0 { sw } else { w };
+                let h = if h <= 0 { sh } else { h };
+                let (left, top) = (x.max(0), y.max(0));
+                let (right, bottom) = (x.saturating_add(w).min(sw), y.saturating_add(h).min(sh));
+                self.scene_viewport =
+                    Some((left, top, (right - left).max(0), (bottom - top).max(0)));
                 Return::value(true)
             }
             "QueryItem" => Return::value(native_or_null(match arg(0) {
@@ -1176,7 +1195,7 @@ impl World {
             "NumWaypointGroups" => {
                 Value::Int(view.map_or(0, |v| v.scene.waypoint_groups.len() as i32))
             }
-            "NumFreeNodes" => Value::Int(view.map_or(0, |v| v.scene.free_entities.len() as i32)),
+            "NumFreeNodes" => Value::Int(self.scene_free_objects().len() as i32),
             "MainLayer" => native_or_null(
                 view.and_then(|v| v.scene.layers.iter().rposition(|l| l.main))
                     .and_then(|i| self.layer_id(i)),
@@ -1208,12 +1227,22 @@ impl World {
                     view.scene.name = name;
                 }
             }
+            // The value is a point to centre the view on, kept inside
+            // the scene: `max(0, v - viewport/2)`, then at most `scene -
+            // viewport` (which is negative for a scene smaller than its
+            // viewport, as in the original).
             "OffsetX" => {
-                self.offset_x = value.get_int(self);
+                let (_, _, vw, _) = self.viewport();
+                let width = self.scene().map_or(0, |v| v.scene.width());
+                let offset = value.get_int(self).saturating_sub(vw / 2).max(0);
+                self.offset_x = offset.min(width - vw);
                 self.target_offset_x = self.offset_x;
             }
             "OffsetY" => {
-                self.offset_y = value.get_int(self);
+                let (_, _, _, vh) = self.viewport();
+                let height = self.scene().map_or(0, |v| v.scene.height());
+                let offset = value.get_int(self).saturating_sub(vh / 2).max(0);
+                self.offset_y = offset.min(height - vh);
                 self.target_offset_y = self.offset_y;
             }
             "AutoScroll" => self.auto_scroll = value.get_bool(self),
@@ -1253,7 +1282,21 @@ impl World {
             }
             "GetNode" => {
                 let node_name = arg(0).get_string(self);
-                Return::value(native_or_null(self.find_node(&node_name)))
+                // `GetNodeByName`: the layers' nodes, the free entities,
+                // then the waypoint groups.
+                let found = match self.find_node(&node_name) {
+                    Some(id) => Some(id),
+                    None => self
+                        .scene()
+                        .and_then(|v| {
+                            v.scene
+                                .waypoint_groups
+                                .iter()
+                                .position(|g| g.name.eq_ignore_ascii_case(&node_name))
+                        })
+                        .and_then(|i| self.waypoint_group_object(i)),
+                };
+                Return::value(native_or_null(found))
             }
             "GetLayer" => {
                 let id = match arg(0) {
@@ -1272,20 +1315,20 @@ impl World {
                 };
                 Return::value(native_or_null(id))
             }
+            // The scene's free objects: its free entities and the
+            // actors loaded into it (`m_Objects`).
             "GetFreeNode" => {
+                let objects = self.scene_free_objects();
                 let id = match arg(0) {
                     Value::Int(i) => usize::try_from(i)
                         .ok()
-                        .filter(|&i| {
-                            self.scene()
-                                .is_some_and(|v| i < v.scene.free_entities.len())
-                        })
-                        .and_then(|i| self.node_id(EntityRef::Free(i))),
+                        .and_then(|i| objects.get(i).copied()),
                     other => {
                         let node_name = other.get_string(self);
-                        self.scene()
-                            .and_then(|v| v.find_free(&node_name))
-                            .and_then(|i| self.node_id(EntityRef::Free(i)))
+                        objects.iter().copied().find(|id| {
+                            self.free_object_name(*id)
+                                .is_some_and(|n| n.eq_ignore_ascii_case(&node_name))
+                        })
                     }
                 };
                 Return::value(native_or_null(id))
@@ -1364,7 +1407,8 @@ impl World {
             "IsPointInViewport" => {
                 let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
                 let (vx, vy, vw, vh) = self.viewport();
-                Return::value(x >= vx && y >= vy && x < vx + vw && y < vy + vh)
+                // Edges included (`X<=Left+Width`, `Y<=Top+Height`).
+                Return::value(x >= vx && y >= vy && x <= vx + vw && y <= vy + vh)
             }
             "GetWaypointGroup" => {
                 let index = usize::try_from(arg(0).get_int(self)).ok();
@@ -1479,6 +1523,11 @@ impl World {
         let Some(entity) = view.entity(r) else {
             return 0;
         };
+        // An entity with a region and no sprite is as high as the
+        // region's bounding rectangle (`CAdEntity::GetHeight`).
+        if let (Some(region), None) = (&entity.region, &entity.sprite) {
+            return region.bounds().map_or(0, |b| b.bottom - b.top);
+        }
         // The sprite being shown (a talk sprite, a played animation), as
         // the frame index is its own; else the entity's sprite.
         let shown = view.shown_sprite(r);
@@ -1707,22 +1756,38 @@ impl World {
             }
             return true;
         }
+        // `CBObject::ScSetProperty`: each of `X` and `Y` is followed by
+        // `AfterMove`, which raises the region events for entities too.
+        if name == "X" || name == "Y" {
+            let Some(e) = self.entity_def_mut(r) else {
+                return false;
+            };
+            if name == "X" {
+                e.x = int;
+            } else {
+                e.y = int;
+            }
+            if let Some(id) = self.node_id(r) {
+                self.object_moved(id);
+            }
+            return true;
+        }
         let Some(e) = self.entity_def_mut(r) else {
             return false;
         };
         match name {
             "Name" => e.name = text,
             "Caption" => e.caption = caption,
-            "X" => e.x = int,
-            "Y" => e.y = int,
             "Registrable" | "Interactive" => e.interactive = flag,
             "Zoomable" | "Scalable" => e.scalable = flag,
             "Rotatable" => e.rotatable = flag,
             "AlphaColor" => e.tint = Some(color_of(int)),
             "BlendMode" => e.blend_mode = BlendMode::from_int(int),
-            "Scale" => e.scale = if is_null { None } else { Some(float as f32) },
-            "ScaleX" => e.scale_x = if is_null { None } else { Some(float as f32) },
-            "ScaleY" => e.scale_y = if is_null { None } else { Some(float as f32) },
+            // A negative scale is "not set", as `null` is (the original
+            // keeps -1 for both and reads any negative value as null).
+            "Scale" => e.scale = Some(float as f32).filter(|s| !is_null && *s >= 0.0),
+            "ScaleX" => e.scale_x = Some(float as f32).filter(|s| !is_null && *s >= 0.0),
+            "ScaleY" => e.scale_y = Some(float as f32).filter(|s| !is_null && *s >= 0.0),
             "RelativeScale" => e.relative_scale = float as f32,
             "Rotate" => e.rotate = if is_null { None } else { Some(float as f32) },
             "RelativeRotate" => e.relative_rotate = float as f32,
@@ -1757,6 +1822,10 @@ impl World {
                 if let Some(e) = self.entity_def_mut(r) {
                     e.x = x;
                     e.y = y;
+                }
+                // `CBObject::SkipTo` ends with `AfterMove`.
+                if let Some(id) = self.node_id(r) {
+                    self.object_moved(id);
                 }
                 Return::null()
             }

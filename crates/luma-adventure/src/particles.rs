@@ -812,7 +812,10 @@ impl Emitter {
         let border = if self.border.is_empty() {
             Border::default()
         } else {
-            let shrink = |thickness: i32| thickness - (thickness as f32 * pos_z / 100.0) as i32;
+            // `int Thickness = T - (float)T * PosZ / 100.0f`: the whole
+            // difference is truncated.
+            let shrink =
+                |thickness: i32| (thickness as f32 - thickness as f32 * pos_z / 100.0) as i32;
             Border {
                 left: self.border.left + shrink(self.border_thickness_left),
                 right: self.border.right - shrink(self.border_thickness_right),
@@ -1234,7 +1237,7 @@ mod tests {
             assert_eq!(p.life_time, (2000.0 - p.z * 10.0) as i32);
             assert_eq!(p.alpha1, 255);
             assert_eq!(p.alpha2, 55);
-            let shrink = 10 - (10.0 * p.z / 100.0) as i32;
+            let shrink = (10.0 - 10.0 * p.z / 100.0) as i32;
             assert_eq!(p.border.left, shrink);
             assert_eq!(p.border.right, 100 - shrink);
         }

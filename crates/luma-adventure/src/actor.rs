@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use luma_archive::Vfs;
-use luma_formats::scene::{Direction, Entity, Point, SceneNode};
+use luma_formats::scene::{Direction, Entity, Point};
 use luma_formats::{Rgba, Scene};
 
 use crate::error::{Error, Result};
@@ -708,25 +708,13 @@ impl Actor {
     /// layer the actor entered and left (`CAdObject::AfterMove`).
     fn after_move(&mut self, scene: &Scene, events: &mut Vec<ActorEvent>) {
         let new = crate::scene_view::regions_at(scene, self.x, self.y);
-        for &(layer, index) in &new {
-            if !self.current_regions.contains(&(layer, index)) {
-                events.push(ActorEvent::OnRegion {
-                    layer,
-                    index,
-                    event: "ActorEntry",
-                });
-            }
-        }
-        for &(layer, index) in &self.current_regions {
-            if !new.contains(&(layer, index)) {
-                events.push(ActorEvent::OnRegion {
-                    layer,
-                    index,
-                    event: "ActorLeave",
-                });
-            }
-        }
-        self.current_regions = new;
+        self.enter_regions(new, events);
+    }
+
+    /// The actor now stands in the regions `new`: `ActorEntry` for
+    /// those it was not in, then `ActorLeave` for those it left.
+    pub(crate) fn enter_regions(&mut self, new: Vec<(usize, usize)>, events: &mut Vec<ActorEvent>) {
+        region_events(&mut self.current_regions, new, events);
     }
 
     /// One frame (`CAdActor::Update`): animations advance, turns and
@@ -763,9 +751,6 @@ impl Actor {
                 sentence.finish();
             }
         }
-        if self.current_sprite.is_none() {
-            self.current_sprite = self.stand_sprite();
-        }
         let mut already_moved = false;
         match self.state {
             ActorState::Talking => self.talk_step(ctx.timer, ctx.random),
@@ -793,20 +778,37 @@ impl Actor {
                 }
             }
         }
+        // The default, after the state switch: the standing sprite in
+        // the direction the actor now faces, when the state gave none (a
+        // turn without a turn sprite, a walk without a walk sprite).
+        if self.current_sprite.is_none() {
+            self.current_sprite = self.stand_sprite();
+        }
         if !already_moved {
             if let Some(path) = self.current_sprite.clone() {
+                let zoom = self.move_zoom(ctx.floor.scene);
                 if let Some((true, move_x, move_y)) = self.step(&path, ctx.timer) {
                     events.push(ActorEvent::FrameShown {
                         frame: self.frame_of(&path),
                         sprite: path,
                     });
-                    self.x += move_x;
-                    self.y += move_y;
+                    self.x += crate::scene_view::scaled_move(move_x, zoom);
+                    self.y += crate::scene_view::scaled_move(move_y, zoom);
                     self.after_move(ctx.floor.scene, events);
                 }
             }
         }
         self.ready = self.state == ActorState::Ready;
+    }
+
+    /// The zoom a frame's `MOVE` is scaled by (`GetCurrentFrame(zoom,
+    /// zoom)`): the scene's at the actor when it is scalable, else 100.
+    fn move_zoom(&self, scene: &Scene) -> f32 {
+        if self.def.scalable {
+            scene.zoom_at(self.x, self.y)
+        } else {
+            100.0
+        }
     }
 
     fn turn_step(&mut self, left: bool) {
@@ -883,6 +885,7 @@ impl Actor {
         let Some(path) = self.current_sprite.clone() else {
             return;
         };
+        let zoom = self.move_zoom(ctx.floor.scene);
         let Some((true, move_x, move_y)) = self.step(&path, ctx.timer) else {
             return;
         };
@@ -890,6 +893,12 @@ impl Actor {
             frame: self.frame_of(&path),
             sprite: path,
         });
+        // The step is the frame's `MOVE` at the scene's zoom: a
+        // scaled-down actor walks slower.
+        let (move_x, move_y) = (
+            crate::scene_view::scaled_move(move_x, zoom),
+            crate::scene_view::scaled_move(move_y, zoom),
+        );
         let mut max_step = move_x.abs().max(move_y.abs()).max(1);
         while self.pf_count > 0 && max_step >= 0 {
             self.pf_x += self.pf_step_x;
@@ -897,9 +906,12 @@ impl Actor {
             self.pf_count -= 1;
             max_step -= 1;
         }
+        // `IsBlockedAt(x, y, true, this)`: a point outside every region
+        // is blocked, so a step that leaves the floor looks for a new
+        // path.
         if ctx
             .floor
-            .is_blocked_at(self.pf_x as i32, self.pf_y as i32, false)
+            .is_blocked_at(self.pf_x as i32, self.pf_y as i32, true)
         {
             // At the final position already: not a block.
             if self.pf_count == 0 {
@@ -1039,6 +1051,36 @@ impl Actor {
     }
 }
 
+/// `CAdObject::AfterMove`: an object that stood in the regions `current`
+/// now stands in `new`. `ActorEntry` is raised on the regions entered,
+/// in the order found (last node first), then `ActorLeave` on those
+/// left; `current` becomes `new`.
+pub(crate) fn region_events(
+    current: &mut Vec<(usize, usize)>,
+    new: Vec<(usize, usize)>,
+    events: &mut Vec<ActorEvent>,
+) {
+    for &(layer, index) in &new {
+        if !current.contains(&(layer, index)) {
+            events.push(ActorEvent::OnRegion {
+                layer,
+                index,
+                event: "ActorEntry",
+            });
+        }
+    }
+    for &(layer, index) in current.iter() {
+        if !new.contains(&(layer, index)) {
+            events.push(ActorEvent::OnRegion {
+                layer,
+                index,
+                event: "ActorLeave",
+            });
+        }
+    }
+    *current = new;
+}
+
 /// Points relative to an object, scaled and moved to its position
 /// (`CAdWaypointGroup::Mimic`, `CBRegion::Mimic`).
 pub fn mimic(points: &[Point], scale: f32, x: i32, y: i32) -> Vec<Point> {
@@ -1088,34 +1130,20 @@ fn entity_mimic_scale(scene: &Scene, entity: &Entity) -> f32 {
     }
 }
 
-/// Every entity of a scene with its polygon and waypoints, for the
-/// floor the actors walk on.
+/// What the scene alone gives the floor the actors walk on: no polygon,
+/// and the points of its waypoint groups. The free objects add theirs
+/// (`World::obstacles_for`); the entities that are nodes of a layer add
+/// nothing, as the original's path finder only looks at the free
+/// objects.
 pub fn scene_obstacles(scene: &Scene) -> (Vec<Vec<Point>>, Vec<Point>) {
-    let mut blockers = Vec::new();
     // A group a script switched off (`WaypointGroup.Active`) is left out.
-    let mut waypoints: Vec<Point> = scene
+    let waypoints: Vec<Point> = scene
         .waypoint_groups
         .iter()
         .filter(|g| g.active)
         .flat_map(|g| g.points.iter().copied())
         .collect();
-    let entities = scene
-        .layers
-        .iter()
-        .flat_map(|l| {
-            l.nodes.iter().filter_map(|n| match n {
-                SceneNode::Entity(e) => Some(&**e),
-                SceneNode::Region(_) => None,
-            })
-        })
-        .chain(scene.free_entities.iter());
-    for entity in entities {
-        if let Some(polygon) = entity_block_polygon(scene, entity) {
-            blockers.push(polygon);
-        }
-        waypoints.extend(entity_waypoints(scene, entity));
-    }
-    (blockers, waypoints)
+    (Vec::new(), waypoints)
 }
 
 #[cfg(test)]
@@ -1264,6 +1292,115 @@ mod tests {
                 event: "ActorEntry"
             }]
         );
+    }
+
+    /// An actor standing at (10, 50) whose `STAND` sprites, one per
+    /// direction used, move it by (10, 4) at every frame.
+    fn standing_actor(scalable: bool) -> Actor {
+        let text = format!(
+            "ACTOR {{ NAME=\"a\" X=10 Y=50 SCALABLE={}
+  STAND {{ SPRITESET {{ LEFT=\"left.sprite\" UP=\"up.sprite\" RIGHT=\"right.sprite\" }} }} }}",
+            if scalable { "TRUE" } else { "FALSE" }
+        );
+        let def = luma_formats::Actor::parse(text.as_bytes()).unwrap();
+        let mut bank = SpriteBank::new();
+        for name in ["left.sprite", "up.sprite", "right.sprite"] {
+            let sprite = luma_formats::Sprite::parse(
+                b"SPRITE { LOOPING=TRUE FRAME { DELAY=10 IMAGE=\"s.png\" MOVE {10,4} } }",
+            )
+            .unwrap();
+            bank.insert(name, sprite);
+        }
+        Actor::from_definition(def, "a.actor", false, bank)
+    }
+
+    fn update_once(actor: &mut Actor, scene: &Scene, timer: u64) -> Vec<ActorEvent> {
+        let mut events = Vec::new();
+        let ctx = WalkContext {
+            floor: Floor {
+                scene,
+                blockers: &[],
+                waypoints: &[],
+            },
+            timer,
+            random: 0,
+        };
+        actor.update(&ctx, &mut events);
+        events
+    }
+
+    #[test]
+    fn a_frames_move_takes_the_scene_zoom_at_a_scalable_actor() {
+        let scene = Scene::parse(
+            b"SCENE {
+  LAYER { NAME=\"main\" MAIN=TRUE WIDTH=200 HEIGHT=100 }
+  SCALE_LEVEL { Y=0 SCALE=50 }
+  SCALE_LEVEL { Y=100 SCALE=50 }
+}",
+        )
+        .unwrap();
+        let mut scaled = standing_actor(true);
+        update_once(&mut scaled, &scene, 1);
+        assert_eq!((scaled.x, scaled.y), (15, 52), "both axes at 50%");
+        let mut plain = standing_actor(false);
+        update_once(&mut plain, &scene, 1);
+        assert_eq!((plain.x, plain.y), (20, 54));
+    }
+
+    #[test]
+    fn a_turn_without_turn_sprites_shows_the_standing_sprite_of_the_new_direction() {
+        let scene = room();
+        let mut actor = standing_actor(false);
+        actor.dir = Direction::Left;
+        actor.turn_to(Direction::Right);
+        assert_eq!(actor.state, ActorState::TurningLeft);
+        // Each update turns one step; the sprite is the one standing in
+        // the direction reached, never none.
+        let mut seen = Vec::new();
+        for timer in 1..=4 {
+            update_once(&mut actor, &scene, timer);
+            seen.push(actor.current_sprite().map(str::to_string));
+        }
+        assert_eq!(actor.dir, Direction::Right);
+        assert!(seen.iter().all(Option::is_some), "{seen:?}");
+        assert_eq!(seen.last().unwrap().as_deref(), Some("right.sprite"));
+        // Through down-left, down and down-right there is no sprite of
+        // that direction and the set gives its nearest; at the end the
+        // new direction's own.
+        assert_eq!(actor.state, ActorState::Ready);
+    }
+
+    #[test]
+    fn a_step_off_the_floor_is_blocked_and_the_actor_looks_for_a_new_path() {
+        // The floor ends at x 100.
+        let scene = Scene::parse(
+            b"SCENE {
+  LAYER {
+    NAME=\"main\" MAIN=TRUE WIDTH=200 HEIGHT=100
+    REGION { NAME=\"floor\" POINT {0,0} POINT {100,0} POINT {100,100} POINT {0,100} }
+  }
+}",
+        )
+        .unwrap();
+        let mut actor = actor();
+        actor.x = 90;
+        actor.dir = Direction::Right;
+        // A path that leaves the floor, as a floor changed under a
+        // walking actor would leave it.
+        actor.target = Point { x: 150, y: 50 };
+        actor.path = vec![Point { x: 150, y: 50 }];
+        actor.path_ready = true;
+        actor.follow_path();
+        let mut blocked = false;
+        for timer in 0..40u64 {
+            let events = update_once(&mut actor, &scene, 1 + timer * 20);
+            if events.contains(&ActorEvent::OnActor("ActorIsBlocked")) {
+                blocked = true;
+                break;
+            }
+        }
+        assert!(blocked, "the step outside every region is blocked");
+        assert!(actor.x <= 101, "{}", actor.x);
     }
 
     #[test]

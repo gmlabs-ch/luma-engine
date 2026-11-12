@@ -889,6 +889,20 @@ impl Renderer {
             let quads = list.quads();
             let attributes = list.attributes();
             let blend_of = |i: usize| attributes.get(i).map_or(BlendMode::Normal, |a| a.blend);
+            let clips = list.clips();
+            let clip_of = |i: usize| clips.get(i).copied().flatten();
+            // The scissor of a clip rectangle, `None` when nothing of it
+            // is on the target; the scissor in force, to set it only
+            // when it changes.
+            let scissor_of = |clip: Option<crate::draw::Rect>| {
+                scissor(
+                    clip,
+                    (x, y, w, h),
+                    (list.width, list.height),
+                    (target.width, target.height),
+                )
+            };
+            let mut scissor_now = Some((0, 0, target.width, target.height));
             // The quad state; `None` after 3D items were drawn, so that
             // it is set again before the next batch.
             let mut quad_state: Option<BlendMode> = None;
@@ -899,6 +913,30 @@ impl Renderer {
                 // The 3D items due before the quad `first` (all the
                 // remaining ones once the quads are done).
                 while next_3d < draws_3d.len() && draws_3d[next_3d].before_quad <= first {
+                    // A 3D item wholly outside its clip rectangle is not
+                    // drawn; its uniform slot is still counted.
+                    let visible = match scissor_of(draws_3d[next_3d].clip) {
+                        Some(rect) => {
+                            if scissor_now != Some(rect) {
+                                pass.set_scissor_rect(rect.0, rect.1, rect.2, rect.3);
+                                scissor_now = Some(rect);
+                            }
+                            true
+                        }
+                        None => false,
+                    };
+                    if !visible {
+                        match &draws_3d[next_3d].draw {
+                            Draw3d::Mesh(_) => mesh_index += 1,
+                            Draw3d::ShadowVolume(_) => {
+                                simple_index += 1;
+                                volume_index += 1;
+                            }
+                            Draw3d::DepthOnly(_) | Draw3d::StencilFill(_) => simple_index += 1,
+                        }
+                        next_3d += 1;
+                        continue;
+                    }
                     match &draws_3d[next_3d].draw {
                         Draw3d::Mesh(draw) => {
                             let mesh = &meshes[&draw.mesh.0];
@@ -984,12 +1022,24 @@ impl Renderer {
                     .map_or(quads.len(), |m| m.before_quad.min(quads.len()));
                 let texture = quads[first].texture;
                 let batch_blend = blend_of(first);
+                let batch_clip = clip_of(first);
                 let mut last = first + 1;
                 while last < limit
                     && quads[last].texture.id == texture.id
                     && blend_of(last) == batch_blend
+                    && clip_of(last) == batch_clip
                 {
                     last += 1;
+                }
+                // The clip rectangle of the batch (`SetViewport`): a
+                // scissor; a batch wholly outside it is not drawn.
+                let Some(rect) = scissor_of(batch_clip) else {
+                    first = last;
+                    continue;
+                };
+                if scissor_now != Some(rect) {
+                    pass.set_scissor_rect(rect.0, rect.1, rect.2, rect.3);
+                    scissor_now = Some(rect);
                 }
                 if quad_state.is_none() {
                     pass.set_bind_group(0, &self.globals_group, &[]);
@@ -1681,6 +1731,39 @@ pub(crate) fn viewport(list: &DrawList<'_>, width: u32, height: u32) -> (f32, f3
     letterbox(list.width, list.height, width, height)
 }
 
+/// The scissor rectangle of a clip rectangle given in logical pixels:
+/// `(x, y, width, height)` in pixels of a target of `target` size on
+/// which the logical size `logical` covers the rectangle `viewport`;
+/// the whole target without a clip rectangle, `None` when nothing of the
+/// rectangle lies on the target. The edges are rounded to whole pixels.
+pub(crate) fn scissor(
+    clip: Option<crate::draw::Rect>,
+    viewport: (f32, f32, f32, f32),
+    logical: (f32, f32),
+    target: (u32, u32),
+) -> Option<(u32, u32, u32, u32)> {
+    let Some(clip) = clip else {
+        return Some((0, 0, target.0, target.1));
+    };
+    let (vx, vy, vw, vh) = viewport;
+    let (sx, sy) = (vw / logical.0.max(1.0), vh / logical.1.max(1.0));
+    let edge = |v: f32, max: u32| -> u32 {
+        if v.is_nan() {
+            0
+        } else {
+            v.round().clamp(0.0, max as f32) as u32
+        }
+    };
+    let left = edge(vx + clip.x * sx, target.0);
+    let top = edge(vy + clip.y * sy, target.1);
+    let right = edge(vx + (clip.x + clip.w) * sx, target.0);
+    let bottom = edge(vy + (clip.y + clip.h) * sy, target.1);
+    if right <= left || bottom <= top {
+        return None;
+    }
+    Some((left, top, right - left, bottom - top))
+}
+
 /// The largest centred rectangle of a target of `width` by `height`
 /// physical pixels with the aspect ratio of a logical size, as
 /// `(x, y, w, h)`: where a letterboxed draw list lands, and the mapping
@@ -1704,6 +1787,45 @@ pub fn letterbox(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_clip_rectangle_becomes_a_scissor_on_the_target() {
+        let full = (0.0, 0.0, 800.0, 600.0);
+        let size = (800.0, 600.0);
+        let rect = |x, y, w, h| Some(crate::draw::Rect::new(x, y, w, h));
+        // No clip: the whole target.
+        assert_eq!(
+            scissor(None, full, size, (800, 600)),
+            Some((0, 0, 800, 600))
+        );
+        assert_eq!(
+            scissor(rect(10.0, 20.0, 100.0, 50.0), full, size, (800, 600)),
+            Some((10, 20, 100, 50))
+        );
+        // Cut to the target, and nothing when wholly outside or empty.
+        assert_eq!(
+            scissor(rect(-10.0, 590.0, 100.0, 50.0), full, size, (800, 600)),
+            Some((0, 590, 90, 10))
+        );
+        assert_eq!(
+            scissor(rect(900.0, 0.0, 10.0, 10.0), full, size, (800, 600)),
+            None
+        );
+        assert_eq!(
+            scissor(rect(5.0, 5.0, 0.0, 10.0), full, size, (800, 600)),
+            None
+        );
+        // Scaled onto a letterbox rectangle of a larger target.
+        assert_eq!(
+            scissor(
+                rect(10.0, 10.0, 20.0, 20.0),
+                (100.0, 0.0, 1600.0, 1200.0),
+                size,
+                (1800, 1200)
+            ),
+            Some((120, 20, 40, 40))
+        );
+    }
 
     #[test]
     fn mesh_uniforms_match_the_shader_layout() {

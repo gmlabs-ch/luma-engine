@@ -73,19 +73,24 @@ impl Camera {
     /// The view's origin on the screen is taken off, so that the layer
     /// is drawn at `-offset` inside the viewport.
     pub fn layer_offset(&self, scene: &Scene, layer: &Layer) -> (f32, f32) {
+        // In doubles, and truncated as a whole, the viewport's origin
+        // included: `(int)(WidthRatio * (layer - viewport) - ViewportX)`.
         let ratio = |offset: f32, scene_size: i32, view: f32| {
-            let scrollable = scene_size as f32 - view;
+            let scrollable = f64::from(scene_size) - f64::from(view);
             if scrollable <= 0.0 {
                 0.0
             } else {
-                offset / scrollable
+                f64::from(offset) / scrollable
             }
         };
         let rx = ratio(self.offset_x, scene.width(), self.width);
         let ry = ratio(self.offset_y, scene.height(), self.height);
+        let of = |ratio: f64, layer_size: i32, view: f32, origin: f32| {
+            (ratio * (f64::from(layer_size) - f64::from(view)) - f64::from(origin)).trunc() as f32
+        };
         (
-            (rx * (layer.width as f32 - self.width)).trunc() - self.origin_x,
-            (ry * (layer.height as f32 - self.height)).trunc() - self.origin_y,
+            of(rx, layer.width, self.width, self.origin_x),
+            of(ry, layer.height, self.height, self.origin_y),
         )
     }
 }
@@ -222,7 +227,8 @@ impl Mask {
         Mask {
             width: image.width,
             height: image.height,
-            opaque: image.pixels.chunks(4).map(|p| p[3] > 128).collect(),
+            // `CBSurfaceD3D::IsTransparentAt`: transparent below 128.
+            opaque: image.pixels.chunks(4).map(|p| p[3] >= 128).collect(),
         }
     }
 
@@ -711,6 +717,17 @@ pub struct SceneView {
     shown: Vec<(EntityRef, String, usize)>,
 }
 
+/// A frame's `MOVE` on one axis at a zoom in percent
+/// (`CBSprite::GetCurrentFrame`): scaled and truncated, as written at
+/// 100.
+pub(crate) fn scaled_move(amount: i32, zoom: f32) -> i32 {
+    if zoom == 100.0 {
+        amount
+    } else {
+        (amount as f32 * (zoom / 100.0)) as i32
+    }
+}
+
 impl SceneView {
     /// Loads a scene file from the game and the sprites of its entities.
     /// A missing or broken sprite is recorded in [`SceneView::missing`],
@@ -1145,10 +1162,23 @@ impl SceneView {
 
     /// The sentences shown this frame, with their entities.
     pub fn sentences(&self) -> impl Iterator<Item = (EntityRef, &Sentence)> {
+        // An entity of a layer switched off is not updated, and it is
+        // its update that shows its sentence (`AddSentence`).
         self.talks
             .iter()
-            .filter(|(_, t)| t.show)
+            .filter(|(r, t)| t.show && !self.in_inactive_layer(**r))
             .map(|(r, t)| (*r, &t.sentence))
+    }
+
+    /// Whether an entity is a node of a layer that is switched off
+    /// (`Layer.Active`): the scene neither updates nor draws it.
+    pub fn in_inactive_layer(&self, r: EntityRef) -> bool {
+        match r {
+            EntityRef::Node { layer, .. } => {
+                self.scene.layers.get(layer).is_some_and(|l| !l.active)
+            }
+            _ => false,
+        }
     }
 
     /// Every sentence being said, mutable.
@@ -1208,6 +1238,10 @@ impl SceneView {
     fn talk_step(&mut self, timer: u64, random: u32) {
         let talking: Vec<EntityRef> = self.talks.keys().copied().collect();
         for r in talking {
+            // Not updated in a layer switched off: the sentence waits.
+            if self.in_inactive_layer(r) {
+                continue;
+            }
             let mut definition_sprite_done = false;
             // `m_Sentence->Update()`: the sprite the `.talk` definition
             // gives for this moment replaces the talk stance
@@ -1309,6 +1343,13 @@ impl SceneView {
     /// Like [`SceneView::advance`], with a random number for the talk
     /// sprites of talking entities.
     pub fn advance_with(&mut self, timer: u64, random: u32) {
+        self.advance_in(timer, random, None);
+    }
+
+    /// Like [`SceneView::advance_with`], for entities shown in another
+    /// scene than the view's own (the game's entities): `levels` is the
+    /// scene whose zoom scales a frame's `MOVE`, `None` for the view's.
+    pub fn advance_in(&mut self, timer: u64, random: u32, levels: Option<&Scene>) {
         self.talk_step(timer, random);
         for r in self.entity_refs() {
             let Some(entity) = self.entity(r) else {
@@ -1317,6 +1358,19 @@ impl SceneView {
             if !entity.active || entity.kind != EntityKind::Normal {
                 continue;
             }
+            // The nodes of a layer switched off are not updated
+            // (`CAdScene::TraverseNodes`).
+            if self.in_inactive_layer(r) {
+                continue;
+            }
+            // `GetCurrentFrame(zoom)`: the X move of a frame is scaled
+            // by the scene's zoom at a scalable entity; the Y move is
+            // not (the original passes the zoom for X only).
+            let zoom = if entity.scalable {
+                levels.unwrap_or(&self.scene).zoom_at(entity.x, entity.y)
+            } else {
+                100.0
+            };
             let Some(sprite_key) = self.anim_mut(r).map(|s| s.sprite.clone()) else {
                 continue;
             };
@@ -1332,6 +1386,7 @@ impl SceneView {
             };
             if changed {
                 self.shown.push((r, sprite_key, frame));
+                let move_x = scaled_move(move_x, zoom);
                 if move_x != 0 || move_y != 0 {
                     if let Some(entity) = self.entity_mut(r) {
                         entity.x += move_x;
@@ -1445,7 +1500,10 @@ impl SceneView {
                         index: ni,
                     }),
                     SceneNode::Region(region) => {
-                        if region.blocked || region.decoration || !region.active {
+                        // Only `BLOCKED` and `DECORATION` regions are
+                        // passed over: a region switched off still shows
+                        // the objects standing in it at its place.
+                        if region.blocked || region.decoration {
                             continue;
                         }
                         draw_in(&mut order, li, Some((ni, region)));
@@ -1528,8 +1586,8 @@ impl SceneView {
                     dst: Rect::new(
                         entity.x as f32 + video.offset.0,
                         entity.y as f32 + video.offset.1,
-                        (video.texture.width as f32 * zoom).trunc(),
-                        (video.texture.height as f32 * zoom).trunc(),
+                        video.texture.width as f32 * zoom,
+                        video.texture.height as f32 * zoom,
                     ),
                     src: None,
                     tint: video.tint,
@@ -1771,14 +1829,25 @@ pub fn place_transformed<'a>(
         None => (texture.width as f32, texture.height as f32),
     };
     let (zx, zy) = (transform.scale_x / 100.0, transform.scale_y / 100.0);
+    // A scale that is negative on one axis only turns the quad the
+    // other way round, and the original culls such a quad
+    // (`D3DCULL_CCW` in `Setup2D`): nothing is drawn.
+    let (w, h) = if (zx < 0.0) != (zy < 0.0) {
+        (0.0, 0.0)
+    } else {
+        (w, h)
+    };
     let dst = if transform.is_unscaled() {
         Rect::new((x - sub.hotspot_x) as f32, (y - sub.hotspot_y) as f32, w, h)
     } else {
+        // The corner is a whole pixel (`CBSubFrame::Draw` hands ints to
+        // `DisplayTransZoom`); the size is not rounded
+        // (`CBRenderD3D::DrawSpriteEx`: `w = width * Scale.x`).
         Rect::new(
             (x as f32 - sub.hotspot_x as f32 * zx).trunc(),
             (y as f32 - sub.hotspot_y as f32 * zy).trunc(),
-            (w * zx).trunc(),
-            (h * zy).trunc(),
+            w * zx,
+            h * zy,
         )
     };
     let quad = Quad {
@@ -1804,4 +1873,38 @@ pub fn place_transformed<'a>(
         blend: BlendMode::Normal,
     };
     (quad, attributes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_layers_offset_is_truncated_with_the_viewports_origin() {
+        // A scene 100 wide in a view of 50 placed at x 3, scrolled by 1:
+        // a layer 60 wide scrolls by 0.2, and (0.2 - 3) truncates to -2,
+        // not to (0 - 3).
+        let scene = Scene::parse(
+            b"SCENE { LAYER { NAME=\"far\" WIDTH=60 HEIGHT=40 }
+  LAYER { NAME=\"main\" MAIN=TRUE WIDTH=100 HEIGHT=40 } }",
+        )
+        .unwrap();
+        let mut camera = Camera::new(50.0, 40.0);
+        camera.offset_x = 1.0;
+        camera.origin_x = 3.0;
+        assert_eq!(camera.layer_offset(&scene, &scene.layers[0]), (-2.0, 0.0));
+        assert_eq!(camera.layer_offset(&scene, &scene.layers[1]), (-2.0, 0.0));
+        camera.offset_x = 10.0;
+        assert_eq!(camera.layer_offset(&scene, &scene.layers[0]), (-1.0, 0.0));
+        assert_eq!(camera.layer_offset(&scene, &scene.layers[1]), (7.0, 0.0));
+    }
+
+    #[test]
+    fn a_frames_move_is_scaled_and_truncated() {
+        assert_eq!(scaled_move(10, 100.0), 10);
+        assert_eq!(scaled_move(10, 50.0), 5);
+        assert_eq!(scaled_move(3, 50.0), 1);
+        assert_eq!(scaled_move(-3, 50.0), -1);
+        assert_eq!(scaled_move(4, 150.0), 6);
+    }
 }

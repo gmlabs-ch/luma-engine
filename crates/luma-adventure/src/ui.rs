@@ -1103,13 +1103,22 @@ impl World {
         ok
     }
 
-    /// The bounding size of a sprite's first frame placed at the origin
-    /// (`CBSprite::GetBoundingRect`), reading the images for the
-    /// sub-frames without a rectangle.
+    /// The bounding size of a sprite placed at the origin
+    /// (`CBSprite::GetBoundingRect`): the rectangle around the
+    /// sub-frames of every frame, reading the images for the sub-frames
+    /// without a rectangle.
     fn sprite_size(&mut self, path: &str) -> Option<(i32, i32)> {
-        let frame = self.ui.bank.sprite(path)?.sprite.frames.first()?.clone();
+        let subframes: Vec<luma_formats::SubFrame> = self
+            .ui
+            .bank
+            .sprite(path)?
+            .sprite
+            .frames
+            .iter()
+            .flat_map(|f| f.subframes.iter().cloned())
+            .collect();
         let (mut left, mut top, mut right, mut bottom) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
-        for sub in &frame.subframes {
+        for sub in &subframes {
             let (w, h) = match sub.rect.filter(|r| !r.is_empty()) {
                 Some(r) => (r.width() as i32, r.height() as i32),
                 None => {
@@ -1120,6 +1129,10 @@ impl World {
                     (mask.width as i32, mask.height as i32)
                 }
             };
+            // `UnionRect` leaves an empty rectangle out.
+            if w <= 0 || h <= 0 {
+                continue;
+            }
             left = left.min(-sub.hotspot_x);
             top = top.min(-sub.hotspot_y);
             right = right.max(-sub.hotspot_x + w);
@@ -1327,6 +1340,8 @@ impl World {
             self.drop_sprite_object(sprite);
         }
         for control in &all {
+            // A container takes its entity with it (`~CUIEntity`).
+            self.drop_container_entity(engine, *control);
             for script in engine.scripts_of(*control) {
                 engine.finish(script, true);
             }
@@ -1521,7 +1536,11 @@ impl World {
         window.ready = false;
         control.visible = true;
         control.disabled = false;
-        self.focus_window(self.top_window(id));
+        // The keyboard's pick is dropped (`m_AccessMgr->SetActiveObject()`),
+        // and the window comes to the front when it is a top-level one
+        // (`Game->FocusWindow` only knows those).
+        self.access.clear_active();
+        self.focus_window(id);
         true
     }
 
@@ -1864,21 +1883,15 @@ impl World {
     /// cannot be frozen and gets mouse events while the game is not
     /// interactive, as the original engine sets it up.
     pub fn set_container_entity(&mut self, engine: &mut Engine, id: NativeId, path: &str) -> bool {
+        let Some(ControlKind::EntityContainer(_)) = self.control(id).map(|c| c.kind.clone()) else {
+            return false;
+        };
+        // The previous entity is unregistered first: a file that does
+        // not load leaves the container without an entity.
+        self.drop_container_entity(engine, id);
         let Some(def) = self.read_entity_def(path) else {
             return false;
         };
-        let Some(ControlKind::EntityContainer(previous)) = self.control(id).map(|c| c.kind.clone())
-        else {
-            return false;
-        };
-        if let Some(previous) = previous {
-            if let Some(old) = self.node_id(EntityRef::Ui(previous)) {
-                for script in engine.scripts_of(old) {
-                    engine.finish(script, true);
-                }
-                self.objects.remove(old);
-            }
-        }
         let index = self.ui_entities.len();
         let caption = self.expand(&def.caption);
         let scripts = def.scripts.clone();
@@ -1904,8 +1917,13 @@ impl World {
             freezable: false,
         });
         let entity = self.objects.insert(Kind::Entity(EntityRef::Ui(index)));
+        // `m_SceneIndependent = true`.
+        if let Some(state) = self.object_state_mut(entity) {
+            state.scene_independent = true;
+        }
         self.set_holder_filename(entity, path);
         self.register_entity_region(entity);
+        self.update_entity_position(entity);
         for script in scripts {
             self.attach(engine, entity, &script);
         }
@@ -1928,11 +1946,28 @@ impl World {
     /// that becomes current plays its sound and raises its events on the
     /// entity.
     fn step_ui_entity_anim(&mut self, index: Option<usize>) {
-        let timer = self.timer();
+        let (timer, clock) = (self.timer(), self.clock);
         let Some(index) = index else { return };
+        // A hidden container neither places nor updates its entity
+        // (`CUIEntity::Display` returns at once).
+        let Some(container) = self.ui_entities.get(index).map(|e| e.container) else {
+            return;
+        };
+        if !self.control(container).is_some_and(|c| c.visible) {
+            return;
+        }
+        let (cx, cy) = self.control_screen_position(container);
         let Some(entity) = self.ui_entities.get_mut(index) else {
             return;
         };
+        // The entity stands at the container's position, whatever the X
+        // and Y of its file (`m_Entity->m_PosX = OffsetX + m_PosX`).
+        entity.def.x = cx;
+        entity.def.y = cy;
+        // The sprite of an owner that is not freezable runs on the live
+        // timer (`CBSprite::GetCurrentFrame`): a container's entity is
+        // not, unless a script made it so.
+        let timer = if entity.freezable { timer } else { clock };
         let Some(path) = entity.def.sprite.clone() else {
             entity.anim = None;
             return;
@@ -1957,7 +1992,10 @@ impl World {
     /// frame that becomes current plays its sound, raises `FrameChanged`
     /// on the slot's sprite object and the frame's events on the control.
     fn step_control_image(&mut self, id: NativeId, slot: ImageSlot) {
-        let timer = self.timer();
+        // A control's images have no owner: they run on the live timer
+        // (`CBSprite::GetCurrentFrame`) and go on while the game is
+        // frozen.
+        let timer = self.clock;
         let Some(control) = self.ui.controls.get_mut(&id) else {
             return;
         };
@@ -2039,7 +2077,9 @@ impl World {
                 return Some(font.clone());
             }
         }
-        self.control_font(control.font.as_deref())
+        // A window without a `FONT` draws no title: there is no fall
+        // back to the system font (`CUIWindow::Display`).
+        control.font.clone()
     }
 
     fn prepare_title(&mut self, id: NativeId) {
@@ -2089,9 +2129,11 @@ impl World {
     /// states, and the press fired on release.
     pub(crate) fn update_button(&mut self, engine: &mut Engine, id: NativeId) {
         let clock = self.clock;
-        // A held game (an exclusive window, the response box) keeps its
-        // buttons live even while the game is not interactive.
-        let interactive = self.interactive || self.semi_frozen();
+        // `m_Interactive || m_State == GAME_SEMI_FROZEN`: while the
+        // response box waits for a pick the buttons stay live even if
+        // the game is not interactive. (A system-exclusive window makes
+        // the game interactive when it freezes it.)
+        let interactive = self.interactive || self.responses_visible();
         let active = self.active_object();
         let left_down = self.mouse.left_down;
         let captured = self.ui.captured;
@@ -2113,8 +2155,27 @@ impl World {
             self.press_button(engine, id);
         }
         let focused = self.is_focused(id);
-        if let Some(slot) = self.control(id).and_then(|c| c.button_image_slot(focused)) {
+        let shown = self.control(id).and_then(|c| c.button_image_slot(focused));
+        if let Some(slot) = shown {
             self.step_control_image(id, slot);
+        }
+        // The images not shown start again from their first frame when
+        // they next show (`CBSprite::Reset` on the unused sprites).
+        if let Some(control) = self.control_mut(id) {
+            for slot in [
+                ImageSlot::Image,
+                ImageSlot::Disable,
+                ImageSlot::Focus,
+                ImageSlot::Press,
+                ImageSlot::Hover,
+            ] {
+                if Some(slot) == shown {
+                    continue;
+                }
+                if let Some(Some(anim)) = control.anim_slot_mut(slot) {
+                    anim.reset();
+                }
+            }
         }
         let (text, font, width, align) = {
             let Some(control) = self.control(id) else {
@@ -2179,6 +2240,11 @@ impl World {
     /// (`Button.Press()`).
     pub fn press_button_later(&mut self, id: NativeId) {
         let clock = self.clock;
+        // Nothing on a hidden or disabled button (`m_Visible &&
+        // !m_Disable`).
+        if !self.control(id).is_some_and(|c| c.visible && !c.disabled) {
+            return;
+        }
         if let Some(b) = self.control_mut(id).and_then(Control::button_mut) {
             b.one_time_press = Some(clock);
         }
@@ -2397,6 +2463,30 @@ impl World {
         }
     }
 
+    /// The viewport of a window that clips its contents
+    /// (`CLIP_CONTENTS`, `CUIWindow::Display`): its rectangle on screen,
+    /// kept inside the screen (`CBViewport::SetRect`), as `(left, top,
+    /// right, bottom)`; `None` for a window that does not clip.
+    pub(crate) fn window_clip(
+        &self,
+        id: NativeId,
+        ox: i32,
+        oy: i32,
+    ) -> Option<(i32, i32, i32, i32)> {
+        let control = self.control(id)?;
+        if !control.window()?.clip_contents {
+            return None;
+        }
+        let (x, y) = (control.x + ox, control.y + oy);
+        let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
+        Some((
+            x.max(0),
+            y.max(0),
+            (x + control.width).min(sw),
+            (y + control.height).min(sh),
+        ))
+    }
+
     pub(crate) fn window_hits(&mut self, id: NativeId, ox: i32, oy: i32, hits: &mut Vec<HitArea>) {
         let Some(control) = self.control(id) else {
             return;
@@ -2411,8 +2501,15 @@ impl World {
             control.width,
             control.height,
         );
-        let image = control.image.clone();
-        let frame = control.anim.as_ref().map_or(0, |a| a.current_frame);
+        // The image shown is the one registered (`IMAGE_INACTIVE` while
+        // the window is not focused and has one).
+        let slot = if !self.is_focused(id) && window.image_inactive.is_some() {
+            ImageSlot::Inactive
+        } else {
+            ImageSlot::Image
+        };
+        let image = control.image_in(slot).map(str::to_string);
+        let frame = control.frame_in(slot);
         if let Some(shield) = self.shield_of(id) {
             let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
             hits.push(HitArea::rect(shield, 0, 0, sw, sh));
@@ -2420,6 +2517,10 @@ impl World {
         if !visible {
             return;
         }
+        // What follows is registered inside the window's viewport when
+        // it clips its contents.
+        let clip_start = hits.len();
+        let clip = self.window_clip(id, ox, oy);
         if !transparent {
             match image.as_deref().and_then(|p| self.ui.bank.sprite(p)) {
                 Some(loaded) => {
@@ -2449,22 +2550,55 @@ impl World {
                 ControlKind::Window(_) => self.window_hits(widget, x, y, hits),
                 ControlKind::Button(b) => {
                     let (bx, by, bw, bh) = (c.x + x, c.y + y, c.width, c.height);
-                    let image = c.image.clone();
-                    let frame = c.anim.as_ref().map_or(0, |a| a.current_frame);
+                    let has_image = c.image.is_some();
+                    // `PIXEL_PERFECT`: the image drawn (the state's, else
+                    // the plain one) is registered where it is drawn,
+                    // centred and shifted like it.
                     if b.pixel_perfect {
-                        if let Some(loaded) = image.as_deref().and_then(|p| self.ui.bank.sprite(p))
-                        {
-                            World::sprite_hits(
-                                widget,
-                                HitBank::Ui,
-                                &loaded.sprite,
-                                frame,
-                                bx,
-                                by,
-                                100.0,
-                                (0, 0),
-                                hits,
-                            );
+                        let focused = self.is_focused(widget);
+                        let slot = c.button_image_slot(focused);
+                        let drawn = slot
+                            .and_then(|s| c.image_in(s).map(|p| (p.to_string(), c.frame_in(s))));
+                        let pushed = b.press || b.one_time_press.is_some();
+                        let state_back = if c.disabled {
+                            b.back_disable.is_some()
+                        } else if c.pressed() {
+                            b.back_press.is_some()
+                        } else if b.hover {
+                            b.back_hover.is_some()
+                        } else if c.can_focus && focused {
+                            b.back_focus.is_some()
+                        } else {
+                            false
+                        };
+                        let has_back = state_back || c.back.is_some();
+                        let centre = b.center_image;
+                        if let Some((path, frame)) = drawn {
+                            let (mut ix, mut iy) = (bx, by);
+                            if centre {
+                                if let Some((w, h)) = self.sprite_size_loaded(&path) {
+                                    ix += (bw - w) / 2;
+                                    iy += (bh - h) / 2;
+                                }
+                            }
+                            let shift = i32::from(pushed && has_back);
+                            if let Some(loaded) = self.ui.bank.sprite(&path) {
+                                World::sprite_hits(
+                                    widget,
+                                    HitBank::Ui,
+                                    &loaded.sprite,
+                                    frame,
+                                    ix + shift,
+                                    iy + shift,
+                                    100.0,
+                                    (0, 0),
+                                    hits,
+                                );
+                            }
+                        }
+                        // The rectangle too when the button has no plain
+                        // image (`!m_PixelPerfect || !m_Image`).
+                        if has_image {
                             continue;
                         }
                     }
@@ -2489,6 +2623,11 @@ impl World {
                         continue;
                     };
                     let frame = entity.anim.as_ref().map_or(0, |a| a.current_frame);
+                    // The entity's region first, in screen coordinates
+                    // (`CAdEntity::Display`), then its sprite.
+                    if let Some(region) = &entity.def.region {
+                        hits.push(HitArea::polygon(owner, region.points.clone()));
+                    }
                     if let Some(loaded) = entity
                         .def
                         .sprite
@@ -2500,8 +2639,8 @@ impl World {
                             HitBank::Ui,
                             &loaded.sprite,
                             frame,
-                            cx + entity.def.x,
-                            cy + entity.def.y,
+                            cx,
+                            cy,
                             100.0,
                             (0, 0),
                             hits,
@@ -2509,6 +2648,33 @@ impl World {
                     }
                 }
             }
+        }
+        if let Some(clip) = clip {
+            crate::input::clip_hits(hits, clip_start, clip);
+        }
+    }
+
+    /// Unregisters a container's entity (`Game->UnregisterObject` in
+    /// `CUIEntity::SetEntity` and `~CUIEntity`): its scripts end, its
+    /// handle goes, and the container has no entity.
+    pub(crate) fn drop_container_entity(&mut self, engine: &mut Engine, id: NativeId) {
+        let Some(ControlKind::EntityContainer(Some(index))) =
+            self.control(id).map(|c| c.kind.clone())
+        else {
+            return;
+        };
+        if let Some(old) = self.node_id(EntityRef::Ui(index)) {
+            for script in engine.scripts_of(old) {
+                engine.finish(script, true);
+            }
+            self.forget_owned(old);
+            self.objects.remove(old);
+            if self.active_object == Some(old) {
+                self.active_object = None;
+            }
+        }
+        if let Some(control) = self.control_mut(id) {
+            control.kind = ControlKind::EntityContainer(None);
         }
     }
 
@@ -2885,6 +3051,18 @@ impl World {
                 flip_y: false,
             });
         }
+        // `CLIP_CONTENTS`: the window and its controls are drawn inside
+        // its rectangle (`PushViewport`); the viewport in force before
+        // comes back when the window is done (`PopViewport`).
+        let outer_clip = list.clip();
+        if let Some((l, t, r, b)) = self.window_clip(id, ox, oy) {
+            list.set_clip(Some(Rect::new(
+                l as f32,
+                t as f32,
+                (r - l).max(0) as f32,
+                (b - t).max(0) as f32,
+            )));
+        }
         let tint = window.alpha_color.unwrap_or(tint);
         let focused = self.is_focused(id);
         let (x, y) = (control.x + ox, control.y + oy);
@@ -2932,6 +3110,7 @@ impl World {
                 }
             }
         }
+        list.set_clip(outer_clip);
     }
 
     /// Draws a container's entity at the container's position inside its
@@ -2957,7 +3136,7 @@ impl World {
         // A video the entity plays takes its sprite's place.
         if let Some(owner) = index.and_then(|i| self.node_id(EntityRef::Ui(i))) {
             if self.entity_videos.contains_key(&owner) {
-                let (x, y) = (ox + control.x + entity.def.x, oy + control.y + entity.def.y);
+                let (x, y) = (ox + control.x, oy + control.y);
                 if let Some(quad) = self.ui_video_quad(owner, x, y, tint) {
                     list.push(quad);
                 }
@@ -2980,7 +3159,7 @@ impl World {
         else {
             return;
         };
-        let (x, y) = (ox + control.x + entity.def.x, oy + control.y + entity.def.y);
+        let (x, y) = (ox + control.x, oy + control.y);
         let tint = entity.def.tint.unwrap_or(tint);
         for sub in crate::scene_view::drawn_subframes(frame) {
             let Some(image) = &sub.image else { continue };
@@ -3014,6 +3193,9 @@ impl World {
             return;
         }
         let pressed = control.pressed();
+        // The one-pixel shift is for a press of the mouse or of
+        // `Press()`, not for a button that stays pressed (`PRESSED`).
+        let pushed = b.press || b.one_time_press.is_some();
         let focused = self.is_focused(id);
         let state_back = if control.disabled {
             b.back_disable.as_ref()
@@ -3040,7 +3222,7 @@ impl World {
         if let Some(back) = back {
             self.draw_tiled(list, back, x, y, control.width, control.height, tint);
         }
-        let shift = i32::from(pressed && back.is_some());
+        let shift = i32::from(pushed && back.is_some());
         if let (Some(path), Some(slot)) = (image, slot) {
             let frame = control.frame_in(slot);
             self.draw_ui_image(list, path, frame, ix + shift, iy + shift, tint);
@@ -3048,7 +3230,7 @@ impl World {
         if !control.text.is_empty() {
             if let Some(font) = self.button_font(id).and_then(|f| self.fonts.get(&f)) {
                 let offset = (control.height - control.text_height) / 2;
-                let shift = i32::from(pressed);
+                let shift = i32::from(pushed);
                 font.draw_forced(
                     list,
                     &control.text,
@@ -3163,12 +3345,13 @@ impl World {
         }
     }
 
-    /// The bounding size of a loaded sprite's first frame, from what is
-    /// already decoded (no reading at draw time).
+    /// The bounding size of a loaded sprite, every frame counted
+    /// (`CBSprite::GetBoundingRect`), from what is already decoded (no
+    /// reading at draw time).
     pub(crate) fn sprite_size_loaded(&self, path: &str) -> Option<(i32, i32)> {
-        let frame = self.ui.bank.sprite(path)?.sprite.frames.first()?;
+        let sprite = &self.ui.bank.sprite(path)?.sprite;
         let (mut left, mut top, mut right, mut bottom) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
-        for sub in &frame.subframes {
+        for sub in sprite.frames.iter().flat_map(|f| f.subframes.iter()) {
             let (w, h) = match sub.rect.filter(|r| !r.is_empty()) {
                 Some(r) => (r.width() as i32, r.height() as i32),
                 None => {
@@ -3189,6 +3372,9 @@ impl World {
                     }
                 }
             };
+            if w <= 0 || h <= 0 {
+                continue;
+            }
             left = left.min(-sub.hotspot_x);
             top = top.min(-sub.hotspot_y);
             right = right.max(-sub.hotspot_x + w);
@@ -3252,6 +3438,9 @@ impl World {
         let left_w = tile(0, 0).width() as i32;
         let top_h = tile(0, 1).height() as i32;
         let right_x = x + left_w + columns * tw;
+        // The right edge of the middle rows comes after `MIDDLE_LEFT`'s
+        // width, the corners' after `UP_LEFT`'s.
+        let middle_right_x = x + tile(1, 0).width() as i32 + columns * tw;
         let bottom_y = y + top_h + rows * th;
         let mut push = |rect: SpriteRect, dx: i32, dy: i32| {
             if rect.is_empty() {
@@ -3283,7 +3472,7 @@ impl World {
         for row in 0..rows {
             let yy = y + top_h + row * th;
             push(tile(1, 0), x, yy);
-            push(tile(1, 2), right_x, yy);
+            push(tile(1, 2), middle_right_x, yy);
         }
         for col in 0..columns {
             let xx = x + left_w + col * tw;

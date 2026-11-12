@@ -121,6 +121,32 @@ on the owner. A looping sprite with a single frame counts as changed on
 every update (`CBSprite::GetCurrentFrame`), so its sound and events
 repeat each frame. The first frame shown counts as a change too.
 
+**Which clock.** A sprite whose owner is freezable runs on the game
+timer, which stops while the game is frozen (a system-exclusive window,
+a full-screen video); a sprite without an owner, or whose owner is not
+freezable, runs on the live timer and keeps animating then
+(`CBSprite::GetCurrentFrame`). The sprites of entities, actors and
+inventory items, of talk stances and of particles have a freezable
+owner. The cursors (the game's, an object's, an item's), the images of
+windows and controls, the icons of dialogue responses and the loading
+icon have no owner; the entity of an entity container is not freezable
+unless a script sets its `Freezable`.
+
+**`MOVE` and scale.** The `MOVE` of the frame that becomes current is
+scaled by the scene's zoom at the owner (the region's `ZOOM`, else the
+scale levels; not the object's own `Scale`) when the owner is
+`SCALABLE`, and truncated: at 50 %, `MOVE {10,4}` moves an actor by
+(5, 2). For an entity only the X move is scaled, the Y move is added as
+written (the original passes the zoom for X only); for an actor both
+are, and its walking step, `max(|MOVE x|, |MOVE y|, 1) + 1`, is counted
+from the scaled values, so an actor walks slower where it is drawn
+smaller.
+
+**Bounding rectangle.** Where a size is taken from a sprite (a control
+without `WIDTH` or `HEIGHT` sized from its image), it is the rectangle
+around the sub-frames of every frame, not of the first one
+(`CBSprite::GetBoundingRect`).
+
 ## Images
 
 Images are `.png`, `.bmp`, `.jpg` or `.tga` files. The engine decodes them
