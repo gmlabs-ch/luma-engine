@@ -270,6 +270,33 @@ impl World {
                 },
             )?
         };
+        // `CAdGame::LoadBuffer`: a response box, an inventory box or an
+        // items file that cannot be read fails the game file, and the
+        // game does not start. (They are loaded for good by
+        // `Runtime::start`, with what they name.)
+        {
+            let mut read = |file: &str| vfs.read(file).ok();
+            let mut files = luma_formats::Files::new(&mut read);
+            let format = |path: &str, source| Error::Format {
+                path: path.to_string(),
+                source,
+            };
+            if let Some(path) = &game_file.response_box {
+                luma_formats::ResponseBoxDef::parse_with(&vfs.read(path)?, &mut files)
+                    .map_err(|source| format(path, source))?;
+            }
+            if let Some(path) = &game_file.inventory_box {
+                luma_formats::InventoryBoxDef::parse_with(&vfs.read(path)?, &mut files)
+                    .map_err(|source| format(path, source))?;
+            }
+            if let Some(path) = &game_file.items {
+                if let (_, Some(source)) =
+                    luma_formats::ItemDef::parse_all_with(&vfs.read(path)?, &mut files)
+                {
+                    return Err(format(path, source));
+                }
+            }
+        }
         let mut objects = Objects::new();
         let game_id = objects.insert(Kind::Game);
         let keyboard_id = objects.insert(Kind::Keyboard);
@@ -417,6 +444,10 @@ impl World {
         if world.system_font.is_none() && world.load_font(crate::resources::SYSTEM_FONT) {
             world.system_font = Some(crate::resources::SYSTEM_FONT.to_string());
         }
+        // `PROPERTY` blocks of the game file.
+        let properties = world.game_file.properties.clone();
+        let game_id = world.game_id;
+        world.apply_file_properties(game_id, &properties);
         // `SHADOW_IMAGE`: the image of the simple shadows of 3D actors.
         // Without the key the engine's own shadow is drawn.
         world.shadow_image = world.game_file.shadow_image.clone();
@@ -1177,19 +1208,24 @@ impl World {
             }
         };
         actor.def.caption = self.expand(&actor.def.caption);
+        // `FONT` is loaded with the actor; one that does not load leaves
+        // the actor without a font of its own (`SetFont`).
+        if let Some(font) = actor.def.font.clone() {
+            if !self.load_font(&font) {
+                actor.def.font = None;
+            }
+        }
         for (file, reason) in actor.bank.missing() {
             self.log(format!("  missing: {file}: {reason}"));
         }
         let id = self.objects.insert(Kind::Actor);
-        if let Some(native) = self.objects.get_mut(id) {
-            for property in &actor.def.properties {
-                native
-                    .props
-                    .insert(property.name.clone(), Value::from(property.value.clone()));
-            }
-        }
         let scripts = actor.def.scripts.clone();
+        let properties = actor.def.properties.clone();
+        // `SOUND_VOLUME`: the volume the actor's sounds start at.
+        let sound_volume = actor.def.sound_volume;
         self.actors.push((id, actor));
+        self.set_sfx_fields(id, sound_volume, 0);
+        self.apply_file_properties(id, &properties);
         for script in scripts {
             self.attach(engine, id, &script);
         }
@@ -2006,6 +2042,41 @@ impl World {
         for e in &mut view.scene.free_entities {
             e.caption = self.strings.expand(&e.caption);
         }
+        view.scene.caption = self.strings.expand(&view.scene.caption);
+        // The fonts the entities name are loaded with the scene; one that
+        // does not load leaves its entity without a font of its own
+        // (`SetFont` in `CAdEntity::LoadBuffer`).
+        let fonts: Vec<String> = view
+            .scene
+            .entities()
+            .filter_map(|e| e.font.clone())
+            .collect();
+        let failed: Vec<String> = fonts
+            .into_iter()
+            .filter(|font| !self.load_font(font))
+            .collect();
+        if !failed.is_empty() {
+            let drop_failed = |e: &mut luma_formats::Entity| {
+                if e.font.as_ref().is_some_and(|font| failed.contains(font)) {
+                    e.font = None;
+                }
+            };
+            for layer in &mut view.scene.layers {
+                for node in &mut layer.nodes {
+                    if let luma_formats::SceneNode::Entity(e) = node {
+                        drop_failed(e);
+                    }
+                }
+            }
+            view.scene.free_entities.iter_mut().for_each(drop_failed);
+        }
+        // The scene's own cursor is a sprite loaded with the file; one
+        // that does not load is dropped (`CAdScene::LoadBuffer`).
+        if let Some(cursor) = view.scene.cursor.clone() {
+            if !view.add_sprite(&self.vfs, &cursor) {
+                view.scene.cursor = None;
+            }
+        }
         self.log(format!(
             "scene '{}' loaded from '{path}': {} layer(s), {} entities",
             view.scene.name,
@@ -2014,6 +2085,20 @@ impl World {
         ));
         for (file, reason) in view.missing() {
             self.log(format!("  missing: {file}: {reason}"));
+        }
+        if view.scene.main_layer().is_none() {
+            self.log(format!("Warning: scene '{path}' has no main layer."));
+        }
+        let both: Vec<String> = view
+            .scene
+            .entities()
+            .filter(|e| e.region.is_some() && e.sprite.is_some())
+            .map(|e| e.name.clone())
+            .collect();
+        for name in both {
+            self.log(format!(
+                "Warning: Entity '{name}' has both sprite and region."
+            ));
         }
         self.offset_x = 0;
         self.offset_y = 0;
@@ -2053,21 +2138,31 @@ impl World {
             .scene()
             .map(|s| s.scene.scripts.clone())
             .unwrap_or_default();
+        let scene_properties = self
+            .scene()
+            .map(|s| s.scene.properties.clone())
+            .unwrap_or_default();
+        self.apply_file_properties(self.scene_id, &scene_properties);
         for script in scene_scripts {
             self.attach(engine, self.scene_id, &script);
         }
         let layers = self.scene().map(|s| s.scene.layers.len()).unwrap_or(0);
         for li in 0..layers {
             let layer_id = self.objects.insert(Kind::Layer(li));
-            let (layer_scripts, node_count) = {
+            let (layer_scripts, node_count, layer_properties) = {
                 let layer = &self.scene().unwrap().scene.layers[li];
-                (layer.scripts.clone(), layer.nodes.len())
+                (
+                    layer.scripts.clone(),
+                    layer.nodes.len(),
+                    layer.properties.clone(),
+                )
             };
+            self.apply_file_properties(layer_id, &layer_properties);
             for script in layer_scripts {
                 self.attach(engine, layer_id, &script);
             }
             for ni in 0..node_count {
-                let (kind, scripts) = {
+                let (kind, scripts, properties) = {
                     match &self.scene().unwrap().scene.layers[li].nodes[ni] {
                         luma_formats::SceneNode::Entity(e) => (
                             Kind::Entity(crate::scene_view::EntityRef::Node {
@@ -2075,6 +2170,7 @@ impl World {
                                 index: ni,
                             }),
                             e.scripts.clone(),
+                            e.properties.clone(),
                         ),
                         luma_formats::SceneNode::Region(r) => (
                             Kind::Region {
@@ -2082,10 +2178,12 @@ impl World {
                                 index: ni,
                             },
                             r.scripts.clone(),
+                            r.properties.clone(),
                         ),
                     }
                 };
                 let id = self.objects.insert(kind);
+                self.apply_file_properties(id, &properties);
                 self.load_entity_sound(id);
                 self.register_entity_region(id);
                 for script in scripts {
@@ -2101,6 +2199,10 @@ impl World {
             let id = self
                 .objects
                 .insert(Kind::Entity(crate::scene_view::EntityRef::Free(i)));
+            let properties = self.scene().unwrap().scene.free_entities[i]
+                .properties
+                .clone();
+            self.apply_file_properties(id, &properties);
             self.load_entity_sound(id);
             self.register_entity_region(id);
             let scripts = self.scene().unwrap().scene.free_entities[i].scripts.clone();
@@ -2111,24 +2213,43 @@ impl World {
         Ok(())
     }
 
-    /// Loads the `SOUND` of an entity without playing it (`CAdEntity`
-    /// reads `SOUND`, `SOUND_START_TIME` and `SOUND_VOLUME`).
+    /// Sets the `PROPERTY` blocks of a definition file on an object, the
+    /// way a script's assignment would (`CBScriptHolder::ParseProperty`
+    /// calls `ScSetProperty`): a name the object knows as one of its own
+    /// properties sets that property from the string, any other becomes a
+    /// script property. The blocks are applied in file order, after the
+    /// other keys of their block.
+    pub(crate) fn apply_file_properties(
+        &mut self,
+        id: NativeId,
+        properties: &[luma_formats::Property],
+    ) {
+        for property in properties {
+            self.set_property(id, &property.name, &Value::from(property.value.clone()));
+        }
+    }
+
+    /// Loads the `SOUND` of an entity without playing it, as
+    /// `CAdEntity::LoadBuffer` does where the key stands
+    /// (`PlaySFX(file, false, false)`): with the volume and the start
+    /// offset read before the key. Those read after it are kept for the
+    /// next `PlaySound()` without a file. An entity of the game or of a
+    /// window is handled like one of the scene.
     pub(crate) fn load_entity_sound(&mut self, id: NativeId) {
         let Some(Kind::Entity(r)) = self.objects.get(id).map(|n| n.kind.clone()) else {
             return;
         };
-        let Some((sound, start, volume)) = self
-            .scene()
-            .and_then(|v| v.entity(r))
-            .map(|e| (e.sound.clone(), e.sound_start_ms, e.sound_volume))
-        else {
+        let Some(entity) = self.entity_def(r) else {
             return;
         };
+        let sound = entity.sound.clone();
+        let (load_volume, load_start) = (entity.sound_load_volume, entity.sound_load_start_ms);
+        let (volume, start) = (entity.sound_volume, entity.sound_start_ms);
         if let Some(sound) = sound {
-            self.set_sfx_time(id, start.max(0) as u64);
-            self.set_sfx_volume(id, volume);
+            self.set_sfx_fields(id, load_volume, load_start.max(0) as u64);
             self.play_sfx(id, Some(&sound), false, false, None, 0);
         }
+        self.set_sfx_fields(id, volume, start.max(0) as u64);
     }
 
     /// The screen fader.
@@ -2214,10 +2335,11 @@ impl World {
             .or_else(|| self.system_font.clone())
     }
 
-    /// Loads the font an object's file names, if it is not loaded yet.
-    /// The original engine loads it with the object (`TOKEN_FONT` in
-    /// `CAdEntity::LoadBuffer` and `CAdActor::LoadBuffer`); Luma loads it
-    /// when the object first talks.
+    /// Loads the font an object has, if it is not loaded yet. The font of
+    /// an object's file is loaded with the object (`TOKEN_FONT` in
+    /// `CAdEntity::LoadBuffer` and `CAdActor::LoadBuffer`); this covers
+    /// the objects restored from a saved game, whose fonts are loaded
+    /// when they first talk.
     fn load_own_font(&mut self, id: NativeId) {
         if let Some(font) = self.own_font(id) {
             if self.fonts.get(&font).is_none()
@@ -3204,13 +3326,11 @@ impl Runtime {
     }
 
     /// Attaches the game's scripts (`SCRIPT=` in `default.game`); they
-    /// run on the first tick. The startup scene, if the game names one,
-    /// is scheduled first.
+    /// run on the first tick. No scene is loaded here: `STARTUP_SCENE`
+    /// is only a name kept for the scripts (`Game.StartupScene`), which
+    /// open the first scene themselves, as in the original engine.
     pub fn start(&mut self) {
         self.world.init_accessibility();
-        if let Some(scene) = self.world.startup_scene.clone() {
-            self.world.schedule_scene(&scene, true);
-        }
         self.world.load_items(&mut self.engine);
         self.world.load_inventory_box(&mut self.engine);
         self.world.load_response_box(&mut self.engine);

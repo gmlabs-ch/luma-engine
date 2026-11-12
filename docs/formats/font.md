@@ -62,7 +62,7 @@ text converted to the ANSI code page first (see
 [Text encoding](#text-encoding)).
 
 **Automatic widths.** For every tile, the width is one more than the
-right-most column holding a pixel with alpha above 128, scanning each row
+right-most column holding a pixel that is not fully transparent, scanning each row
 from the right (an empty tile has width 0). `EXPAND_WIDTH` is then added
 (not below 0), and the space gets `SPACE_WIDTH`, or, when its measured
 width is 0 or equal to `EXPAND_WIDTH`, half the sum of the widths of `m`
@@ -109,8 +109,8 @@ TTFONT
 | `FACE` | string | `Arial` | The family name of the typeface the text is drawn with (see [Choosing the face](#choosing-the-face)). |
 | `FILENAME` | string | `arial.ttf` | A font file among the game's files, made available to the engine: it is drawn with when `FACE` names its typeface. |
 | `BOLD`, `ITALIC` | bool | `FALSE` | The weight and the slant of the face. |
-| `UNDERLINE`, `STRIKE` | bool | `FALSE` | `UNDERLINE` draws a line under the text; `STRIKE` is read and ignored. |
-| `CHARSET` | int | `0` | The Windows character set of the font, ignored: every face is addressed by Unicode character. |
+| `UNDERLINE`, `STRIKE` | bool | `FALSE` | `UNDERLINE` draws a line under the text; `STRIKE` is read and not drawn yet. |
+| `CHARSET` | int | `0` | The character set of the font, which in an ANSI game decides the code page the text's bytes are read in: `3` Baltic (Windows-1257), `5` Central Europe (1250), `7` Greek (1253), `10` Cyrillic (1251), `13` Turkish (1254); `0`, `1` and the others are read as Windows-1252. The original also knows `2` OEM, `4` Big5, `6` GB2312, `8` Hangul, `9` Mac, `11` Shift-JIS, `12` symbol, `14` Vietnamese, `15` Johab, `16` Arabic, `17` Hebrew and `18` Thai, for which Luma has no table. No effect in a UTF-8 game. |
 | `COLOR` | `r,g,b` | `0,0,0` | Colour of the text when no `LAYER` is given. |
 | `ALPHA` | int | `0` | Opacity of that colour. |
 | `LAYER` | block, repeatable | | A layer: `OFFSET_X`, `OFFSET_Y` (default `0`), `COLOR`, `ALPHA` (default black, transparent). Layers are drawn in file order, each the whole text moved by its offset and tinted with its colour; an outline is four dark layers under a light one. |
@@ -244,8 +244,9 @@ the text above the object and plays its talk sprites until the sentence
 ends. The text is expanded through the string table.
 
 - **Font.** The object's own (`FONT` in its file, or `SetFont`), else
-  the game's system font. The original engine loads the font with the
-  object; Luma loads it when the object first talks.
+  the game's system font. The font is loaded with the object; one that
+  does not load leaves the object without a font of its own (`GetFont`
+  is then null).
 - **Height.** The object's height is the largest hotspot `y` of the
   frame it shows, of the sprite it shows (a talk sprite or a played
   animation, not only its base sprite), scaled with the object

@@ -31,6 +31,9 @@ impl World {
             Some(Kind::Actor3D) => self.actor3d(id).and_then(|a| a.cursor.clone()),
             Some(Kind::Entity(r)) => self.entity_def(*r).and_then(|e| e.cursor.clone()),
             Some(Kind::Control) => self.control(id).and_then(|c| c.cursor.clone()),
+            // The scene's own cursor (`CURSOR` of the scene file): the
+            // engine never draws it, scripts can ask for it.
+            Some(Kind::Scene) => self.scene().and_then(|v| v.scene.cursor.clone()),
             _ => None,
         }
     }

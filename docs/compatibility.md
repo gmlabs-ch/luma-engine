@@ -307,7 +307,7 @@ How the list was made. For every class with a script interface, the names tested
 | `TalkSkipButton` | get/set | **done** | Mouse button that skips speech. |
 | `VideoSkipButton` | get/set | **done** | Mouse button that skips videos. |
 | `ChangingScene` | get | **done** | True while a scene change is pending. |
-| `StartupScene` | get/set | **done** | Scene loaded at startup (from `default.game`); `null` when none, settable, saved with the game. |
+| `StartupScene` | get/set | **done** | The `STARTUP_SCENE` of `default.game`, a name for the game's scripts (the engine does not load it by itself); `null` when none, settable, saved with the game. |
 
 ### Window hook defined in CAdGame (`CAdGame::WindowScriptMethodHook`)
 

@@ -263,7 +263,7 @@ impl BitmapFontDef {
     }
 
     /// The measured width of tile `index`: one more than the right-most
-    /// column with a pixel more than half opaque.
+    /// column with a pixel that is not fully transparent.
     fn measure_tile(&self, image: &Image, index: i32) -> i32 {
         let x0 = (index % self.columns) * self.tile_width;
         let y0 = (index / self.columns) * self.tile_height;
@@ -272,8 +272,11 @@ impl BitmapFontDef {
             let mut col = self.tile_width - 1;
             while col > min_col {
                 let (x, y) = (x0 + col, y0 + row);
+                // Ink is any pixel that is not fully transparent
+                // (`IsTransparentAtLite`), the soft edge of an
+                // antialiased letter included.
                 let opaque =
-                    x >= 0 && y >= 0 && image.pixel(x as u32, y as u32).is_some_and(|p| p.a > 128);
+                    x >= 0 && y >= 0 && image.pixel(x as u32, y as u32).is_some_and(|p| p.a != 0);
                 if opaque {
                     min_col = min_col.max(col);
                     break;
@@ -681,6 +684,75 @@ mod tests {
             (0, 40, 8, 10),
             "tile 64 with the fix"
         );
+    }
+
+    /// `CBFontBitmap::LoadBuffer`: the tables, the defaults and what a
+    /// key outside them does.
+    #[test]
+    fn font_keys_follow_the_original() {
+        // A key outside the table fails the font.
+        assert!(
+            FontFile::parse(b"FONT { IMAGE=\"a\" COLUMNS=4 TILE_WIDTH=4 TILE_HEIGHT=4 BOGUS=1 }")
+                .is_err()
+        );
+        assert!(FontFile::parse(b"TTFONT { SIZE=10 BOGUS=1 }").is_err());
+        // The root block is the first statement.
+        assert!(
+            FontFile::parse(
+                b"NAME=\"x\"\nFONT { IMAGE=\"a\" COLUMNS=4 TILE_WIDTH=4 TILE_HEIGHT=4 }"
+            )
+            .is_err()
+        );
+        // `WIDTHS_FRAME` is read as meant (the original takes it for
+        // `WIDTHS` and crashes), next to `WIDTHS`.
+        let FontFile::Bitmap(def) = FontFile::parse(
+            b"FONT { SPRITE=\"f.sprite\" COLUMNS=4 TILE_WIDTH=4 TILE_HEIGHT=4 WIDTHS_FRAME=2 WIDTHS { 300, 2 } DEFAULT_WIDTH=260 }",
+        )
+        .unwrap() else {
+            panic!("bitmap expected");
+        };
+        assert_eq!(def.widths_frame, 2);
+        // Widths are bytes: 300 keeps its low byte, 44.
+        assert_eq!(def.widths, [44, 2]);
+        assert_eq!(def.widths(None)[5], 4, "260 as a byte");
+
+        // TrueType: `SIZE` is 12 by default, `CHARSET` is read, a layer
+        // with a key of its own that is not known is dropped alone.
+        let FontFile::TrueType(def) = FontFile::parse(
+            b"TTFONT { CHARSET=5 COLOR { 1,2,3 } ALPHA=9 LAYER { BOGUS=1 } LAYER { OFFSET_X=2 COLOR { 4,5,6 } } }",
+        )
+        .unwrap() else {
+            panic!("truetype expected");
+        };
+        assert_eq!(def.size, 12);
+        assert_eq!(def.charset, 5);
+        assert_eq!(def.layers.len(), 1);
+        assert_eq!(def.layers[0].offset_x, 2);
+        assert_eq!(def.layers[0].color, Rgba::from_ints(4, 5, 6, 0));
+    }
+
+    /// `CBFontBitmap::GetWidths`: a pixel is ink unless it is fully
+    /// transparent.
+    #[test]
+    fn a_faint_pixel_counts_for_the_width() {
+        let mut pixels = vec![0u8; 4 * 4 * 4];
+        // One pixel of alpha 1 in column 2 of the only tile.
+        pixels[(4 + 2) * 4 + 3] = 1;
+        let image = Image {
+            width: 4,
+            height: 4,
+            pixels,
+            has_alpha_channel: true,
+        };
+        let def = BitmapFontDef {
+            image: Some("f.png".into()),
+            columns: 1,
+            tile_width: 4,
+            tile_height: 4,
+            auto_width: true,
+            ..BitmapFontDef::default()
+        };
+        assert_eq!(def.widths(Some(&image))[0], 3);
     }
 
     #[test]

@@ -287,14 +287,8 @@ impl World {
             self.load_font(font);
         }
         let id = self.objects.insert(Kind::Item);
-        if let Some(native) = self.objects.get_mut(id) {
-            for property in &def.properties {
-                native
-                    .props
-                    .insert(property.name.clone(), Value::from(property.value.clone()));
-            }
-        }
         let scripts = def.scripts.clone();
+        let properties = def.properties.clone();
         self.inventory.items.push((
             id,
             Item {
@@ -305,6 +299,7 @@ impl World {
                 y: 0,
             },
         ));
+        self.apply_file_properties(id, &properties);
         for script in scripts {
             self.attach(engine, id, &script);
         }
@@ -353,18 +348,26 @@ impl World {
         };
         if let Some(window_def) = def.window.take() {
             let window = self.new_window_control(None);
-            self.apply_window_def(engine, window, window_def, None);
+            if !self.apply_window_def(engine, window, window_def, None) {
+                // A window that fails fails the box
+                // (`CAdInventoryBox::LoadBuffer`).
+                self.log(format!("Error loading INVENTORY_BOX definition '{path}'"));
+                self.unload_object(engine, window);
+                return false;
+            }
             for widget in self.widgets_of(window) {
                 if let Some(b) = self.control_mut(widget).and_then(Control::button_mut) {
                     b.listener = Some(ButtonListener::Inventory);
                 }
             }
             self.inventory.window = Some(window);
-            if def.exclusive {
-                let close =
-                    self.new_button_control(Some(window), "close", ButtonListener::Inventory);
-                self.inventory.close_button = Some(close);
-            }
+        }
+        // An exclusive box has its `close` button under the whole screen,
+        // with or without a window.
+        if def.exclusive {
+            let close =
+                self.new_button_control(self.inventory.window, "close", ButtonListener::Inventory);
+            self.inventory.close_button = Some(close);
         }
         self.inventory.visible = def.always_visible;
         self.inventory.def = Some(def);

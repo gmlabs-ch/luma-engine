@@ -2160,7 +2160,9 @@ fn sounds_music_and_speech_play_on_the_game_clock() {
     assert_eq!(result(&runtime, "len"), Value::Int(300));
     assert_eq!(result(&runtime, "started"), Value::Bool(true));
     assert_eq!(result(&runtime, "playing"), Value::Bool(true));
-    assert_eq!(result(&runtime, "humVol"), Value::Int(50));
+    // `SOUND_VOLUME` is written after `SOUND`, as the scene editor does:
+    // the sound was loaded at the volume read before it, 100.
+    assert_eq!(result(&runtime, "humVol"), Value::Int(100));
     assert_eq!(result(&runtime, "humPlaying0"), Value::Bool(false));
     assert_eq!(result(&runtime, "humPlaying1"), Value::Bool(true));
     // The effects: kept on the object, applied to its playing sound,
@@ -6045,6 +6047,219 @@ fn a_bare_game_gets_the_built_in_font_and_its_caption_is_expanded() {
     );
 }
 
+/// `CBScriptHolder::ParseProperty`: the `PROPERTY` blocks of a file are
+/// set on the object as a script's assignment would be, so a name the
+/// object knows sets its own property.
+#[test]
+fn file_properties_are_set_as_a_script_would() {
+    let dir = game();
+    std::fs::write(
+        dir.join("default.game"),
+        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" PROPERTY { NAME=\"difficulty\" VALUE=\"2\" } }",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("scenes")).unwrap();
+    std::fs::write(
+        dir.join("scenes/props.scene"),
+        b"SCENE {\n NAME=\"p\"\n PROPERTY { NAME=\"mood\" VALUE=\"dark\" }\n LAYER { NAME=\"main\" MAIN=TRUE WIDTH=32 HEIGHT=32\n  ENTITY { NAME=\"lamp\" ACTIVE=TRUE PROPERTY { NAME=\"lit\" VALUE=\"yes\" } PROPERTY { NAME=\"Active\" VALUE=\"false\" } PROPERTY { NAME=\"broken\" } }\n }\n WAYPOINTS { NAME=\"w\" PROPERTY { NAME=\"kind\" VALUE=\"path\" } POINT {1,1} }\n}",
+    )
+    .unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    assert_eq!(
+        runtime.world.get_property(game, "difficulty"),
+        Some(Value::from("2"))
+    );
+    runtime.change_scene("scenes\\props.scene").unwrap();
+    runtime.tick(16);
+    let scene = runtime.world.scene_id();
+    assert_eq!(
+        runtime.world.get_property(scene, "mood"),
+        Some(Value::from("dark"))
+    );
+    let lamp_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    let lamp = runtime.world.node_id(lamp_ref).unwrap();
+    assert_eq!(
+        runtime.world.get_property(lamp, "lit"),
+        Some(Value::from("yes"))
+    );
+    // `Active` is a property of the entity itself: the string sets it.
+    assert!(
+        !runtime
+            .world
+            .scene()
+            .unwrap()
+            .entity(lamp_ref)
+            .unwrap()
+            .active
+    );
+    // A block without `VALUE` sets nothing.
+    assert_eq!(runtime.world.get_property(lamp, "broken"), None);
+    let group = runtime.world.waypoint_group_object(0).unwrap();
+    assert_eq!(
+        runtime.world.get_property(group, "kind"),
+        Some(Value::from("path"))
+    );
+}
+
+/// `CAdGame::LoadBuffer STARTUP_SCENE`: the engine keeps the name for
+/// the scripts and never loads the scene by itself.
+#[test]
+fn the_startup_scene_is_only_a_name_for_the_scripts() {
+    let dir = temp_dir();
+    let mut pkg = PackageBuilder::new("data");
+    pkg.add_file(
+        "default.game",
+        b"GAME { NAME=\"T\" } AD_GAME { STARTUP_SCENE=\"scenes\\first.scene\" SCENE_VIEWPORT { -5, 4, 900, 20 } }".to_vec(),
+    );
+    pkg.add_file(
+        "scenes\\first.scene",
+        b"SCENE { NAME=\"first\" LAYER { NAME=\"main\" MAIN=TRUE WIDTH=32 HEIGHT=32 } }".to_vec(),
+    );
+    std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    runtime.start();
+    for _ in 0..5 {
+        runtime.tick(16);
+    }
+    assert!(runtime.world.scene().is_none());
+    assert_eq!(runtime.world.startup_scene(), Some("scenes\\first.scene"));
+    // `SCENE_VIEWPORT` is left, top, right, bottom, kept inside the
+    // screen (800 by 600 without settings).
+    assert_eq!(runtime.world.viewport(), (0, 4, 800, 16));
+}
+
+/// `CAdResponseBox::LoadBuffer`: a box without `WINDOW` still offers its
+/// choices, laid out in `AREA` on the screen.
+#[test]
+fn a_response_box_without_a_window_shows_its_choices_on_the_screen() {
+    let dir = game();
+    std::fs::write(
+        dir.join("responses.def"),
+        b"RESPONSE_BOX { AREA { 2, 2, 30, 30 } FONT=\"fonts\\sys.font\" FONT_HOVER=\"gone.font\" }",
+    )
+    .unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "dialogue.script")
+    );
+    runtime.tick(16);
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "dlg", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "num"), Value::Int(2));
+    let window = runtime.world.responses_window().unwrap();
+    let buttons: Vec<_> = runtime
+        .world
+        .widgets_of(window)
+        .into_iter()
+        .filter(|w| runtime.world.control(*w).unwrap().name == "response")
+        .collect();
+    assert_eq!(buttons.len(), 2);
+    let second = runtime.world.control(buttons[1]).unwrap();
+    assert!(second.visible);
+    // The area is on the screen: the choices start at its left edge.
+    assert_eq!(second.x, 2);
+    let (x, y) = (second.x + 2, second.y + second.height / 2);
+    runtime.mouse_move(x, y);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(buttons[1]));
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "chosen"), Value::Int(2));
+}
+
+/// `CUIWindow::LoadBuffer`, `CUIButton::LoadBuffer`: a font, an image,
+/// a background or a cursor that does not load fails the control, and a
+/// control that fails makes its window fail.
+#[test]
+fn a_window_whose_control_names_a_missing_font_does_not_load() {
+    let dir = game();
+    std::fs::write(
+        dir.join("bad.window"),
+        b"WINDOW { NAME=\"bad\" WIDTH=20 HEIGHT=16 BUTTON { NAME=\"b\" FONT=\"gone.font\" } }",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("bad2.window"),
+        b"WINDOW { NAME=\"bad2\" WINDOW { NAME=\"inner\" STATIC { NAME=\"s\" BACK=\"gone.tiled\" } } }",
+    )
+    .unwrap();
+    // A missing image is the placeholder and loads.
+    std::fs::write(
+        dir.join("ok.window"),
+        b"WINDOW { NAME=\"ok\" WIDTH=20 HEIGHT=16 BUTTON { NAME=\"b\" IMAGE=\"gone.png\" } }",
+    )
+    .unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let windows = runtime.world.window_ids().len();
+    for file in ["bad.window", "bad2.window"] {
+        assert!(
+            runtime
+                .world
+                .load_window(&mut runtime.engine, file)
+                .is_none(),
+            "{file}"
+        );
+        assert_eq!(runtime.world.window_ids().len(), windows, "{file}");
+    }
+    let log = runtime.world.take_log();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Error loading WINDOW definition 'bad.window'")),
+        "{log:?}"
+    );
+    let ok = runtime
+        .world
+        .load_window(&mut runtime.engine, "ok.window")
+        .expect("a missing image does not fail the window");
+    let button = runtime.world.widget(ok, "b").unwrap();
+    assert_eq!(runtime.world.control(button).unwrap().width, 64);
+}
+
+/// `CAdGame::LoadBuffer`: an items file, an inventory box or a response
+/// box that cannot be read fails the game file.
+#[test]
+fn a_game_whose_items_file_is_missing_does_not_start() {
+    for ad_game in [
+        "ITEMS=\"gone.items\"",
+        "INVENTORY_BOX=\"gone.def\"",
+        "RESPONSE_BOX=\"bad.def\"",
+    ] {
+        let dir = temp_dir();
+        let mut pkg = PackageBuilder::new("data");
+        pkg.add_file(
+            "default.game",
+            format!("GAME {{ NAME=\"T\" }} AD_GAME {{ {ad_game} }}").into_bytes(),
+        );
+        pkg.add_file("bad.def", b"RESPONSE_BOX { BOGUS=1 }".to_vec());
+        std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
+        assert!(
+            Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).is_err(),
+            "{ad_game}"
+        );
+    }
+}
+
 /// `CBGame::LoadSettings`: `SAVED_GAME_EXT` names the extension of the
 /// slot files, and `ALLOW_ACCESSIBILITY_TAB` is read from the settings.
 #[test]
@@ -6205,16 +6420,16 @@ fn defects_runtime() -> (Runtime, std::path::PathBuf) {
 }
 
 #[test]
-fn an_object_loads_the_font_of_its_file_when_it_first_talks() {
+fn an_object_loads_the_font_of_its_file_with_the_file() {
     let (mut runtime, dir) = defects_runtime();
     let talker = runtime.world.find_node("talker").unwrap();
+    // `FONT` is loaded when the entity is (`CAdEntity::LoadBuffer`).
     assert!(
-        runtime.world.fonts().get("fonts\\own.font").is_none(),
-        "nothing else loads the entity's font"
+        runtime.world.fonts().get("fonts\\own.font").is_some(),
+        "the scene loads the entity's font"
     );
     call_native(&mut runtime, talker, "TalkAsync", &[Value::from("Hi")]);
     runtime.tick(16);
-    assert!(runtime.world.fonts().get("fonts\\own.font").is_some());
     let sentence = runtime
         .world
         .sentences()
@@ -6248,16 +6463,14 @@ fn an_object_loads_the_font_of_its_file_when_it_first_talks() {
 }
 
 #[test]
-fn a_missing_object_font_falls_back_to_the_system_font_and_is_logged() {
+fn a_missing_object_font_falls_back_to_the_system_font() {
     let (mut runtime, dir) = defects_runtime();
     let lost = runtime.world.find_node("lost").unwrap();
+    // The font failed when the scene loaded: the entity has none of its
+    // own, as the original's `SetFont` leaves it.
+    assert_eq!(call_native(&mut runtime, lost, "GetFont", &[]), Value::Null);
     call_native(&mut runtime, lost, "TalkAsync", &[Value::from("Lost")]);
-    let log = runtime.world.take_log();
     runtime.tick(16);
-    assert!(
-        log.iter().any(|l| l.contains("Error loading font")),
-        "{log:?}"
-    );
     let sentence = runtime
         .world
         .sentences()

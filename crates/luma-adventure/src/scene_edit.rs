@@ -159,11 +159,31 @@ impl World {
         for sprite in missing {
             self.log(format!("  missing: {sprite}"));
         }
-        if let Some(native) = self.objects.get_mut(id) {
-            for property in &entity.properties {
-                native
-                    .props
-                    .insert(property.name.clone(), Value::from(property.value.clone()));
+        // `FONT` is loaded with the entity; one that does not load leaves
+        // the entity without a font of its own (`SetFont`).
+        if let Some(font) = &entity.font {
+            if !self.load_font(font) {
+                if let Some(e) = self.entity_def_mut(r) {
+                    e.font = None;
+                }
+            }
+        }
+        if entity.region.is_some() && entity.sprite.is_some() {
+            self.log(format!(
+                "Warning: Entity '{}' has both sprite and region.",
+                entity.name
+            ));
+        }
+        self.apply_file_properties(id, &entity.properties);
+        // An entity standing for an item that was taken starts hidden
+        // (`IsItemTaken` at the end of `CAdEntity::LoadBuffer`).
+        if entity
+            .item
+            .as_deref()
+            .is_some_and(|item| self.is_item_taken(item))
+        {
+            if let Some(e) = self.entity_def_mut(r) {
+                e.active = false;
             }
         }
         self.load_entity_sound(id);

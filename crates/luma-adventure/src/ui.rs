@@ -667,7 +667,13 @@ impl World {
         let def = self.read_window_def(path)?;
         let id = self.new_control(ControlKind::Window(Box::default()), None);
         self.ui.windows.push(id);
-        self.apply_window_def(engine, id, def, Some(path));
+        if !self.apply_window_def(engine, id, def, Some(path)) {
+            // A background, an image, a font, a cursor or a control that
+            // does not load fails the window (`CUIWindow::LoadBuffer`).
+            self.log(format!("Error loading WINDOW definition '{path}'"));
+            self.unload_object(engine, id);
+            return None;
+        }
         Some(id)
     }
 
@@ -689,8 +695,7 @@ impl World {
         if self.control(id).and_then(Control::window).is_none() {
             return false;
         }
-        self.apply_window_def(engine, id, def, Some(path));
-        true
+        self.apply_window_def(engine, id, def, Some(path))
     }
 
     fn new_control(&mut self, kind: ControlKind, parent: Option<NativeId>) -> NativeId {
@@ -771,37 +776,52 @@ impl World {
         Some(tiled)
     }
 
-    fn load_control_font(&mut self, path: &Option<String>) -> Option<String> {
+    /// Loads the font a control names; `ok` turns false when it names one
+    /// that does not load, which fails the control in the original.
+    fn load_control_font(&mut self, path: &Option<String>, ok: &mut bool) -> Option<String> {
         let path = path.as_deref()?;
         if self.load_font(path) {
             Some(path.to_string())
         } else {
+            *ok = false;
             None
         }
     }
 
-    fn load_control_image(&mut self, path: &Option<String>) -> Option<String> {
+    /// Loads the image a control names; see [`World::load_control_font`].
+    /// An image that does not exist is the placeholder and loads.
+    fn load_control_image(&mut self, path: &Option<String>, ok: &mut bool) -> Option<String> {
         let path = path.as_deref()?;
         if self.load_ui_image(path) {
             Some(path.to_string())
         } else {
+            *ok = false;
             None
         }
     }
 
-    fn load_control_back(&mut self, path: &Option<String>) -> Option<TiledImage> {
+    /// Loads the tiled image a control names; see
+    /// [`World::load_control_font`].
+    fn load_control_back(&mut self, path: &Option<String>, ok: &mut bool) -> Option<TiledImage> {
         let path = path.as_deref()?;
-        self.load_tiled(path)
+        let tiled = self.load_tiled(path);
+        if tiled.is_none() {
+            *ok = false;
+        }
+        tiled
     }
 
     /// Fills a control's common fields from a definition, loading what
-    /// it names.
-    fn apply_control_def(&mut self, engine: &mut Engine, id: NativeId, def: &ControlDef) {
-        let font = self.load_control_font(&def.font);
-        let image = self.load_control_image(&def.image);
-        let back = self.load_control_back(&def.back);
+    /// it names. `false` when something it names does not load: the
+    /// original's loaders of windows and controls stop there and the
+    /// control fails.
+    fn apply_control_def(&mut self, engine: &mut Engine, id: NativeId, def: &ControlDef) -> bool {
+        let mut ok = true;
+        let font = self.load_control_font(&def.font, &mut ok);
+        let image = self.load_control_image(&def.image, &mut ok);
+        let back = self.load_control_back(&def.back, &mut ok);
         if let Some(cursor) = &def.cursor {
-            self.load_cursor(cursor);
+            ok &= self.load_cursor(cursor);
         }
         if let Some(control) = self.control_mut(id) {
             control.apply_base(def);
@@ -813,20 +833,25 @@ impl World {
         for script in &def.scripts {
             self.attach(engine, id, script);
         }
+        ok
     }
 
+    /// Fills a window from its definition and creates its controls
+    /// (`CUIWindow::LoadBuffer`). `false` when the window fails: a
+    /// background, an image, a font, a cursor or a control of it does
+    /// not load. The caller then drops the window.
     pub(crate) fn apply_window_def(
         &mut self,
         engine: &mut Engine,
         id: NativeId,
         def: WindowDef,
         filename: Option<&str>,
-    ) {
-        self.apply_control_def(engine, id, &def.base);
+    ) -> bool {
+        let mut ok = self.apply_control_def(engine, id, &def.base);
         let title = self.expand(&def.title);
-        let back_inactive = self.load_control_back(&def.back_inactive);
-        let image_inactive = self.load_control_image(&def.image_inactive);
-        let font_inactive = self.load_control_font(&def.font_inactive);
+        let back_inactive = self.load_control_back(&def.back_inactive, &mut ok);
+        let image_inactive = self.load_control_image(&def.image_inactive, &mut ok);
+        let font_inactive = self.load_control_font(&def.font_inactive, &mut ok);
         if let Some(control) = self.control_mut(id) {
             control.text = title;
             control.can_focus = true;
@@ -848,9 +873,10 @@ impl World {
             }
         }
         for widget in def.widgets {
-            self.create_widget(engine, id, widget);
+            ok &= self.create_widget_checked(engine, id, widget).1;
         }
         self.correct_size(id);
+        ok
     }
 
     /// Adds a control from its definition to a window.
@@ -860,44 +886,55 @@ impl World {
         parent: NativeId,
         def: WidgetDef,
     ) -> NativeId {
-        let id = match def {
+        self.create_widget_checked(engine, parent, def).0
+    }
+
+    /// Adds a control from its definition to a window; the flag is false
+    /// when the control fails to load (something it names does not load,
+    /// or its entity for a container), which fails its window.
+    fn create_widget_checked(
+        &mut self,
+        engine: &mut Engine,
+        parent: NativeId,
+        def: WidgetDef,
+    ) -> (NativeId, bool) {
+        let (id, ok) = match def {
             WidgetDef::Button(def) => {
                 let id = self.new_control(ControlKind::Button(Box::default()), Some(parent));
-                self.apply_button_def(engine, id, &def);
-                id
+                (id, self.apply_button_def(engine, id, &def))
             }
             WidgetDef::Static(def) => {
                 let id =
                     self.new_control(ControlKind::Static(StaticState::default()), Some(parent));
-                self.apply_static_def(engine, id, &def);
-                id
+                (id, self.apply_static_def(engine, id, &def))
             }
             WidgetDef::Edit(def) => {
                 let id = self.new_control(ControlKind::Edit(Box::default()), Some(parent));
-                self.apply_edit_def(engine, id, &def);
-                id
+                (id, self.apply_edit_def(engine, id, &def))
             }
             WidgetDef::Window(def) => {
                 let id = self.new_control(ControlKind::Window(Box::default()), Some(parent));
-                self.apply_window_def(engine, id, *def, None);
-                id
+                (id, self.apply_window_def(engine, id, *def, None))
             }
             WidgetDef::EntityContainer(def) => {
                 let id = self.new_control(ControlKind::EntityContainer(None), Some(parent));
-                self.apply_control_def(engine, id, &def.base);
+                let mut ok = self.apply_control_def(engine, id, &def.base);
                 if let Some(control) = self.control_mut(id) {
                     control.can_focus = false;
                 }
                 if let Some(path) = &def.entity {
-                    self.set_container_entity(engine, id, path);
+                    ok &= self.set_container_entity(engine, id, path);
                 }
-                id
+                // `CorrectSize`: a container has no image, so it is 100
+                // wide and keeps its height.
+                self.correct_size(id);
+                (id, ok)
             }
         };
         if let Some(window) = self.control_mut(parent).and_then(Control::window_mut) {
             window.widgets.push(id);
         }
-        id
+        (id, ok)
     }
 
     /// Adds an empty control to a window (`CreateButton`, `CreateStatic`,
@@ -918,26 +955,28 @@ impl World {
         id
     }
 
-    fn apply_button_def(&mut self, engine: &mut Engine, id: NativeId, def: &ButtonDef) {
-        self.apply_control_def(engine, id, &def.base);
+    /// `CUIButton::LoadBuffer`, on a parsed definition; `false` when the
+    /// button fails (something it names does not load).
+    fn apply_button_def(&mut self, engine: &mut Engine, id: NativeId, def: &ButtonDef) -> bool {
+        let mut ok = self.apply_control_def(engine, id, &def.base);
         let text = self.expand(&def.text);
         let state = ButtonState {
-            back_hover: self.load_control_back(&def.back_hover),
-            back_press: self.load_control_back(&def.back_press),
-            back_disable: self.load_control_back(&def.back_disable),
-            back_focus: self.load_control_back(&def.back_focus),
-            image_hover: self.load_control_image(&def.image_hover),
-            image_press: self.load_control_image(&def.image_press),
-            image_disable: self.load_control_image(&def.image_disable),
-            image_focus: self.load_control_image(&def.image_focus),
+            back_hover: self.load_control_back(&def.back_hover, &mut ok),
+            back_press: self.load_control_back(&def.back_press, &mut ok),
+            back_disable: self.load_control_back(&def.back_disable, &mut ok),
+            back_focus: self.load_control_back(&def.back_focus, &mut ok),
+            image_hover: self.load_control_image(&def.image_hover, &mut ok),
+            image_press: self.load_control_image(&def.image_press, &mut ok),
+            image_disable: self.load_control_image(&def.image_disable, &mut ok),
+            image_focus: self.load_control_image(&def.image_focus, &mut ok),
             anim_hover: None,
             anim_press: None,
             anim_disable: None,
             anim_focus: None,
-            font_hover: self.load_control_font(&def.font_hover),
-            font_press: self.load_control_font(&def.font_press),
-            font_disable: self.load_control_font(&def.font_disable),
-            font_focus: self.load_control_font(&def.font_focus),
+            font_hover: self.load_control_font(&def.font_hover, &mut ok),
+            font_press: self.load_control_font(&def.font_press, &mut ok),
+            font_disable: self.load_control_font(&def.font_disable, &mut ok),
+            font_focus: self.load_control_font(&def.font_focus, &mut ok),
             text_align: def.text_align,
             hover: false,
             press: false,
@@ -953,10 +992,13 @@ impl World {
             control.kind = ControlKind::Button(Box::new(state));
         }
         self.correct_size(id);
+        ok
     }
 
-    fn apply_static_def(&mut self, engine: &mut Engine, id: NativeId, def: &StaticDef) {
-        self.apply_control_def(engine, id, &def.base);
+    /// `CUIText::LoadBuffer`, on a parsed definition; `false` when the
+    /// control fails.
+    fn apply_static_def(&mut self, engine: &mut Engine, id: NativeId, def: &StaticDef) -> bool {
+        let ok = self.apply_control_def(engine, id, &def.base);
         let text = self.expand(&def.text);
         if let Some(control) = self.control_mut(id) {
             control.text = text;
@@ -967,13 +1009,17 @@ impl World {
             });
         }
         self.correct_size(id);
+        ok
     }
 
-    fn apply_edit_def(&mut self, engine: &mut Engine, id: NativeId, def: &EditDef) {
-        self.apply_control_def(engine, id, &def.base);
-        let font_selected = self.load_control_font(&def.font_selected);
+    /// `CUIEdit::LoadBuffer`, on a parsed definition; `false` when the
+    /// control fails. The text goes through the string table.
+    fn apply_edit_def(&mut self, engine: &mut Engine, id: NativeId, def: &EditDef) -> bool {
+        let mut ok = self.apply_control_def(engine, id, &def.base);
+        let font_selected = self.load_control_font(&def.font_selected, &mut ok);
+        let text = self.expand(&def.text);
         if let Some(control) = self.control_mut(id) {
-            control.set_text(&def.text);
+            control.set_text(&text);
             control.can_focus = true;
             control.kind = ControlKind::Edit(Box::new(EditState {
                 font_selected,
@@ -984,6 +1030,7 @@ impl World {
             }));
         }
         self.correct_size(id);
+        ok
     }
 
     /// The bounding size of a sprite's first frame placed at the origin

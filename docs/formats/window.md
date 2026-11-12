@@ -63,7 +63,10 @@ syntax error that fails the control: `FOCUSABLE` is a button key,
 `NAME`, `X`, `Y`, `DISABLED`, `VISIBLE`, `SCRIPT`, `ENTITY` and
 `TEMPLATE`. The loaders of windows and controls stop at the first error:
 a control that fails makes its window fail, and `Game.LoadWindow` then
-returns null.
+returns null. A background (`BACK*`), a font (`FONT*`), a cursor or an
+image that cannot be loaded is such an error, and so is the `ENTITY` of
+a container. An image file that does not exist is not: the engine shows
+its placeholder for it.
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|

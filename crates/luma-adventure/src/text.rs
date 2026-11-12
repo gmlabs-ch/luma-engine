@@ -92,6 +92,80 @@ fn ansi_to_text(raw: &str) -> String {
         .collect()
 }
 
+/// Windows-1250 (Central Europe) from 0x80 to 0xFF; U+FFFD where the
+/// code page has no character.
+const WINDOWS_1250: &str = "€\u{fffd}‚\u{fffd}„…†‡\u{fffd}‰Š‹ŚŤŽŹ\u{fffd}‘’“”•–—\u{fffd}™š›śťžź\u{a0}ˇ˘Ł¤Ą¦§¨©Ş«¬\u{ad}®Ż°±˛ł´µ¶·¸ąş»Ľ˝ľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖ×ŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőö÷řůúűüýţ˙";
+
+/// Windows-1251 (Cyrillic) from 0x80 to 0xBF; 0xC0 to 0xFF are the
+/// letters U+0410 to U+044F.
+const WINDOWS_1251: &str =
+    "ЂЃ‚ѓ„…†‡€‰Љ‹ЊЌЋЏђ‘’“”•–—\u{fffd}™љ›њќћџ\u{a0}ЎўЈ¤Ґ¦§Ё©Є«¬\u{ad}®Ї°±Ііґµ¶·ё№є»јЅѕї";
+
+/// Windows-1253 (Greek) from 0x80 to 0xBF; the letters follow from
+/// U+0390, with two holes.
+const WINDOWS_1253: &str = "€\u{fffd}‚ƒ„…†‡\u{fffd}‰\u{fffd}‹\u{fffd}\u{fffd}\u{fffd}\u{fffd}\u{fffd}‘’“”•–—\u{fffd}™\u{fffd}›\u{fffd}\u{fffd}\u{fffd}\u{fffd}\u{a0}΅Ά£¤¥¦§¨©\u{fffd}«¬\u{ad}®―°±²³΄µ¶·ΈΉΊ»Ό½ΎΏ";
+
+/// Windows-1257 (Baltic) from 0x80 to 0xFF.
+const WINDOWS_1257: &str = "€\u{fffd}‚\u{fffd}„…†‡\u{fffd}‰\u{fffd}‹\u{fffd}¨ˇ¸\u{fffd}‘’“”•–—\u{fffd}™\u{fffd}›\u{fffd}¯˛\u{fffd}\u{a0}\u{fffd}¢£¤\u{fffd}¦§Ø©Ŗ«¬\u{ad}®Æ°±²³´µ¶·ø¹ŗ»¼½¾æĄĮĀĆÄÅĘĒČÉŹĖĢĶĪĻŠŃŅÓŌÕÖ×ŲŁŚŪÜŻŽßąįāćäåęēčéźėģķīļšńņóōõö÷ųłśūüżž˙";
+
+/// The character a byte from 0x80 up stands for in the code page of a
+/// font's `CHARSET` (`CBFontTT::GetWindowsCharset`: the character set
+/// GDI is given with the font, which decides how it reads ANSI text).
+/// `None` for the character sets read as Windows-1252: 0 and 1 (the
+/// system's), and those Luma has no table for.
+fn charset_character(charset: i32, byte: u8) -> Option<char> {
+    let index = usize::from(byte.checked_sub(0x80)?);
+    let from = |table: &'static str| table.chars().nth(index);
+    let character = match charset {
+        // BALTIC_CHARSET
+        3 => from(WINDOWS_1257)?,
+        // EASTEUROPE_CHARSET
+        5 => from(WINDOWS_1250)?,
+        // GREEK_CHARSET
+        7 => match byte {
+            0x80..=0xBF => from(WINDOWS_1253)?,
+            0xD2 | 0xFF => '\u{fffd}',
+            _ => char::from_u32(0x0390 + u32::from(byte) - 0xC0)?,
+        },
+        // RUSSIAN_CHARSET
+        10 => match byte {
+            0x80..=0xBF => from(WINDOWS_1251)?,
+            _ => char::from_u32(0x0410 + u32::from(byte) - 0xC0)?,
+        },
+        // TURKISH_CHARSET: Windows-1252 but for six letters.
+        13 => match byte {
+            0xD0 => 'Ğ',
+            0xDD => 'İ',
+            0xDE => 'Ş',
+            0xF0 => 'ğ',
+            0xFD => 'ı',
+            0xFE => 'ş',
+            0x8E | 0x9E => '\u{fffd}',
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(character)
+}
+
+/// The characters of an ANSI game's text for a TrueType font of a given
+/// `CHARSET`: each byte is a character of the font's code page, of
+/// Windows-1252 when the character set has none of its own here.
+fn ansi_to_text_in(raw: &str, charset: i32) -> String {
+    let high = |c: char| u8::try_from(u32::from(c)).ok().filter(|b| *b >= 0x80);
+    if !raw.chars().any(|c| high(c).is_some()) {
+        return raw.to_string();
+    }
+    raw.chars()
+        .map(
+            |c| match high(c).and_then(|byte| charset_character(charset, byte)) {
+                Some('\u{fffd}') | None => ansi_to_text(&c.to_string()).chars().next().unwrap_or(c),
+                Some(mapped) => mapped,
+            },
+        )
+        .collect()
+}
+
 /// The Windows-1252 bytes of a text, `?` for the characters the code
 /// page lacks (`CBTextUtils::Utf8ToAnsi`): what a bitmap font draws of
 /// a UTF-8 game's text.
@@ -222,29 +296,48 @@ pub struct BitmapFont {
 }
 
 impl BitmapFont {
-    /// Loads the tile image and measures the widths.
+    /// Loads the tiles and measures the widths (the end of
+    /// `CBFontBitmap::LoadBuffer`). A `SPRITE` that loads is used, and
+    /// `IMAGE` only without one; `AUTO_WIDTH` then measures the frame
+    /// `WIDTHS_FRAME` of the sprite. The tiles drawn are those of the
+    /// sprite's first frame.
     pub fn load(vfs: &Vfs, def: BitmapFontDef) -> Result<BitmapFont, String> {
-        let (image_path, color_key) = match (&def.image, &def.sprite) {
-            (Some(image), _) => (image.clone(), def.transparent.unwrap_or(DEFAULT_COLOR_KEY)),
-            (None, Some(sprite_path)) => {
-                let bytes = vfs.read(sprite_path).map_err(|e| e.to_string())?;
-                let sprite = Sprite::parse(&bytes).map_err(|e| e.to_string())?;
-                let sub = sprite
-                    .frames
-                    .first()
-                    .and_then(|f| f.subframes.first())
-                    .ok_or_else(|| format!("{sprite_path}: no frame"))?;
-                let image = sub
-                    .image
-                    .clone()
-                    .ok_or_else(|| format!("{sprite_path}: no image"))?;
-                (image, sub.color_key)
+        let decode = |path: &str, key| -> Result<Image, String> {
+            let bytes = vfs.read(path).map_err(|e| e.to_string())?;
+            luma_formats::image::decode(&bytes, key).map_err(|e| e.to_string())
+        };
+        // The first sub-frame of a frame of the sprite: its image and
+        // colour key.
+        let tiles_of = |sprite: &Sprite, frame: usize| {
+            let sub = sprite.frames.get(frame)?.subframes.first()?;
+            Some((sub.image.clone()?, sub.color_key))
+        };
+        let sprite = def.sprite.as_deref().and_then(|path| {
+            let bytes = vfs.read(path).ok()?;
+            let sprite = Sprite::parse(&bytes).ok()?;
+            tiles_of(&sprite, 0).map(|tiles| (sprite, tiles))
+        });
+        let (image_path, image, measured) = match (sprite, &def.image) {
+            (Some((sprite, (path, key))), _) => {
+                let image = decode(&path, key)?;
+                // The widths come from the frame `WIDTHS_FRAME`; a frame
+                // the sprite has not leaves nothing to measure.
+                let measured = match usize::try_from(def.widths_frame) {
+                    Ok(0) => Some(image.clone()),
+                    Ok(frame) => {
+                        tiles_of(&sprite, frame).and_then(|(path, key)| decode(&path, key).ok())
+                    }
+                    Err(_) => None,
+                };
+                (path, image, measured)
+            }
+            (None, Some(path)) => {
+                let image = decode(path, def.transparent.unwrap_or(DEFAULT_COLOR_KEY))?;
+                (path.clone(), image.clone(), Some(image))
             }
             (None, None) => return Err("Incomplete font definition".to_string()),
         };
-        let bytes = vfs.read(&image_path).map_err(|e| e.to_string())?;
-        let image = luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())?;
-        let widths = def.widths(Some(&image));
+        let widths = def.widths(measured.as_ref());
         Ok(BitmapFont {
             def,
             widths,
@@ -611,7 +704,8 @@ impl TrueTypeFont {
         if self.utf8 {
             utf8_to_text(text)
         } else {
-            ansi_to_text(text)
+            // The font's `CHARSET` picks the code page of ANSI text.
+            ansi_to_text_in(text, self.def.charset)
         }
     }
 
@@ -1092,6 +1186,76 @@ mod tests {
             .find_map(|p| std::fs::read(p).ok().map(|b| (p.to_string(), b)))
     }
 
+    /// `CBFontBitmap::LoadBuffer`: a `SPRITE` that loads is used before
+    /// `IMAGE`, and `AUTO_WIDTH` measures the frame `WIDTHS_FRAME` of it.
+    #[test]
+    fn a_bitmap_font_prefers_its_sprite_and_measures_the_widths_frame() {
+        let png = |ink_columns: u32| {
+            let mut pixels = vec![0u8; 8 * 4 * 4];
+            for y in 0..4u32 {
+                for x in 0..ink_columns {
+                    let at = ((y * 8 + x) * 4) as usize;
+                    pixels[at..at + 4].copy_from_slice(&[255, 255, 255, 255]);
+                }
+            }
+            Image {
+                width: 8,
+                height: 4,
+                pixels,
+                has_alpha_channel: true,
+            }
+            .to_png()
+            .unwrap()
+        };
+        let dir = std::env::temp_dir().join(format!("luma-font-sprite-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("one.png"), png(1)).unwrap();
+        std::fs::write(dir.join("three.png"), png(3)).unwrap();
+        std::fs::write(dir.join("plain.png"), png(2)).unwrap();
+        std::fs::write(
+            dir.join("f.sprite"),
+            "SPRITE { FRAME { IMAGE=\"one.png\" } FRAME { IMAGE=\"three.png\" } }",
+        )
+        .unwrap();
+        let vfs = Vfs::open_game(&dir).unwrap();
+        let parse = |text: &str| match FontFile::parse(text.as_bytes()).unwrap() {
+            FontFile::Bitmap(def) => def,
+            FontFile::TrueType(_) => panic!("a bitmap font"),
+        };
+        let base = "COLUMNS=2 TILE_WIDTH=4 TILE_HEIGHT=4 AUTO_WIDTH=TRUE";
+        // The sprite wins over the image; its first frame is measured.
+        let font = BitmapFont::load(
+            &vfs,
+            parse(&format!(
+                "FONT {{ IMAGE=\"plain.png\" SPRITE=\"f.sprite\" {base} }}"
+            )),
+        )
+        .unwrap();
+        assert_eq!(font.image_path, "one.png");
+        assert_eq!(font.widths[0], 1);
+        // `WIDTHS_FRAME` picks the frame measured.
+        let font = BitmapFont::load(
+            &vfs,
+            parse(&format!(
+                "FONT {{ SPRITE=\"f.sprite\" WIDTHS_FRAME=1 {base} }}"
+            )),
+        )
+        .unwrap();
+        assert_eq!(font.image_path, "one.png");
+        assert_eq!(font.widths[0], 3);
+        // A sprite that does not load leaves the image.
+        let font = BitmapFont::load(
+            &vfs,
+            parse(&format!(
+                "FONT {{ IMAGE=\"plain.png\" SPRITE=\"gone.sprite\" {base} }}"
+            )),
+        )
+        .unwrap();
+        assert_eq!(font.image_path, "plain.png");
+        assert_eq!(font.widths[0], 2);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn bitmap_fonts_measure_and_lay_out_text() {
         let def = BitmapFontDef {
@@ -1279,6 +1443,33 @@ mod tests {
         // Bytes that are not UTF-8 are replaced, not a panic.
         assert_eq!(bitmap.codes("caf\u{e9}"), b"caf?");
         assert_eq!(text_to_ansi("\u{fffd}"), b"?");
+    }
+
+    /// `CBFontTT::LoadBuffer CHARSET`: the character set of the font
+    /// decides the code page ANSI text is read in.
+    #[test]
+    fn the_charset_of_a_font_picks_the_code_page_of_ansi_text() {
+        // The bytes E8 F8 9A: `čřš` in Central Europe, `иш` and a
+        // Serbian letter in Cyrillic, `θψ` in Greek, Latin-1 elsewhere.
+        let raw = "\u{e8}\u{f8}\u{9a}";
+        assert_eq!(ansi_to_text_in(raw, 5), "čřš");
+        assert_eq!(ansi_to_text_in(raw, 10), "ишљ");
+        assert_eq!(ansi_to_text_in("\u{e8}\u{f8}", 7), "θψ");
+        assert_eq!(ansi_to_text_in("\u{c0}\u{e0}\u{d0}\u{fe}", 3), "ĄąŠž");
+        assert_eq!(ansi_to_text_in("\u{d0}\u{fd}\u{e9}", 13), "Ğıé");
+        // 0 and 1 are the system's: Windows-1252, as before.
+        for charset in [0, 1, 99] {
+            assert_eq!(ansi_to_text_in("caf\u{e9} \u{80}", charset), "café €");
+        }
+        // The tables are whole: 128 or 64 characters.
+        assert_eq!(WINDOWS_1250.chars().count(), 128);
+        assert_eq!(WINDOWS_1257.chars().count(), 128);
+        assert_eq!(WINDOWS_1251.chars().count(), 64);
+        assert_eq!(WINDOWS_1253.chars().count(), 64);
+        // The ends of the ranges.
+        assert_eq!(ansi_to_text_in("\u{c0}\u{ff}", 10), "Ая");
+        assert_eq!(ansi_to_text_in("\u{c1}\u{fe}\u{d3}", 7), "ΑώΣ");
+        assert_eq!(ansi_to_text_in("ascii", 10), "ascii");
     }
 
     #[test]

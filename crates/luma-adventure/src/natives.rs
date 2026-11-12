@@ -403,6 +403,14 @@ impl World {
         Some(match name {
             "Type" => Value::from("game"),
             "Name" => Value::from(self.name.clone()),
+            // The game file, or the last `TEMPLATE` read into it
+            // (`CBGame::LoadFile` keeps the name of the file it reads).
+            "Filename" => Value::from(
+                self.game_file
+                    .filename
+                    .clone()
+                    .unwrap_or_else(|| self.settings.game_file.clone()),
+            ),
             "Caption" => Value::from(self.caption.clone()),
             "CurrentTime" => Value::Int(self.timer() as i32),
             // `timeGetTime`: a clock that runs while the game is frozen.
@@ -1016,7 +1024,7 @@ impl World {
                 Return::value(self.current_dlg_branch().map_or(Value::Null, Value::from))
             }
             "GetResponsesWindow" | "GetResponseWindow" => {
-                Return::value(native_or_null(self.responses.window))
+                Return::value(native_or_null(self.response_box_window()))
             }
             "LoadResponseBox" => {
                 let path = arg(0).get_string(self);
@@ -1501,7 +1509,7 @@ impl World {
             "Type" => Value::from("entity"),
             "Name" => Value::from(e.name.clone()),
             "Caption" => Value::from(e.caption.clone()),
-            "Filename" => Value::Null,
+            "Filename" => e.filename.clone().map_or(Value::Null, Value::from),
             "X" => Value::Int(e.x),
             "Y" => Value::Int(e.y),
             "Height" => Value::Int(self.entity_height(r)),

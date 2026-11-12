@@ -282,7 +282,16 @@ impl World {
         if let Some(id) = self.objects.find(|k| *k == Kind::WaypointGroup(index)) {
             return Some(id);
         }
-        Some(self.objects.insert(Kind::WaypointGroup(index)))
+        let id = self.objects.insert(Kind::WaypointGroup(index));
+        let properties = self
+            .scene()?
+            .scene
+            .waypoint_groups
+            .get(index)?
+            .properties
+            .clone();
+        self.apply_file_properties(id, &properties);
+        Some(id)
     }
 
     pub(crate) fn waypoint_group_get(&self, index: usize, name: &str) -> Option<Value> {

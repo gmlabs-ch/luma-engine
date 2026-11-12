@@ -306,7 +306,11 @@ scene's 3D side and the game's shadow settings (the lists are empty and
 the side absent in a 2D game). Version 14, after 13, added the 3D
 actors' attachments, material overrides and bone emitters, and the
 shadow image and light position every object keeps (`SetShadowImage`,
-`SetLightPosition`).
+`SetLightPosition`). Version 15, after 14, follows the definitions the
+loaders now keep: the file an entity or an actor was loaded from, the
+volume and start offset an entity's sound was loaded with, the items'
+tint always present, the fade flag of a window and the response box's
+window definition.
 
 ## Checking a game
 

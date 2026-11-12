@@ -104,24 +104,68 @@ impl World {
             }
         };
         self.clear_responses(engine);
-        if let Some(window_def) = def.window.take() {
-            let window = self.new_window_control(None);
-            self.apply_window_def(engine, window, window_def, None);
-            for widget in self.widgets_of(window) {
-                if let Some(b) = self.control_mut(widget).and_then(Control::button_mut) {
-                    b.listener = Some(ButtonListener::ResponseBox);
-                }
+        let mut window = None;
+        if let Some(window_def) = def.window.clone() {
+            let id = self.new_window_control(None);
+            if self.apply_window_def(engine, id, window_def, None) {
+                window = Some(id);
+            } else {
+                // A window that fails leaves the box without one, and the
+                // box goes on (`CAdResponseBox::LoadBuffer`).
+                self.log(format!(
+                    "Error loading the WINDOW of the response box '{path}'"
+                ));
+                self.unload_object(engine, id);
+                def.window = None;
             }
-            if let Some(control) = self.control_mut(window) {
-                control.visible = false;
-            }
-            self.responses.window = Some(window);
         }
-        for font in [&def.font, &def.font_hover].into_iter().flatten() {
-            self.load_font(font);
+        // A box without a window still shows its choices, in `AREA` on
+        // the screen: they are held by a window that draws nothing and
+        // lets the mouse through, which scripts do not see
+        // (`ResponseBox.GetWindow` is null for it).
+        let window = window.unwrap_or_else(|| {
+            let id = self.new_window_control(None);
+            if let Some(w) = self.control_mut(id).and_then(Control::window_mut) {
+                w.transparent = true;
+            }
+            id
+        });
+        for widget in self.widgets_of(window) {
+            if let Some(b) = self.control_mut(widget).and_then(Control::button_mut) {
+                b.listener = Some(ButtonListener::ResponseBox);
+            }
+        }
+        if let Some(control) = self.control_mut(window) {
+            control.visible = false;
+        }
+        self.responses.window = Some(window);
+        // A font or a cursor that does not load is dropped: the choices
+        // then use the system font.
+        for font in [&mut def.font, &mut def.font_hover] {
+            if font.as_deref().is_some_and(|path| !self.load_font(path)) {
+                *font = None;
+            }
+        }
+        if def
+            .cursor
+            .as_deref()
+            .is_some_and(|path| !self.load_cursor(path))
+        {
+            def.cursor = None;
         }
         self.responses.def = Some(def);
         true
+    }
+
+    /// The window of the response box as scripts see it: the one its
+    /// file defines, none when the file has no `WINDOW`.
+    pub(crate) fn response_box_window(&self) -> Option<NativeId> {
+        let defined = self
+            .responses
+            .def
+            .as_ref()
+            .is_some_and(|def| def.window.is_some());
+        self.responses.window.filter(|_| defined)
     }
 
     /// Adds a choice (`AddResponse`, `AddResponseOnce`,
@@ -260,15 +304,27 @@ impl World {
         let pending = self.responses.pending.clone();
         let area_width = def.area.width() as i32;
         let screen_width = self.settings.width as i32;
+        // The cursor of an icon choice: the box's, else the game's
+        // active cursor. A text choice has none of its own.
+        let icon_cursor = def.cursor.clone().or_else(|| self.cursors.active.clone());
         for (index, response) in pending.iter().enumerate() {
-            let hover = def.font_hover.clone();
-            let state = ButtonState {
+            // A text choice is hovered and pressed in the box's hover
+            // font, the system font when the box names none.
+            let textual = response.icon.is_none();
+            let hover = def
+                .font_hover
+                .clone()
+                .or_else(|| self.system_font.clone())
+                .filter(|_| textual);
+            let mut state = ButtonState {
                 listener: Some(ButtonListener::Response(index)),
-                text_align: def.text_align,
                 font_hover: hover.clone(),
                 font_press: hover,
                 ..ButtonState::default()
             };
+            if textual {
+                state.text_align = def.text_align;
+            }
             let id = self.create_control(
                 window,
                 ControlKind::Button(Box::new(state)),
@@ -308,10 +364,24 @@ impl World {
             if let Some(control) = self.control_mut(id) {
                 control.can_focus = false;
                 control.visible = false;
-                control.cursor = def.cursor.clone();
+                if !textual {
+                    control.cursor = icon_cursor.clone();
+                }
             }
             self.correct_size(id);
             self.responses.buttons.push(id);
+            // A choice higher than the area makes the area as high.
+            let height = self.control(id).map_or(0, |c| c.height);
+            if let Some(def) = self.responses.def.as_mut() {
+                let area_height = def.area.bottom - def.area.top;
+                if area_height < height {
+                    def.area.bottom += height - area_height;
+                    let text = response.text.clone();
+                    self.log(format!(
+                        "Warning: Response '{text}' is too high to be displayed within response box. Correcting."
+                    ));
+                }
+            }
         }
     }
 

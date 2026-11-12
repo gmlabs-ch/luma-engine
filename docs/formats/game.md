@@ -79,7 +79,7 @@ AD_GAME {
 | | `INDICATOR_X`, `INDICATOR_Y`, `INDICATOR_WIDTH`, `INDICATOR_HEIGHT`, `INDICATOR_COLOR { r, g, b, a }` | The progress bar shown while the game saves or loads: by default along the bottom of the screen, 8 pixels high, translucent red. Read into `GameFile`; Luma does not draw the bar. |
 | | `COMPAT_KILL_METHOD_THREADS` | Scripts waiting for an object are not reset when the object's scripts are finished (the behaviour before version 1.9). Read into `GameFile`. |
 | | `EVENTS`, `EDITOR_PROPERTY` | Accepted and ignored. |
-| `AD_GAME` | `RESPONSE_BOX`, `INVENTORY_BOX`, `ITEMS` | The dialogue, inventory and item definition files. |
+| `AD_GAME` | `RESPONSE_BOX`, `INVENTORY_BOX`, `ITEMS` | The dialogue, inventory and item definition files. A file that is missing or does not parse fails the game file: the game does not start. |
 | | `SCENE_VIEWPORT { left, top, right, bottom }` | The part of the screen the scene is drawn in and scrolled for (`Game.SetSceneViewport` changes it); the whole screen when absent. A scene smaller than the viewport sits lower or further right by the difference, as the original engine's scroll clamp gives a negative offset (OpenQuest's 320x170 title in a 320x189 viewport starts 19 pixels down). |
 | | `TALK_SKIP_BUTTON` | Which mouse button skips speech: `right`, `both`; anything else is the left button. |
 | | `VIDEO_SKIP_BUTTON` | Which mouse button skips a video: `right`, `both`; anything else is the left button. |

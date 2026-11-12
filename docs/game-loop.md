@@ -10,8 +10,10 @@ Lite's `BGame`, `AdGame`, `BRenderer`, `BKeyboardState`, `BFader`,
 `luma-player <game>` opens a window at a whole multiple of the game's
 resolution (the largest that keeps the window at most 1280 points wide,
 or `--scale <n>`; the frame is letterboxed when the window has another
-shape, see [rendering.md](rendering.md#coordinates)), loads `default.game`, attaches the
-game's scripts and schedules its `STARTUP_SCENE`. Every frame then runs,
+shape, see [rendering.md](rendering.md#coordinates)), loads `default.game` and attaches the
+game's scripts. No scene is loaded by the engine: the game's script opens
+the first one (`Game.ChangeScene(Game.StartupScene)`), `STARTUP_SCENE`
+being only the name kept for it. Every frame then runs,
 in this order (`Runtime::tick`):
 
 1. a game load asked last frame (`Game.LoadGame`) happens, replacing
@@ -312,7 +314,13 @@ A conversation's choices go through the **response box**
 (`RESPONSE_BOX` in the game file, a `.def` file with `FONT`,
 `FONT_HOVER`, `AREA`, `HORIZONTAL`, `SPACING`, `TEXT_ALIGN`,
 `VERTICAL_ALIGN`, `CURSOR` and a `WINDOW` with `prev` and `next`
-buttons), as the original engine's `CAdResponseBox` does. The script
+buttons), as the original engine's `CAdResponseBox` does. `TEXT_ALIGN`
+is `center`, `right` or (anything else) left; `VERTICAL_ALIGN` is `top`,
+`center` or (anything else, and by default) bottom. A choice is hovered
+and pressed in `FONT_HOVER`, the system font without one; `CURSOR` is
+the cursor of the icon choices. A box without `WINDOW`, or whose window
+does not load, lays its choices out in `AREA` on the screen; an area
+lower than a choice grows to its height. The script
 adds its choices with `Game.AddResponse(id, text)`,
 `AddResponseOnce` (not offered again in the current dialogue branch) or
 `AddResponseOnceGame` (never again), then `Game.GetResponse()` shows
