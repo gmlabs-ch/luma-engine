@@ -553,16 +553,11 @@ impl World {
             "MostRecentSaveSlot" => Value::Int(self.most_recent_save_slot()),
             "TalkSkipButton" => Value::Int(self.talk_skip_button.code()),
             "ResponsesVisible" => Value::Bool(self.responses_visible()),
-            "LastResponse" => self
-                .responses
-                .last_text
-                .clone()
-                .map_or(Value::Null, Value::from),
-            "LastResponseOrig" => self
-                .responses
-                .last_text_orig
-                .clone()
-                .map_or(Value::Null, Value::from),
+            // An empty string before any response was chosen.
+            "LastResponse" => Value::from(self.responses.last_text.clone().unwrap_or_default()),
+            "LastResponseOrig" => {
+                Value::from(self.responses.last_text_orig.clone().unwrap_or_default())
+            }
             "Platform" => Value::from("luma"),
             "DeviceType" => Value::from("desktop"),
             _ => return None,
@@ -1092,11 +1087,20 @@ impl World {
                     optional(arg(4), self),
                     optional(arg(5), self),
                 );
-                self.add_response(kind, id, &text, icon, hover, pressed, font);
+                if self.responses.def.is_some() {
+                    self.add_response(kind, id, &text, icon, hover, pressed, font);
+                } else {
+                    self.runtime_error(&ctx, "Game.AddResponse: response box is not defined");
+                }
                 Return::null()
             }
             "ResetResponse" => {
-                self.reset_response(arg(0).get_int(self));
+                // `GetInt(-1)`: no id given is -1.
+                let id = match arg(0) {
+                    Value::Null => -1,
+                    v => v.get_int(self),
+                };
+                self.reset_response(id);
                 Return::null()
             }
             "ClearResponses" => {
@@ -1104,10 +1108,20 @@ impl World {
                 Return::null()
             }
             "GetResponse" => {
+                if self.responses.def.is_none() {
+                    self.runtime_error(&ctx, "Game.GetResponse: response box is not defined");
+                    return Some(Return::null());
+                }
                 let auto = arg(0).get_bool(self);
                 return Some(self.get_response(ctx.engine, ctx.script, auto));
             }
-            "GetNumResponses" => Return::value(self.num_responses() as i32),
+            "GetNumResponses" => {
+                if self.responses.def.is_none() {
+                    self.runtime_error(&ctx, "Game.GetNumResponses: response box is not defined");
+                    return Some(Return::null());
+                }
+                Return::value(self.num_responses() as i32)
+            }
             "StartDlgBranch" => {
                 let name = match arg(0) {
                     Value::Null => None,

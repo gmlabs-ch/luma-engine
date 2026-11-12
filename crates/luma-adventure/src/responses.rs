@@ -48,6 +48,18 @@ pub struct Response {
     pub kind: ResponseKind,
 }
 
+/// Whether two dialogue-branch contexts are the same: both none, or the
+/// same name without regard to case (`stricmp` in `CAdGame::
+/// BranchResponseUsed`, `GameResponseUsed` and `ResetResponse`). A
+/// context and no context never match.
+fn same_context(a: Option<&String>, b: Option<&String>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        _ => false,
+    }
+}
+
 /// The response box and the dialogue state.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Responses {
@@ -65,10 +77,13 @@ pub struct Responses {
     pub scroll_offset: usize,
     /// The dialogue branches open, innermost last.
     pub branches: Vec<String>,
-    /// The "once" responses chosen, with the branch they were chosen in.
+    /// The "once" responses chosen, with the branch they were chosen in
+    /// (`CAdGame::m_ResponsesBranch`, a list of `CAdResponseContext`).
     pub used_branch: Vec<(Option<String>, i32)>,
-    /// The "once per game" responses chosen.
-    pub used_game: Vec<i32>,
+    /// The "once per game" responses chosen, with the branch they were
+    /// chosen in as well (`CAdGame::m_ResponsesGame`): the same id
+    /// offered from another branch is a different response.
+    pub used_game: Vec<(Option<String>, i32)>,
     /// The text of the last response chosen (`Game.LastResponse`).
     pub last_text: Option<String>,
     /// See `last_text`, as the script gave it (`LastResponseOrig`).
@@ -152,37 +167,60 @@ impl World {
         });
     }
 
-    /// Whether a "once" response was chosen in the current branch.
+    /// Whether a "once" response was chosen in the current branch
+    /// (`CAdGame::BranchResponseUsed`).
     fn branch_response_used(&self, id: i32) -> bool {
-        let context = self.responses.branches.last().cloned();
+        let context = self.responses.branches.last();
         self.responses
             .used_branch
             .iter()
-            .any(|(ctx, used)| *used == id && *ctx == context)
+            .any(|(ctx, used)| *used == id && same_context(ctx.as_ref(), context))
+    }
+
+    /// Whether a "once per game" response was chosen in the current
+    /// branch (`CAdGame::GameResponseUsed`).
+    fn game_response_used(&self, id: i32) -> bool {
+        let context = self.responses.branches.last();
+        self.responses
+            .used_game
+            .iter()
+            .any(|(ctx, used)| *used == id && same_context(ctx.as_ref(), context))
     }
 
     /// Drops the pending choices already chosen where they may not come
     /// back (`WeedResponses`).
     fn weed_responses(&mut self) {
-        let used_branch: Vec<i32> = self
+        let keep: Vec<bool> = self
             .responses
             .pending
             .iter()
-            .filter(|r| r.kind == ResponseKind::Once && self.branch_response_used(r.id))
-            .map(|r| r.id)
+            .map(|r| match r.kind {
+                ResponseKind::Normal => true,
+                ResponseKind::Once => !self.branch_response_used(r.id),
+                ResponseKind::OnceGame => !self.game_response_used(r.id),
+            })
             .collect();
-        let used_game = self.responses.used_game.clone();
-        self.responses.pending.retain(|r| match r.kind {
-            ResponseKind::Normal => true,
-            ResponseKind::Once => !used_branch.contains(&r.id),
-            ResponseKind::OnceGame => !used_game.contains(&r.id),
-        });
+        let mut keep = keep.into_iter();
+        self.responses
+            .pending
+            .retain(|_| keep.next().unwrap_or(true));
     }
 
-    /// Forgets that a response was chosen (`ResetResponse`).
+    /// Forgets that a response was chosen in the current dialogue branch
+    /// (`CAdGame::ResetResponse`): the first entry of each list with
+    /// this id and the current branch as context. A use noted in
+    /// another branch stays.
     pub(crate) fn reset_response(&mut self, id: i32) {
-        self.responses.used_branch.retain(|(_, used)| *used != id);
-        self.responses.used_game.retain(|used| *used != id);
+        let context = self.responses.branches.last().cloned();
+        let responses = &mut self.responses;
+        for list in [&mut responses.used_game, &mut responses.used_branch] {
+            if let Some(i) = list
+                .iter()
+                .position(|(ctx, used)| *used == id && same_context(ctx.as_ref(), context.as_ref()))
+            {
+                list.remove(i);
+            }
+        }
     }
 
     /// Drops the pending choices and their buttons (`ClearResponses`).
@@ -404,8 +442,9 @@ impl World {
                 }
             }
             ResponseKind::OnceGame => {
-                if !self.responses.used_game.contains(&response.id) {
-                    self.responses.used_game.push(response.id);
+                if !self.game_response_used(response.id) {
+                    let context = self.responses.branches.last().cloned();
+                    self.responses.used_game.push((context, response.id));
                 }
             }
         }

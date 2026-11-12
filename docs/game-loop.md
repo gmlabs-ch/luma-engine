@@ -593,11 +593,23 @@ returns the choice's id to the script, sets `Game.LastResponse` and
 it at once when asked to (`GetResponse(true)`). `StartDlgBranch` and
 `EndDlgBranch` name the branch the once-only choices are remembered in
 (qualified by the script file and event, as the original does; the
-innermost without a name); when the last branch ends they are
-forgotten. `ResetResponse(id)` forgets one, `ClearResponses` drops the
+innermost without a name). Both kinds of once-only choice are
+remembered as a pair, the id and the innermost branch open when it was
+chosen (`CAdResponseContext`; no branch is a context of its own), and a
+choice is left out only when its id was chosen in the branch open now,
+the names compared without regard to case: the same id offered from
+another branch is another choice, also for `AddResponseOnceGame`. When
+the last branch ends the once-per-branch pairs are forgotten; the
+once-per-game pairs last until the game is restarted.
+`ResetResponse(id)` forgets the pair of the branch open now, in both
+lists (no id is -1), `ClearResponses` drops the
 pending ones, `GetNumResponses` counts them after weeding,
 `Game.ResponsesVisible` says whether the box waits, and
 `GetResponsesWindow` and `LoadResponseBox` serve the box itself.
+Without a response box `AddResponse` and its variants, `GetResponse`
+and `GetNumResponses` raise a script runtime error (`response box is
+not defined`) and do nothing; `Game.LastResponse` and
+`LastResponseOrig` are empty strings until a choice is made.
 
 While the box waits (the original's semi-frozen state), and while an
 exclusive window is up, the windows and their controls take the mouse

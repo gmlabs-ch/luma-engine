@@ -341,6 +341,8 @@ shadow image and light position every object keeps (`SetShadowImage`,
 `SetLightPosition`). Version 15, after 14, added the start position a
 sound keeps for its later plays and moved the sound event from the
 sound to its object.
+Version 17, after 16, keeps the dialogue-branch context of
+every once-per-game response chosen (it kept the id alone).
 
 ## Checking a game
 
