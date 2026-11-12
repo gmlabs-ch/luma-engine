@@ -10,8 +10,10 @@
 //!
 //! The text a font is given is the game's, held as its files hold it:
 //! one `char` per byte. A font reads it in the game's encoding
-//! (`Game.TextEncoding`, see [`FontBank::set_utf8`]): the bytes are
-//! Windows-1252 characters in an ANSI game, UTF-8 in a UTF-8 game.
+//! (`Game.TextEncoding`, see [`FontBank::set_utf8`]): UTF-8 in a UTF-8
+//! game; in an ANSI game the bytes are characters of a Windows code
+//! page, the one of a TrueType font's `CHARSET` (see
+//! [`CodePage`](crate::code_page::CodePage)).
 
 use std::collections::HashMap;
 
@@ -21,6 +23,7 @@ use luma_formats::{DEFAULT_COLOR_KEY, Image, Rgb, Rgba, Sprite};
 use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
 use luma_script::classes::utf8_to_text;
 
+use crate::code_page::CodePage;
 use crate::font_face::{FaceChoice, FaceOrigin, FaceSet, choose_face, resolve_face};
 use crate::scene_view::key;
 
@@ -72,57 +75,6 @@ pub fn latin1(text: &str) -> Vec<u8> {
     text.chars()
         .map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?'))
         .collect()
-}
-
-/// The characters Windows-1252 puts at `0x80..=0x9F`, where Latin-1 has
-/// control codes; U+FFFD for the five bytes it leaves unused.
-const WINDOWS_1252: [char; 32] = [
-    '€', '\u{fffd}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{fffd}', 'Ž',
-    '\u{fffd}', '\u{fffd}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{fffd}',
-    'ž', 'Ÿ',
-];
-
-/// The characters of an ANSI game's text, for a TrueType font: each
-/// byte is a Windows-1252 character, the code page the original engine
-/// draws ANSI text with on a western system. Characters beyond a byte
-/// are kept.
-fn ansi_to_text(raw: &str) -> String {
-    raw.chars()
-        .map(|c| match u32::from(c) {
-            code @ 0x80..=0x9F => match WINDOWS_1252[(code - 0x80) as usize] {
-                '\u{fffd}' => c,
-                mapped => mapped,
-            },
-            _ => c,
-        })
-        .collect()
-}
-
-/// The Windows-1252 bytes of a text, `?` for the characters the code
-/// page lacks (`CBTextUtils::Utf8ToAnsi`): what a bitmap font draws of
-/// a UTF-8 game's text.
-fn text_to_ansi(text: &str) -> Vec<u8> {
-    text.chars()
-        .map(|c| match u32::from(c) {
-            code @ (0..=0x7F | 0xA0..=0xFF) => code as u8,
-            _ => WINDOWS_1252
-                .iter()
-                .position(|&w| w == c && w != '\u{fffd}')
-                .map_or(b'?', |at| 0x80 + at as u8),
-        })
-        .collect()
-}
-
-/// The Windows-1252 byte of a character, `None` when the code page
-/// lacks it.
-pub(crate) fn ansi_byte(c: char) -> Option<u8> {
-    match u32::from(c) {
-        code @ (0..=0x7F | 0xA0..=0xFF) => Some(code as u8),
-        _ => WINDOWS_1252
-            .iter()
-            .position(|&w| w == c && w != '\u{fffd}')
-            .map(|at| 0x80 + at as u8),
-    }
 }
 
 impl Font {
@@ -187,6 +139,17 @@ impl Font {
         }
     }
 
+    /// Sets the ANSI code page of the system the game was made for
+    /// (`CP_ACP`): the one a bitmap font converts a UTF-8 game's text
+    /// to, and the one a TrueType font whose `CHARSET` stands for the
+    /// system's reads an ANSI game's text in.
+    pub fn set_code_page(&mut self, page: CodePage) {
+        match self {
+            Font::Bitmap(f) => f.page = page,
+            Font::TrueType(f) => f.set_system_code_page(page),
+        }
+    }
+
     /// Lays TrueType text out right to left (`Game.TextRTL`); bitmap
     /// fonts are unaffected, as in the original engine, where only the
     /// GDI text of `CBFontTT` reads the flag.
@@ -237,6 +200,8 @@ pub struct BitmapFont {
     texture: Option<Texture>,
     /// Whether the text is UTF-8 (`Game.TextEncoding`).
     utf8: bool,
+    /// The ANSI code page a UTF-8 game's text is converted to.
+    page: CodePage,
 }
 
 impl BitmapFont {
@@ -270,6 +235,7 @@ impl BitmapFont {
             image,
             texture: None,
             utf8: false,
+            page: CodePage::WESTERN,
         })
     }
 
@@ -283,16 +249,17 @@ impl BitmapFont {
             image,
             texture: None,
             utf8: false,
+            page: CodePage::WESTERN,
         }
     }
 
     /// The tile codes of a text: its bytes in an ANSI game; in a UTF-8
-    /// game its characters converted to the ANSI code page, `?` for
-    /// those it lacks (`CBFontBitmap::TextHeightDraw` calls
+    /// game its characters converted to the system's ANSI code page,
+    /// `?` for those it lacks (`CBFontBitmap::TextHeightDraw` calls
     /// `Utf8ToAnsi`).
     fn codes(&self, text: &str) -> Vec<u8> {
         if self.utf8 {
-            text_to_ansi(&utf8_to_text(text))
+            self.page.encode(&utf8_to_text(text))
         } else {
             latin1(text)
         }
@@ -498,6 +465,8 @@ pub struct TrueTypeFont {
     rtl: bool,
     /// Whether the text is UTF-8 (`Game.TextEncoding`).
     utf8: bool,
+    /// The ANSI code page of the system the game was made for.
+    system_page: CodePage,
 }
 
 impl TrueTypeFont {
@@ -648,6 +617,7 @@ impl TrueTypeFont {
             texts: Vec::new(),
             rtl: false,
             utf8: false,
+            system_page: CodePage::WESTERN,
         })
     }
 
@@ -671,14 +641,32 @@ impl TrueTypeFont {
         }
     }
 
+    /// The code page the font reads an ANSI game's text in: the one of
+    /// its `CHARSET` (`CBFontTT::GetWindowsCharset`, the character set
+    /// `CreateFont` is given, in whose code page GDI reads the bytes).
+    pub fn code_page(&self) -> CodePage {
+        CodePage::of_charset(self.def.charset, self.system_page)
+    }
+
+    /// Sets the ANSI code page of the system the game was made for; the
+    /// texts rendered so far go when the font reads its text in it.
+    pub fn set_system_code_page(&mut self, page: CodePage) {
+        let before = self.code_page();
+        self.system_page = page;
+        if self.code_page() != before && !self.utf8 {
+            self.texts.clear();
+        }
+    }
+
     /// The characters of a game text in the game's encoding
-    /// (`CBTextUtils::ConvertToNative`): what [`wrap`](Self::wrap),
+    /// (`CBTextUtils::ConvertToNative`, and for ANSI text what GDI does
+    /// with the bytes): what [`wrap`](Self::wrap),
     /// [`measure`](Self::measure) and [`render`](Self::render) take.
     pub fn characters(&self, text: &str) -> String {
         if self.utf8 {
             utf8_to_text(text)
         } else {
-            ansi_to_text(text)
+            self.code_page().decode(text)
         }
     }
 
@@ -1094,6 +1082,10 @@ pub struct FontBank {
     rtl: bool,
     /// Whether text is UTF-8 (`Game.TextEncoding`).
     utf8: bool,
+    /// The ANSI code page set for the game, when one was.
+    page: Option<CodePage>,
+    /// The ANSI code page the fonts loaded tell of.
+    told_page: Option<CodePage>,
 }
 
 impl FontBank {
@@ -1118,7 +1110,16 @@ impl FontBank {
                 font.set_utf8(self.utf8);
                 if let Font::TrueType(f) = &font {
                     self.chosen.push((path.to_string(), f.face_note()));
+                    // The first font of a language tells which system
+                    // the game was made for.
+                    if self.told_page.is_none() {
+                        self.told_page = CodePage::system_of_charset(f.def.charset);
+                        if self.page.is_none() && self.told_page.is_some() {
+                            self.apply_code_page();
+                        }
+                    }
                 }
+                font.set_code_page(self.ansi_code_page());
                 self.fonts.insert(k, font);
                 true
             }
@@ -1166,6 +1167,30 @@ impl FontBank {
     /// Whether text is read as UTF-8.
     pub fn utf8(&self) -> bool {
         self.utf8
+    }
+
+    /// The ANSI code page of the system the game was made for, which
+    /// the original engine takes from Windows (`CP_ACP`): the one set
+    /// with [`set_ansi_code_page`](Self::set_ansi_code_page); else the
+    /// one the first TrueType font loaded with a `CHARSET` of a language
+    /// names (a game with Russian fonts was made for a Cyrillic system);
+    /// else Windows-1252.
+    pub fn ansi_code_page(&self) -> CodePage {
+        self.page.or(self.told_page).unwrap_or(CodePage::WESTERN)
+    }
+
+    /// Sets the ANSI code page of the game, or with `None` leaves it to
+    /// the fonts; the fonts loaded and those loaded later follow.
+    pub fn set_ansi_code_page(&mut self, page: Option<CodePage>) {
+        self.page = page;
+        self.apply_code_page();
+    }
+
+    fn apply_code_page(&mut self) {
+        let page = self.ansi_code_page();
+        for font in self.fonts.values_mut() {
+            font.set_code_page(page);
+        }
     }
 
     /// Fonts that could not be loaded, with the reason.
@@ -1556,16 +1581,57 @@ mod tests {
         assert_eq!(bitmap.codes(&raw("é’€œЖ")), b"\xe9\x92\x80\x9c?");
         // Bytes that are not UTF-8 are replaced, not a panic.
         assert_eq!(bitmap.codes("caf\u{e9}"), b"caf?");
-        assert_eq!(text_to_ansi("\u{fffd}"), b"?");
+        // The tiles are those of the system's code page
+        // (`Utf8ToAnsi` converts to `CP_ACP`): a font laid out for
+        // Cyrillic shows Cyrillic.
+        font.set_code_page(CodePage::new(1251).unwrap());
+        let Font::Bitmap(bitmap) = &font else {
+            panic!()
+        };
+        assert_eq!(bitmap.codes(&raw("Жук é")), b"\xc6\xf3\xea ?");
+        assert_eq!(font.text_width(&raw("Жук")), 12);
+    }
+
+    /// `CBFontTT::GetWindowsCharset`: GDI reads an ANSI game's bytes in
+    /// the code page of the font's character set.
+    #[test]
+    fn truetype_fonts_read_ansi_text_in_the_code_page_of_their_charset() {
+        let mut font = test_ttf("", " abжćé");
+        assert_eq!(font.code_page(), CodePage::WESTERN);
+        assert_eq!(
+            font.characters("caf\u{e9} \u{84}x\u{93} \u{80}\u{81}"),
+            "café „x“ €\u{81}"
+        );
+        // 0xE6 is `æ` in Windows-1252, which the face lacks.
+        assert_eq!(font.line_width(&font.characters("a\u{e6}b")), 20);
+        // `CHARSET=10` is Russian: the same byte is `ж`.
+        font.def.charset = 10;
+        assert_eq!(font.code_page().number(), 1251);
+        assert_eq!(font.characters("a\u{e6}b"), "aжb");
+        assert_eq!(font.line_width(&font.characters("a\u{e6}b")), 30);
+        font.def.charset = 5;
+        assert_eq!(font.characters("a\u{e6}b"), "aćb");
+        // `DEFAULT_CHARSET` is the system's code page; the texts
+        // rendered in the old one go.
+        font.def.charset = 1;
+        assert_eq!(font.characters("\u{e9}"), "é");
+        font.prepare("a\u{e6}b", 100, TextAlign::Left, -1);
+        font.set_system_code_page(CodePage::new(1251).unwrap());
+        assert!(font.texts.is_empty());
+        assert_eq!(font.characters("\u{e6}"), "ж");
+        // A UTF-8 game's text is not read through a code page.
+        font.set_utf8(true);
+        assert_eq!(font.characters(&raw("ж")), "ж");
     }
 
     #[test]
-    fn ansi_text_is_windows_1252_for_truetype_fonts() {
-        assert_eq!(
-            ansi_to_text("caf\u{e9} \u{84}x\u{93} \u{80}\u{81}"),
-            "café „x“ €\u{81}"
-        );
-        assert_eq!(text_to_ansi("café „x“ €"), b"caf\xe9 \x84x\x93 \x80");
+    fn the_fonts_tell_which_code_page_the_game_was_made_for() {
+        let mut bank = FontBank::new();
+        assert_eq!(bank.ansi_code_page(), CodePage::WESTERN);
+        bank.set_ansi_code_page(CodePage::new(1253));
+        assert_eq!(bank.ansi_code_page().number(), 1253);
+        bank.set_ansi_code_page(None);
+        assert_eq!(bank.ansi_code_page(), CodePage::WESTERN);
     }
 
     #[test]

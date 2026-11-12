@@ -426,6 +426,10 @@ pub struct TrueTypeFontDef {
     pub underline: bool,
     /// `STRIKE`.
     pub strike: bool,
+    /// `CHARSET`: the character set the text's bytes are read in when the
+    /// game is not UTF-8 (0 and 1: the system's, read as Windows-1252;
+    /// see `charset_code_page`).
+    pub charset: i32,
     /// The layers, in drawing order; at least one.
     pub layers: Vec<FontLayer>,
 }
@@ -445,6 +449,7 @@ impl TrueTypeFontDef {
             italic: false,
             underline: false,
             strike: false,
+            charset: 0,
             layers: Vec::new(),
         };
         let mut base = Rgba {

@@ -586,6 +586,39 @@ fn an_editor_with_a_truetype_font_shows_what_is_typed() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// An ANSI game made for another system is read in that system's code
+/// page (`CBTextUtils::AnsiToUnicode` uses `CP_ACP`): what is shown and
+/// spoken, the code of a typed character, an editor's `Text`.
+#[test]
+fn an_ansi_game_is_read_in_the_code_page_of_its_system() {
+    use luma_adventure::code_page::CodePage;
+    use luma_script::Natives;
+    let (dir, mut runtime, _) = start();
+    assert!(!runtime.world.text_utf8());
+    assert_eq!(runtime.world.ansi_code_page(), CodePage::WESTERN);
+    let raw = "\u{c6}\u{f3}\u{ea} \u{93}x\u{94}";
+    assert_eq!(runtime.world.display_text(raw), "Æóê “x”");
+    runtime.world.set_ansi_code_page(CodePage::new(1251));
+    assert_eq!(runtime.world.display_text(raw), "Жук “x”");
+
+    let edit = load_edit(&mut runtime);
+    runtime.key_char('ж', false, false, false);
+    assert_eq!(runtime.world.keyboard().key_code, 230);
+    runtime.world.edit_key(edit, 0, Some('ж'));
+    // The editor keeps the character; a script reads the game's bytes.
+    assert_eq!(runtime.world.control(edit).unwrap().text, "ж");
+    assert_eq!(
+        runtime.world.get_property(edit, "Text"),
+        Some(Value::from("\u{e6}"))
+    );
+    runtime
+        .world
+        .set_property(edit, "Text", &Value::from("\u{c6}\u{f3}\u{ea}"));
+    assert_eq!(runtime.world.control(edit).unwrap().text, "Жук");
+    runtime.tick(16);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// Loads `edit.window` and returns its editor.
 fn load_edit(runtime: &mut Runtime) -> luma_script::NativeId {
     let game = runtime.world.game_id();

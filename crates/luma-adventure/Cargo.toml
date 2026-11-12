@@ -19,6 +19,7 @@ luma-3d = { workspace = true, optional = true, features = ["serde"] }
 luma-compiler = { workspace = true, optional = true }
 luma-script = { workspace = true, features = ["serde"] }
 crc32fast.workspace = true
+encoding_rs.workspace = true
 fontdue.workspace = true
 fontdb.workspace = true
 ttf-parser.workspace = true

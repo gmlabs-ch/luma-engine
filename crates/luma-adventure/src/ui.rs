@@ -2417,8 +2417,10 @@ impl World {
         } else {
             translated.or(text.filter(|c| !c.is_control()))
         };
-        let typed =
-            ch.is_some_and(|ch| self.edit_message(id, true, crate::input::char_code(ch), Some(ch)));
+        let typed = ch.is_some_and(|ch| {
+            let code = crate::input::char_code_in(ch, self.ansi_code_page());
+            self.edit_message(id, true, code, Some(ch))
+        });
         down || typed
     }
 

@@ -50,6 +50,7 @@ pub mod actor;
 #[cfg(feature = "3d")]
 pub mod actor3d;
 pub mod capture;
+pub mod code_page;
 #[cfg(feature = "3d")]
 pub mod draw3d;
 mod error;

@@ -104,7 +104,7 @@ TTFONT
 | `FILENAME` | string | `arial.ttf` | A font file among the game's files, made available to the engine: it is drawn with when `FACE` names its typeface. |
 | `BOLD`, `ITALIC` | bool | `FALSE` | The weight and the slant of the face. |
 | `UNDERLINE`, `STRIKE` | bool | `FALSE` | A line under, or through, every line of the text (see [Metrics](#metrics)). |
-| `CHARSET` | int | `0` | The Windows character set of the font, ignored: every face is addressed by Unicode character. |
+| `CHARSET` | int | `0` | The Windows character set of the font: in an ANSI game, the code page the text's bytes are read in (see [Code pages](#code-pages)). |
 | `COLOR` | `r,g,b` | `0,0,0` | Colour of the text when no `LAYER` is given. |
 | `ALPHA` | int | `0` | Opacity of that colour. |
 | `LAYER` | block, repeatable | | A layer: `OFFSET_X`, `OFFSET_Y` (default `0`), `COLOR`, `ALPHA` (default black, transparent). Layers are drawn in file order, each the whole text moved by its offset and tinted with its colour; an outline is four dark layers under a light one. |
@@ -239,16 +239,15 @@ where characters matter:
   (`CBTextUtils::ConvertToNative`). In a UTF-8 game the bytes are
   decoded as UTF-8; a sequence that is not valid UTF-8 becomes U+FFFD
   (the original engine draws such a text as ANSI or not at all,
-  depending on the Windows version). In an ANSI game each byte is a
-  Windows-1252 character: Latin-1, plus the typographic quotes, dashes,
-  `€`, `œ` and the others at `0x80` to `0x9F`. The original engine
-  uses the code page of the system it runs on; Luma Engine always uses
-  Windows-1252, the one western games are written in.
+  depending on the Windows version). In an ANSI game the bytes are
+  read in the code page of the font's `CHARSET` (see
+  [Code pages](#code-pages)).
 - **Bitmap fonts** have one tile per byte. In an ANSI game the bytes of
   the text are the tile numbers. In a UTF-8 game the text is decoded and
-  each character converted to its Windows-1252 byte, `?` for the
-  characters the code page lacks (`CBTextUtils::Utf8ToAnsi`): a bitmap
-  font cannot show Cyrillic or Greek text.
+  each character converted to its byte, or bytes, in the game's ANSI
+  code page, `?` for the characters the code page lacks
+  (`CBTextUtils::Utf8ToAnsi`): a bitmap font laid out for Windows-1251
+  shows Cyrillic text when that is the game's code page.
 - **Scripts** count characters: the `Length` of a string and the
   positions of the `String` class are bytes in an ANSI game, the
   characters the bytes encode in a UTF-8 game (see
@@ -264,6 +263,59 @@ where characters matter:
 A string that holds a character beyond U+00FF cannot be bytes; it is
 taken as characters already. The texts a TrueType font has cached are
 dropped when the encoding changes.
+
+### Code pages
+
+The bytes of an ANSI game's text stand for characters through a Windows
+code page. The original engine leaves this to Windows in two places:
+
+- **A TrueType font's text.** GDI reads the bytes a font is given in
+  the code page of the font's character set, which `CHARSET` chooses
+  (`CBFontTT::GetWindowsCharset`):
+
+  | `CHARSET` | Character set | Code page |
+  |-----------|---------------|-----------|
+  | `1` | default | the system's |
+  | `2` | OEM | the system's DOS code page; read as the system's ANSI one |
+  | `3` | Baltic | 1257 |
+  | `4` | Traditional Chinese (Big5) | 950 |
+  | `5` | Eastern Europe | 1250 |
+  | `6` | Simplified Chinese (GB2312) | 936 |
+  | `7` | Greek | 1253 |
+  | `8` | Korean (Hangul) | 949 |
+  | `9` | Macintosh | 10000 (Mac Roman) |
+  | `10` | Russian | 1251 |
+  | `11` | Japanese (Shift-JIS) | 932 |
+  | `12` | Symbol | byte `b` from `0x20` is the character U+F000 + `b`, where symbol fonts keep their glyphs |
+  | `13` | Turkish | 1254 |
+  | `14` | Vietnamese | 1258 |
+  | `15` | Korean (Johab) | 1361; not read, taken as the system's |
+  | `16` | Arabic | 1256 |
+  | `17` | Hebrew | 1255 |
+  | `18` | Thai | 874 |
+  | any other, `0` | ANSI | 1252 |
+
+- **Everywhere else** (`CBTextUtils::AnsiToUnicode`, `Utf8ToAnsi`): the
+  ANSI code page of the system the game runs on (`CP_ACP`). It reads
+  the text given to the screen reader, converts a UTF-8 game's text for
+  its bitmap fonts and its editors, and is the code page the keyboard's
+  characters arrive in (`Keyboard.KeyCode` of a typed `ж` is 230 on a
+  Cyrillic system).
+
+Luma Engine has no system code page to ask. The game's ANSI code page
+is, in order: the one the front-end sets (`luma-player --code-page
+1251`); the one the first TrueType font loaded with a `CHARSET` of a
+language names (a game whose fonts say Russian was made for a Cyrillic
+system; the Macintosh and symbol sets say nothing); Windows-1252. That
+the fonts tell the system's code page is Luma Engine's inference, not
+something the original does.
+
+A byte, or pair of bytes, a code page does not define becomes U+FFFD
+(the control codes Windows passes through stay). Converting back, a
+character the code page lacks is `?`; Windows also replaces some by a
+look-alike (`Ā` by `A`), which Luma Engine does not. The original cuts
+the converted text to as many bytes as it has characters, losing the
+end of a text in a two-byte code page; that defect is not reproduced.
 
 ## Where fonts are used
 
@@ -327,7 +379,7 @@ not. `StopTalk` ends it; `IsTalking` says whether one is playing.
 ## Notes for implementers
 
 - Bitmap fonts index tiles by byte; in a UTF-8 game, characters outside
-  Windows-1252 draw as `?` (see [Text encoding](#text-encoding)).
+  the game's ANSI code page draw as `?` (see [Code pages](#code-pages)).
 - Right-to-left text (`Game.TextRTL`, turned on by a string table's
   `@right-to-left` entry or by a script) makes a TrueType font lay each
   line's glyphs out from the last to the first, the reading order GDI
