@@ -304,7 +304,7 @@ How the list was made. For every class with a script interface, the names tested
 | `PrevScene`, `PreviousScene`, `PrevSceneFilename`, `PreviousSceneFilename` | get | **done** | Name / file of the previous scene. |
 | `LastResponse`, `LastResponseOrig` | get | **done** | Text (expanded / original) of the last chosen response. |
 | `InventoryObject` | get/set | **done** | The object whose inventory the box shows (the game itself by default); the box's scroll position is kept per inventory. |
-| `TalkSkipButton` | get/set | **done** | Mouse button that skips speech. |
+| `TalkSkipButton` | get/set | **done** | Mouse button that skips speech (0 left, 1 right, 2 both, 3 none; a value set outside 0..3 is brought to the nearer end). |
 | `VideoSkipButton` | get/set | **done** | Mouse button that skips videos. |
 | `ChangingScene` | get | **done** | True while a scene change is pending. |
 | `StartupScene` | get/set | **done** | Scene loaded at startup (from `default.game`); `null` when none, settable, saved with the game. |

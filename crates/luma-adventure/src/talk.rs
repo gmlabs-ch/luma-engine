@@ -163,13 +163,14 @@ impl TalkSkipButton {
         self as i32
     }
 
-    /// The setting of a script code.
+    /// The setting of a script code, kept within 0..3: a negative code
+    /// is the left button, one above 3 none.
     pub fn from_code(code: i32) -> TalkSkipButton {
         match code {
+            i32::MIN..=0 => TalkSkipButton::Left,
             1 => TalkSkipButton::Right,
             2 => TalkSkipButton::Both,
-            3 => TalkSkipButton::None,
-            _ => TalkSkipButton::Left,
+            _ => TalkSkipButton::None,
         }
     }
 
@@ -214,6 +215,14 @@ impl Default for SubtitleMods {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_skip_button_code_is_kept_in_range() {
+        assert_eq!(TalkSkipButton::from_code(-4), TalkSkipButton::Left);
+        assert_eq!(TalkSkipButton::from_code(2), TalkSkipButton::Both);
+        assert_eq!(TalkSkipButton::from_code(3), TalkSkipButton::None);
+        assert_eq!(TalkSkipButton::from_code(9), TalkSkipButton::None);
+    }
+
     use super::*;
 
     fn sentence() -> Sentence {
