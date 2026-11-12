@@ -34,6 +34,7 @@ fontdue = { version = "0.9", default-features = false, features = ["std", "hashb
 fontdb = { version = "0.24", default-features = false, features = ["std", "fs", "memmap"] }
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 encoding_rs = { version = "0.8", default-features = false, features = ["alloc"] }
+unicode-bidi = { version = "0.3", default-features = false, features = ["std", "hardcoded-data"] }
 kira = { version = "0.12", default-features = false, features = ["ogg", "vorbis", "wav", "pcm"] }
 ogg = { version = "0.9", default-features = false }
 oxideav-theora = { version = "0.0.12", default-features = false }

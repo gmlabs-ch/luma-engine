@@ -86,6 +86,7 @@ pub mod talk;
 #[cfg(test)]
 mod test_font;
 pub mod text;
+mod text_shape;
 #[cfg(not(feature = "3d"))]
 mod three_d_off;
 pub mod ui;

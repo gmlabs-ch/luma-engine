@@ -418,14 +418,30 @@ not. `StopTalk` ends it; `IsTalking` says whether one is playing.
 
 - Bitmap fonts index tiles by byte; in a UTF-8 game, characters outside
   the game's ANSI code page draw as `?` (see [Code pages](#code-pages)).
-- Right-to-left text (`Game.TextRTL`, turned on by a string table's
-  `@right-to-left` entry or by a script) makes a TrueType font lay each
-  line's glyphs out from the last to the first, the reading order GDI
-  gives the original engine with `ETO_RTLREADING`; there is no
-  bidirectional algorithm, so a run of another direction inside a line
-  is reversed with it. Bitmap fonts ignore the flag, as in the original
-  engine, whose `CBFontBitmap` never reads it. The texts a TrueType font
-  has cached are dropped when the direction changes.
+- Right-to-left scripts. The original gives each line of a TrueType
+  text to GDI (`ExtTextOut`), which puts Hebrew and Arabic letters in
+  the order they are read and joins Arabic letters; with `Game.TextRTL`
+  (turned on by a string table's `@right-to-left` entry or by a script)
+  it passes `ETO_RTLREADING`, and the whole line is read from the
+  right. Luma Engine does this itself, by rules of its own that stand
+  for Windows':
+  - each line, once broken (lines break by the widths of the characters
+    in the order they are written, as in the original), is put in
+    drawing order by the Unicode bidirectional algorithm: runs of
+    right-to-left letters are reversed and their brackets mirrored,
+    numbers and Latin words keep their order; the line is read from
+    the right with `Game.TextRTL` and from the left without;
+  - Arabic letters take the form their neighbours call for (isolated,
+    final, initial, medial, and the single sign of a lam followed by an
+    alef), from the Unicode presentation forms, Persian letters
+    included; a form the font lacks while it has the plain letter is
+    left as the letter. Other scripts that need shaping (Indic, Thai
+    marks) are drawn letter by letter.
+
+  Bitmap fonts ignore all of it, as in the original engine, whose
+  `CBFontBitmap` never reads the flag and draws one tile per byte. The
+  texts a TrueType font has cached are dropped when the direction
+  changes.
 - A TrueType font's text is cached as a rendered image per (text, width,
   alignment, height limit); the engine keeps 50 such images per font
   (`NUM_CACHED_TEXTS`), a text used again counting one more use and a

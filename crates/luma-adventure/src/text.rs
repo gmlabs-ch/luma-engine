@@ -30,6 +30,7 @@ use crate::font_face::{
     FaceChoice, FaceOrigin, FaceSet, choose_face, resolve_face, system_face_with_glyph,
 };
 use crate::scene_view::key;
+use crate::text_shape::{join_arabic, visual_order};
 
 /// The number of rendered texts a TrueType font keeps
 /// (`NUM_CACHED_TEXTS`).
@@ -161,7 +162,7 @@ impl Font {
         }
     }
 
-    /// Lays TrueType text out right to left (`Game.TextRTL`); bitmap
+    /// Has TrueType text read from the right (`Game.TextRTL`); bitmap
     /// fonts are unaffected, as in the original engine, where only the
     /// GDI text of `CBFontTT` reads the flag.
     pub fn set_rtl(&mut self, rtl: bool) {
@@ -982,16 +983,21 @@ impl TrueTypeFont {
     /// (`CBTextUtils::ConvertToNative`, and for ANSI text what GDI does
     /// with the bytes): what [`wrap`](Self::wrap),
     /// [`measure`](Self::measure) and [`render`](Self::render) take.
+    /// Arabic letters come out in the forms their neighbours call for,
+    /// as Windows shapes them when it draws: a form the face lacks while
+    /// it has the plain letter is left as the letter.
     pub fn characters(&self, text: &str) -> String {
-        if self.utf8 {
+        let characters = if self.utf8 {
             utf8_to_text(text)
         } else {
             self.code_page().decode(text)
-        }
+        };
+        let has = |c: char| self.font.lookup_glyph_index(c) != 0;
+        join_arabic(&characters, |form, letter| has(form) || !has(letter))
     }
 
-    /// Lays lines out right to left when `rtl`; the texts rendered so
-    /// far go when the direction changes.
+    /// Reads lines from the right when `rtl` (`Game.TextRTL`); the texts
+    /// rendered so far go when the direction changes.
     pub fn set_rtl(&mut self, rtl: bool) {
         if self.rtl != rtl {
             self.rtl = rtl;
@@ -1037,6 +1043,11 @@ impl TrueTypeFont {
             if self.font.lookup_glyph_index(plain) != 0 {
                 return Some(Glyph::of(&self.font, plain, px, embolden, self.slant));
             }
+        }
+        // A control character draws nothing: no other face is asked for
+        // one, which some fonts give a sign.
+        if ch.is_control() {
+            return None;
         }
         let fallback = self.fallback_for(ch)?;
         let face = &self.fallbacks[fallback];
@@ -1248,17 +1259,13 @@ impl TrueTypeFont {
             }
             let orig_x = align.start_x(0, width, *line_width);
             let mut pos_x = orig_x;
-            // Right-to-left text lays the line's glyphs out from the last
-            // to the first: the reading order GDI gives the original
-            // engine with `ETO_RTLREADING`, without a bidirectional
-            // algorithm.
-            let visual: Vec<char> = if self.rtl {
-                line.chars().rev().collect()
-            } else {
-                line.chars().collect()
-            };
+            // The order the line is drawn in: runs of right-to-left
+            // characters reversed, and with `Game.TextRTL` the line read
+            // from the right (what GDI does of a line, with
+            // `ETO_RTLREADING` then).
+            let visual = visual_order(line, self.rtl);
             let mut prev: Option<char> = None;
-            for ch in visual {
+            for ch in visual.chars() {
                 let (metrics, bearing_y, coverage) = match self.glyph(ch) {
                     Some(glyph) => (glyph.metrics, glyph.bearing_y(), glyph.coverage.clone()),
                     None => continue,
@@ -1873,12 +1880,17 @@ mod tests {
         assert!(font.texts.is_empty(), "rendered again with the glyph");
         assert_eq!(font.line_width("aéb"), 30);
         assert_eq!(font.line_width("aжb aΩb"), 60);
+        // A control character is not looked for in other faces.
+        font.add_fallback_file(Arc::new(FaceSet::from_bytes(
+            TestFont::regular("Odd", "\r\t").build(),
+        )));
+        assert_eq!(font.line_width("a\r\tb"), 20);
         let after = font.render("aéb", 100, TextAlign::Left, -1);
         assert_eq!(alpha(&after, 25, 10), 255, "three, one of the other face");
         // The face is loaded once, and the file is taken once.
         assert_eq!(font.fallbacks.len(), 1);
         font.add_fallback_file(other);
-        assert_eq!(font.files.len(), 1);
+        assert_eq!(font.files.len(), 2);
         // A bold asked of the font is imitated on the other face too.
         let mut bold = test_ttf("BOLD=TRUE", " ab");
         bold.add_fallback_file(Arc::new(FaceSet::from_bytes(
@@ -2107,18 +2119,60 @@ mod tests {
         font.prepare("Hi", 100, TextAlign::Center, -1);
         assert_eq!(font.texts.len(), 1);
 
-        // Right-to-left lays the glyphs out from the last: "ab" comes out
-        // as "ba" does left to right; the cache goes with the direction.
-        let ltr = font.render("ba", 100, TextAlign::Left, -1);
+        // The cache goes with the direction; Latin letters keep their
+        // order when the line is read from the right.
+        let ltr = font.render("ab", 100, TextAlign::Left, -1);
         font.set_rtl(true);
         assert!(font.texts.is_empty());
         let rtl = font.render("ab", 100, TextAlign::Left, -1);
         assert_eq!(rtl.pixels, ltr.pixels);
-        let same = font.render("ab", 100, TextAlign::Left, -1);
-        font.set_rtl(false);
-        let back = font.render("ab", 100, TextAlign::Left, -1);
-        assert_eq!(same.pixels, rtl.pixels);
-        assert_ne!(back.pixels, rtl.pixels);
+    }
+
+    /// What GDI does of a line: right-to-left letters are drawn from
+    /// the right, and `Game.TextRTL` has the whole line read from the
+    /// right.
+    #[test]
+    fn right_to_left_letters_are_drawn_from_the_right() {
+        // A Hebrew letter and a space: a box and a gap of 10 pixels.
+        let mut font = test_ttf("", " abאב");
+        let boxes = |image: &Image| -> Vec<bool> {
+            (0..4)
+                .map(|slot| alpha(image, slot * 10 + 5, 10) > 0)
+                .collect()
+        };
+        // Read from the left, the space that ends the line stays at its
+        // right end.
+        let ltr = font.render("א ", 100, TextAlign::Left, -1);
+        assert_eq!(boxes(&ltr), [true, false, false, false]);
+        assert_eq!(font.wrap("אב ab", 100, -1)[0].1, 50);
+        // Read from the right, it goes to the left end.
+        font.set_rtl(true);
+        let rtl = font.render("א ", 100, TextAlign::Left, -1);
+        assert_eq!(boxes(&rtl), [false, true, false, false]);
+        // The lines break where they break left to right: the widths
+        // are those of the characters.
+        assert_eq!(lines(&mut font, "אב אב", 35, -1), ["אב", "אב"]);
+    }
+
+    /// Arabic letters are measured and drawn in their joined forms when
+    /// the face has them.
+    #[test]
+    fn arabic_letters_are_joined_before_they_are_measured() {
+        // Lam, alef: one sign when the face has it.
+        let with_forms = test_ttf("", " لا\u{fefb}");
+        assert_eq!(with_forms.characters("لا"), "\u{fefb}");
+        let mut with_forms = with_forms;
+        let joined = with_forms.characters("لا");
+        assert_eq!(with_forms.line_width(&joined), 10);
+        // A face with the letters only keeps them.
+        let mut plain = test_ttf("", " لا");
+        assert_eq!(plain.characters("لا"), "لا");
+        let kept = plain.characters("لا");
+        assert_eq!(plain.line_width(&kept), 20);
+        // A face with neither leaves the forms to the faces that stand
+        // in for it.
+        let latin = test_ttf("", " ab");
+        assert_eq!(latin.characters("لا"), "\u{fefb}");
     }
 
     /// A negative width is a single line of any length, as for the

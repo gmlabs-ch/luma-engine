@@ -643,8 +643,8 @@ impl World {
     }
 
     /// Sets right-to-left text (`Game.TextRTL`, a string table's
-    /// `@right-to-left`): the TrueType fonts lay their lines out from
-    /// the last glyph and the editors mirror their keys.
+    /// `@right-to-left`): the TrueType fonts read their lines from the
+    /// right and the editors mirror their keys.
     pub fn set_text_rtl(&mut self, rtl: bool) {
         self.text_rtl = rtl;
         self.fonts.set_rtl(rtl);

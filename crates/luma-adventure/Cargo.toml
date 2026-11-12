@@ -23,6 +23,7 @@ encoding_rs.workspace = true
 fontdue.workspace = true
 fontdb.workspace = true
 ttf-parser.workspace = true
+unicode-bidi.workspace = true
 flate2.workspace = true
 postcard.workspace = true
 serde.workspace = true
