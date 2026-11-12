@@ -132,16 +132,16 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DJoint::C3DJoint` | todo | A bone of a Milkshape model (local rotation and translation, parent, absolute, relative and final matrices, current key index per channel). Luma has no Milkshape models (see `C3DModel::LoadFile`). |
-| `C3DJoint::~C3DJoint` | todo | Frees the joint's name; comes with the Milkshape models. |
-| `C3DJoint::Persist` | todo | Saves a joint's rotation, translation, three matrices, current key indices per channel and parent. Not in Luma. |
+| `C3DJoint::C3DJoint` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DJoint::~C3DJoint` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DJoint::Persist` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
 
 ## `wme_base/3DKeyframe.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DKeyframe::C3DKeyframe` | todo | A rotation or translation key of a Milkshape joint animation (joint index, time, three values). Not in Luma. |
-| `C3DKeyframe::~C3DKeyframe` | todo | Comes with the Milkshape models. |
+| `C3DKeyframe::C3DKeyframe` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DKeyframe::~C3DKeyframe` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
 
 ## `wme_base/3DLight.cpp`
 
@@ -176,15 +176,15 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DLoaderMS3D::C3DLoaderMS3D` | todo | Reader of Milkshape 3D (`.ms3d`) files for the legacy `ACTOR3D` actors. Luma refuses these actors (`luma-3d/src/actor3d.rs`: `legacy Milkshape actor, which is not supported`). |
-| `C3DLoaderMS3D::~C3DLoaderMS3D` | todo | Comes with the Milkshape loader. |
-| `C3DLoaderMS3D::Cleanup` | todo | Frees the parsed vertices, triangles, groups, materials and joints. Not in Luma. |
-| `C3DLoaderMS3D::ParseFile` | todo | Parses the `.ms3d` file: header, vertices with bone ids, triangles with normals and texture coordinates, groups, materials, animation frame rate and total frames, joints with their rotation and translation keys. Not in Luma. |
-| `C3DLoaderMS3D::MergeMesh` | todo | Adds one named group of another `.ms3d` file to a model, bound to one bone (`Actor3D.AddMesh`). Not in Luma. |
-| `C3DLoaderMS3D::LoadModel` | todo | Fills a `C3DModel` from the parsed file: one mesh per group, the materials, the joints with their rotation and translation converted to the left-handed system. Not in Luma. |
-| `C3DLoaderMS3D::LoadAnimation` | todo | Cuts an animation out of the file's keys between `StartFrame` and `EndFrame` (an end frame of 0 means the end of the file; key times in milliseconds from the start frame; frame time from the file's frame rate). Not in Luma. |
-| `C3DLoaderMS3D::LoadMesh` | todo | Builds a mesh from a group: three vertices per triangle with the winding swapped, `z` negated, negative `t` coordinates wrapped, the group's hidden flag as `m_Visible`. Not in Luma. |
-| `C3DLoaderMS3D::LoadMaterial` | todo | Copies a Milkshape material (ambient, diffuse, specular, emissive, shininess) and loads its texture relative to the model. Not in Luma. |
+| `C3DLoaderMS3D::C3DLoaderMS3D` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::~C3DLoaderMS3D` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::Cleanup` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::ParseFile` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::MergeMesh` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::LoadModel` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::LoadAnimation` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::LoadMesh` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::LoadMaterial` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
 
 ## `wme_base/3DMaterial.cpp`
 
@@ -217,44 +217,44 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DModel::C3DModel` | todo | A Milkshape (`.ms3d`) skeletal model, the model of the legacy `ACTOR3D` actors (`CAdActor3D`, `Game.LoadActor3D`). Luma refuses these actors (`luma-3d/src/actor3d.rs`: `legacy Milkshape actor, which is not supported`). |
-| `C3DModel::~C3DModel` | todo | Comes with the Milkshape models. |
-| `C3DModel::SetDefaults` | todo | Resets counts, the ten animation channels, the box, the rectangle and the stored pick matrices. Not in Luma. |
-| `C3DModel::Cleanup` | todo | Frees meshes, materials, joints, animations, the attached and deleted mesh lists. Not in Luma. |
-| `C3DModel::ClearLoaderCache` | todo | Drops the parsed `.ms3d` files kept while the actor file loads. Not in Luma. |
-| `C3DModel::LoadFile` | todo | Loads a `.ms3d` file (any other extension fails with `Error: no suitable loader found for file`). Not in Luma. |
-| `C3DModel::LoadFinalize` | todo | After the actor file: clears the loader cache, computes the joints' absolute matrices and moves the vertices into bone space, restarts the animations. Not in Luma. |
-| `C3DModel::Update` | todo | Advances the animations, re-skins the visible meshes and updates the bounding rectangle. Not in Luma. |
-| `C3DModel::Render` | todo | Draws each visible mesh with its material and texture (back faces culled unless `DrawBackfaces`), then stores the matrices and offsets for picking. Not in Luma. |
-| `C3DModel::PrepareMeshes` | todo | CPU skinning: each vertex and normal through its bone's final matrix (unbound vertices as loaded), and the bounding box of the result. Not in Luma. |
-| `C3DModel::AnimSetupJoints` | todo | Builds each joint's relative and absolute matrices from its Euler rotation and translation and brings vertices and normals into bone space. Not in Luma. |
-| `C3DModel::AnimRestart` | todo | Restarts every channel. Not in Luma. |
-| `C3DModel::AnimRestart #2` | todo | Restarts one channel: key indices to 0, final matrices to absolute, start time to the game timer, not finished. Not in Luma. |
-| `C3DModel::AnimAdvance` | todo | Per channel: local time, loop or finish (a finished animation on a channel other than 0 is dropped), events when the frame index changes, linear interpolation of translation and rotation keys per joint; the highest channel with a non-zero value wins per joint; final matrices down the hierarchy. Not in Luma. |
-| `C3DModel::SetAnimation` | todo | Selects the animation of a channel by name (none when not found) and restarts it when it changed or on `ForceReset`. Not in Luma. |
-| `C3DModel::UpdateBoundingRect` | todo | Projects the eight corners of the box to the screen rectangle. Not in Luma for these models (the `.X` equivalent is `CXModel::UpdateBoundingRect`). |
-| `C3DModel::UpdateRect` | todo | Grows the rectangle by a projected point. Not in Luma for these models. |
-| `C3DModel::IsTransparentAt` | todo | Pixel pick against the skinned triangles with the stored matrices. Not in Luma for these models (see `CBRenderer::GetObjectAt`, `m_Model` branch). |
-| `C3DModel::ShowMesh` | todo | Shows or hides the meshes of a name (`Actor3D.ShowMesh`, `HideMesh`), logging when none matches. Not in Luma. |
-| `C3DModel::IsMeshVisible` | todo | Whether the first mesh of a name is visible. Not in Luma. |
-| `C3DModel::DeleteMesh` | todo | Removes the meshes of a name and remembers the deletion for saved games (`Actor3D.DeleteMesh`). Not in Luma. |
-| `C3DModel::AddMesh` | todo | Adds a group of another `.ms3d` file bound to a named bone and remembers it for saved games (`Actor3D.AddMesh`). Not in Luma. |
-| `C3DModel::ParseFileMS3D` | todo | Parses a `.ms3d` file once and caches the loader by file name. Not in Luma. |
-| `C3DModel::ParseAnim` | todo | Reads an `ANIMATION` block of a legacy actor file and cuts the animation out of a `.ms3d` file. Not in Luma. |
-| `C3DModel::ParseAnim NAME` | todo | The animation's name. Not in Luma (legacy `ACTOR3D` files are refused). |
-| `C3DModel::ParseAnim LOOPING` | todo | Whether it loops, false by default in the block (the animation object's own default is true). Not in Luma. |
-| `C3DModel::ParseAnim START_FRAME` | todo | First frame of the range taken from the file, default 0. Not in Luma. |
-| `C3DModel::ParseAnim END_FRAME` | todo | Last frame of the range, default 0. Not in Luma. |
-| `C3DModel::ParseAnim MODEL` | todo | The `.ms3d` file to take the animation from, the model's own file by default. Not in Luma. |
-| `C3DModel::ParseAnim EVENT` | todo | An event block of the animation. Not in Luma. |
-| `C3DModel::ParseEvent` | todo | Reads an `EVENT` block; an event without a name is dropped. Not in Luma. |
-| `C3DModel::ParseEvent NAME` | todo | The event's name. Not in Luma. |
-| `C3DModel::ParseEvent FRAME` | todo | The frame the event fires on, stored minus one. Not in Luma. |
-| `C3DModel::IsAnimPending` | todo | Whether a channel plays an unfinished animation, optionally of a given name. Not in Luma for these models. |
-| `C3DModel::IsAnimPending #2` | todo | The same over all ten channels. Not in Luma for these models. |
-| `C3DModel::AnimStop` | todo | Clears a channel's animation. Not in Luma for these models. |
-| `C3DModel::AnimStop #2` | todo | Clears every channel. Not in Luma for these models. |
-| `C3DModel::Persist` | todo | Saves the box, rectangle, pick matrices, owner, joints, animations, the animation and start time of each channel, the deleted and attached meshes; reloads the file and replays the deletions and attachments on load. Not in Luma. |
+| `C3DModel::C3DModel` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::~C3DModel` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::SetDefaults` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::Cleanup` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ClearLoaderCache` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::LoadFile` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::LoadFinalize` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::Update` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::Render` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::PrepareMeshes` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimSetupJoints` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimRestart` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimRestart #2` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimAdvance` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::SetAnimation` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::UpdateBoundingRect` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::UpdateRect` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::IsTransparentAt` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ShowMesh` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::IsMeshVisible` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::DeleteMesh` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AddMesh` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseFileMS3D` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim NAME` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim LOOPING` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim START_FRAME` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim END_FRAME` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim MODEL` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim EVENT` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseEvent` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseEvent NAME` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseEvent FRAME` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::IsAnimPending` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::IsAnimPending #2` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimStop` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimStop #2` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::Persist` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
 
 ## `wme_base/3DRenderTarget.cpp`
 
@@ -307,12 +307,12 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DSkelAnim::C3DSkelAnim` | todo | An animation of a Milkshape model (per-joint rotation and translation keys, total and frame time, looping true by default, events). Not in Luma (see `C3DModel::LoadFile`). |
-| `C3DSkelAnim::~C3DSkelAnim` | todo | Frees the joint animations and events. Not in Luma. |
-| `C3DSkelAnim::C3DJointAnim::C3DJointAnim` | todo | The animation of one joint of a Milkshape model: no rotation and no translation keys at first. Not in Luma (see `C3DModel::LoadFile`). |
-| `C3DSkelAnim::C3DJointAnim::~C3DJointAnim` | todo | Frees the two key arrays; would be Rust ownership once the type exists. Not in Luma. |
-| `C3DSkelAnim::Persist` | todo | Saves the animation: current frame, finished, frame time, looping, name, total time, events and every joint's keys. Not in Luma. |
-| `C3DSkelAnim::C3DJointAnim::Persist` | todo | Saves one joint: the two key counts, then joint index, parameter vector and time of every rotation key, then of every translation key. Not in Luma. |
+| `C3DSkelAnim::C3DSkelAnim` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DSkelAnim::~C3DSkelAnim` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DSkelAnim::C3DJointAnim::C3DJointAnim` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DSkelAnim::C3DJointAnim::~C3DJointAnim` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DSkelAnim::Persist` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DSkelAnim::C3DJointAnim::Persist` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
 
 ## `wme_base/3DUtils.cpp`
 
