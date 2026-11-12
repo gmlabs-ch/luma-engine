@@ -378,6 +378,10 @@ const ANIMATION_FILE_KEYS: &[&str] = &["ANIMATION"];
 /// bound and a file naming itself overflows its stack.
 const MAX_TEMPLATE_DEPTH: u32 = 16;
 
+/// How many template files one actor file may load in all, so that
+/// files naming one another several times cannot multiply without end.
+const MAX_TEMPLATE_LOADS: u32 = 64;
+
 impl Actor3dDef {
     /// Whether a file is a `.X` actor definition: its first keyword is
     /// `ACTOR3DX` (`CAdActor3D::IsActorX`). Anything else, including the
@@ -402,7 +406,7 @@ impl Actor3dDef {
     /// `MODEL`.
     pub fn parse(bytes: &[u8]) -> Result<Actor3dDef> {
         let mut def = Actor3dDef::default();
-        def.apply_file(bytes, None, 0)?;
+        def.apply_file(bytes, None, 0, &mut 0)?;
         Ok(def)
     }
 
@@ -424,7 +428,7 @@ impl Actor3dDef {
     /// [`Self::build_models`]).
     pub fn parse_with(bytes: &[u8], templates: &mut TemplateSource<'_>) -> Result<Actor3dDef> {
         let mut def = Actor3dDef::default();
-        def.apply_file(bytes, Some(templates), 0)?;
+        def.apply_file(bytes, Some(templates), 0, &mut 0)?;
         Ok(def)
     }
 
@@ -436,6 +440,7 @@ impl Actor3dDef {
         bytes: &[u8],
         mut templates: Option<&mut TemplateSource<'_>>,
         depth: u32,
+        loads: &mut u32,
     ) -> Result<()> {
         let doc = Document::parse(bytes)?;
         let root = doc.nodes.first().ok_or_else(|| Error::Invalid {
@@ -465,16 +470,21 @@ impl Actor3dDef {
                         // Not loaded: what a template would drop is
                         // dropped.
                         None => self.drop_models(),
-                        Some(_) if depth >= MAX_TEMPLATE_DEPTH => self.log.push(format!(
-                            "Error: template '{path}' is nested too deep and is not loaded"
-                        )),
+                        Some(_) if depth >= MAX_TEMPLATE_DEPTH || *loads >= MAX_TEMPLATE_LOADS => {
+                            self.log.push(format!(
+                                "Error: template '{path}' is nested too deep and is not loaded"
+                            ));
+                        }
                         Some(source) => match source(&path) {
                             None => self
                                 .log
                                 .push(format!("CAdActor3DX::LoadFile failed for file '{path}'")),
                             Some(bytes) => {
+                                *loads += 1;
                                 self.filename_override = Some(path.clone());
-                                if let Err(err) = self.apply_file(&bytes, Some(source), depth + 1) {
+                                if let Err(err) =
+                                    self.apply_file(&bytes, Some(source), depth + 1, loads)
+                                {
                                     self.log.push(err.to_string());
                                     self.log
                                         .push(format!("Error parsing ACTOR3D file '{path}'"));
@@ -1322,6 +1332,14 @@ AnimationSet idle {
         assert_eq!(reads, MAX_TEMPLATE_DEPTH);
         assert_eq!(def.models, vec!["m.x"]);
         assert!(def.log.iter().any(|line| line.contains("nested too deep")));
+        // Nor multiply: each file names itself twice.
+        let mut reads = 0;
+        let mut twice = |_: &str| {
+            reads += 1;
+            Some(b"ACTOR3DX { TEMPLATE = \"t\" TEMPLATE = \"t\" MODEL = \"m.x\" }".to_vec())
+        };
+        Actor3dDef::parse_with(b"ACTOR3DX { TEMPLATE = \"t\" }", &mut twice).unwrap();
+        assert_eq!(reads, MAX_TEMPLATE_LOADS);
     }
 
     /// The values are read as `CAdActor3DX::LoadBuffer` scans them.

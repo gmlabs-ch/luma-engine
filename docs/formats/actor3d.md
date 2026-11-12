@@ -143,8 +143,8 @@ middle of the file being read (`CAdActor3DX::LoadFile`, then
 `Actor3dDef::parse_with` does this with a closure that reads a path
 (`Actor3dDef::log` holds the lines logged); `Actor3dDef::parse` only
 records the last `TEMPLATE` and drops the model keys before it. Templates
-may nest 16 deep; the original has no bound and a file that names itself
-overflows its stack.
+may nest 16 deep and one actor file loads 64 template files at most; the
+original has no bound and a file that names itself overflows its stack.
 
 ## `ANIMATION` blocks
 
