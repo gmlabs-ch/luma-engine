@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use luma_archive::Vfs;
-use luma_formats::scene::{Direction, Entity, Point, SceneNode};
+use luma_formats::scene::{Direction, Entity, Point};
 use luma_formats::{Rgba, Scene};
 
 use crate::error::{Error, Result};
@@ -1087,34 +1087,20 @@ fn entity_mimic_scale(scene: &Scene, entity: &Entity) -> f32 {
     }
 }
 
-/// Every entity of a scene with its polygon and waypoints, for the
-/// floor the actors walk on.
+/// What the scene alone gives the floor the actors walk on: no polygon,
+/// and the points of its waypoint groups. The free objects add theirs
+/// (`World::obstacles_for`); the entities that are nodes of a layer add
+/// nothing, as the original's path finder only looks at the free
+/// objects.
 pub fn scene_obstacles(scene: &Scene) -> (Vec<Vec<Point>>, Vec<Point>) {
-    let mut blockers = Vec::new();
     // A group a script switched off (`WaypointGroup.Active`) is left out.
-    let mut waypoints: Vec<Point> = scene
+    let waypoints: Vec<Point> = scene
         .waypoint_groups
         .iter()
         .filter(|g| g.active)
         .flat_map(|g| g.points.iter().copied())
         .collect();
-    let entities = scene
-        .layers
-        .iter()
-        .flat_map(|l| {
-            l.nodes.iter().filter_map(|n| match n {
-                SceneNode::Entity(e) => Some(&**e),
-                SceneNode::Region(_) => None,
-            })
-        })
-        .chain(scene.free_entities.iter());
-    for entity in entities {
-        if let Some(polygon) = entity_block_polygon(scene, entity) {
-            blockers.push(polygon);
-        }
-        waypoints.extend(entity_waypoints(scene, entity));
-    }
-    (blockers, waypoints)
+    (Vec::new(), waypoints)
 }
 
 #[cfg(test)]

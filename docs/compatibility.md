@@ -339,15 +339,15 @@ How the list was made. For every class with a script interface, the names tested
 | `ScrollTo`, `ScrollToAsync` | method | **done** | Scrolls the view to a position or object, waiting or not. |
 | `GetLayer` | method | **done** | Layer by index or name. |
 | `GetWaypointGroup` | method | **done** | Waypoint group by index, as an object. |
-| `GetNode` | method | **done** | Any node (entity or region) by name. |
-| `GetFreeNode` | method | **done** | Free (layer-less) entity by index or name. |
+| `GetNode` | method | **done** | Any node (entity or region) by name, then a free entity, then a waypoint group. |
+| `GetFreeNode` | method | **done** | A free object of the scene by index or name: its free entities, then the actors loaded into it. |
 | `GetRegionAt` | method | **done** | Region under a point (optionally including decorations). |
 | `IsBlockedAt`, `IsWalkableAt` | method | **done** | Walkplane tests at a point. |
 | `GetScaleAt`, `GetRotationAt` | method | **done** | Scale / rotation level at a point. |
 | `IsScrolling` | method | **done** | True while the view scrolls. |
 | `FadeOut`, `FadeOutAsync`, `FadeIn`, `FadeInAsync` | method | **done** | Fades only the scene viewport (not the UI), on the game timer; the scene's own fader, new with every scene. |
 | `GetFadeColor` | method | **done** | Colour of the scene fade (0xAARRGGBB, the alpha as it is now). |
-| `IsPointInViewport` | method | **done** | True when a point is inside the scene viewport. |
+| `IsPointInViewport` | method | **done** | True when a point is inside the scene viewport, its right and bottom edges included. |
 | `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled` | method | **done** | Shows / hides / queries a mesh node of the scene's 3D geometry. |
 | `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `GetLightColor`, `GetLightPosition` | method | **done** | Controls the lights of the scene's 3D geometry, by name; `GetLightColor` packs the colour with full alpha. |
 | `SetActiveCamera` | method | **done** | Selects a camera of the 3D geometry by name (a runtime error when it does not exist). |
@@ -362,7 +362,7 @@ How the list was made. For every class with a script interface, the names tested
 | `PersistentState` | get/set | **done** | Whether the scene keeps its state between visits. |
 | `PersistentStateSprites` | get/set | **done** | Whether sprite state is kept too. |
 | `ScrollPixelsX`, `ScrollPixelsY`, `ScrollSpeedX`, `ScrollSpeedY` | get/set | **done** | Auto-scroll step and speed. |
-| `OffsetX`, `OffsetY` | get/set | **done** | Current view offset. |
+| `OffsetX`, `OffsetY` | get/set | **done** | Current view offset. Set: the point to centre the view on, kept inside the scene. |
 | `GeometryFile` | get | **done** | The 3D geometry file, `null` without one. |
 | `WaypointsHeight` | get/set | **done** | Height of the 3D waypoints over the floor; setting it drops them again. |
 | `Width`, `Height` | get | **done** | Scene size in pixels. |

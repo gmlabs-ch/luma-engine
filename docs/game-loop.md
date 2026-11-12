@@ -27,7 +27,8 @@ Every frame then runs, in this order (`Runtime::tick`):
    [Scene changes](#scene-changes));
 3. speech sounds that ended end their sentences; the fader advances;
 4. the scripts run (`Engine::tick`);
-5. the scene's entities and the game's own (see
+5. the view takes its scroll step towards the target set last frame;
+   the scene's entities and the game's own (see
    [formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments))
    animate and talk; the actors walk, turn, talk; a sprite frame that
    becomes current plays its `SOUND`, stops the sprite's earlier frame
@@ -39,8 +40,8 @@ Every frame then runs, in this order (`Runtime::tick`):
    scripts by name (see [3d-actors.md](3d-actors.md), section 8); the
    particle emitters of the entities and actors follow their owner and
    emit (see [particles.md](particles.md));
-6. the view scrolls towards the main object; the objects' sounds follow
-   them;
+6. the main object sets the view's next scroll target; the objects'
+   sounds follow them;
 7. the object under the mouse is found and becomes the **active
    object**, raising `MouseLeave` and `MouseEntry`;
 8. the windows note the mouse: a button held under it is pressed, a
@@ -725,8 +726,11 @@ the next clickable object and Ctrl+Shift+Tab the previous one, cycling
 through the buttons and editors of the focused window (into its child
 windows, disabled ones skipped), else the response buttons while the
 dialogue waits for a pick, else the scene's active, interactive
-entities in layer order (a close-up layer hides what is below it) and
-its active, interactive actors. While Ctrl is held, the object picked
+objects in the order they are drawn (`CAdScene::GetSceneObjects`): the
+entities layer by layer (a close-up layer drops what is below it), at
+each region the free objects standing in it or stuck to it, sorted by
+`y`, and at the end the free objects not listed yet (the scene's free
+entities and actors, the game's actors and entities). While Ctrl is held, the object picked
 is framed in red, four pixels wide, over the windows; with
 `KeyboardCursorSkip` (on by default) the mouse cursor jumps to the
 centre of its area the frame it is picked, so that the next click goes

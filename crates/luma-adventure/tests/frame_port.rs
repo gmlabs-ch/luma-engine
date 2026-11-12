@@ -10,7 +10,7 @@ use luma_archive::{PackageBuilder, Vfs};
 use luma_compiler::{Compiler, Natives};
 use luma_formats::{Image, Rgba};
 use luma_render::{DrawList, Gpu, Offscreen, Renderer};
-use luma_script::{NativeId, Value};
+use luma_script::{NativeId, Natives as _, Value};
 
 fn temp_dir() -> std::path::PathBuf {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -702,5 +702,265 @@ on "Busy" {
     raise(&mut runtime, "Busy");
     runtime.tick(16);
     assert_eq!(runtime.world.cursors().shown(), None);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A scene 200 wide: a back layer with an entity and an inactive layer
+/// with an animated one, the main layer with an entity, a region that
+/// is switched off, a second entity and a close-up layer over it all;
+/// two free entities, one standing in the region, and waypoints.
+const STAGE: &str = "SCENE {
+  NAME=\"Stage\"
+  LAYER {
+    NAME=\"back\" WIDTH=200 HEIGHT=48
+    ENTITY { NAME=\"far\" X=4 Y=4 SPRITE=\"red.png\" }
+  }
+  LAYER {
+    NAME=\"off\" WIDTH=200 HEIGHT=48 ACTIVE=FALSE
+    ENTITY { NAME=\"hidden\" X=4 Y=20 SPRITE=\"blink.sprite\" }
+  }
+  LAYER {
+    NAME=\"main\" MAIN=TRUE WIDTH=200 HEIGHT=48
+    ENTITY { NAME=\"first\" X=20 Y=4 SPRITE=\"red.png\"
+      BLOCKED_REGION { POINT {0,0} POINT {8,0} POINT {8,8} POINT {0,8} }
+      WAYPOINTS { POINT {1,1} } }
+    REGION { NAME=\"floor\" ACTIVE=FALSE POINT {0,24} POINT {200,24} POINT {200,48} POINT {0,48} }
+    ENTITY { NAME=\"second\" X=40 Y=4 SPRITE=\"red.png\" }
+  }
+  LAYER {
+    NAME=\"close\" WIDTH=200 HEIGHT=48 CLOSE_UP=TRUE
+    ENTITY { NAME=\"near\" X=50 Y=30 SPRITE=\"green.png\" }
+  }
+  WAYPOINTS { NAME=\"route\" POINT {100,30} }
+  ENTITY { NAME=\"walker\" X=30 Y=40 SPRITE=\"red.png\"
+    BLOCKED_REGION { POINT {-2,-2} POINT {2,-2} POINT {2,2} POINT {-2,2} }
+    WAYPOINTS { POINT {5,0} } }
+  ENTITY { NAME=\"flyer\" X=30 Y=10 SPRITE=\"red.png\" }
+}";
+
+fn stage(script: &str) -> (std::path::PathBuf, Runtime) {
+    let (dir, runtime, log) = start(
+        script,
+        &[
+            File::Text("stage.scene", STAGE),
+            File::Text("blink.sprite", BLINK),
+            File::Text("room.scene", ROOM),
+            File::Text(
+                "bob.actor",
+                "ACTOR { NAME=\"bob\" X=60 Y=44 SCALABLE=FALSE STAND { SPRITESET { LEFT=\"red.png\" } } }",
+            ),
+        ],
+    );
+    no_errors(&log);
+    (dir, runtime)
+}
+
+#[test]
+fn a_close_up_layer_shields_the_layers_below_it() {
+    let (dir, mut runtime) = stage(
+        r#"
+global result = new Object();
+Game.ChangeScene("stage.scene", false, false);
+var scene = Game.Scene;
+result.near = scene.GetNode("near");
+result.far = scene.GetNode("far");
+"#,
+    );
+    let near = object(&runtime, "near");
+    let far = object(&runtime, "far");
+    assert_eq!(object_at(&mut runtime, 52, 32), Some(near));
+    // Over the entity of the back layer the mouse finds the shield, an
+    // object of its own that is a window to scripts, not the entity.
+    let found = object_at(&mut runtime, 6, 6).expect("the shield");
+    assert_ne!(found, far);
+    assert_eq!(
+        runtime.world.get_property(found, "Type"),
+        Some(Value::from("window"))
+    );
+    // Anywhere else on the screen too.
+    assert_eq!(object_at(&mut runtime, 60, 2), Some(found));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_region_switched_off_keeps_its_place_and_an_inactive_layer_stands_still() {
+    use luma_adventure::{DrawItem, EntityRef};
+    let (dir, mut runtime) = stage(
+        r#"
+global result = new Object();
+Game.ChangeScene("stage.scene", false, false);
+"#,
+    );
+    // The walker stands in the floor region, which is switched off: it
+    // is still drawn at the region's place, between the two entities of
+    // the main layer; the flyer, in no region, ends the layer.
+    let order = runtime.world.draw_order();
+    let main: Vec<DrawItem> = order.into_iter().filter(|i| i.layer() == 2).collect();
+    assert_eq!(
+        main,
+        vec![
+            DrawItem::Node { layer: 2, index: 0 },
+            DrawItem::Free { index: 0, layer: 2 },
+            DrawItem::Node { layer: 2, index: 2 },
+            DrawItem::Free { index: 1, layer: 2 },
+        ]
+    );
+    // The entity of the inactive layer is not updated: its sprite does
+    // not animate.
+    let hidden = EntityRef::Node { layer: 1, index: 0 };
+    let frame = runtime.world.scene().unwrap().frame_of(hidden);
+    for _ in 0..6 {
+        runtime.tick(50);
+    }
+    assert_eq!(runtime.world.scene().unwrap().frame_of(hidden), frame);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn only_free_objects_block_the_floor_and_lend_their_waypoints() {
+    let (dir, mut runtime) = stage(
+        r#"
+global result = new Object();
+Game.ChangeScene("stage.scene", false, false);
+result.bob = Game.LoadActor("bob.actor");
+"#,
+    );
+    runtime.tick(16);
+    let bob = object(&runtime, "bob");
+    let (blockers, waypoints) = runtime.world.obstacles_for(bob);
+    let point = |x, y| luma_formats::Point { x, y };
+    // The scene's waypoint group and the free entity's waypoint; the
+    // `WAYPOINTS` and `BLOCKED_REGION` of the entity that is a node of
+    // the main layer are not looked at.
+    assert_eq!(waypoints, vec![point(100, 30), point(35, 40)]);
+    assert_eq!(blockers.len(), 1);
+    assert_eq!(blockers[0][0], point(28, 38));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn the_scene_answers_for_its_free_objects_waypoint_groups_and_viewport() {
+    let (dir, runtime) = stage(
+        r#"
+global result = new Object();
+Game.ChangeScene("stage.scene", false, false);
+var scene = Game.Scene;
+var bob = scene.LoadActor("bob.actor");
+// The free entities and the actors loaded into the scene.
+result.count = scene.NumFreeNodes;
+var node = scene.GetFreeNode(2);
+result.third = node.Name;
+node = scene.GetFreeNode("BOB");
+result.byName = (node == bob);
+result.past = scene.GetFreeNode(3);
+// A waypoint group is found by name after the nodes and free entities.
+var group = scene.GetNode("route");
+result.groupType = group.Type;
+// The viewport's right and bottom edges are inside.
+result.corner = scene.IsPointInViewport(64, 48);
+result.beyond = scene.IsPointInViewport(65, 48);
+// A point to centre on, kept inside the scene (200 wide, 64 shown).
+scene.OffsetX = 100;
+result.centred = scene.OffsetX;
+scene.OffsetX = 500;
+result.clampedRight = scene.OffsetX;
+scene.OffsetX = 10;
+result.clampedLeft = scene.OffsetX;
+scene.OffsetY = 40;
+result.vertical = scene.OffsetY;
+"#,
+    );
+    let flag = |key: &str| result(&runtime, key);
+    assert_eq!(flag("count"), Value::Int(3));
+    assert_eq!(flag("third"), Value::from("bob"));
+    assert_eq!(flag("byName"), Value::Bool(true));
+    assert_eq!(flag("past"), Value::Null);
+    assert_eq!(flag("groupType"), Value::from("waypoint-group"));
+    assert_eq!(flag("corner"), Value::Bool(true));
+    assert_eq!(flag("beyond"), Value::Bool(false));
+    assert_eq!(flag("centred"), Value::Int(68));
+    assert_eq!(flag("clampedRight"), Value::Int(136));
+    assert_eq!(flag("clampedLeft"), Value::Int(0));
+    assert_eq!(
+        flag("vertical"),
+        Value::Int(0),
+        "max(0, 40 - 24), at most 48 - 48"
+    );
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_scene_load_puts_the_scroll_settings_back() {
+    let (dir, mut runtime) = stage(
+        r#"
+global result = new Object();
+Game.ChangeScene("stage.scene", false, false);
+var scene = Game.Scene;
+scene.AutoScroll = false;
+scene.ScrollPixelsX = 7;
+scene.ScrollSpeedY = 99;
+on "Next" {
+  Game.ChangeScene("room.scene", false, false);
+}
+on "Read" {
+  var s = Game.Scene;
+  result.auto = s.AutoScroll;
+  result.pixels = s.ScrollPixelsX;
+  result.speed = s.ScrollSpeedY;
+}
+"#,
+    );
+    raise(&mut runtime, "Next");
+    runtime.tick(16);
+    raise(&mut runtime, "Read");
+    assert_eq!(result(&runtime, "auto"), Value::Bool(true));
+    assert_eq!(result(&runtime, "pixels"), Value::Int(1));
+    assert_eq!(result(&runtime, "speed"), Value::Int(10));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn the_keyboard_walks_the_scenes_objects_in_the_order_they_are_drawn() {
+    let (dir, mut runtime) = stage(
+        r#"
+global result = new Object();
+Game.ChangeScene("stage.scene", false, false);
+var scene = Game.Scene;
+var layer = scene.GetLayer("close");
+layer.CloseUp = false;
+result.far = scene.GetNode("far");
+result.hidden = scene.GetNode("hidden");
+result.first = scene.GetNode("first");
+result.second = scene.GetNode("second");
+result.near = scene.GetNode("near");
+result.walker = scene.GetFreeNode("walker");
+result.flyer = scene.GetFreeNode("flyer");
+on "Close" {
+  var s = Game.Scene;
+  var l = s.GetLayer("close");
+  l.CloseUp = true;
+}
+"#,
+    );
+    let id = |key: &str| object(&runtime, key);
+    // Layer by layer, the inactive one included; at the region the free
+    // entity standing in it; the one outside every region at the end.
+    assert_eq!(
+        runtime.world.access_objects(),
+        vec![
+            id("far"),
+            id("hidden"),
+            id("first"),
+            id("walker"),
+            id("second"),
+            id("near"),
+            id("flyer"),
+        ]
+    );
+    // A close-up layer drops what was gathered under it; the free
+    // objects then all come at the end, by `y`.
+    let (near, flyer, walker) = (id("near"), id("flyer"), id("walker"));
+    raise(&mut runtime, "Close");
+    assert_eq!(runtime.world.access_objects(), vec![near, flyer, walker]);
     std::fs::remove_dir_all(dir).ok();
 }

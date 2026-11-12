@@ -1181,7 +1181,7 @@ impl World {
             "NumWaypointGroups" => {
                 Value::Int(view.map_or(0, |v| v.scene.waypoint_groups.len() as i32))
             }
-            "NumFreeNodes" => Value::Int(view.map_or(0, |v| v.scene.free_entities.len() as i32)),
+            "NumFreeNodes" => Value::Int(self.scene_free_objects().len() as i32),
             "MainLayer" => native_or_null(
                 view.and_then(|v| v.scene.layers.iter().rposition(|l| l.main))
                     .and_then(|i| self.layer_id(i)),
@@ -1213,12 +1213,22 @@ impl World {
                     view.scene.name = name;
                 }
             }
+            // The value is a point to centre the view on, kept inside
+            // the scene: `max(0, v - viewport/2)`, then at most `scene -
+            // viewport` (which is negative for a scene smaller than its
+            // viewport, as in the original).
             "OffsetX" => {
-                self.offset_x = value.get_int(self);
+                let (_, _, vw, _) = self.viewport();
+                let width = self.scene().map_or(0, |v| v.scene.width());
+                let offset = value.get_int(self).saturating_sub(vw / 2).max(0);
+                self.offset_x = offset.min(width - vw);
                 self.target_offset_x = self.offset_x;
             }
             "OffsetY" => {
-                self.offset_y = value.get_int(self);
+                let (_, _, _, vh) = self.viewport();
+                let height = self.scene().map_or(0, |v| v.scene.height());
+                let offset = value.get_int(self).saturating_sub(vh / 2).max(0);
+                self.offset_y = offset.min(height - vh);
                 self.target_offset_y = self.offset_y;
             }
             "AutoScroll" => self.auto_scroll = value.get_bool(self),
@@ -1258,7 +1268,21 @@ impl World {
             }
             "GetNode" => {
                 let node_name = arg(0).get_string(self);
-                Return::value(native_or_null(self.find_node(&node_name)))
+                // `GetNodeByName`: the layers' nodes, the free entities,
+                // then the waypoint groups.
+                let found = match self.find_node(&node_name) {
+                    Some(id) => Some(id),
+                    None => self
+                        .scene()
+                        .and_then(|v| {
+                            v.scene
+                                .waypoint_groups
+                                .iter()
+                                .position(|g| g.name.eq_ignore_ascii_case(&node_name))
+                        })
+                        .and_then(|i| self.waypoint_group_object(i)),
+                };
+                Return::value(native_or_null(found))
             }
             "GetLayer" => {
                 let id = match arg(0) {
@@ -1277,20 +1301,20 @@ impl World {
                 };
                 Return::value(native_or_null(id))
             }
+            // The scene's free objects: its free entities and the
+            // actors loaded into it (`m_Objects`).
             "GetFreeNode" => {
+                let objects = self.scene_free_objects();
                 let id = match arg(0) {
                     Value::Int(i) => usize::try_from(i)
                         .ok()
-                        .filter(|&i| {
-                            self.scene()
-                                .is_some_and(|v| i < v.scene.free_entities.len())
-                        })
-                        .and_then(|i| self.node_id(EntityRef::Free(i))),
+                        .and_then(|i| objects.get(i).copied()),
                     other => {
                         let node_name = other.get_string(self);
-                        self.scene()
-                            .and_then(|v| v.find_free(&node_name))
-                            .and_then(|i| self.node_id(EntityRef::Free(i)))
+                        objects.iter().copied().find(|id| {
+                            self.free_object_name(*id)
+                                .is_some_and(|n| n.eq_ignore_ascii_case(&node_name))
+                        })
                     }
                 };
                 Return::value(native_or_null(id))
@@ -1369,7 +1393,8 @@ impl World {
             "IsPointInViewport" => {
                 let (x, y) = (arg(0).get_int(self), arg(1).get_int(self));
                 let (vx, vy, vw, vh) = self.viewport();
-                Return::value(x >= vx && y >= vy && x < vx + vw && y < vy + vh)
+                // Edges included (`X<=Left+Width`, `Y<=Top+Height`).
+                Return::value(x >= vx && y >= vy && x <= vx + vw && y <= vy + vh)
             }
             "GetWaypointGroup" => {
                 let index = usize::try_from(arg(0).get_int(self)).ok();

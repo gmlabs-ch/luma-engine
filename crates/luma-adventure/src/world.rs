@@ -1426,22 +1426,65 @@ impl World {
 
     /// The floor an actor walks on: the scene, the polygons of the other
     /// active objects, and every waypoint but its own.
-    pub(crate) fn obstacles_for(
+    pub fn obstacles_for(
         &self,
         id: NativeId,
     ) -> (Vec<Vec<luma_formats::Point>>, Vec<luma_formats::Point>) {
         let Some(view) = &self.scene else {
             return (Vec::new(), Vec::new());
         };
-        let (mut blockers, mut waypoints) = scene_obstacles(&view.scene);
-        for (other, actor) in &self.actors {
-            if *other == id || !actor.def.active {
+        // The scene's waypoint groups and the free objects of the scene
+        // (`CAdScene::m_Objects`), then the game's (`CAdGame::m_Objects`):
+        // the entities that are nodes of a layer are not looked at, their
+        // `BLOCKED_REGION` and `WAYPOINTS` have no effect
+        // (`CAdScene::IsBlockedAt`, `GetPath`).
+        let scene = &view.scene;
+        let (mut blockers, mut waypoints) = scene_obstacles(scene);
+        for (index, entity) in scene.free_entities.iter().enumerate() {
+            if self.node_id(crate::scene_view::EntityRef::Free(index)) == Some(id) {
                 continue;
             }
-            if let Some(polygon) = actor.block_polygon(&view.scene) {
+            if let Some(polygon) = crate::actor::entity_block_polygon(scene, entity) {
                 blockers.push(polygon);
             }
-            waypoints.extend(actor.waypoints(&view.scene));
+            waypoints.extend(crate::actor::entity_waypoints(scene, entity));
+        }
+        for bound in [true, false] {
+            for (other, actor) in &self.actors {
+                if *other == id || !actor.def.active || actor.scene_bound != bound {
+                    continue;
+                }
+                if let Some(polygon) = actor.block_polygon(scene) {
+                    blockers.push(polygon);
+                }
+                waypoints.extend(actor.waypoints(scene));
+            }
+            #[cfg(feature = "3d")]
+            for (other, actor) in &self.actors3d {
+                if *other == id || !actor.active || actor.scene_bound != bound {
+                    continue;
+                }
+                if let Some(polygon) = actor.block_polygon(scene) {
+                    blockers.push(polygon);
+                }
+            }
+        }
+        for r in self.game_view.entity_refs() {
+            let (Some(entity), Some(other)) = (self.game_view.entity(r), self.node_id(r)) else {
+                continue;
+            };
+            // An attachment is not one of the game's objects.
+            if other == id
+                || self
+                    .object_state(other)
+                    .is_some_and(|s| s.attached_to.is_some())
+            {
+                continue;
+            }
+            if let Some(polygon) = crate::actor::entity_block_polygon(scene, entity) {
+                blockers.push(polygon);
+            }
+            waypoints.extend(crate::actor::entity_waypoints(scene, entity));
         }
         (blockers, waypoints)
     }
@@ -1856,6 +1899,39 @@ impl World {
                 drawable
             })
             .collect()
+    }
+
+    /// The scene's free objects (`CAdScene::m_Objects`): its free
+    /// entities, then the actors loaded into it (`Scene.LoadActor`,
+    /// `LoadActor3D`). The original keeps them in the order they were
+    /// made; here the entities come first.
+    pub fn scene_free_objects(&self) -> Vec<NativeId> {
+        let Some(view) = &self.scene else {
+            return Vec::new();
+        };
+        let mut ids: Vec<NativeId> = (0..view.scene.free_entities.len())
+            .filter_map(|i| self.node_id(crate::scene_view::EntityRef::Free(i)))
+            .collect();
+        ids.extend(
+            self.actors
+                .iter()
+                .filter(|(_, a)| a.scene_bound)
+                .map(|(id, _)| *id),
+        );
+        ids.extend(self.scene_bound_actors3d());
+        ids
+    }
+
+    /// The name of a free object of the scene: an entity's or an
+    /// actor's.
+    pub(crate) fn free_object_name(&self, id: NativeId) -> Option<String> {
+        match &self.objects.get(id)?.kind {
+            Kind::Entity(r) => self.entity_def(*r).map(|e| e.name.clone()),
+            Kind::Actor => self.actor(id).map(|a| a.def.name.clone()),
+            #[cfg(feature = "3d")]
+            Kind::Actor3D => self.actor3d(id).map(|a| a.name.clone()),
+            _ => None,
+        }
     }
 
     /// The free objects of the game drawn among the scene's: the active
@@ -2273,10 +2349,19 @@ impl World {
         for (file, reason) in view.missing() {
             self.log(format!("  missing: {file}: {reason}"));
         }
+        // `CAdScene::SetDefaults`, run by `Cleanup` at every load: the
+        // scroll settings of the scene left behind do not carry over.
         self.offset_x = 0;
         self.offset_y = 0;
         self.target_offset_x = 0;
         self.target_offset_y = 0;
+        self.auto_scroll = true;
+        self.scroll_pixels_x = 1;
+        self.scroll_pixels_y = 1;
+        self.scroll_time_x = 10;
+        self.scroll_time_y = 10;
+        self.last_scroll_x = 0;
+        self.last_scroll_y = 0;
         self.active_object = None;
         self.hits.clear();
         self.scene = Some(view);
@@ -3696,11 +3781,14 @@ impl Runtime {
         self.world.flush_removed_objects(&mut self.engine);
         self.engine.tick(&mut self.world);
         self.world.flush_removed_objects(&mut self.engine);
+        // `CAdScene::TraverseNodes(true)`: the view takes its scroll step
+        // first, then the objects update and the main object sets the
+        // next target.
+        self.world.scroll_step();
         self.world.update_scene();
         self.world.update_entity_videos();
         self.world.update_actors();
         self.world.update_emitters();
-        self.world.scroll_step();
         self.world.update_sounds();
         self.world.collect_hits();
         self.world.update_active_object();
@@ -3750,7 +3838,8 @@ impl Runtime {
     fn mouse_in_viewport(&self) -> bool {
         let (x, y) = (self.world.mouse.x, self.world.mouse.y);
         let (vx, vy, vw, vh) = self.world.viewport();
-        self.world.scene.is_some() && x >= vx && y >= vy && x < vx + vw && y < vy + vh
+        // Edges included (`X<=Left+Width`).
+        self.world.scene.is_some() && x >= vx && y >= vy && x <= vx + vw && y <= vy + vh
     }
 
     /// Raises a mouse event (`CAdGame::OnMouseLeftDown` and the like):

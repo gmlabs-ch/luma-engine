@@ -154,7 +154,7 @@ A scene with no main layer loads, with a warning, and has a size of
 | `MAIN` | bool | false | The main layer. The scene takes its `WIDTH` and `HEIGHT`, its regions define the floor, and actors are drawn inside it. The last layer with `MAIN=TRUE` wins. |
 | `WIDTH`, `HEIGHT` | int | 0 | Size of the layer in pixels. Layers larger than the main one scroll faster, smaller ones slower (parallax). |
 | `ACTIVE` | bool | true | An inactive layer is neither drawn nor updated. |
-| `CLOSE_UP` | bool | false | The layer is a close-up: a full-screen shield is drawn under it that swallows mouse clicks meant for the layers below. |
+| `CLOSE_UP` | bool | false | The layer is a close-up: a full-screen shield is laid under it, so nothing of the layers below takes the mouse (see [Drawing](#drawing)). |
 | `ENTITY` | block, repeatable | | An entity node, see [`ENTITY`](#entity). |
 | `REGION` | block, repeatable | | A region node, see [`REGION`](#region). |
 | `SCRIPT` | string, repeatable | | Scripts attached to the layer. |
@@ -193,8 +193,8 @@ scene and the root block of an `.entity` file.
 | `ALPHA` | int 0–255 | none | Fixed opacity. `ALPHA` without `ALPHA_COLOR` means `255,255,255` with that alpha. |
 | `CURSOR` | string | | Sprite used as the mouse cursor over the entity. |
 | `REGION` | block | | Clickable area as a polygon, see [`REGION`](#region); only the base keys are read. Without it, the sprite's pixels are the clickable area. |
-| `BLOCKED_REGION` | block | | Polygon that blocks actors while the entity is there (a crate on the floor). |
-| `WAYPOINTS` | block | | Waypoints that become available while the entity is there (a ladder). |
+| `BLOCKED_REGION` | block | | Polygon that blocks actors while the entity is there (a crate on the floor). Only for a [free entity](#free-entities) or an entity of the game: the path finder does not look at the entities that are nodes of a layer. |
+| `WAYPOINTS` | block | | Waypoints that become available while the entity is there (a ladder). Same restriction. |
 | `WALK_TO_X`, `WALK_TO_Y` | int | 0 | Where the actor walks before interacting with the entity. |
 | `WALK_TO_DIR` | int | none | Direction the actor turns to when it arrives: `0` up, `1` up-right, `2` right, `3` down-right, `4` down, `5` down-left, `6` left, `7` up-left. Negative values mean `0`, values of `8` and above mean none. |
 | `SCRIPT` | string, repeatable | | Scripts attached to the entity. |
@@ -377,9 +377,15 @@ untinted.
 Walk the main layer's active, non-`DECORATION` regions in order, keeping
 those that contain the point: the **first** `BLOCKED` one makes the point
 blocked; otherwise the point is free if at least one walkable region
-contains it, and blocked when none does (off the floor). The
-`BLOCKED_REGION`s of active entities and actors block as well. Actors may
-only walk on unblocked points.
+contains it, and blocked when none does (off the floor). For a walking
+actor, the `BLOCKED_REGION`s of the other active **free objects** block
+as well, and their `WAYPOINTS` join the scene's: the scene's free
+entities and the actors loaded into it, then the game's actors and
+entities (`CAdScene::IsBlockedAt`, `IsWalkableAt` and `GetPath` walk
+`m_Objects` of the scene and of the game). An entity written inside a
+`LAYER` is not one of them: its `BLOCKED_REGION` and `WAYPOINTS` are
+read and have no effect. `Scene.IsBlockedAt` and `IsWalkableAt` look at
+the regions only. Actors may only walk on unblocked points.
 
 ## Free entities
 
@@ -463,7 +469,8 @@ For each active layer, in order:
 1. Compute the layer's scroll offset (see [Camera](#camera)).
 2. Walk the layer's nodes in order. An active entity node is drawn at its
    position. A region node that is neither `BLOCKED` nor `DECORATION`
-   draws the **free objects** (actors and free entities) whose position is
+   (whether or not it is `ACTIVE`: a region switched off still orders
+   the objects standing in it) draws the **free objects** (actors and free entities) whose position is
    inside it and that have not been drawn yet, sorted by `Y`, so that an
    actor standing on the floor region is drawn between the background
    (before the region in the file) and the foreground props (after it).
@@ -474,7 +481,17 @@ For each active layer, in order:
    (those inside no region), sorted by `Y`.
 
 Entities with `SUBTYPE="sound"` are never drawn. A `CLOSE_UP` layer first
-draws a full-screen shield that captures the mouse.
+lays a full-screen shield (`CAdScene::m_ShieldWindow`, an empty window
+covering the screen, cut to the scene's viewport when it has one): over
+a close-up layer the object under the mouse is an object of that layer
+or the shield, never one of a layer below, and a click on the shield
+goes nowhere. Scripts see the shield as an object whose `Type` is
+`window`.
+
+A layer whose `ACTIVE` is off is neither drawn nor updated: its entities
+do not animate, play no frame sound, raise no frame event, and a
+sentence one of them is saying waits, unseen, until the layer is
+switched on again.
 
 ## Camera
 
@@ -485,7 +502,13 @@ a **scroll offset**
 `(offset_x, offset_y)` clamped to `[0, scene_width - viewport_width]` and
 `[0, scene_height - viewport_height]`. The scroll follows the main actor
 ("auto scroll": one pixel every 10 ms by default, both configurable by
-scripts) or is set by scripts.
+scripts) or is set by scripts. `Scene.OffsetX = v` takes `v` as the
+point to centre the view on: the offset becomes `max(0, v - viewport
+width / 2)`, at most `scene width - viewport width`; `OffsetY` the
+same. `AutoScroll`, `ScrollPixelsX/Y` and `ScrollSpeedX/Y` go back to
+their defaults at every scene load (`CAdScene::SetDefaults`). Each
+frame the view takes its scroll step before the objects update, so the
+target the main object sets moves the view from the next frame on.
 
 Each layer is scrolled proportionally to its own size (parallax):
 
@@ -494,7 +517,9 @@ ratio_x  = offset_x / (scene_width  - viewport_width)      (0 when not scrollabl
 layer_x  = ratio_x  * (layer_width  - viewport_width)
 ```
 
-and the same for `y`. A layer the size of the main layer scrolls with it;
+and the same for `y`, minus the viewport's origin, the whole truncated
+to a pixel (`(int)(ratio * (layer - viewport) - viewport_x)`). A layer
+the size of the main layer scrolls with it;
 a wider layer scrolls faster (foreground), a narrower one slower
 (background). The main layer, by definition, scrolls by exactly
 `offset_x`.

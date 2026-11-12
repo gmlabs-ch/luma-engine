@@ -73,19 +73,24 @@ impl Camera {
     /// The view's origin on the screen is taken off, so that the layer
     /// is drawn at `-offset` inside the viewport.
     pub fn layer_offset(&self, scene: &Scene, layer: &Layer) -> (f32, f32) {
+        // In doubles, and truncated as a whole, the viewport's origin
+        // included: `(int)(WidthRatio * (layer - viewport) - ViewportX)`.
         let ratio = |offset: f32, scene_size: i32, view: f32| {
-            let scrollable = scene_size as f32 - view;
+            let scrollable = f64::from(scene_size) - f64::from(view);
             if scrollable <= 0.0 {
                 0.0
             } else {
-                offset / scrollable
+                f64::from(offset) / scrollable
             }
         };
         let rx = ratio(self.offset_x, scene.width(), self.width);
         let ry = ratio(self.offset_y, scene.height(), self.height);
+        let of = |ratio: f64, layer_size: i32, view: f32, origin: f32| {
+            (ratio * (f64::from(layer_size) - f64::from(view)) - f64::from(origin)).trunc() as f32
+        };
         (
-            (rx * (layer.width as f32 - self.width)).trunc() - self.origin_x,
-            (ry * (layer.height as f32 - self.height)).trunc() - self.origin_y,
+            of(rx, layer.width, self.width, self.origin_x),
+            of(ry, layer.height, self.height, self.origin_y),
         )
     }
 }
@@ -1114,10 +1119,23 @@ impl SceneView {
 
     /// The sentences shown this frame, with their entities.
     pub fn sentences(&self) -> impl Iterator<Item = (EntityRef, &Sentence)> {
+        // An entity of a layer switched off is not updated, and it is
+        // its update that shows its sentence (`AddSentence`).
         self.talks
             .iter()
-            .filter(|(_, t)| t.show)
+            .filter(|(r, t)| t.show && !self.in_inactive_layer(**r))
             .map(|(r, t)| (*r, &t.sentence))
+    }
+
+    /// Whether an entity is a node of a layer that is switched off
+    /// (`Layer.Active`): the scene neither updates nor draws it.
+    pub fn in_inactive_layer(&self, r: EntityRef) -> bool {
+        match r {
+            EntityRef::Node { layer, .. } => {
+                self.scene.layers.get(layer).is_some_and(|l| !l.active)
+            }
+            _ => false,
+        }
     }
 
     /// Every sentence being said, mutable.
@@ -1175,6 +1193,10 @@ impl SceneView {
     fn talk_step(&mut self, timer: u64, random: u32) {
         let talking: Vec<EntityRef> = self.talks.keys().copied().collect();
         for r in talking {
+            // Not updated in a layer switched off: the sentence waits.
+            if self.in_inactive_layer(r) {
+                continue;
+            }
             let (time_is_up, sprite_done) = {
                 let talk = &self.talks[&r];
                 let done = talk.sprite.as_deref().is_none_or(|p| {
@@ -1255,6 +1277,11 @@ impl SceneView {
                 continue;
             };
             if !entity.active || entity.kind != EntityKind::Normal {
+                continue;
+            }
+            // The nodes of a layer switched off are not updated
+            // (`CAdScene::TraverseNodes`).
+            if self.in_inactive_layer(r) {
                 continue;
             }
             // `GetCurrentFrame(zoom)`: the X move of a frame is scaled
@@ -1394,7 +1421,10 @@ impl SceneView {
                         index: ni,
                     }),
                     SceneNode::Region(region) => {
-                        if region.blocked || region.decoration || !region.active {
+                        // Only `BLOCKED` and `DECORATION` regions are
+                        // passed over: a region switched off still shows
+                        // the objects standing in it at its place.
+                        if region.blocked || region.decoration {
                             continue;
                         }
                         draw_in(&mut order, li, Some((ni, region)));
@@ -1747,4 +1777,38 @@ pub fn place_transformed<'a>(
         blend: BlendMode::Normal,
     };
     (quad, attributes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_layers_offset_is_truncated_with_the_viewports_origin() {
+        // A scene 100 wide in a view of 50 placed at x 3, scrolled by 1:
+        // a layer 60 wide scrolls by 0.2, and (0.2 - 3) truncates to -2,
+        // not to (0 - 3).
+        let scene = Scene::parse(
+            b"SCENE { LAYER { NAME=\"far\" WIDTH=60 HEIGHT=40 }
+  LAYER { NAME=\"main\" MAIN=TRUE WIDTH=100 HEIGHT=40 } }",
+        )
+        .unwrap();
+        let mut camera = Camera::new(50.0, 40.0);
+        camera.offset_x = 1.0;
+        camera.origin_x = 3.0;
+        assert_eq!(camera.layer_offset(&scene, &scene.layers[0]), (-2.0, 0.0));
+        assert_eq!(camera.layer_offset(&scene, &scene.layers[1]), (-2.0, 0.0));
+        camera.offset_x = 10.0;
+        assert_eq!(camera.layer_offset(&scene, &scene.layers[0]), (-1.0, 0.0));
+        assert_eq!(camera.layer_offset(&scene, &scene.layers[1]), (7.0, 0.0));
+    }
+
+    #[test]
+    fn a_frames_move_is_scaled_and_truncated() {
+        assert_eq!(scaled_move(10, 100.0), 10);
+        assert_eq!(scaled_move(10, 50.0), 5);
+        assert_eq!(scaled_move(3, 50.0), 1);
+        assert_eq!(scaled_move(-3, 50.0), -1);
+        assert_eq!(scaled_move(4, 150.0), 6);
+    }
 }

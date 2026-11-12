@@ -209,6 +209,10 @@ pub fn char_for_key(code: i32, shift: bool) -> Option<char> {
         .map(|&(plain, shifted, _)| if shift { shifted } else { plain })
 }
 
+/// The kind name of the object standing for a close-up layer's shield
+/// (`CAdScene::m_ShieldWindow`): scripts see it as a window.
+const SCENE_SHIELD: &str = "Window";
+
 /// Which bank holds the image of a hit area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HitBank {
@@ -784,7 +788,8 @@ impl World {
     pub(crate) fn collect_hits(&mut self) {
         self.hits.clear();
         let mut hits = Vec::new();
-        self.scene_hits(&mut hits);
+        let shield = self.scene_shield();
+        self.scene_hits(&mut hits, shield);
         // The scene's objects are registered inside its viewport.
         if let Some(clip) = self.scene_clip() {
             clip_hits(&mut hits, 0, clip);
@@ -797,8 +802,30 @@ impl World {
         self.hits = hits;
     }
 
-    /// The hit areas of the scene's objects, in drawing order.
-    fn scene_hits(&self, hits: &mut Vec<HitArea>) {
+    /// The object that stands for the shield a close-up layer lays
+    /// under itself (`CAdScene::m_ShieldWindow`, a window covering the
+    /// screen): made when the scene first has an active `CLOSE_UP`
+    /// layer, `None` without one.
+    fn scene_shield(&mut self) -> Option<NativeId> {
+        let needed = self
+            .scene
+            .as_ref()
+            .is_some_and(|v| v.scene.layers.iter().any(|l| l.active && l.close_up));
+        if !needed {
+            return None;
+        }
+        let is_shield = |k: &Kind| matches!(k, Kind::Inert(name) if name == SCENE_SHIELD);
+        Some(match self.objects.find(is_shield) {
+            Some(id) => id,
+            None => self.inert(SCENE_SHIELD),
+        })
+    }
+
+    /// The hit areas of the scene's objects, in drawing order; `shield`
+    /// is registered over the whole screen before the nodes of each
+    /// active close-up layer, so that nothing of the layers below takes
+    /// the mouse (`CAdScene::TraverseNodes`).
+    fn scene_hits(&self, hits: &mut Vec<HitArea>, shield: Option<NativeId>) {
         let Some(view) = &self.scene else {
             return;
         };
@@ -806,7 +833,21 @@ impl World {
         let free_objects = self.free_objects();
         let positions: Vec<crate::scene_view::FreeObject> =
             free_objects.iter().map(|(_, o)| *o).collect();
-        for item in view.draw_order(&positions, |i| self.free_entity_stick(i)) {
+        let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
+        let mut shielded = vec![false; view.scene.layers.len()];
+        let mut shield_layers_up_to = |hits: &mut Vec<HitArea>, upto: usize| {
+            for (li, layer) in view.scene.layers.iter().enumerate().take(upto + 1) {
+                if layer.active && layer.close_up && !shielded[li] {
+                    shielded[li] = true;
+                    if let Some(shield) = shield {
+                        hits.push(HitArea::rect(shield, 0, 0, sw, sh));
+                    }
+                }
+            }
+        };
+        let order = view.draw_order(&positions, |i| self.free_entity_stick(i));
+        for item in order {
+            shield_layers_up_to(hits, item.layer());
             let layer = &view.scene.layers[item.layer()];
             let (ox, oy) = camera.layer_offset(&view.scene, layer);
             let layer_offset = (ox as i32, oy as i32);
@@ -836,6 +877,9 @@ impl World {
                 }
             }
         }
+        // The close-up layers after the last object drawn.
+        let last = view.scene.layers.len().saturating_sub(1);
+        shield_layers_up_to(hits, last);
     }
 
     /// The hit areas of an object's attachments, registered as the
