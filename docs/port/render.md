@@ -757,7 +757,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXModel::Reset` | done | `animation.rs` `pose` starts every frame from its loaded matrix. |
 | `CXModel::IsAnimPending` | done | `animation.rs` `AnimatedModel::is_playing`; an out-of-range channel reads false where the original indexes out of bounds. |
 | `CXModel::IsAnimPending #2` | done | `animation.rs` `AnimatedModel::is_playing_on_any_channel`. |
-| `CXModel::UpdateShadowVol` | partial | `draw3d.rs` `shadow_items` (stencil branch). The original builds the volume from `m_ShadowModel` when the actor has one; Luma always uses the main model (see `LoadFromFile`). |
+| `CXModel::UpdateShadowVol` | done | `draw3d.rs` `shadow_items` (stencil branch) builds the volume from `ModelDraw::casters`: the actor's `SHADOW_MODEL` (`luma_3d::ShadowModel`, bones looked up in the main model's frames) when it has one, else the main model. |
 | `CXModel::Render` | partial | `draw3d.rs` `model_items`: culling only when `DrawBackfaces` is false, vertex colours ignored. The pick matrices and offsets are not stored: Luma picks with the current projection (`Actor3d::is_transparent_at`). See `CXMesh::Render` for the alpha difference and `CXFrameNode::Render` for the order. |
 | `CXModel::GetBoneMatrix` | done | `animation.rs` `AnimatedModel::bone_matrix`. |
 | `CXModel::GetRootFrame` | replaced | `Model::frames[ROOT]`. |

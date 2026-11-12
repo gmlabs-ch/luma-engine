@@ -120,3 +120,50 @@ fn stop_anim_of_an_attachment_stops_every_channel() {
     attachment.model = ModelSlot::default();
     assert!(!attachment.stop_all_anims());
 }
+
+fn vfs() -> Vfs {
+    let mut vfs = Vfs::new();
+    vfs.add_resource("main.x", TRIANGLE.as_bytes().to_vec());
+    vfs.add_resource("shadow.x", TRIANGLE.as_bytes().to_vec());
+    vfs.add_resource(
+        "bob.act3d",
+        b"ACTOR3DX { MODEL=\"main.x\" SHADOW_MODEL=\"shadow.x\" }".to_vec(),
+    );
+    vfs.add_resource(
+        "plain.act3d",
+        b"ACTOR3DX { MODEL=\"main.x\" SHADOW_MODEL=\"missing.x\" }".to_vec(),
+    );
+    vfs
+}
+
+#[test]
+fn a_shadow_model_is_loaded_and_posed_after_the_main_model() {
+    let vfs = vfs();
+    let loaded = Actor3d::load(&vfs, "bob.act3d", false).expect("the actor loads");
+    let mut actor = loaded.actor;
+    assert!(actor.shadow_model.is_some());
+    run(&mut actor, 1);
+    let shadow = actor.shadow_model.as_ref().unwrap();
+    assert_eq!(shadow.meshes().len(), 1);
+    assert_eq!(shadow.meshes()[0].vertices.len(), 3);
+}
+
+#[test]
+fn merge_anims_fails_on_a_bad_sidecar_although_the_sets_are_merged() {
+    let mut vfs = vfs();
+    vfs.add_resource("extra.x", TRIANGLE.as_bytes().to_vec());
+    vfs.add_resource("extra.anim", b"BOGUS { }".to_vec());
+    let mut actor = Actor3d::load(&vfs, "bob.act3d", false)
+        .expect("the actor loads")
+        .actor;
+    assert!(actor.merge_anims(&vfs, "extra.x").is_err());
+    // The path is remembered, so a saved game merges the sets again.
+    assert_eq!(actor.merged_files, vec!["extra.x".to_string()]);
+}
+
+#[test]
+fn a_shadow_model_that_cannot_be_loaded_leaves_the_actor_without_one() {
+    let vfs = vfs();
+    let loaded = Actor3d::load(&vfs, "plain.act3d", false).expect("the actor still loads");
+    assert!(loaded.actor.shadow_model.is_none());
+}

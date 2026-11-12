@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use luma_3d::math::deg_to_rad;
-use luma_3d::{AnimatedModel, Mat4, Material, Mesh, Model, Plane, ShadowType, Vec3};
+use luma_3d::{AnimatedModel, Mat4, Material, Mesh, Model, Plane, ShadowType, SkinnedMesh, Vec3};
 use luma_formats::image::DEFAULT_COLOR_KEY;
 use luma_formats::{Rgb, Rgba, Sprite};
 use luma_render::{
@@ -356,10 +356,41 @@ impl ScriptTexture {
     }
 }
 
+/// A posed model: the data and the meshes as skinned this frame, of an
+/// actor's or attachment's model or of an actor's shadow model.
+#[derive(Clone, Copy)]
+struct Posed<'a> {
+    model: &'a Model,
+    meshes: &'a [SkinnedMesh],
+}
+
+impl<'a> Posed<'a> {
+    fn model(&self) -> &'a Model {
+        self.model
+    }
+
+    fn meshes(&self) -> &'a [SkinnedMesh] {
+        self.meshes
+    }
+
+    fn of(model: &'a AnimatedModel) -> Posed<'a> {
+        Posed {
+            model: model.model(),
+            meshes: model.meshes(),
+        }
+    }
+}
+
+/// The key under which the GPU meshes of an actor's shadow model are
+/// kept: its own handle with the top bit set, so that no object collides.
+fn shadow_key(id: NativeId) -> NativeId {
+    NativeId(id.0 | (1 << 63))
+}
+
 /// A model drawn this frame: the actor's or an attachment's.
 struct ModelDraw<'a> {
     id: NativeId,
-    model: &'a AnimatedModel,
+    model: Posed<'a>,
     world: Mat4,
     draw_backfaces: bool,
 }
@@ -368,7 +399,7 @@ impl<'a> ModelDraw<'a> {
     fn of_actor(draw: &Actor3dDraw<'a>) -> ModelDraw<'a> {
         ModelDraw {
             id: draw.id,
-            model: draw.model,
+            model: Posed::of(draw.model),
             world: draw.world,
             draw_backfaces: draw.draw_backfaces,
         }
@@ -377,10 +408,31 @@ impl<'a> ModelDraw<'a> {
     fn of_attachment(attachment: &AttachmentDraw<'a>) -> ModelDraw<'a> {
         ModelDraw {
             id: attachment.id,
-            model: attachment.model,
+            model: Posed::of(attachment.model),
             world: attachment.world,
             draw_backfaces: attachment.draw_backfaces,
         }
+    }
+
+    /// What casts the shadow: the actor's shadow model when it has one,
+    /// else its model (`CAdActor3DX::RenderModel`,
+    /// `DisplayShadowVolume`), then its attachments'.
+    fn casters(draw: &Actor3dDraw<'a>) -> Vec<ModelDraw<'a>> {
+        let first = match draw.shadow_model {
+            Some(shadow) => ModelDraw {
+                id: shadow_key(draw.id),
+                model: Posed {
+                    model: shadow.model(),
+                    meshes: shadow.meshes(),
+                },
+                world: draw.world,
+                draw_backfaces: draw.draw_backfaces,
+            },
+            None => ModelDraw::of_actor(draw),
+        };
+        std::iter::once(first)
+            .chain(draw.attachments.iter().map(ModelDraw::of_attachment))
+            .collect()
     }
 
     /// The actor's model, then its attachments', as they are drawn
@@ -425,7 +477,11 @@ impl Render3d {
         };
         let live: Vec<NativeId> = draws
             .iter()
-            .flat_map(|d| std::iter::once(d.id).chain(d.attachments.iter().map(|a| a.id)))
+            .flat_map(|d| {
+                std::iter::once(d.id)
+                    .chain(d.shadow_model.map(|_| shadow_key(d.id)))
+                    .chain(d.attachments.iter().map(|a| a.id))
+            })
             .collect();
         let overrides: Vec<(NativeId, &MaterialOverride)> = draws
             .iter()
@@ -448,6 +504,14 @@ impl Render3d {
                         }
                     }
                 }
+            }
+            if let Some(shadow) = draw.shadow_model {
+                self.upload_model(
+                    renderer,
+                    shadow_key(draw.id),
+                    shadow.model(),
+                    shadow.meshes(),
+                );
             }
             for material in draw.materials {
                 self.update_override(world, renderer, draw.id, material);
@@ -867,7 +931,7 @@ impl Render3d {
                 };
                 let flatten = shadow_matrix(plane, draw.shadow_light);
                 let reference = (draw.other_index % 255 + 1) as u8;
-                for model in ModelDraw::all(draw) {
+                for model in ModelDraw::casters(draw) {
                     let world = gpu_matrix(&(model.world * flatten));
                     for index in 0..model.model.model().meshes.len() {
                         let Some(uploaded) = self.meshes.get(&(model.id, index)) else {
@@ -892,7 +956,7 @@ impl Render3d {
                 let depth = light_vector.length() * EXTRUSION_FACTOR;
                 let direction = light_vector.normalized();
                 let mut vertices = Vec::new();
-                for model in ModelDraw::all(draw) {
+                for model in ModelDraw::casters(draw) {
                     let Some(inverse) = model.world.inverse() else {
                         continue;
                     };

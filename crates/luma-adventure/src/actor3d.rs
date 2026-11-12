@@ -21,11 +21,11 @@
 //! `SetMaterialTheora`) of Wintermute Engine 1.x (MIT License, Copyright
 //! (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
-use luma_3d::actor3d::AnimationDef;
+use luma_3d::AnimationFile;
 use luma_3d::math::{deg_to_rad, rad_to_deg};
 use luma_3d::{
     Actor3dDef, AnimatedModel, AnimationState, Light, Mat4, Model, Path3D, PathFinder, Projection,
-    SceneGeometry, ShadowType, Ticket, Vec3,
+    SceneGeometry, ShadowModel, ShadowType, Ticket, Vec3,
 };
 use luma_archive::Vfs;
 use luma_formats::scene::{Entity, Point};
@@ -350,6 +350,12 @@ pub struct Actor3d {
     pub shadow_model_file: Option<String>,
     /// The model and its animation state.
     pub model: ModelSlot,
+    /// The `SHADOW_MODEL`: a low-polygon model on the main model's
+    /// skeleton (`ParentModel`), posed right after it each frame, which
+    /// casts the shadow instead of the main model. Loaded again with the
+    /// model after a saved game.
+    #[serde(skip)]
+    pub shadow_model: Option<ShadowModel>,
     /// The models attached to bones (`AddAttachment`), in order.
     pub attachments: Vec<Attachment3d>,
     /// The textures scripts put on materials (`SetTexture`,
@@ -564,25 +570,19 @@ pub fn world_matrix(position: Vec3, angle: f32, scale: f32) -> Mat4 {
         * Mat4::translation(position)
 }
 
-/// Reads an `.X` model and the files merged into it.
-fn load_model(vfs: &Vfs, files: &[String]) -> Result<Model, String> {
-    let (first, rest) = files
-        .split_first()
-        .ok_or_else(|| "Error: No model has been loaded for 3D actor".to_string())?;
-    let bytes = vfs
-        .read(first)
-        .map_err(|e| format!("Error loading model '{first}': {e}"))?;
-    let mut model =
-        Model::parse(&bytes, first).map_err(|e| format!("Error loading model '{first}': {e}"))?;
-    for file in rest {
-        let bytes = vfs
-            .read(file)
-            .map_err(|e| format!("Error merging model '{file}': {e}"))?;
-        model
-            .merge_animations(&bytes, file)
-            .map_err(|e| format!("Error merging model '{file}': {e}"))?;
-    }
-    Ok(model)
+/// What `MergeAnims` did: whether the sets of the `.x` file are in the
+/// model, and what went wrong.
+struct Merge {
+    merged: bool,
+    error: Option<String>,
+}
+
+/// Builds the models of a parsed actor file in the order of its keys
+/// (`CAdActor3DX::LoadBuffer`): the log lines of the original are the
+/// warnings, a missing model fails the actor.
+fn build(vfs: &Vfs, def: &Actor3dDef, path: &str) -> Result<luma_3d::BuiltModels, String> {
+    def.build_models(path, &mut |file| vfs.read(file).ok())
+        .map_err(|log| log.join("\n"))
 }
 
 impl Actor3d {
@@ -597,16 +597,15 @@ impl Actor3d {
             .map_err(|e| format!("CAdActor3DX::LoadFile failed for file '{path}': {e}"))?;
         let def = Actor3dDef::parse_with(&bytes, &mut |template| vfs.read(template).ok())
             .map_err(|e| format!("Error parsing ACTOR3D file '{path}': {e}"))?;
-        let mut model = load_model(vfs, &def.models)?;
-        let warnings = def
-            .apply_animations(&mut model)
-            .into_iter()
-            .map(|name| format!("Error: animation '{name}' not found in model (file: {path})"))
-            .collect();
+        let built = build(vfs, &def, path)?;
+        let warnings = built.warnings.clone();
         let scripts = def.scripts.clone();
         let properties = def.properties.clone();
+        let mut actor = Actor3d::from_definition(def, path, scene_bound, built.model);
+        actor.shadow_model = built.shadow;
+        actor.merged_files = built.merged_files;
         Ok(Loaded3d {
-            actor: Actor3d::from_definition(def, path, scene_bound, model),
+            actor,
             warnings,
             scripts,
             properties,
@@ -646,6 +645,7 @@ impl Actor3d {
                 model: Some(AnimatedModel::new(model)),
                 pending: None,
             },
+            shadow_model: None,
             attachments: Vec::new(),
             materials: Vec::new(),
             part_bone: None,
@@ -722,20 +722,18 @@ impl Actor3d {
         })?;
         let def = Actor3dDef::parse_with(&bytes, &mut |template| vfs.read(template).ok())
             .map_err(|e| format!("Error parsing ACTOR3D file '{}': {e}", self.filename))?;
-        let mut model = load_model(vfs, &self.model_files)?;
-        let mut warnings: Vec<String> = def
-            .apply_animations(&mut model)
-            .into_iter()
-            .map(|name| {
-                format!(
-                    "Error: animation '{name}' not found in model (file: {})",
-                    self.filename
-                )
-            })
-            .collect();
+        let built = build(vfs, &def, &self.filename)?;
+        let mut warnings = built.warnings;
+        let model = built.model;
+        self.shadow_model = built.shadow;
+        let built_merges = built.merged_files;
         let mut animated = AnimatedModel::new(model);
         for file in self.merged_files.clone() {
-            if let Err(err) = Self::merge_into(&mut animated, vfs, &file) {
+            // The definition's own `MODEL` merges are already in.
+            if built_merges.contains(&file) {
+                continue;
+            }
+            if let Some(err) = Self::merge_into(&mut animated, vfs, &file).error {
                 warnings.push(err);
             }
         }
@@ -882,32 +880,53 @@ impl Actor3d {
     /// Merges the animation sets of an `.x` file into a model, then the
     /// `ANIMATION` blocks of its `.anim` sidecar when there is one
     /// (`CAdActor3DX::MergeAnimations`).
-    fn merge_into(model: &mut AnimatedModel, vfs: &Vfs, file: &str) -> Result<(), String> {
-        let bytes = vfs
-            .read(file)
-            .map_err(|e| format!("Error: MergeAnims failed for file '{file}': {e}"))?;
-        model
-            .model_mut()
-            .merge_animations(&bytes, file)
-            .map_err(|e| format!("Error: MergeAnims failed for file '{file}': {e}"))?;
+    fn merge_into(model: &mut AnimatedModel, vfs: &Vfs, file: &str) -> Merge {
+        let failed = |e: String| Merge {
+            merged: false,
+            error: Some(format!("Error: MergeAnims failed for file '{file}': {e}")),
+        };
+        let bytes = match vfs.read(file) {
+            Ok(bytes) => bytes,
+            Err(e) => return failed(e.to_string()),
+        };
+        if let Err(e) = model.model_mut().merge_animations(&bytes, file) {
+            return failed(e.to_string());
+        }
+        // The sets are in: the path is remembered whatever the sidecar does.
+        let mut merge = Merge {
+            merged: true,
+            error: None,
+        };
         let sidecar = Actor3dDef::anim_sidecar(file);
         if let Ok(bytes) = vfs.read(&sidecar) {
-            let defs = AnimationDef::parse_file(&bytes)
-                .map_err(|e| format!("Error loading animation definition file '{sidecar}': {e}"))?;
-            for def in defs {
-                def.apply(model.model_mut());
+            // `MergeAnimations2`: the blocks read before a bad statement are
+            // applied; the function then fails (`MergeAnims` answers false
+            // although the sets are merged).
+            let applied = AnimationFile::parse(&bytes).apply_to(model.model_mut());
+            if !applied.ok {
+                let mut lines = applied.log;
+                lines.push(format!(
+                    "Error loading animation definition file '{sidecar}'"
+                ));
+                merge.error = Some(lines.join("\n"));
             }
         }
-        Ok(())
+        merge
     }
 
     /// Adds the animation sets of a file (`MergeAnims`); whether it
-    /// loaded.
+    /// loaded. The file's path is remembered for a saved game as soon as
+    /// its sets are merged.
     pub fn merge_anims(&mut self, vfs: &Vfs, file: &str) -> Result<(), String> {
         let model = self.model.model.as_mut().ok_or("no model")?;
-        Self::merge_into(model, vfs, file)?;
-        self.merged_files.push(file.to_string());
-        Ok(())
+        let merge = Self::merge_into(model, vfs, file);
+        if merge.merged {
+            self.merged_files.push(file.to_string());
+        }
+        match merge.error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     /// Removes an animation set (`UnloadAnim`); whether the model had it.
@@ -1399,6 +1418,11 @@ impl Actor3d {
             Some(model) => model.update(delta_ms),
             None => Vec::new(),
         };
+        // `m_ShadowModel->Update()` right after the main model's.
+        if let (Some(shadow), Some(model)) = (self.shadow_model.as_mut(), self.model.model.as_ref())
+        {
+            shadow.update(model);
+        }
         if ctx.has_camera {
             self.update_bounding_rect(ctx.projection);
         }
@@ -1779,6 +1803,9 @@ pub struct Actor3dDraw<'a> {
     pub other_index: usize,
     /// The posed, skinned model.
     pub model: &'a AnimatedModel,
+    /// The shadow model, which casts the flat and the stencil shadow
+    /// instead of `model` when the actor has one.
+    pub shadow_model: Option<&'a ShadowModel>,
     /// The world matrix.
     pub world: Mat4,
     /// The position in world units (the feet), where the shadows lie.
@@ -2096,6 +2123,7 @@ impl World {
                 id,
                 other_index: index,
                 model,
+                shadow_model: actor.shadow_model.as_ref(),
                 world: actor.world_matrix(),
                 position: actor.position,
                 angle: actor.angle,

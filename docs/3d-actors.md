@@ -1482,7 +1482,11 @@ original, on purpose:
   the `StencilFill` in the shadow colour; the renderer counts them with
   wrapping increments and decrements as Direct3D did (the quads face
   inward, so a shadowed pixel counts to 255; see rendering.md). The
-  `SHADOW_MODEL` is not used yet: the display model casts.
+  `SHADOW_MODEL`, when the actor has one, casts instead of the display
+  model (`ModelDraw::casters`): it is loaded at its key's place against the
+  main model as `ParentModel` (its bones are the main model's frames),
+  posed by `luma_3d::ShadowModel::update` right after the main model, and
+  its meshes are uploaded under a key of their own.
 - **Receivers**: when `min(Game.MaxShadowType, Scene.MaxShadowType)` is
   stencil (`ThreeDFrame::stencil_shadows`), the active nodes flagged
   `RECEIVE_SHADOWS` (walk planes, blocks and generics alike, `SceneGeometry
@@ -1773,8 +1777,7 @@ timer, the scene's path) and `luma-3d` stays free of the renderer.
   as the original's texture stage ignores it (10.1).
 - **Shadows**: 10.4.
 - **Picking** uses the skinned triangles on the CPU (10.3), untouched.
-- **Not done**: the `SHADOW_MODEL` (the display model casts the shadow)
-  and the geometry overlay of `Scene.ShowGeometry` (wireframe in the
+- **Not done**: the geometry overlay of `Scene.ShowGeometry` (wireframe in the
   original, which needs a line pipeline the renderer does not have; the
   flag is not stored either).
 
@@ -1900,7 +1903,7 @@ read first.
 | 10 | **`luma-render` extension.** Depth/stencil buffer cleared once per frame, quads without depth, `MeshDraw` items of the `DrawList` drawn in order in the same pass, mesh upload and per-frame vertex update, tests of the depth test among meshes and of the viewport. **Done** (12.3, [rendering.md](rendering.md#3d-pass)). | `BRenderD3D.cpp` (`Fill`, `Setup2D`/`Setup3D`) | M | |
 | 11 | **Mesh pass.** Pipelines, dynamic skinned buffers, materials and textures with mipmaps and the colour key, lights (model of 3.4), ambient, fog, alpha test and blend mode, culling option. **Done** in `luma-render` (shader `mesh.wgsl`); the light *selection* per object (`EnableLights`) and the geometry debug overlay (`Scene.ShowGeometry`, the validation tool for task 7) move to task 13, which has the scene. | `BRenderD3D.cpp` (`Setup3D`), `XMesh.cpp` (`Render`), `3DMaterial.cpp`, `3DLight.cpp`, `AdSceneGeometry.cpp` (`Render`, `EnableLights`, `CreateLights`) | L | 7, 9, 10 |
 | 12a | **Simple shadows.** **Done** (10.4; the default image is generated). | `3DShadowGen.cpp` (`RenderSimple`) | S | 11 |
-| 12b | **Stencil shadows.** CPU shadow volumes, stencil passes, receiver depth prepass, attachments, `SHADOW_MODEL`. **Done** but the `SHADOW_MODEL` (10.4, the shadow items of `luma-render`). | `3DShadowVolume.cpp`, `AdActor3DX.cpp` (`DisplayShadowVolume`), `AdSceneGeometry.cpp` (`RenderShadowGeometry`), `XMesh.cpp` (`UpdateShadowVol`), `AdScene.cpp` (`TraverseNodes`) | M | 11, 9 |
+| 12b | **Stencil shadows.** CPU shadow volumes, stencil passes, receiver depth prepass, attachments, `SHADOW_MODEL`. **Done**, `SHADOW_MODEL` included (10.4). | `3DShadowVolume.cpp`, `AdActor3DX.cpp` (`DisplayShadowVolume`), `AdSceneGeometry.cpp` (`RenderShadowGeometry`), `XMesh.cpp` (`UpdateShadowVol`), `AdScene.cpp` (`TraverseNodes`) | M | 11, 9 |
 | 12c | **Flat shadows.** Light-view pre-pass to texture, projective floor quad. **Done** as a planar projection of the posed triangles with a stencil mask (10.4), not a pre-pass. | `3DShadowGen.cpp` (`Render`, `SetAdjustedProjectionMatrix`, `SetTextureMatrixStage0Stage1`) | M | 11 |
 
 ### Phase C: the actor in the game
