@@ -286,6 +286,15 @@ impl Package {
             return Ok(stored);
         }
         let declared = u64::from(entry.length);
+        if declared > max_inflated(stored.len()) {
+            return Err(Error::Decompress {
+                name: entry.name.clone(),
+                reason: format!(
+                    "{declared} bytes cannot come out of {} compressed bytes",
+                    stored.len()
+                ),
+            });
+        }
         let mut data = Vec::new();
         ZlibDecoder::new(stored.as_slice())
             .take(declared + 1)
@@ -492,6 +501,13 @@ impl<R: Read + Seek> Parser<'_, R> {
 fn c_string(raw: &[u8]) -> String {
     let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
     raw[..end].iter().map(|&b| char::from(b)).collect()
+}
+
+/// The most bytes a zlib stream of `stored` bytes can inflate to: deflate
+/// never does better than about 1032 to 1. A file that declares more is
+/// refused before anything is allocated for it.
+pub(crate) fn max_inflated(stored: usize) -> u64 {
+    (stored as u64).saturating_mul(1032).saturating_add(1024)
 }
 
 #[cfg(test)]
@@ -703,5 +719,34 @@ mod tests {
         assert_eq!(c_string(b"abc\0def"), "abc");
         assert_eq!(c_string(b"abc"), "abc");
         assert_eq!(c_string(b"\xE9t\xE9"), "été");
+    }
+
+    #[test]
+    fn refuses_an_entry_declaring_more_than_its_stream_can_hold() {
+        let pkg = open(&sample());
+        let mut entry = pkg.find("scenes\\Room\\room.scene").unwrap().clone();
+        assert!(entry.is_compressed());
+        entry.length = u32::MAX; // about 4 GiB over a few stored bytes
+        let started = std::time::Instant::now();
+        assert!(matches!(pkg.read(&entry), Err(Error::Decompress { .. })));
+        assert!(started.elapsed().as_secs() < 5, "refused before inflating");
+    }
+
+    #[test]
+    fn still_inflates_a_highly_compressible_entry() {
+        let mut b = PackageBuilder::new("data");
+        b.add_file("zeros.bin", vec![0u8; 1 << 20]);
+        let pkg = open(&b);
+        let entry = pkg.find("zeros.bin").unwrap();
+        assert!(entry.is_compressed());
+        assert!(entry.stored_length() < 4096);
+        assert_eq!(pkg.read(entry).unwrap(), vec![0u8; 1 << 20]);
+    }
+
+    #[test]
+    fn max_inflated_is_generous_and_never_overflows() {
+        assert_eq!(max_inflated(0), 1024);
+        assert_eq!(max_inflated(10), 10 * 1032 + 1024);
+        assert!(max_inflated(usize::MAX) >= u64::from(u32::MAX));
     }
 }

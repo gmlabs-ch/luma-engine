@@ -508,12 +508,22 @@ fn read_loose(path: &Path) -> Result<Vec<u8>> {
     let data_offset = word(8) as usize;
     let comp_size = word(12) as usize;
     let uncomp_size = word(16) as u64;
-    let stream = data
-        .get(data_offset..data_offset + comp_size)
+    let stream = data_offset
+        .checked_add(comp_size)
+        .and_then(|end| data.get(data_offset..end))
         .ok_or_else(|| Error::Decompress {
             name: name.clone(),
             reason: "compressed data extends beyond the end of the file".into(),
         })?;
+    if uncomp_size > crate::package::max_inflated(stream.len()) {
+        return Err(Error::Decompress {
+            name,
+            reason: format!(
+                "{uncomp_size} bytes cannot come out of {} compressed bytes",
+                stream.len()
+            ),
+        });
+    }
     let mut out = Vec::new();
     ZlibDecoder::new(stream)
         .take(uncomp_size + 1)
@@ -834,6 +844,70 @@ mod tests {
         assert!(vfs.exists("invalid.bmp"));
         // The name is matched whole: no directory.
         assert!(!vfs.exists("art\\invalid.bmp"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn loose_compressed(offset: u32, comp_size: u32, declared: u32, stream: &[u8]) -> Vec<u8> {
+        let mut file = Vec::new();
+        file.extend_from_slice(&MAGIC_1.to_le_bytes());
+        file.extend_from_slice(&COMPRESSED_FILE_MAGIC.to_le_bytes());
+        file.extend_from_slice(&offset.to_le_bytes());
+        file.extend_from_slice(&comp_size.to_le_bytes());
+        file.extend_from_slice(&declared.to_le_bytes());
+        file.extend_from_slice(stream);
+        file
+    }
+
+    fn zlib(data: &[u8]) -> Vec<u8> {
+        let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(data).unwrap();
+        enc.finish().unwrap()
+    }
+
+    #[test]
+    fn refuses_a_loose_file_declaring_more_than_its_stream_can_hold() {
+        let dir = temp_dir();
+        let stream = zlib(b"tiny");
+        let file = loose_compressed(20, stream.len() as u32, u32::MAX, &stream);
+        fs::write(dir.join("huge.dat"), &file).unwrap();
+        let started = std::time::Instant::now();
+        let result = read_loose(&dir.join("huge.dat"));
+        assert!(matches!(result, Err(Error::Decompress { .. })));
+        assert!(started.elapsed().as_secs() < 5, "refused before inflating");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn still_inflates_a_highly_compressible_loose_file() {
+        let dir = temp_dir();
+        let payload = vec![0u8; 1 << 20];
+        let stream = zlib(&payload);
+        let file = loose_compressed(20, stream.len() as u32, payload.len() as u32, &stream);
+        fs::write(dir.join("zeros.dat"), &file).unwrap();
+        assert_eq!(read_loose(&dir.join("zeros.dat")).unwrap(), payload);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn refuses_a_loose_file_whose_data_runs_past_the_end() {
+        let dir = temp_dir();
+        let stream = zlib(b"tiny");
+        for (offset, size) in [
+            (20, stream.len() as u32 + 1),
+            (u32::MAX, 16),
+            (16, u32::MAX),
+            (u32::MAX, u32::MAX),
+        ] {
+            let file = loose_compressed(offset, size, 4, &stream);
+            fs::write(dir.join("bad.dat"), &file).unwrap();
+            assert!(
+                matches!(
+                    read_loose(&dir.join("bad.dat")),
+                    Err(Error::Decompress { .. })
+                ),
+                "offset {offset}, size {size}"
+            );
+        }
         fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -81,6 +81,10 @@ impl FontFile {
 /// before `WIDTHS_FRAME`, so that `WIDTHS_FRAME` is read as `WIDTHS`
 /// followed by garbage and crashes the engine; here the longer key comes
 /// first and is read as it was meant to be.
+/// The most columns, and the largest tile side in pixels, of a bitmap
+/// font's grid.
+const MAX_GRID: i32 = 4096;
+
 const BITMAP_FONT_KEYS: &[&str] = &[
     "FONTEXT_FIX",
     "FONT",
@@ -214,9 +218,12 @@ impl BitmapFontDef {
             }
         }
         if def.image.is_none() && def.sprite.is_none()
-            || def.columns == 0
-            || def.tile_width == 0
-            || def.tile_height == 0
+            // A grid no image holds (the original only refuses zero; a
+            // hostile file must not make the engine measure billions of
+            // rows).
+            || !(1..=MAX_GRID).contains(&def.columns)
+            || !(1..=MAX_GRID).contains(&def.tile_width)
+            || !(1..=MAX_GRID).contains(&def.tile_height)
         {
             return Err(Error::Invalid {
                 reason: "Incomplete font definition".into(),
@@ -240,7 +247,8 @@ impl BitmapFontDef {
             // keeps its low byte.
             if self.expand_width != 0 {
                 for width in &mut widths {
-                    *width = ((i32::from(*width) + self.expand_width).max(0) & 0xff) as u8;
+                    *width =
+                        (i32::from(*width).saturating_add(self.expand_width).max(0) & 0xff) as u8;
                 }
             }
             let space = if self.fontext_fix { b' ' - 1 } else { b' ' } as usize;
@@ -270,8 +278,12 @@ impl BitmapFontDef {
         let x0 = (index % self.columns) * self.tile_width;
         let y0 = (index / self.columns) * self.tile_height;
         let mut min_col = -1;
-        for row in 0..self.tile_height {
-            let mut col = self.tile_width - 1;
+        // Nothing is measured outside the image.
+        let rows = i64::from(self.tile_height).min(i64::from(image.height) - i64::from(y0));
+        let last_col =
+            i64::from(self.tile_width - 1).min(i64::from(image.width) - 1 - i64::from(x0));
+        for row in 0..rows.max(0) as i32 {
+            let mut col = last_col.max(-1) as i32;
             while col > min_col {
                 let (x, y) = (x0 + col, y0 + row);
                 // Ink is any pixel that is not fully transparent
@@ -859,5 +871,89 @@ mod tests {
         assert_eq!(TextAlign::from_code(-1), TextAlign::Left);
         assert_eq!(TextAlign::Center.start_x(10, 100, 20), 50);
         assert_eq!(TextAlign::Right.start_x(10, 100, 20), 90);
+    }
+
+    #[test]
+    fn refuses_grids_outside_one_to_four_thousand_ninety_six() {
+        let font = |extra: &str| {
+            format!("FONT {{ IMAGE=\"f.png\" COLUMNS=16 TILE_WIDTH=8 TILE_HEIGHT=10 {extra} }}")
+        };
+        assert!(FontFile::parse(font("").as_bytes()).is_ok());
+        for (key, value) in [
+            ("TILE_HEIGHT", "2000000000"),
+            ("TILE_WIDTH", "2000000000"),
+            ("COLUMNS", "2000000000"),
+            ("COLUMNS", "5000"),
+            ("TILE_WIDTH", "4097"),
+            ("TILE_HEIGHT", "-1"),
+            ("TILE_WIDTH", "-5"),
+            ("COLUMNS", "-16"),
+            ("COLUMNS", "0"),
+        ] {
+            // The last assignment wins.
+            let text = font(&format!("{key}={value}"));
+            assert!(
+                FontFile::parse(text.as_bytes()).is_err(),
+                "{key}={value} must be refused"
+            );
+        }
+        let text = font("COLUMNS=4096 TILE_WIDTH=4096 TILE_HEIGHT=4096");
+        assert!(FontFile::parse(text.as_bytes()).is_ok(), "the limit itself");
+    }
+
+    #[test]
+    fn measuring_a_grid_larger_than_the_image_stays_inside_it() {
+        let mut pixels = vec![0u8; 4 * 4 * 4];
+        pixels[(4 + 2) * 4 + 3] = 255; // row 1, column 2
+        let image = Image {
+            width: 4,
+            height: 4,
+            pixels,
+            has_alpha_channel: true,
+        };
+        let def = BitmapFontDef {
+            image: Some("f.png".into()),
+            columns: 4096,
+            tile_width: 4096,
+            tile_height: 4096,
+            auto_width: true,
+            ..BitmapFontDef::default()
+        };
+        let started = std::time::Instant::now();
+        let widths = def.widths(Some(&image));
+        assert!(started.elapsed().as_secs() < 5);
+        assert_eq!(widths[0], 3, "tile 0 overlaps the image");
+        assert_eq!(widths[1], 0, "tile 1 lies wholly outside it");
+        assert_eq!(widths[255], 0);
+    }
+
+    #[test]
+    fn a_huge_expand_width_does_not_overflow() {
+        for expand in [i32::MAX, i32::MIN] {
+            let def = BitmapFontDef {
+                image: Some("f.png".into()),
+                columns: 16,
+                tile_width: 8,
+                tile_height: 10,
+                auto_width: true,
+                expand_width: expand,
+                ..BitmapFontDef::default()
+            };
+            let image = Image {
+                width: 8,
+                height: 10,
+                pixels: vec![255; 8 * 10 * 4],
+                has_alpha_channel: true,
+            };
+            def.widths(Some(&image));
+            def.widths(None);
+        }
+        let FontFile::Bitmap(def) = FontFile::parse(
+            b"FONT { IMAGE=\"f.png\" COLUMNS=16 TILE_WIDTH=8 TILE_HEIGHT=10 AUTO_WIDTH=TRUE EXPAND_WIDTH=2147483647 }",
+        )
+        .unwrap() else {
+            panic!("bitmap expected");
+        };
+        def.widths(None);
     }
 }

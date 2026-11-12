@@ -122,8 +122,10 @@ impl GameSettings {
         // A resolution that is not positive cannot be shown: the default
         // stays (the original would fail to create its device).
         if width > 0 && height > 0 {
-            settings.width = width as u32;
-            settings.height = height as u32;
+            // No screen is larger than this, and a frame of that size is
+            // already a quarter of a gigabyte.
+            settings.width = (width as u32).min(MAX_RESOLUTION);
+            settings.height = (height as u32).min(MAX_RESOLUTION);
         }
         Ok(settings)
     }
@@ -144,6 +146,9 @@ impl GameSettings {
         }
     }
 }
+
+/// The largest width or height a game may ask for.
+const MAX_RESOLUTION: u32 = 16384;
 
 #[cfg(test)]
 mod tests {
@@ -199,5 +204,15 @@ mod tests {
         assert!(GameSettings::parse(b"SETTINGS { BOGUS=1 }").is_err());
         // `ALLOW_ACCESSIBILITY_TAB` is read here, not in the game file.
         assert!(luma_formats::GameFile::parse(b"GAME { ALLOW_ACCESSIBILITY_TAB=FALSE }").is_err());
+    }
+
+    #[test]
+    fn clamps_an_absurd_resolution() {
+        let s = GameSettings::parse(b"SETTINGS { RESOLUTION { 2000000000,2000000000 } }").unwrap();
+        assert_eq!((s.width, s.height), (16384, 16384));
+        let s = GameSettings::parse(b"SETTINGS { RESOLUTION { 2000000000,600 } }").unwrap();
+        assert_eq!((s.width, s.height), (16384, 600));
+        let s = GameSettings::parse(b"SETTINGS { RESOLUTION { 1920,1080 } }").unwrap();
+        assert_eq!((s.width, s.height), (1920, 1080));
     }
 }
