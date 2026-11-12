@@ -737,7 +737,10 @@ impl World {
         let Some(item_id) = self.selected_item() else {
             return;
         };
-        if self.ui.frozen || !self.interactive || self.cursors.hidden {
+        // `m_State==GAME_RUNNING && m_StateEx==GAME_NORMAL &&
+        // m_Interactive`: not while the game is frozen nor while the
+        // response box waits, where the plain cursor shows.
+        if !self.is_running() || !self.interactive || self.cursors.hidden {
             return;
         }
         let Some(item) = self.item(item_id) else {

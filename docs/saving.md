@@ -340,7 +340,9 @@ actors' attachments, material overrides and bone emitters, and the
 shadow image and light position every object keeps (`SetShadowImage`,
 `SetLightPosition`). Version 15, after 14, added the start position a
 sound keeps for its later plays and moved the sound event from the
-sound to its object.
+sound to its object. Version 17, after 16, added the cursor of its own
+that every object keeps (`SetCursor` on an item, a region, a layer, a
+waypoint group, the response box).
 
 ## Checking a game
 

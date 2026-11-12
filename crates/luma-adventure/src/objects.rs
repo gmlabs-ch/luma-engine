@@ -202,6 +202,11 @@ pub struct ObjectState {
     /// box's definition file. `None` for an object written inside
     /// another file or created empty: its `Filename` reads `null`.
     pub filename: Option<String>,
+    /// `CBObject::m_Cursor` for the kinds that keep it nowhere else (an
+    /// item's own cursor, a region's, a layer's, a waypoint group's,
+    /// the response box's): set by `SetCursor`, shown while the object
+    /// is the one under the mouse.
+    pub cursor: Option<String>,
 }
 
 /// The inventory of an object other than the game (`CAdInventory`).
@@ -242,6 +247,7 @@ impl Default for ObjectState {
             shadow_light: None,
             freezable: true,
             filename: None,
+            cursor: None,
         }
     }
 }

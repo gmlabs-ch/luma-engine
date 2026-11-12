@@ -22,10 +22,35 @@ impl World {
         self.objects.get_mut(id).map(|n| &mut n.state)
     }
 
-    /// The object's own cursor (`CURSOR` of entities, actors and
-    /// controls, `SetCursor`).
+    /// Whether a kind of object keeps its own cursor in its
+    /// [`ObjectState`]: the `CBObject`s that have no other place for it.
+    fn keeps_cursor_in_state(kind: &Kind) -> bool {
+        matches!(
+            kind,
+            Kind::Item
+                | Kind::Region { .. }
+                | Kind::EntityRegion(_)
+                | Kind::Layer(_)
+                | Kind::WaypointGroup(_)
+                | Kind::ResponseBox
+                | Kind::Emitter(_)
+                | Kind::Attachment3D(_)
+                | Kind::Fader
+                | Kind::SceneFader
+        )
+    }
+
+    /// The object's own cursor (`CBObject::m_Cursor`: the `CURSOR` of
+    /// an entity, an actor, a control or the scene, `SetCursor` on any
+    /// object). The game's own is its normal cursor (`CURSOR` of the
+    /// game file).
     pub fn object_cursor(&self, id: NativeId) -> Option<String> {
         match self.objects.get(id).map(|n| &n.kind) {
+            Some(Kind::Game) => self.cursors.normal.clone(),
+            Some(Kind::Scene) => self.scene.as_ref().and_then(|v| v.scene.cursor.clone()),
+            Some(kind) if Self::keeps_cursor_in_state(kind) => {
+                self.object_state(id).and_then(|s| s.cursor.clone())
+            }
             Some(Kind::Actor) => self.actor(id).and_then(|a| a.def.cursor.clone()),
             #[cfg(feature = "3d")]
             Some(Kind::Actor3D) => self.actor3d(id).and_then(|a| a.cursor.clone()),
@@ -35,17 +60,24 @@ impl World {
         }
     }
 
-    /// Sets the object's own cursor (`SetCursor`, `RemoveCursor` with
-    /// `None`); `false` when the object has no cursor or the sprite does
-    /// not load.
+    /// Sets the object's own cursor (`CBObject::SetCursor`,
+    /// `RemoveCursor` with `None`); `false` when the object is of a kind
+    /// without a cursor or the sprite does not load. The old cursor is
+    /// gone in both cases: a sprite that does not load leaves the
+    /// object without a cursor, as in the original.
     pub fn set_object_cursor(&mut self, id: NativeId, path: Option<&str>) -> bool {
-        if let Some(path) = path {
-            if !self.load_cursor(path) {
-                return false;
-            }
-        }
-        let value = path.map(str::to_string);
+        let value = path.filter(|p| self.load_cursor(p)).map(str::to_string);
+        let loaded = path.is_none() || value.is_some();
         match self.objects.get(id).map(|n| n.kind.clone()) {
+            Some(Kind::Game) => self.cursors.normal = value,
+            Some(Kind::Scene) => match self.scene.as_mut() {
+                Some(view) => view.scene.cursor = value,
+                None => return false,
+            },
+            Some(kind) if Self::keeps_cursor_in_state(&kind) => match self.object_state_mut(id) {
+                Some(state) => state.cursor = value,
+                None => return false,
+            },
             Some(Kind::Actor) => match self.actor_mut(id) {
                 Some(actor) => actor.def.cursor = value,
                 None => return false,
@@ -65,7 +97,7 @@ impl World {
             },
             _ => return false,
         }
-        true
+        loaded
     }
 
     /// The cursor in a slot of an object: its own, the game's active or

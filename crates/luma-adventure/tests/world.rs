@@ -4078,6 +4078,21 @@ fn objects_have_their_own_cursor_caption_slots_and_flags() {
         ),
         Value::Bool(false)
     );
+    // The old cursor went before the new one failed to load
+    // (`CBObject::SetCursor`).
+    assert_eq!(
+        call_native(&mut runtime, prop, "HasCursor", &[]),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            prop,
+            "SetCursor",
+            &[Value::from("sprites\\cursor.sprite")]
+        ),
+        Value::Bool(true)
+    );
     assert_eq!(
         text(call_native(&mut runtime, prop, "GetCursor", &[])),
         "sprites\\cursor.sprite"

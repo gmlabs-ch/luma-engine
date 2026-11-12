@@ -644,14 +644,19 @@ impl World {
         ok
     }
 
-    /// Sets the cursor over interactive objects (`SetActiveCursor`).
+    /// Sets the cursor over interactive objects (`SetActiveCursor`); a
+    /// sprite that does not load leaves none, as in the original, which
+    /// has deleted the old one by then.
     pub fn set_active_cursor(&mut self, path: Option<&str>) -> bool {
         match path {
             Some(path) if self.load_cursor(path) => {
                 self.cursors.active = Some(path.to_string());
                 true
             }
-            Some(_) => false,
+            Some(_) => {
+                self.cursors.active = None;
+                false
+            }
             None => {
                 self.cursors.active = None;
                 true
@@ -660,14 +665,17 @@ impl World {
     }
 
     /// Sets the cursor shown while the game is not interactive
-    /// (`SetWaitCursor`).
+    /// (`SetWaitCursor`); a sprite that does not load leaves none.
     pub fn set_wait_cursor(&mut self, path: Option<&str>) -> bool {
         match path {
             Some(path) if self.load_cursor(path) => {
                 self.cursors.noninteractive = Some(path.to_string());
                 true
             }
-            Some(_) => false,
+            Some(_) => {
+                self.cursors.noninteractive = None;
+                false
+            }
             None => {
                 self.cursors.noninteractive = None;
                 true
@@ -676,13 +684,15 @@ impl World {
     }
 
     /// The cursor to show (`CBGame::ShowCursor`): the non-interactive one
-    /// while the game is not interactive, else the active object's own,
-    /// else the active cursor over an object, else the default.
+    /// (or none without one) while the game is not interactive and runs
+    /// (`m_State==GAME_RUNNING`: not while the response box waits, where
+    /// the cursors below show); else the active object's own, else the
+    /// active cursor over an object that can be used, else the default.
     fn cursor_to_show(&mut self) -> Option<String> {
         if self.cursors.hidden {
             return None;
         }
-        if !self.interactive {
+        if !self.interactive && self.is_running() {
             return self.cursors.noninteractive.clone();
         }
         if let Some(active) = self.active_object() {

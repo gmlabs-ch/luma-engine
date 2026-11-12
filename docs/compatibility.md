@@ -117,7 +117,7 @@ How the list was made. For every class with a script interface, the names tested
 | `SkipTo` | method | **done** | Moves the object to (x, y) immediately, or to another object's position. |
 | `Caption` | method | **done** | Returns a caption slot (1 to 7; 0 is 1) of any object: game, scene objects, controls, items. |
 | `SetCaption` | method | **done** | Sets a caption slot (text, slot), expanded through the string table. |
-| `SetCursor` | method | **done** | Sets the cursor shown when the mouse is over the object (entities, actors, controls); false when the sprite does not load. Items keep their normal / hover cursors (`SetNormalCursor`). |
+| `SetCursor` | method | **done** | Sets the object's own cursor, shown when the mouse is over it; false when the sprite does not load, and the object is then left without one. On every object: the game's is its normal cursor, the scene's its `CURSOR`. Items also keep their normal / hover cursors (`SetNormalCursor`). |
 | `RemoveCursor` | method | **done** | Removes the object's own cursor. |
 | `GetCursor` | method | **done** | Returns the object's cursor file. |
 | `GetCursorObject` | method | **done** | Returns the object's cursor as a sprite object sharing the cursor's animation. |

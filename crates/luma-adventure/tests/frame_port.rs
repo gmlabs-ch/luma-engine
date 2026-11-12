@@ -622,3 +622,85 @@ result.height = b.Height;
     assert_eq!(result(&runtime, "height"), Value::Int(8));
     std::fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn every_object_has_a_cursor_of_its_own_and_the_games_is_the_normal_one() {
+    let (dir, mut runtime, log) = start_with(
+        "GAME { NAME=\"Frame\" SCRIPT=\"game.script\" CURSOR=\"red.png\" }",
+        r#"
+global result = new Object();
+Game.ChangeScene("room.scene", false, false);
+// The game's own cursor is the normal cursor.
+result.had = Game.HasCursor();
+result.name = Game.GetCursor();
+result.set = Game.SetCursor("green.png");
+result.now = Game.GetCursor();
+var sprite = Game.GetCursorObject();
+result.object = (sprite != null);
+// A sprite that does not load leaves no cursor.
+result.bad = Game.SetCursor("missing.sprite");
+result.afterBad = Game.HasCursor();
+result.objectAfterBad = Game.GetCursorObject();
+Game.SetCursor("red.png");
+Game.RemoveCursor();
+result.removed = Game.HasCursor();
+Game.SetCursor("green.png");
+
+// The scene, a layer and an entity's region are objects too.
+var scene = Game.Scene;
+result.sceneHad = scene.HasCursor();
+result.sceneSet = scene.SetCursor("red.png");
+result.sceneName = scene.GetCursor();
+var layer = scene.MainLayer;
+result.layerSet = layer.SetCursor("red.png");
+result.layerHas = layer.HasCursor();
+layer.RemoveCursor();
+result.layerRemoved = layer.HasCursor();
+
+// The active and the wait cursor go when their sprite does not load.
+Game.SetActiveCursor("red.png");
+result.activeBad = Game.SetActiveCursor("missing.sprite");
+result.activeLeft = Game.HasActiveCursor();
+Game.SetWaitCursor("red.png");
+result.waitBad = Game.SetWaitCursor("missing.sprite");
+result.waitLeft = Game.GetWaitCursor();
+
+on "Busy" {
+  Game.Interactive = false;
+}
+"#,
+        &[File::Text("room.scene", ROOM)],
+    );
+    assert!(
+        !log.iter().any(|l| l.starts_with("Runtime error")),
+        "{log:?}"
+    );
+    let flag = |key: &str| result(&runtime, key);
+    assert_eq!(flag("had"), Value::Bool(true));
+    assert_eq!(flag("name"), Value::from("red.png"));
+    assert_eq!(flag("set"), Value::Bool(true));
+    assert_eq!(flag("now"), Value::from("green.png"));
+    assert_eq!(flag("object"), Value::Bool(true));
+    assert_eq!(flag("bad"), Value::Bool(false));
+    assert_eq!(flag("afterBad"), Value::Bool(false));
+    assert_eq!(flag("objectAfterBad"), Value::Null);
+    assert_eq!(flag("removed"), Value::Bool(false));
+    assert_eq!(flag("sceneHad"), Value::Bool(false));
+    assert_eq!(flag("sceneSet"), Value::Bool(true));
+    assert_eq!(flag("sceneName"), Value::from("red.png"));
+    assert_eq!(flag("layerSet"), Value::Bool(true));
+    assert_eq!(flag("layerHas"), Value::Bool(true));
+    assert_eq!(flag("layerRemoved"), Value::Bool(false));
+    assert_eq!(flag("activeBad"), Value::Bool(false));
+    assert_eq!(flag("activeLeft"), Value::Bool(false));
+    assert_eq!(flag("waitBad"), Value::Bool(false));
+    assert_eq!(flag("waitLeft"), Value::Null);
+    // The cursor the game ended with is the one shown.
+    runtime.tick(16);
+    assert_eq!(runtime.world.cursors().shown(), Some("green.png"));
+    // Not interactive and running, without a wait cursor: no cursor.
+    raise(&mut runtime, "Busy");
+    runtime.tick(16);
+    assert_eq!(runtime.world.cursors().shown(), None);
+    std::fs::remove_dir_all(dir).ok();
+}

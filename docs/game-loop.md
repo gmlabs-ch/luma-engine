@@ -399,30 +399,41 @@ others, and its items are active objects through their sprites.
 ## Cursors
 
 The cursor drawn (`CBGame::ShowCursor`), in order: nothing while
-`Game.HideCursor`; the `NONINTERACTIVE_CURSOR` while the game is not
-interactive; the active object's own `CURSOR`; the `ACTIVE_CURSOR` over
+`Game.HideCursor`; the `NONINTERACTIVE_CURSOR`, or nothing without one,
+while the game is not interactive and runs (not while the response box
+waits for a pick: the cursors below show then, so the player can choose
+an answer during a non-interactive dialogue); the active object's own
+`CURSOR`; the `ACTIVE_CURSOR` over
 an active object that can be used (an entity, an actor or an item, the
 engine's `usable` flag; not a window or a button); the `CURSOR`. A cursor that was not shown last frame
 restarts its animation; cursors animate on the live timer, so they keep
 moving while a menu freezes the game (see
 [formats/sprite.md](formats/sprite.md#animation)). `Game.SetActiveCursor`, `RemoveActiveCursor`,
 `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`,
-`GetActiveCursor` and `GetWaitCursor` change and read them;
+`GetActiveCursor` and `GetWaitCursor` change and read them (a sprite
+that does not load leaves none: the old one is dropped first);
 `GetActiveCursorObject` and `GetWaitCursorObject` return them as
 sprite objects (see below), `null` without one. The system cursor is
 hidden over the window.
 
 An object's own cursor comes from its `CURSOR` key, or from `SetCursor`
-on the object (entities, actors and controls; `false` when the sprite
-does not load, and the old cursor stays). `RemoveCursor` takes it off,
+on the object; `false` when the sprite does not load, and the object is
+then left without a cursor, the old one being dropped first
+(`CBObject::SetCursor`). Every object has the methods: on the game they
+act on the normal cursor (`Game.SetCursor(file)` changes the `CURSOR`
+of the game file, `Game.RemoveCursor()` leaves none), on the scene on
+its `CURSOR`; items, regions, layers, waypoint groups and the response
+box keep one too, shown when the object is the one under the mouse (an
+item in the inventory box). `RemoveCursor` takes it off,
 `HasCursor` and `GetCursor` read it, and `GetCursorObject` returns it as
 a sprite object (frames, `CurrentFrame`, `Looping`, `Reset`, `Pause`,
 `Play`), sharing the animation the cursor shows. Scripts find the
 entity under the mouse change cursor from the next frame on, as in the
 original engine.
 
-While an inventory item is selected and the game is interactive, the
-item's `CURSOR` is drawn at the mouse, over the cursor above when the
+While an inventory item is selected, the game is interactive and runs
+(not frozen, the response box not waiting), the item's `CURSOR` is
+drawn at the mouse, over the cursor above when the
 item's `CURSOR_COMBINED` is on, instead of it otherwise; over an entity,
 an actor or an item its `CURSOR_HOVER` is drawn instead (only over
 objects that handle the item's event when `Game.SmartItemCursor` is
