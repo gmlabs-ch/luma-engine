@@ -116,6 +116,9 @@ pub struct SoundsState {
     pub speech_dirs: Vec<String>,
     /// Whether the frozen game held the music too.
     pub music_frozen: bool,
+    /// The sounds of sprite frames still playing: the object showing
+    /// the sprite, the file, the position in milliseconds.
+    pub frame_sounds: Vec<(NativeId, String, u64)>,
 }
 
 /// The world's state as written (`WorldRef`, borrowing the world) and
@@ -228,6 +231,7 @@ world_state! {
 struct SavedRef<'a> {
     engine: &'a EngineSnapshot,
     world: WorldRef<'a>,
+    videos: &'a crate::video::VideosState,
 }
 
 /// The body of a saved game as read.
@@ -235,6 +239,7 @@ struct SavedRef<'a> {
 struct Saved {
     engine: EngineSnapshot,
     world: WorldState,
+    videos: crate::video::VideosState,
 }
 
 /// Seconds since the Unix epoch.
@@ -355,9 +360,11 @@ pub fn save_game(
     };
     let snapshot = engine.snapshot();
     let sounds = world.sounds_state();
+    let videos = world.videos_state();
     let body = postcard::to_allocvec(&SavedRef {
         engine: &snapshot,
         world: WorldRef::of(world, &sounds),
+        videos: &videos,
     })
     .map_err(|e| e.to_string())?;
     write_file(&path, &header, &body)?;
@@ -385,6 +392,8 @@ pub fn load_game(world: &mut World, engine: &mut Engine, slot: i32) -> Result<()
     world.rng = rng;
     world.after_restore(sounds);
     engine.restore(saved.engine, world)?;
+    // `AfterLoadTheora`: the videos play again where they were.
+    world.restore_videos(engine, saved.videos);
     let game = world.game_id;
     engine.apply_event(world, game, "AfterLoad", true);
     Ok(())
@@ -563,6 +572,7 @@ impl World {
             crossfade: self.sounds.crossfade.clone(),
             speech_dirs: self.sounds.speech_dirs.clone(),
             music_frozen,
+            frame_sounds: self.frame_sounds_state(),
         }
     }
 
@@ -632,6 +642,7 @@ impl World {
             }
         }
         self.restore_speech();
+        self.restore_frame_sounds(state.frame_sounds);
         if self.ui.frozen {
             self.sounds.audio.pause_all(state.music_frozen);
         }
@@ -640,11 +651,9 @@ impl World {
     /// What a loaded game needs beyond its state (`InitAfterLoad`): the
     /// frame's leftovers cleared, the sprites, images, fonts and cursors
     /// the state names loaded again, and the sounds started where they
-    /// were. A video is not kept.
+    /// were. The videos follow once the scripts are back
+    /// (`World::restore_videos`).
     fn after_restore(&mut self, sounds: SoundsState) {
-        self.video = None;
-        self.video_texture = None;
-        self.video_uploaded = 0;
         self.hits.clear();
         self.sentences.clear();
         self.quit = false;

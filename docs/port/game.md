@@ -228,7 +228,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBGame::AfterLoadRegion` | replaced | Region polygons are saved as points and tested directly (`path::polygon_contains`); no GDI region to rebuild. |
 | `CBGame::AfterLoadSubFrame` | replaced | `World::reload_assets`: the sprite banks load their images again. |
 | `CBGame::AfterLoadSound` | replaced | `World::restore_sounds` (`save.rs`). |
-| `CBGame::AfterLoadTheora` | partial | A video playing in an entity or full-screen is not brought back by a load (`after_restore` drops `World::video`); WME reopens the Theora players of the saved game (`InitializeSimple`). Check `entity_videos` with the sound-video table. |
+| `CBGame::AfterLoadTheora` | done | `World::restore_videos` (`luma-adventure/src/video.rs`), called by `save.rs` `load_game`: every saved video (the game's, each entity's) is reopened as `CVidTheoraPlayer::InitializeSimple` does; see that row for the differences kept on purpose. |
 | `CBGame::AfterLoadXModel` | replaced | `World::reload_3d` (`save.rs`, `draw3d.rs`). |
 | `CBGame::AfterLoadScript` | replaced | `Engine::restore` (`luma-script`) rebuilds the scripts from the snapshot. |
 | `CBGame::DisplayWindows` | done | `World::update_ui` (focus fallback: the topmost visible, enabled window when the focused one is gone, hidden or disabled) and `World::draw_windows` (`ui.rs`): the visible windows of the pass, in list order. |

@@ -1320,6 +1320,12 @@ impl Actor3d {
                     if self.path_2d_ready {
                         self.follow_path_2d(ctx);
                     }
+                } else if self.ticket.is_none() {
+                    // A game saved while the actor waited for its path:
+                    // the finder's open request is not part of a saved
+                    // game (the original saves it with the geometry), so
+                    // the actor asks again.
+                    self.state = Actor3dState::SearchingPath;
                 } else if let Some(path) = self.ticket.and_then(|t| ctx.finder.take_path(t)) {
                     self.ticket = None;
                     self.path = path;

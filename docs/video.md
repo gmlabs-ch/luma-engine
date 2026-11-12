@@ -294,10 +294,36 @@ round on the sound track had the sound effects' global percentage as
 its own volume instead of the entity's `SoundVolume`: a defect, not
 reproduced.)
 
-Deviations from the original engine: the video is not kept in saved
-games (the engine saves the player and reopens the file on load; after
-a load in Luma the entity shows its sprite), and only one video plays
-per entity, as there.
+Only one video plays per entity, as in the original engine.
+
+### Videos in saved games
+
+A saved game keeps the video an entity plays and the game's own
+(`CVidTheoraPlayer::Persist`): the file, the alpha file, the movie time,
+whether it was paused, the placement, the zoom, the looping and the
+volume. After a load the file is opened again and played from the saved
+position (`InitializeSimple`), that is from the first key frame at or
+after it, as any start time; a video saved paused shows one frame and
+pauses. A file that no longer opens is logged and leaves no video: the
+entity shows its sprite.
+
+Three things differ from the original, on purpose:
+
+- the original starts the reopened video without a volume, so it plays
+  at the sound effects' global percentage instead of the entity's
+  `SoundVolume`; Luma keeps the saved volume;
+- the original does not save the game's pointer to its own video
+  (`CBGame::m_TheoraPlayer`) and reopens the player without its
+  "freezes the game" flag: the loaded game stays frozen by a video
+  nothing shows any more. Luma brings the game's video back on screen,
+  with its subtitle file and its "show every frame" flag, and the end
+  of the video unfreezes the game as it would have; when the file is
+  gone the game is unfrozen at once;
+- the subtitles of the game's video come from the file `PlayTheora`
+  named, where the original would look for the video's own `.sub`.
+
+A video used as a texture of a 3D actor's material is saved with the
+actor (see [3d-actors.md](3d-actors.md)).
 
 ## Subtitles
 
@@ -349,7 +375,6 @@ The file is read as the engine reads it (`CVidSubtitler::LoadSubtitles`):
 
 - The `.avi` player of the old `PlayVideo` (see above: by design).
 - `SetTheoraTexture` on 3D actors, with the rest of the 3D module.
-- An entity's video in saved games.
 - The White Chamber's own videos (`assets\data0001.ogg` and the others)
   are not in the itch.io release: there the engine logs the missing file
   and the game goes on to the next scene. With the eight files of the

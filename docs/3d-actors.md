@@ -1083,7 +1083,10 @@ again and every animation state restored (`Actor3d::reload`). `Scene3d` saves th
 height, the active camera, every light's active flag and colour and
 every node's active flag by name, and the fog; the geometry is read
 again and the state put back (`Scene3d::reload`). The path finder's
-request is not saved. The game's `MaxShadowType` and shadow image are
+request is not saved: an actor that comes back waiting for a path
+without an open request (`Actor3d::update`, `WaitingPath`) goes back to
+searching and asks the new finder again, so the walk and the script
+waiting for it go on. The game's `MaxShadowType` and shadow image are
 saved with the world.
 
 ## 9. Geometry at runtime

@@ -77,11 +77,16 @@ A saved game holds:
   captured, whether the game is frozen and by how many windows;
 - the sounds: each object's sound and the music channels, by file,
   position, looping, volume, start position and whether they play or
-  are paused, with each object's pending sound event; a sound held by a
+  are paused, with each object's pending sound event; the sounds of
+  sprite frames still playing (a frame's `SOUND`), by file and
+  position; a sound held by a
   frozen game is saved as playing, with its position (the original
   engine saves it as stopped and it starts over after the load; see
   [audio.md](audio.md)); the crossfade in progress; the speech
   directories;
+- the videos: the one an entity plays and the game's own, by file,
+  position, placement, zoom, looping, volume and whether paused; they
+  are opened again and play on (see [video.md](video.md));
 - the game's fader and the scene's, the cursors chosen, the mouse and
   the keyboard state;
 - the game's own settings a script may change: name, caption,
@@ -94,12 +99,6 @@ A saved game holds:
 
 What a saved game does **not** hold, and what happens to it:
 
-- a video being played (`Game.PlayTheora`): a game saved from a script
-  while a video plays loads without it;
-- the speech sound of a sentence: the sentence goes on with its text,
-  silently, for the time it had left;
-- the sounds of sprite frames that were playing (a frame's `SOUND`):
-  the next frame that becomes current plays its own;
 - the string table: the one loaded by the running game stays (the
   original engine does not save it either; a game picks its language
   before loading);
@@ -352,7 +351,8 @@ with each sentence being said its speech file and position, whether it
 is hidden by a freeze, and its talk definition (`.talk`) with the sprite
 it is at; and what each item is doing (a sentence, a played animation).
 Version 20 keeps the caption slots 2 to 7 in the remembered scene
-states and the `SaveState` flag of region nodes.
+states, the `SaveState` flag of region nodes, the sounds of sprite
+frames still playing and the videos.
 
 ## Checking a game
 
@@ -375,4 +375,3 @@ button, a slot, "Save" again, type a name and click "OK".
 
 - The `savegame:` images (a saved game's thumbnail shown by a window).
 - `Game.AutoSaveOnExit` and `AutoSaveSlot`.
-- A video being played is not kept.
