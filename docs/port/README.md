@@ -39,7 +39,7 @@ python3 docs/port/inventory.py --check
 | `todo` | Luma does not do it and should. |
 | `replaced` | Luma reaches the same result another way (for example the Direct3D renderer by `luma-render`); the note says how. |
 | `n/a` | It has no meaning outside the original program (a Windows dialog, the editor's hooks, the debugger); the note says why. |
-| `excluded` | Left out by a decision of the maintainer; the note says which and when. Today: the Direct3D 9 HLSL material effects. |
+| `excluded` | Left out by a decision of the maintainer; the note says which and when. Today: the Direct3D 9 HLSL material effects and the legacy Milkshape (MS3D) actors. |
 
 A row is `done` only when the function was read in the original and in
 Luma and they agree on every branch, not when a game shows the right
@@ -51,13 +51,13 @@ original does. `partial` and `todo` rows are the work that remains.
 <!-- counts -->
 | Table | Functions | Keys | unreviewed | done | partial | todo | replaced | n/a | excluded |
 |---|---|---|---|---|---|---|---|---|---|
-| [The adventure game: scenes, actors, entities, items, dialogue](adventure.md) | 564 | 358 | 0 | 566 | 125 | 55 | 96 | 76 | 4 |
+| [The adventure game: scenes, actors, entities, items, dialogue](adventure.md) | 564 | 358 | 0 | 593 | 98 | 1 | 96 | 76 | 58 |
 | [Windows, settings dialogs, hardware detection, plugins, network, debugger](platform.md) | 336 | 0 | 0 | 10 | 10 | 17 | 34 | 265 | 0 |
-| [Renderers, surfaces, 3D models and scenes](render.md) | 574 | 13 | 0 | 128 | 49 | 91 | 138 | 106 | 75 |
+| [Renderers, surfaces, 3D models and scenes](render.md) | 574 | 13 | 0 | 140 | 43 | 24 | 141 | 106 | 133 |
 | [Sound and video](sound-video.md) | 167 | 0 | 0 | 59 | 14 | 20 | 46 | 28 | 0 |
-| [Windows and controls, fonts, text](ui-text.md) | 176 | 174 | 0 | 236 | 42 | 0 | 32 | 40 | 0 |
+| [Windows and controls, fonts, text](ui-text.md) | 176 | 174 | 0 | 241 | 37 | 0 | 32 | 40 | 0 |
 | [The script engine, its classes, saved games](script.md) | 406 | 3 | 0 | 172 | 18 | 6 | 91 | 122 | 0 |
 | [Packages, files, the definition-file parser, utilities](files.md) | 127 | 0 | 0 | 26 | 6 | 0 | 68 | 27 | 0 |
-| [The game, its objects, sprites, regions, effects](game.md) | 400 | 124 | 0 | 247 | 66 | 4 | 52 | 155 | 0 |
-| **Total** | **2750** | **672** | **0** | **1444** | **330** | **193** | **557** | **819** | **79** |
+| [The game, its objects, sprites, regions, effects](game.md) | 400 | 124 | 0 | 265 | 51 | 2 | 51 | 155 | 0 |
+| **Total** | **2750** | **672** | **0** | **1506** | **277** | **70** | **559** | **819** | **191** |
 <!-- /counts -->

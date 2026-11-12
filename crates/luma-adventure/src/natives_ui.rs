@@ -430,7 +430,11 @@ impl World {
                     v => Some(v.get_string(self)),
                 };
                 let kind = match name {
-                    "CreateButton" => ControlKind::Button(Box::default()),
+                    // A button's label is centred (`CUIButton::CUIButton`).
+                    "CreateButton" => ControlKind::Button(Box::new(crate::ui::ButtonState {
+                        text_align: TextAlign::Center,
+                        ..Default::default()
+                    })),
                     "CreateStatic" => ControlKind::Static(StaticState::default()),
                     "CreateEditor" => ControlKind::Edit(Box::default()),
                     _ => ControlKind::Window(Box::default()),

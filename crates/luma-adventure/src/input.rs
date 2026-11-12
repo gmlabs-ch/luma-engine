@@ -218,6 +218,10 @@ pub fn char_for_key(code: i32, shift: bool) -> Option<char> {
         .map(|&(plain, shifted, _)| if shift { shifted } else { plain })
 }
 
+/// The kind name of the object standing for a close-up layer's shield
+/// (`CAdScene::m_ShieldWindow`): scripts see it as a window.
+const SCENE_SHIELD: &str = "Window";
+
 /// Which bank holds the image of a hit area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HitBank {
@@ -400,6 +404,21 @@ pub struct HitArea {
     /// The scroll offset of the layer the object is drawn in.
     layer_offset: (i32, i32),
     shape: HitShape,
+    /// The viewport in force when the area was registered, on screen
+    /// (left, top, right, bottom): the area takes the mouse only inside
+    /// it (`CBActiveRect::ClipRect`). `None` outside any viewport.
+    clip: Option<(i32, i32, i32, i32)>,
+}
+
+/// Limits the hit areas registered from `start` on to a viewport, those
+/// an inner viewport already limited excepted (a viewport replaces the
+/// one under it while it is pushed).
+pub(crate) fn clip_hits(hits: &mut [HitArea], start: usize, clip: (i32, i32, i32, i32)) {
+    for hit in hits.iter_mut().skip(start) {
+        if hit.clip.is_none() {
+            hit.clip = Some(clip);
+        }
+    }
 }
 
 impl HitArea {
@@ -409,6 +428,18 @@ impl HitArea {
             owner,
             layer_offset: (0, 0),
             shape: HitShape::Rect(x, y, w, h),
+            clip: None,
+        }
+    }
+
+    /// A polygon given in screen coordinates (the region of a window
+    /// container's entity).
+    pub(crate) fn polygon(owner: NativeId, points: Vec<Point>) -> HitArea {
+        HitArea {
+            owner,
+            layer_offset: (0, 0),
+            shape: HitShape::Polygon(points),
+            clip: None,
         }
     }
 
@@ -424,6 +455,7 @@ impl HitArea {
             owner,
             layer_offset,
             shape: HitShape::Model3D(left, top, right, bottom),
+            clip: None,
         }
     }
 }
@@ -636,14 +668,19 @@ impl World {
         ok
     }
 
-    /// Sets the cursor over interactive objects (`SetActiveCursor`).
+    /// Sets the cursor over interactive objects (`SetActiveCursor`); a
+    /// sprite that does not load leaves none, as in the original, which
+    /// has deleted the old one by then.
     pub fn set_active_cursor(&mut self, path: Option<&str>) -> bool {
         match path {
             Some(path) if self.load_cursor(path) => {
                 self.cursors.active = Some(path.to_string());
                 true
             }
-            Some(_) => false,
+            Some(_) => {
+                self.cursors.active = None;
+                false
+            }
             None => {
                 self.cursors.active = None;
                 true
@@ -652,14 +689,17 @@ impl World {
     }
 
     /// Sets the cursor shown while the game is not interactive
-    /// (`SetWaitCursor`).
+    /// (`SetWaitCursor`); a sprite that does not load leaves none.
     pub fn set_wait_cursor(&mut self, path: Option<&str>) -> bool {
         match path {
             Some(path) if self.load_cursor(path) => {
                 self.cursors.noninteractive = Some(path.to_string());
                 true
             }
-            Some(_) => false,
+            Some(_) => {
+                self.cursors.noninteractive = None;
+                false
+            }
             None => {
                 self.cursors.noninteractive = None;
                 true
@@ -668,13 +708,15 @@ impl World {
     }
 
     /// The cursor to show (`CBGame::ShowCursor`): the non-interactive one
-    /// while the game is not interactive, else the active object's own,
-    /// else the active cursor over an object, else the default.
+    /// (or none without one) while the game is not interactive and runs
+    /// (`m_State==GAME_RUNNING`: not while the response box waits, where
+    /// the cursors below show); else the active object's own, else the
+    /// active cursor over an object that can be used, else the default.
     fn cursor_to_show(&mut self) -> Option<String> {
         if self.cursors.hidden {
             return None;
         }
-        if !self.interactive {
+        if !self.interactive && self.is_running() {
             return self.cursors.noninteractive.clone();
         }
         if let Some(active) = self.active_object() {
@@ -707,7 +749,10 @@ impl World {
                 self.cursors.anims.insert(k.clone(), AnimState::new(path));
                 self.cursors.last = Some(k.clone());
             }
-            let timer = self.timer();
+            // A cursor's sprite has no owner: it runs on the live
+            // timer (`CBSprite::GetCurrentFrame`) and goes on while the
+            // game is frozen.
+            let timer = self.clock;
             if let Some(loaded) = self.cursors.bank.sprite(path) {
                 let state = self
                     .cursors
@@ -763,7 +808,12 @@ impl World {
     pub(crate) fn collect_hits(&mut self) {
         self.hits.clear();
         let mut hits = Vec::new();
-        self.scene_hits(&mut hits);
+        let shield = self.scene_shield();
+        self.scene_hits(&mut hits, shield);
+        // The scene's objects are registered inside its viewport.
+        if let Some(clip) = self.scene_clip() {
+            clip_hits(&mut hits, 0, clip);
+        }
         self.ui_hits_in_game(&mut hits);
         self.inventory_hits(&mut hits);
         // In drawing order: the response box is under the normal windows.
@@ -772,8 +822,30 @@ impl World {
         self.hits = hits;
     }
 
-    /// The hit areas of the scene's objects, in drawing order.
-    fn scene_hits(&self, hits: &mut Vec<HitArea>) {
+    /// The object that stands for the shield a close-up layer lays
+    /// under itself (`CAdScene::m_ShieldWindow`, a window covering the
+    /// screen): made when the scene first has an active `CLOSE_UP`
+    /// layer, `None` without one.
+    fn scene_shield(&mut self) -> Option<NativeId> {
+        let needed = self
+            .scene
+            .as_ref()
+            .is_some_and(|v| v.scene.layers.iter().any(|l| l.active && l.close_up));
+        if !needed {
+            return None;
+        }
+        let is_shield = |k: &Kind| matches!(k, Kind::Inert(name) if name == SCENE_SHIELD);
+        Some(match self.objects.find(is_shield) {
+            Some(id) => id,
+            None => self.inert(SCENE_SHIELD),
+        })
+    }
+
+    /// The hit areas of the scene's objects, in drawing order; `shield`
+    /// is registered over the whole screen before the nodes of each
+    /// active close-up layer, so that nothing of the layers below takes
+    /// the mouse (`CAdScene::TraverseNodes`).
+    fn scene_hits(&self, hits: &mut Vec<HitArea>, shield: Option<NativeId>) {
         let Some(view) = &self.scene else {
             return;
         };
@@ -781,7 +853,21 @@ impl World {
         let free_objects = self.free_objects();
         let positions: Vec<crate::scene_view::FreeObject> =
             free_objects.iter().map(|(_, o)| *o).collect();
-        for item in view.draw_order(&positions, |i| self.free_entity_stick(i)) {
+        let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
+        let mut shielded = vec![false; view.scene.layers.len()];
+        let mut shield_layers_up_to = |hits: &mut Vec<HitArea>, upto: usize| {
+            for (li, layer) in view.scene.layers.iter().enumerate().take(upto + 1) {
+                if layer.active && layer.close_up && !shielded[li] {
+                    shielded[li] = true;
+                    if let Some(shield) = shield {
+                        hits.push(HitArea::rect(shield, 0, 0, sw, sh));
+                    }
+                }
+            }
+        };
+        let order = view.draw_order(&positions, |i| self.free_entity_stick(i));
+        for item in order {
+            shield_layers_up_to(hits, item.layer());
             let layer = &view.scene.layers[item.layer()];
             let (ox, oy) = camera.layer_offset(&view.scene, layer);
             let layer_offset = (ox as i32, oy as i32);
@@ -811,6 +897,9 @@ impl World {
                 }
             }
         }
+        // The close-up layers after the last object drawn.
+        let last = view.scene.layers.len().saturating_sub(1);
+        shield_layers_up_to(hits, last);
     }
 
     /// The hit areas of an object's attachments, registered as the
@@ -926,6 +1015,7 @@ impl World {
                     color_key: sub.color_key,
                     area: pixel_area(sub, x, y, transform, sprite.precise),
                 },
+                clip: None,
             });
         }
     }
@@ -966,6 +1056,7 @@ impl World {
                 owner: id,
                 layer_offset,
                 shape: HitShape::Polygon(region.points.clone()),
+                clip: None,
             });
         }
         let Some(path) = view.shown_sprite(r) else {
@@ -1074,7 +1165,18 @@ impl World {
             if w <= 0 || h <= 0 {
                 continue;
             }
-            found = Some((x - hit.layer_offset.0, y - hit.layer_offset.1, w, h));
+            let (mut x, mut y, mut w, mut h) =
+                (x - hit.layer_offset.0, y - hit.layer_offset.1, w, h);
+            // Only the part inside the viewport it was registered in.
+            if let Some((cl, ct, cr, cb)) = hit.clip {
+                let (l, t) = (x.max(cl), y.max(ct));
+                let (r, b) = ((x + w).min(cr), (y + h).min(cb));
+                if r <= l || b <= t {
+                    continue;
+                }
+                (x, y, w, h) = (l, t, r - l, b - t);
+            }
+            found = Some((x, y, w, h));
             break;
         }
         self.hits = hits;
@@ -1106,7 +1208,20 @@ impl World {
     pub fn object_at(&mut self, x: i32, y: i32) -> Option<NativeId> {
         let hits = std::mem::take(&mut self.hits);
         let mut found = None;
+        let screen = (
+            0,
+            0,
+            self.settings.width as i32,
+            self.settings.height as i32,
+        );
         for hit in hits.iter().rev() {
+            // `CBActiveRect::ClipRect`: the rectangle was cut to the
+            // viewport in force (the screen without one), so a point
+            // outside it misses.
+            let (cl, ct, cr, cb) = hit.clip.unwrap_or(screen);
+            if x < cl || y < ct || x >= cr || y >= cb {
+                continue;
+            }
             let (lx, ly) = (x + hit.layer_offset.0, y + hit.layer_offset.1);
             let inside = match &hit.shape {
                 HitShape::Polygon(points) => crate::path::polygon_contains(points, lx, ly),

@@ -1284,8 +1284,8 @@ impl World {
             dst: Rect::new(
                 x as f32 + dx,
                 y as f32 + dy,
-                (texture.width as f32 * zoom).trunc(),
-                (texture.height as f32 * zoom).trunc(),
+                texture.width as f32 * zoom,
+                texture.height as f32 * zoom,
             ),
             src: None,
             tint: entity.def.tint.unwrap_or(tint),
@@ -1446,8 +1446,8 @@ impl World {
                 dst: Rect::new(
                     player.x as f32 + dx,
                     player.y as f32 + dy,
-                    (texture.width as f32 * zoom).trunc(),
-                    (texture.height as f32 * zoom).trunc(),
+                    texture.width as f32 * zoom,
+                    texture.height as f32 * zoom,
                 ),
                 src: None,
                 tint: luma_formats::Rgba::OPAQUE_WHITE,

@@ -107,7 +107,7 @@ pub use actor3d::{
     MaterialTexture, ThreeDFrame,
 };
 pub use error::{Error, Result};
-pub use fader::{Fader, SCENE_FADE_MS};
+pub use fader::{Fader, SCENE_FADE_MS, Transition, TransitionKind};
 pub use input::{Clipboard, Cursors, Keyboard, MemoryClipboard, Mouse};
 pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;

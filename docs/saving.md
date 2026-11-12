@@ -351,6 +351,10 @@ context of every once-per-game response chosen (it kept the id alone);
 with each sentence being said its speech file and position, whether it
 is hidden by a freeze, and its talk definition (`.talk`) with the sprite
 it is at; and what each item is doing (a sentence, a played animation).
+Version 20 added to every object's runtime state the cursor of its own
+(`SetCursor` on an item, a region, a layer, a waypoint group, the
+response box) and the regions an entity stood in when it last moved,
+for its `ActorEntry` and `ActorLeave` events.
 
 ## Checking a game
 

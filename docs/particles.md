@@ -66,7 +66,7 @@ after each batch, so that the deepest are drawn first.
 | `Stop()` | Removes every particle and stops. |
 | `Pause()`, `Resume()` | Hold the emitter where it is (nothing moves, nothing is born) and go on. |
 | `SetBorder(x, y, width, height)` | A rectangle (right and bottom edges excluded) a particle fades out on leaving; a rectangle without area means none. |
-| `SetBorderThickness(left, right, top, bottom)` | The border shrinks by these amounts for the particles at depth 0, by nothing at depth 100, in between linearly: the nearest particles are kept further from the edges. |
+| `SetBorderThickness(left, right, top, bottom)` | The border shrinks by these amounts for the particles at depth 0, by nothing at depth 100, in between linearly (`thickness - thickness * depth / 100`, truncated as a whole): the nearest particles are kept further from the edges. |
 | `AddGlobalForce(name, angle, strength)` | A push on every particle of `strength` pixels per second per second towards `angle` (as for the velocity: `180` is down, for gravity); a force with the same name (without case) is replaced. |
 | `AddPointForce(name, x, y, angle, strength)` | In the original engine 1.x this creates the same global force as `AddGlobalForce` (`CPartEmitter::ScCallMethod` passes `FORCE_GLOBAL` for both), the point being kept but unused. Luma reproduces this, so that games tuned against the original look the same. The point force itself (a push towards `angle` scaled by `100 / distance` to the point) is implemented, but no script can create one. |
 | `RemoveForce(name)` | Removes a force; `false` when there is none. |
