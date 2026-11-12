@@ -103,7 +103,7 @@ TTFONT
 | `FACE` | string | `Arial` | The family name of the typeface the text is drawn with (see [Choosing the face](#choosing-the-face)). |
 | `FILENAME` | string | `arial.ttf` | A font file among the game's files, made available to the engine: it is drawn with when `FACE` names its typeface. |
 | `BOLD`, `ITALIC` | bool | `FALSE` | The weight and the slant of the face. |
-| `UNDERLINE`, `STRIKE` | bool | `FALSE` | `UNDERLINE` draws a line under the text; `STRIKE` is read and ignored. |
+| `UNDERLINE`, `STRIKE` | bool | `FALSE` | A line under, or through, every line of the text (see [Metrics](#metrics)). |
 | `CHARSET` | int | `0` | The Windows character set of the font, ignored: every face is addressed by Unicode character. |
 | `COLOR` | `r,g,b` | `0,0,0` | Colour of the text when no `LAYER` is given. |
 | `ALPHA` | int | `0` | Opacity of that colour. |
@@ -155,20 +155,62 @@ imitates. A character the chosen face lacks is skipped: it is not
 looked up in the game's file or in another font, where Windows would
 substitute one.
 
-**Metrics.** The line height is the font's line spacing in pixels,
-rounded up, plus 2. Text is rendered to an image as wide as the box:
-each line is placed `line height - descender` below its top, glyphs at
-their bearings, advancing by the integer part of each advance plus the
-integer part of the kerning with the previous glyph; the whole image is
-then drawn `text offset` higher, where the offset is the largest bearing
-of the last line (the engine's own quirk, kept so that layouts match).
+### Metrics
 
-**Line breaking** (`CBFontTT::WrapText`). Characters are added to the
-line until one would exceed the width; the line then breaks at the last
-space, or before the current character when there is none, and the
-space is dropped. `\n` breaks too. Lines beyond the maximum height are
-dropped. The text width is the widest line, the height the number of
-lines times the line height.
+The line height is the font's line spacing in pixels, rounded up, plus
+2. Text is rendered to an image as wide as the box: each line has its
+baseline `line height - descender` below its top, glyphs at their
+bearings, advancing by the integer part of each advance plus the integer
+part of the kerning with the previous glyph; the image is drawn with its
+top left corner at the text's position, moved by each layer's offset.
+
+These metrics are Luma Engine's own (they come from WME Lite) and are
+kept on purpose: the original measures and draws with GDI, whose line is
+the font's cell height (ascent plus descent, no line gap, no 2 pixels),
+whose pixel size is a whole number and whose widths are GDI's. A text is
+therefore not placed pixel for pixel as the original places it; what
+agrees is the layout: where lines break, which are dropped, how they are
+aligned.
+
+`UNDERLINE` and `STRIKE` draw a line across each line of the text, from
+its first glyph to the end of its width. Their place and thickness are
+the font's own, as for GDI: the underline position and thickness of the
+`post` table, the strike-out position and size of the `OS/2` table,
+scaled to the pixel size (at least one pixel thick). A font without
+them gets an underline half the descent under the baseline and a
+strike-through a quarter of the pixel size above it, a fourteenth of the
+size thick.
+
+**Line breaking** (`CBFontTT::FormatText`). A line takes characters
+while the text up to them fits the width:
+
+- `\n` ends the line;
+- when a character does not fit, the line ends before the last space
+  that fitted, and that space is dropped; when no space fitted, it ends
+  before the character (in the middle of a word, or before a space,
+  which then starts the next line and is the first place that line
+  breaks at);
+- a first character that does not fit ends the text: nothing more is
+  drawn;
+- a line that would pass the maximum height is dropped with all that
+  follows;
+- after a line that held a space, one more character is skipped: the
+  space the line broke at, or the line break that ended it. A second
+  line break right after is then skipped with it, so two line breaks in
+  a row leave an empty line after a line without a space and none after
+  a line with one. This is how the original's loop behaves, texts were
+  laid out with it, and it is reproduced.
+
+The text height is the number of lines times the line height (0 for an
+empty text). The text width is that of the whole text on one line
+(`CBFontTT::GetTextWidth` gives the text to GDI in one piece); a line
+break counts for nothing in it.
+
+One defect of the original is not reproduced: the first line is tested
+against a width left over from measuring the letters "Ay", so a text
+that starts with a line break, in a box narrower than those two
+letters, makes it read before the start of the text. Luma Engine gives
+such a text an empty first line.
 
 A negative width means no box, for both kinds of font: the text is one
 line of any length (`\n` still breaks it), drawn from the left whatever

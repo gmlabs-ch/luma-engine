@@ -32,6 +32,7 @@ winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11
 pollster = "1"
 fontdue = { version = "0.9", default-features = false, features = ["std", "hashbrown"] }
 fontdb = { version = "0.24", default-features = false, features = ["std", "fs", "memmap"] }
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 kira = { version = "0.12", default-features = false, features = ["ogg", "vorbis", "wav", "pcm"] }
 ogg = { version = "0.9", default-features = false }
 oxideav-theora = { version = "0.0.12", default-features = false }

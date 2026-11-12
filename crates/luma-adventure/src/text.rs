@@ -158,7 +158,7 @@ impl Font {
     pub fn text_width(&mut self, text: &str) -> i32 {
         match self {
             Font::Bitmap(f) => f.def.text_width(&f.widths, &f.codes(text), -1),
-            Font::TrueType(f) => f.measure(&f.characters(text), -1).0,
+            Font::TrueType(f) => f.line_width(&f.characters(text)),
         }
     }
 
@@ -433,6 +433,26 @@ impl Glyph {
     }
 }
 
+/// A horizontal line a face draws along a line of text (the underline,
+/// the strike-through): how far above the baseline its top is, and its
+/// thickness, in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Rule {
+    top: i32,
+    thickness: i32,
+}
+
+impl Rule {
+    /// The rule a face gives (`position` is its top above the baseline,
+    /// in the font's units), at `scale` pixels per unit.
+    fn scaled(position: i16, thickness: i16, scale: f32) -> Rule {
+        Rule {
+            top: (f32::from(position) * scale).round() as i32,
+            thickness: ((f32::from(thickness) * scale).round() as i32).max(1),
+        }
+    }
+}
+
 /// A text rendered to an image, kept for reuse.
 #[derive(Debug)]
 struct CachedText {
@@ -441,7 +461,6 @@ struct CachedText {
     align: TextAlign,
     max_height: i32,
     image: Image,
-    offset: i32,
     texture: Option<Texture>,
     priority: u32,
     /// Asked for since the textures were last uploaded: the frame being
@@ -469,6 +488,10 @@ pub struct TrueTypeFont {
     ascender: f32,
     descender: f32,
     max_char_height: i32,
+    /// Where `UNDERLINE` draws its line.
+    underline: Rule,
+    /// Where `STRIKE` draws its line.
+    strike: Rule,
     glyphs: HashMap<char, Option<Glyph>>,
     texts: Vec<CachedText>,
     /// Whether lines are laid out right to left (`Game.TextRTL`).
@@ -581,6 +604,27 @@ impl TrueTypeFont {
         let descender = -metrics.descent;
         let line_height = metrics.new_line_size.ceil() as i32 + 2;
         let max_char_height = (metrics.ascent - metrics.descent).ceil() as i32;
+        // The lines of the face, as GDI draws them from the font's own
+        // metrics; a face without them gets the usual places: half the
+        // descent under the baseline, a quarter of the size above it.
+        let stroke = ((px / 14.0).round() as i32).max(1);
+        let mut underline = Rule {
+            top: -((descender / 2.0).round() as i32).max(1),
+            thickness: stroke,
+        };
+        let mut strike = Rule {
+            top: (px * 0.26).round() as i32,
+            thickness: stroke,
+        };
+        if let Ok(face) = ttf_parser::Face::parse(bytes, index) {
+            let scale = px / f32::from(face.units_per_em().max(1));
+            if let Some(m) = face.underline_metrics() {
+                underline = Rule::scaled(m.position, m.thickness, scale);
+            }
+            if let Some(m) = face.strikeout_metrics() {
+                strike = Rule::scaled(m.position, m.thickness, scale);
+            }
+        }
         Ok(TrueTypeFont {
             def,
             source: source.to_string(),
@@ -598,6 +642,8 @@ impl TrueTypeFont {
             ascender,
             descender,
             max_char_height,
+            underline,
+            strike,
             glyphs: HashMap::new(),
             texts: Vec::new(),
             rtl: false,
@@ -682,105 +728,113 @@ impl TrueTypeFont {
     }
 
     /// Breaks a text (its characters) into lines for a box of `max_width`
-    /// (`CBFontTT::WrapText`): each line with its width. Negative limits
-    /// mean none.
+    /// (`CBFontTT::FormatText`, `FormatTextW`): each line with its
+    /// width. A negative height means no limit; a negative width means
+    /// no box (lines only end where the text says so), which is Luma
+    /// Engine's own convention.
+    ///
+    /// A line takes characters while the text up to them fits. `\n` ends
+    /// it. When a character does not fit, the line ends before the last
+    /// space that fitted, and that space is dropped; without one it ends
+    /// before the character. A first character that does not fit ends
+    /// the text, and so does a line that would pass `max_height`. After
+    /// a line that held a space the original skips one character more:
+    /// the space it broke at, or the line break that ended it, and then
+    /// a second line break is taken with it, so the empty line of two
+    /// line breaks in a row is dropped after a line with a space and
+    /// kept after a line without one. Texts are laid out for that, so
+    /// it is reproduced.
     pub fn wrap(&mut self, text: &str, max_width: i32, max_height: i32) -> Vec<(String, i32)> {
         let chars: Vec<char> = text.chars().collect();
         let mut lines: Vec<(String, i32)> = Vec::new();
-        let mut curr_width = 0;
-        let mut prev_char: Option<char> = None;
-        let mut prev_space_index: Option<usize> = None;
-        let mut prev_space_width = 0;
-        let mut line_start = 0;
-        let mut i = 0;
-        while i < chars.len() {
-            let ch = chars[i];
-            if ch == ' ' {
-                prev_space_index = Some(i);
-                prev_space_width = curr_width;
-            }
-            let mut char_width = 0;
-            if ch != '\n' {
-                match self.advance(prev_char, ch) {
-                    Some(advance) => {
-                        char_width = advance;
-                        prev_char = Some(ch);
-                    }
-                    None => {
-                        i += 1;
-                        continue;
-                    }
-                }
-            }
-            let line_too_long = max_width >= 0 && curr_width + char_width > max_width;
-            if line_too_long && curr_width == 0 {
+        let mut start = 0;
+        while start < chars.len() {
+            if max_height >= 0 && (lines.len() as i32 + 1) * self.line_height > max_height {
                 break;
             }
-            if ch == '\n' || i == chars.len() - 1 || line_too_long {
-                let (mut break_point, mut break_width, break_on_space);
-                match prev_space_index {
-                    Some(space) if line_too_long => {
-                        break_point = space;
-                        break_width = prev_space_width;
-                        break_on_space = true;
-                    }
-                    _ => {
-                        break_point = i;
-                        break_width = curr_width;
-                        break_on_space = ch == '\n';
-                        if i == chars.len() - 1 {
-                            break_point += 1;
-                            break_width += char_width;
-                        }
-                    }
-                }
-                if max_height >= 0 && (lines.len() as i32 + 1) * self.line_height > max_height {
+            // `taken` characters are measured; `width` is what those that
+            // fit take.
+            let (mut taken, mut width, mut over) = (0, 0, false);
+            // The last space that fitted: the characters before it and
+            // their width.
+            let mut last_space: Option<(usize, i32)> = None;
+            let mut prev: Option<char> = None;
+            while start + taken < chars.len() {
+                let ch = chars[start + taken];
+                if ch == '\n' {
                     break;
                 }
-                let line: String = chars[line_start..break_point.max(line_start)]
-                    .iter()
-                    .collect();
-                lines.push((line, break_width));
-                curr_width = 0;
-                prev_char = None;
-                prev_space_index = None;
-                if break_on_space {
-                    break_point += 1;
+                taken += 1;
+                let advance = self.advance(prev, ch);
+                let wider = width + advance.unwrap_or(0);
+                if max_width >= 0 && wider > max_width {
+                    over = true;
+                    break;
                 }
-                line_start = break_point;
-                i = break_point;
-                continue;
+                if ch == ' ' {
+                    last_space = Some((taken - 1, width));
+                }
+                if advance.is_some() {
+                    prev = Some(ch);
+                }
+                width = wider;
             }
-            curr_width += char_width;
-            i += 1;
+            if over && taken == 1 {
+                break;
+            }
+            let (mut length, line_width) = match (over, last_space) {
+                (true, Some((before, width))) => (before, width),
+                (true, None) => (taken - 1, width),
+                (false, _) => (taken, width),
+            };
+            lines.push((chars[start..start + length].iter().collect(), line_width));
+            if last_space.is_some() {
+                length += 1;
+            }
+            start += length;
+            if chars.get(start) == Some(&'\n') {
+                start += 1;
+            }
         }
         lines
     }
 
-    /// The width and height of a text in a box.
+    /// The width of a text on one line (`CBFontTT::GetTextWidth`): the
+    /// whole text, as the original gives it to GDI in one piece. A line
+    /// break counts for nothing here; what GDI makes of one depends on
+    /// the font.
+    pub fn line_width(&mut self, text: &str) -> i32 {
+        let mut prev: Option<char> = None;
+        let mut width = 0;
+        for ch in text.chars().filter(|&ch| ch != '\n') {
+            if let Some(advance) = self.advance(prev, ch) {
+                width += advance;
+                prev = Some(ch);
+            }
+        }
+        width
+    }
+
+    /// The width of a text on one line, and its height in a box of
+    /// `max_width` (`CBFontTT::GetTextWidth`, `GetTextHeight`).
     pub fn measure(&mut self, text: &str, max_width: i32) -> (i32, i32) {
         let lines = self.wrap(text, max_width, -1);
         let height = lines.len() as i32 * self.line_height;
-        let width = lines.iter().map(|l| l.1).max().unwrap_or(0);
-        (width, height)
+        (self.line_width(text), height)
     }
 
-    /// Renders a text to an image (`CBFontTT::RenderTextToTexture`):
-    /// white glyphs with their coverage as alpha, to be tinted by each
-    /// layer. Returns the image and the offset the engine draws it
-    /// higher by.
+    /// Renders a text to an image (`CBFontTT::DrawTextD3D`, the half
+    /// that draws the lines `FormatText` breaks the text into): white
+    /// glyphs with their coverage as alpha, to be tinted by each layer.
+    /// Every line has its baseline `line height - descender` under its
+    /// top, with the underline and the strike-through of the font across
+    /// its width.
     ///
     /// A negative width means no box, as for [`wrap`](Self::wrap) and
     /// for the bitmap fonts: the lines are never broken for their
     /// length, start at the left whatever the alignment, and the image
     /// is as wide as the widest of them (an editor's line).
-    pub fn render(
-        &mut self,
-        text: &str,
-        width: i32,
-        align: TextAlign,
-        max_height: i32,
-    ) -> (Image, i32) {
+    pub fn render(&mut self, text: &str, width: i32, align: TextAlign, max_height: i32) -> Image {
         let boxed = width >= 0;
         let lines = self.wrap(text, if boxed { width } else { -1 }, max_height);
         let wrapped_height = lines.len() as i32 * self.line_height;
@@ -805,17 +859,13 @@ impl TrueTypeFont {
             pixels: vec![0; (width * text_height * 4) as usize],
             has_alpha_channel: true,
         };
-        let mut pos_y = self.line_height - self.descender as i32;
-        let mut text_offset = 0;
+        let mut baseline = self.line_height - self.descender as i32;
         for (line, line_width) in &lines {
-            let mut pos_x = align.start_x(0, width, *line_width);
-            let orig_x = pos_x;
-            text_offset = 0;
-            for ch in line.chars() {
-                if let Some(glyph) = self.glyph(ch) {
-                    text_offset = text_offset.max(glyph.bearing_y());
-                }
+            if baseline - self.line_height > text_height {
+                break;
             }
+            let orig_x = align.start_x(0, width, *line_width);
+            let mut pos_x = orig_x;
             // Right-to-left text lays the line's glyphs out from the last
             // to the first: the reading order GDI gives the original
             // engine with `ETO_RTLREADING`, without a bidirectional
@@ -834,26 +884,26 @@ impl TrueTypeFont {
                 let kerning = prev.map_or(0.0, |p| self.kerning(p, ch)) as i32;
                 pos_x += kerning;
                 let gx = pos_x + metrics.xmin;
-                let gy = pos_y - bearing_y + text_offset;
+                let gy = baseline - bearing_y;
                 blit(&mut image, &coverage, metrics.width, metrics.height, gx, gy);
                 prev = Some(ch);
                 pos_x += metrics.advance_width as i32;
             }
-            if self.def.underline {
-                let y = (-self.font_underline() + self.ascender) as i32;
-                for x in orig_x..orig_x + line_width {
-                    set_pixel(&mut image, x, y);
+            let rules = [
+                (self.def.underline, self.underline),
+                (self.def.strike, self.strike),
+            ];
+            for (_, rule) in rules.iter().filter(|(drawn, _)| *drawn) {
+                let top = baseline - rule.top;
+                for y in top..top + rule.thickness {
+                    for x in orig_x..orig_x.saturating_add(*line_width) {
+                        set_pixel(&mut image, x, y);
+                    }
                 }
             }
-            pos_y += self.line_height;
+            baseline += self.line_height;
         }
-        (image, text_offset)
-    }
-
-    fn font_underline(&self) -> f32 {
-        // fontdue exposes no underline position; a line just below the
-        // baseline, as most fonts place it.
-        -(self.descender / 2.0)
+        image
     }
 
     /// Renders a game text into the cache if it is not there
@@ -889,14 +939,13 @@ impl TrueTypeFont {
             .unwrap_or(0)
             .saturating_add(1);
         let characters = self.characters(text);
-        let (image, offset) = self.render(&characters, width, align, max_height);
+        let image = self.render(&characters, width, align, max_height);
         let cached = CachedText {
             text: text.to_string(),
             width,
             align,
             max_height,
             image,
-            offset,
             texture: None,
             priority: next_priority,
             wanted: true,
@@ -987,7 +1036,7 @@ impl TrueTypeFont {
                 texture,
                 dst: Rect::new(
                     (x + layer.offset_x) as f32,
-                    (y - cached.offset + layer.offset_y) as f32,
+                    (y + layer.offset_y) as f32,
                     cached.image.width as f32,
                     cached.image.height as f32,
                 ),
@@ -1214,6 +1263,112 @@ mod tests {
         assert_eq!(font.texts.len(), MAX_FRAME_TEXTS);
     }
 
+    fn lines(font: &mut TrueTypeFont, text: &str, width: i32, height: i32) -> Vec<String> {
+        font.wrap(text, width, height)
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect()
+    }
+
+    /// `CBFontTT::FormatText`: where the lines of a text end.
+    #[test]
+    fn truetype_text_breaks_where_the_original_breaks_it() {
+        let mut font = test_ttf("", LETTERS);
+        // The last space that fitted, and the space is dropped.
+        assert_eq!(
+            font.wrap("aaa bbb ccc", 100, -1),
+            [("aaa bbb".to_string(), 70), ("ccc".to_string(), 30)]
+        );
+        // No space: before the character that does not fit.
+        assert_eq!(lines(&mut font, "abcdefgh", 35, -1), ["abc", "def", "gh"]);
+        // The character that does not fit is a space: the line still
+        // ends at the last space that fitted, not at this one.
+        assert_eq!(lines(&mut font, "aaa bbb ccc", 75, -1), ["aaa", "bbb ccc"]);
+        // ... and without an earlier space the line ends before it; the
+        // space then starts the next line, which ends before it at once.
+        assert_eq!(lines(&mut font, "aaa bbb", 35, -1), ["aaa", "", "bbb"]);
+        // Line breaks; one at the end adds no line.
+        assert_eq!(lines(&mut font, "ab\ncd", 100, -1), ["ab", "cd"]);
+        assert_eq!(lines(&mut font, "ab\n", 100, -1), ["ab"]);
+        assert_eq!(lines(&mut font, "\nab", 100, -1), ["", "ab"]);
+        // Two line breaks leave an empty line after a line without a
+        // space; after a line that held one, the second is skipped too.
+        assert_eq!(lines(&mut font, "ab\n\ncd", 100, -1), ["ab", "", "cd"]);
+        assert_eq!(lines(&mut font, "a b\n\ncd", 100, -1), ["a b", "cd"]);
+        assert_eq!(lines(&mut font, "a b\ncd", 100, -1), ["a b", "cd"]);
+        assert_eq!(lines(&mut font, "a b\n\n\ncd", 100, -1), ["a b", "", "cd"]);
+        // A first character that does not fit ends the text.
+        assert!(lines(&mut font, "abc", 5, -1).is_empty());
+        assert_eq!(
+            lines(&mut font, "ab cdefgh", 25, -1),
+            ["ab", "", "cd", "ef", "gh"]
+        );
+        // Lines that would pass the height are dropped, with the rest.
+        assert_eq!(lines(&mut font, "a\nb\nc", 100, 44), ["a", "b"]);
+        assert_eq!(lines(&mut font, "a\nb\nc", 100, 43), ["a"]);
+        assert!(lines(&mut font, "a", 100, 21).is_empty());
+        assert!(lines(&mut font, "", 100, -1).is_empty());
+        // Without a box only the text breaks lines.
+        assert_eq!(
+            lines(&mut font, "aaa bbb ccc\nd", -1, -1),
+            ["aaa bbb ccc", "d"]
+        );
+    }
+
+    /// `CBFontTT::GetTextWidth` and `GetTextHeight`.
+    #[test]
+    fn truetype_text_is_measured_on_one_line_and_by_its_lines() {
+        let mut font = Font::TrueType(Box::new(test_ttf("", LETTERS)));
+        assert_eq!(font.text_width("aaa bbb"), 70);
+        assert_eq!(font.text_width("aaa\nbbb"), 60, "the whole text");
+        assert_eq!(font.text_width(""), 0);
+        assert_eq!(font.text_height("aaa bbb ccc", 75), 44);
+        assert_eq!(font.text_height("a b\n\ncd", 100), 44);
+        assert_eq!(font.text_height("", 100), 0);
+        assert_eq!(font.line_height(), 22);
+    }
+
+    fn alpha(image: &Image, x: u32, y: u32) -> u8 {
+        image.pixels[((y * image.width + x) * 4 + 3) as usize]
+    }
+
+    /// Every line stands on its own baseline, with the font's underline
+    /// and strike-through across it (`CreateFont`'s flags).
+    #[test]
+    fn truetype_lines_are_underlined_and_struck_one_by_one() {
+        // The test face: boxes from 2 to 8 of each 10 pixels, 14 high on
+        // the baseline, 18 under the top of the line.
+        let plain = test_ttf("", LETTERS).render("ab\ncd", 100, TextAlign::Left, -1);
+        assert_eq!(plain.width, 100);
+        assert!(plain.height >= 44);
+        for top in [4, 26] {
+            assert_eq!(alpha(&plain, 5, top - 1), 0);
+            assert_eq!(alpha(&plain, 5, top), 255);
+            assert_eq!(alpha(&plain, 5, top + 13), 255);
+            assert_eq!(alpha(&plain, 5, top + 14), 0);
+        }
+        assert!((0..44).all(|y| alpha(&plain, 0, y) == 0), "no line drawn");
+        // The underline: 2 pixels under the baseline, 1 thick, as wide
+        // as the line.
+        let under = test_ttf("UNDERLINE=TRUE", LETTERS).render("ab\ncd", 100, TextAlign::Left, -1);
+        for row in [20, 42] {
+            assert_eq!(alpha(&under, 0, row), 255, "row {row}");
+            assert_eq!(alpha(&under, 19, row), 255);
+            assert_eq!(alpha(&under, 20, row), 0);
+            assert_eq!(alpha(&under, 0, row - 1), 0);
+            assert_eq!(alpha(&under, 0, row + 1), 0);
+        }
+        // The strike-through: 6 pixels above the baseline.
+        let struck = test_ttf("STRIKE=TRUE", LETTERS).render("ab\ncd", 100, TextAlign::Right, -1);
+        for row in [12, 34] {
+            assert_eq!(alpha(&struck, 80, row), 255, "row {row}");
+            assert_eq!(alpha(&struck, 99, row), 255);
+            assert_eq!(alpha(&struck, 79, row), 0);
+            assert_eq!(alpha(&struck, 80, row + 1), 0);
+        }
+        assert_eq!(alpha(&struck, 80, 20), 0, "no underline");
+    }
+
     fn system_font() -> Option<(String, Vec<u8>)> {
         SYSTEM_FONTS
             .iter()
@@ -1263,7 +1418,7 @@ mod tests {
         );
         let (w, h) = font.measure("Hello", -1);
         assert!(w > 10 && h == font.line_height);
-        let lines = font.wrap("Hello wide world", w + 2, -1);
+        let lines = font.wrap("Hello wide world", w * 3 / 2, -1);
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert_eq!(lines[0].0, "Hello");
         assert_eq!(lines[1].0, "wide");
@@ -1271,9 +1426,8 @@ mod tests {
         let lines = font.wrap("a\nb", 1000, -1);
         assert_eq!(lines.len(), 2);
         assert_eq!(font.wrap("a\nb\nc", 1000, font.line_height).len(), 1);
-        let (image, offset) = font.render("Hi", 100, TextAlign::Center, -1);
+        let image = font.render("Hi", 100, TextAlign::Center, -1);
         assert_eq!(image.width, 100);
-        assert!(offset > 0);
         assert!(image.pixels.chunks(4).any(|p| p[3] > 128), "some ink");
         font.prepare("Hi", 100, TextAlign::Center, -1);
         font.prepare("Hi", 100, TextAlign::Center, -1);
@@ -1281,14 +1435,14 @@ mod tests {
 
         // Right-to-left lays the glyphs out from the last: "ab" comes out
         // as "ba" does left to right; the cache goes with the direction.
-        let (ltr, _) = font.render("ba", 100, TextAlign::Left, -1);
+        let ltr = font.render("ba", 100, TextAlign::Left, -1);
         font.set_rtl(true);
         assert!(font.texts.is_empty());
-        let (rtl, _) = font.render("ab", 100, TextAlign::Left, -1);
+        let rtl = font.render("ab", 100, TextAlign::Left, -1);
         assert_eq!(rtl.pixels, ltr.pixels);
-        let (same, _) = font.render("ab", 100, TextAlign::Left, -1);
+        let same = font.render("ab", 100, TextAlign::Left, -1);
         font.set_rtl(false);
-        let (back, _) = font.render("ab", 100, TextAlign::Left, -1);
+        let back = font.render("ab", 100, TextAlign::Left, -1);
         assert_eq!(same.pixels, rtl.pixels);
         assert_ne!(back.pixels, rtl.pixels);
     }
@@ -1310,7 +1464,7 @@ mod tests {
         let text = "Lab with axe, a long name no box holds";
         let (line_width, height) = font.measure(text, -1);
         assert_eq!(height, font.line_height, "one line");
-        let (image, _) = font.render(text, -1, TextAlign::Center, -1);
+        let image = font.render(text, -1, TextAlign::Center, -1);
         assert!(
             image.width as i32 >= line_width,
             "{} < {line_width}",
@@ -1334,7 +1488,7 @@ mod tests {
             "{last_ink}"
         );
         assert!((first_ink as i32) < font.line_height, "{first_ink}");
-        let (left, _) = font.render(text, -1, TextAlign::Left, -1);
+        let left = font.render(text, -1, TextAlign::Left, -1);
         assert_eq!(left.pixels, image.pixels);
 
         // What is prepared is what is drawn: same arguments, same image.
@@ -1348,7 +1502,7 @@ mod tests {
         // A line breaks only where the text says so, and an absurd
         // length does not make an absurd image.
         assert_eq!(
-            font.render("a\nb", -1, TextAlign::Left, -1).0.height as i32,
+            font.render("a\nb", -1, TextAlign::Left, -1).height as i32,
             {
                 let lines = 2;
                 (lines * font.line_height)
@@ -1356,10 +1510,10 @@ mod tests {
             }
         );
         let endless = "wide ".repeat(4000);
-        let (image, _) = font.render(&endless, -1, TextAlign::Left, -1);
+        let image = font.render(&endless, -1, TextAlign::Left, -1);
         assert_eq!(image.width as i32, MAX_UNBOUNDED_WIDTH);
         // A box still wraps and keeps its width.
-        let (image, _) = font.render(text, 60, TextAlign::Left, -1);
+        let image = font.render(text, 60, TextAlign::Left, -1);
         assert_eq!(image.width, 60);
         assert!(image.height as i32 >= 2 * font.line_height);
     }
@@ -1560,8 +1714,8 @@ mod tests {
         );
         assert_eq!(imitated.line_height, regular.line_height);
         let ink = |image: &Image| -> u64 { image.pixels.chunks(4).map(|p| u64::from(p[3])).sum() };
-        let (thin, _) = regular.render(text, -1, TextAlign::Left, -1);
-        let (thick, _) = imitated.render(text, -1, TextAlign::Left, -1);
+        let thin = regular.render(text, -1, TextAlign::Left, -1);
+        let thick = imitated.render(text, -1, TextAlign::Left, -1);
         assert!(ink(&thick) > ink(&thin) * 11 / 10, "more ink when bold");
     }
 
