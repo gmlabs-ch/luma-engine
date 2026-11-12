@@ -194,7 +194,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `C3DMaterial::~C3DMaterial` | replaced | Rust ownership. |
 | `C3DMaterial::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
 | `C3DMaterial::RestoreDeviceObjects` | n/a | Direct3D device loss. |
-| `C3DMaterial::SetTexture` | partial | `model.rs` `load_material` (the material's name is the texture file's base name) and `luma-adventure/src/draw3d.rs` `ensure_texture` (default colour key). Differences: the original loads the texture as an ordinary surface with a single mip level, so the `MIPFILTER LINEAR` of `Setup3D` has nothing to filter; Luma builds a mipmap chain (`Renderer::mesh_texture`) and samples trilinearly, which makes distant textures softer than in the original (`docs/rendering.md` states the opposite about the original). A missing file becomes `invalid.bmp` in the original, untextured in Luma. |
+| `C3DMaterial::SetTexture` | partial | deliberate: `model.rs` `load_material` (the material's name is the texture file's base name) and `luma-adventure/src/draw3d.rs` `ensure_texture` (default colour key): the texture is uploaded with ONE mip level as the original asks D3DX for (`MipLevels = 1`; `docs/rendering.md` corrected). A missing file is `invalid.bmp` in the original; Luma draws the material untextured (opaque). |
 | `C3DMaterial::SetSprite` | done | `draw3d.rs` `ScriptTexture::Sprite`, `Still`: the sprite replaces the texture; the material keeps its name. |
 | `C3DMaterial::SetTheora` | done | `draw3d.rs` `ScriptTexture::Video`: the video replaces the texture; the material keeps its name. |
 | `C3DMaterial::SetEffect` | todo | Attaches or clears an effect and its parameters on the material; see `C3DEffect::CreateFromFile`. |
@@ -282,7 +282,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `C3DShadowGen::CreateFloor` | replaced | The 500 by 500 floor quad that receives the projected shadow texture has no counterpart: Luma flattens the model's triangles onto the plane (see `Render`). |
 | `C3DShadowGen::CreateSurfaces` | replaced | The shadow render-target texture and its depth buffer are not needed by Luma's flat shadow (see `Render`). |
 | `C3DShadowGen::Render` | partial | `draw3d.rs` `shadow_items`, flat branch: simple shadow when the effective type is at most simple; otherwise the model seen from the shadow light in the shadow colour on the plane of the actor's feet. Luma projects the posed triangles onto that plane with `shadow_matrix` and uses the stencil so that overlaps darken once; the original renders the model from the light (45 degree cone, near 1, far 10000) into a 512 by 512 texture and projects it on a 500 by 500 floor quad centred on the actor. Differences: Luma's edge is sharp where the original's is the bilinear texture; the original clips the shadow to the light cone and to the floor quad; the original draws the `SHADOW_MODEL` when the actor has one (`RenderModel`), Luma the main model. The colour is the shadow colour squared with the shadow alpha, as documented in the code. |
-| `C3DShadowGen::RenderSimple` | partial | `draw3d.rs` `shadow_items`, simple branch: the quad scaled by `ShadowSize * Scale3D`, turned by the actor's angle, at its position, the actor's shadow image or the game's, no depth writes. Differences: without any shadow image the original draws nothing, Luma draws a generated round shadow (`default_shadow_image`); the original draws the quad lit with whatever material was last set, Luma unlit with the image's own colours. |
+| `C3DShadowGen::RenderSimple` | partial | deliberate: `draw3d.rs` `shadow_items`, simple branch: the quad scaled by `ShadowSize * Scale3D`, turned by the actor's angle, at its position, the actor's shadow image or the game's, no depth writes; without any shadow image nothing is drawn, as in the original. Luma draws the quad unlit with the image's own colours where the original lights it with whatever material was last set. |
 | `C3DShadowGen::SetAdjustedProjectionMatrix` | replaced | Projection of the light's view for the shadow texture; Luma's `shadow_matrix` projects from the light point instead. |
 | `C3DShadowGen::SetFrustumMatrix` | replaced | See `SetAdjustedProjectionMatrix`. |
 | `C3DShadowGen::SetColorFactorShader` | replaced | Draws the model in one flat colour into the shadow texture; Luma's flat shadow uses an unlit `MeshMaterial` of the shadow colour. |
@@ -602,7 +602,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CSkinMeshHelper::GetNumBones` | replaced | `Mesh::bones.len()`, `Mesh::is_skinned`. |
 | `CSkinMeshHelper::GetOriginalMesh` | replaced | The loaded vertices stay in `Mesh::vertices`; the posed copy is `SkinnedMesh::vertices` (`luma-3d/src/animation.rs`). |
 | `CSkinMeshHelper::GenerateSkinnedMesh` | replaced | Clone of the mesh plus `GenerateAdjacency`: `AnimatedModel::new` clones the vertices, `luma-adventure/src/draw3d.rs` `Adjacency::of` builds the face adjacency (welding equal positions) for the shadow volumes. |
-| `CSkinMeshHelper::UpdateSkinnedMesh` | partial | `luma-3d/src/animation.rs` `skin_mesh`: positions and normals blended by the bone weights with `offset * combined`. D3DX software skinning is closed source, so two points are inferred: vertices without any weight keep their loaded position in Luma, and normals are transformed by the bone matrix itself (D3DX uses the inverse transpose, equal for rotations and uniform scales) then normalised. |
+| `CSkinMeshHelper::UpdateSkinnedMesh` | done | `luma-3d/src/animation.rs` `skin_mesh`: positions and normals blended by the bone weights with `offset * combined`. D3DX software skinning is closed source; two points are inferred and named in `docs/formats/xfile.md` section 3: a vertex without any weight keeps its loaded position, and the normals are transformed by the bone matrix itself (the engine passes no inverse transposes) then normalised. |
 | `CSkinMeshHelper::GetBoneName` | replaced | `Bone::frame_name`. |
 | `CSkinMeshHelper::GetBoneOffsetMatrix` | replaced | `Bone::offset`. |
 | `CSkinMeshHelper::CSkinMeshHelper #2` | replaced | Direct3D 8 variant of the same wrapper; see the first row. |
@@ -611,7 +611,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CSkinMeshHelper::GetNumBones #2` | replaced | See `GetNumBones`. |
 | `CSkinMeshHelper::GetOriginalMesh #2` | replaced | See `GetOriginalMesh`. |
 | `CSkinMeshHelper::GenerateSkinnedMesh #2` | replaced | See `GenerateSkinnedMesh`. |
-| `CSkinMeshHelper::UpdateSkinnedMesh #2` | partial | See `UpdateSkinnedMesh`. |
+| `CSkinMeshHelper::UpdateSkinnedMesh #2` | done | Direct3D 8 variant; see `UpdateSkinnedMesh`. |
 | `CSkinMeshHelper::GetBoneName #2` | replaced | See `GetBoneName`. |
 | `CSkinMeshHelper::GetBoneOffsetMatrix #2` | replaced | See `GetBoneOffsetMatrix`. |
 
@@ -635,8 +635,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXAnimation::CXAnimation` | done | `luma-3d/src/model.rs` `Animation::default`: no target, no keys. |
 | `CXAnimation::~CXAnimation` | replaced | Rust ownership. |
 | `CXAnimation::FindBone` | done | `model.rs` `Model::find_bones`: a non-empty target name is looked up among the frames by exact name, first in depth-first order. |
-| `CXAnimation::Load` | partial | `model.rs` `load_animation`: a frame reference names the target, `AnimationKey` and `AnimationOptions` children are read. Difference: Luma also accepts a reference it cannot resolve as a frame name, and keeps the last of several references; the original's duplicate check tests `m_TargetFrame`, which is still null at load, so it never fires either. |
-| `CXAnimation::Load #2` | partial | Direct3D 8 variant of `Load`; same remark. |
+| `CXAnimation::Load` | done | `luma-3d/src/model.rs` `load_animation`: a reference to a frame names the target (the last one wins: the original's duplicate check tests `m_TargetFrame`, still null at load), `AnimationKey` and `AnimationOptions` children are read, a failing key fails the animation and its set. Inferred (`docs/formats/xfile.md` section 3): a reference to an object the file does not define is taken as a frame name, which a merged file of animations alone needs. |
+| `CXAnimation::Load #2` | done | Direct3D 8 variant of `Load`; same code in Luma. |
 | `CXAnimation::LoadAnimationOptionData` | done | `model.rs` `load_animation`: a non-zero `openclosed` sets the set's `looping`; the position quality is ignored. |
 | `CXAnimation::LoadAnimationKeyData` | done | `model.rs` `load_animation_key`: types 0 rotation (w, x, y, z), 1 scale, 2 position, 4 matrix decomposed with `decompose_simple` and the quaternion's vector part negated; a second track of a kind is an error, an unknown type is ignored. Luma also fails on a key whose value count is wrong, which the original reads blindly. |
 | `CXAnimation::Update` | done | `model.rs` `Animation::sample`, `key_pair`: first key later than the time and the one before, linear for scale and position, slerp of the two negated quaternions, both indices 0 when no key is later; nothing is written without a target frame or without any track. |
@@ -691,17 +691,17 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXFrameNode::GetOriginalMatrix` | done | `model.rs` `Frame::transform`. |
 | `CXFrameNode::SetTransformationMatrix` | n/a | Only used by the commented-out `tiny.x` hack in `CXModel::Reset`. |
 | `CXFrameNode::SetTransformation` | done | `animation.rs` `FrameSlots::set`. |
-| `CXFrameNode::LoadFromXData` | partial | `model.rs` `Model::load_object`: `Mesh`, `FrameTransformMatrix`, `AnimationSet`, loose `Animation`, child `Frame` and `AnimTicksPerSecond`, unknown objects ignored. Differences in error handling: the original keeps a frame only when its last child loaded (a failure of an earlier child is ignored) and drops a `Frame` that has no child at all, returning the failure to its parent; Luma keeps empty frames and fails the whole file on any child error. |
+| `CXFrameNode::LoadFromXData` | done | `luma-3d/src/model.rs` `Model::load_object`: `Mesh`, `FrameTransformMatrix`, `AnimationSet`, loose `Animation`, child `Frame` and `AnimTicksPerSecond`, unknown objects ignored. A frame answers for its last object only: an earlier failure is ignored, a frame whose last object fails or that has no object is dropped with what is under it and fails in turn (`Error::EmptyFrame`); at the top level a failure fails the file. Inferred (`docs/formats/xfile.md` section 2): a data reference among a frame's objects counts as loaded and is not followed. |
 | `CXFrameNode::MergeFromXData` | done | `model.rs` `Model::merge_object`: animation sets and loose animations, descending into frames, nothing else. |
-| `CXFrameNode::LoadFromXData #2` | partial | Direct3D 8 variant of `LoadFromXData`; same remark. |
+| `CXFrameNode::LoadFromXData #2` | done | Direct3D 8 variant of `LoadFromXData`; same code in Luma (that build skips references and fails a frame whose last object is one; Luma counts them as loaded). |
 | `CXFrameNode::MergeFromXData #2` | done | Direct3D 8 variant of `MergeFromXData`. |
-| `CXFrameNode::FindBones` | partial | `model.rs` `Model::find_bones` resolves mesh bones in the model's own frames. The original can resolve them in another model's frames (`ParentModel`, used for `SHADOW_MODEL`); see `CXModel::FindBones`. |
+| `CXFrameNode::FindBones` | done | `luma-3d/src/model.rs` `Model::find_bones`: the bones of every mesh, looked up in the model's own frames or, with a parent, in the parent's (`Model::parse_with_parent`). `luma-adventure` uses it for `SHADOW_MODEL`. |
 | `CXFrameNode::FindFrame` | done | `model.rs` `Model::find_frame`: exact name, first in depth-first file order, never the root. |
 | `CXFrameNode::UpdateMatrices` | done | `animation.rs` `FrameSlots::local_matrix` and `AnimatedModel::pose`: scale, rotation, translation; both slots blended by slot 0's factor; slots cleared; combined is local times parent. |
 | `CXFrameNode::UpdateMeshes` | done | `animation.rs` `AnimatedModel::pose` skins every mesh. |
 | `CXFrameNode::ResetMatrices` | done | `animation.rs` `pose`: a frame without a pose takes its loaded matrix. |
 | `CXFrameNode::UpdateShadowVol` | done | `luma-adventure/src/draw3d.rs` `shadow_items` adds every mesh of the model. |
-| `CXFrameNode::Render` | partial | `draw3d.rs` `model_items` draws the meshes in load order (`Model::meshes`). The original draws a frame's own meshes before its child frames; a mesh written after a child frame in the file is drawn later in Luma. Only matters for blended meshes that overlap. |
+| `CXFrameNode::Render` | done | `luma-3d/src/model.rs` `Model::order_meshes`: `Model::meshes` is in the original's order, a frame's own meshes before its child frames', which `draw3d.rs` `model_items` draws in list order. |
 | `CXFrameNode::PickPoly` | done | `animation.rs` `AnimatedModel::pick`: first triangle hit, meshes in order. |
 | `CXFrameNode::GetBoundingBox` | done | `animation.rs` `pose`: the model's box starts at the origin and grows around the meshes. |
 | `CXFrameNode::HasChildren` | done | `model.rs` `Model::from_xfile` fails with `NoFrame` when the root has no child frame. |
@@ -718,12 +718,12 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CXMesh::CXMesh` | done | `model.rs` `Mesh`; the box starts empty. |
 | `CXMesh::~CXMesh` | replaced | Rust ownership. |
-| `CXMesh::LoadFromXData` | partial | `model.rs` `load_mesh`, `load_material`: positions, faces (triangulated), normals, texture coordinates, material list, skin weights; a mesh without materials gets grey 0.5; ambient is the diffuse colour; the texture path is the model's directory plus the file name. The original uses `D3DXLoadSkinMeshFromXof`, so Luma's handling of vertex duplication, missing normals and polygon triangulation is a reimplementation (`docs/formats/xfile.md`). Known difference: a missing texture file falls back to `invalid.bmp` in the original (`CBSurfaceStorage::AddSurface`), Luma draws the material untextured. |
+| `CXMesh::LoadFromXData` | done | `luma-3d/src/model.rs` `load_mesh`, `load_material`: positions, faces (triangulated), normals, texture coordinates, material list, skin weights; a mesh without materials gets grey 0.5; ambient is the diffuse colour; the texture path is the model's directory plus the file name; a mesh that fails is handled by `CXFrameNode::LoadFromXData`'s rule. The original calls `D3DXLoadSkinMeshFromXof` (closed source): vertex duplication, missing normals, triangulation and what fails a mesh are inferred from the public format and listed in `docs/formats/xfile.md` section 3. The `invalid.bmp` placeholder of a missing texture is the surface loader's and is tracked at `CBSurfaceStorage::AddSurface`. |
 | `CXMesh::GenerateMesh` | replaced | Clones the mesh and computes adjacency: `AnimatedModel::new` and `draw3d.rs` `Adjacency::of`. |
 | `CXMesh::FindBones` | done | `model.rs` `Model::find_bones`; an unknown bone is skinned with the identity where the original logs `Warning: Cannot find frame` and keeps a dangling matrix pointer. |
-| `CXMesh::Update` | partial | `animation.rs` `skin_mesh`. Skinned meshes: bone matrix is `offset * combined`, box from the posed positions. Static meshes: the original moves only the positions by the frame's combined matrix and leaves the normals as loaded; Luma also turns the normals by that matrix, so a mesh without bones inside a rotated frame is lit differently. |
+| `CXMesh::Update` | done | `luma-3d/src/animation.rs` `skin_mesh`. Skinned meshes: bone matrix is `offset * combined`, box from the posed positions. Meshes without bones: the positions are moved by the frame's combined matrix and the normals stay as loaded. With a `ParentModel` the bone matrices are the parent's: `ShadowModel::update`. |
 | `CXMesh::UpdateShadowVol` | done | `draw3d.rs` `add_shadow_volume` with the posed positions and the adjacency. |
-| `CXMesh::Render` | partial | `draw3d.rs` `model_items`: one draw per material range (`sorted_indices`), material colours, the material's texture or none. Differences: (1) no effect path; (2) with no texture Direct3D yields alpha 1 (the texture argument reads opaque white and the alpha operation is `SELECTARG1`), Luma uses the material's diffuse alpha, so an untextured material with alpha below 1 is translucent, and discarded below 8/255, where the original draws it opaque; (3) the material's ambient colour is the diffuse one in both, specular plays no role. |
+| `CXMesh::Render` | done | `luma-adventure/src/draw3d.rs` `model_items`: one draw per material range (`sorted_indices`), material colours, the material's texture or none; an untextured material is drawn opaque (alpha 1, as Direct3D yields without a texture), the ambient colour is the diffuse one, specular plays no role. The effect path is excluded with `C3DEffect`. |
 | `CXMesh::PickPoly` | done | `animation.rs` `AnimatedModel::pick` with `math::intersect_triangle`, NaN vertices skipped. |
 | `CXMesh::SetMaterialSprite` | partial | `draw3d.rs` `override_texture`: the sprite's current frame, first sub-frame, textures the material. Difference: when the sprite's frame has no usable image Luma falls back to the material's own texture; the original draws the material untextured. |
 | `CXMesh::SetMaterialTheora` | done | `draw3d.rs` `ScriptTexture::Video`: the video frame textures the material. |
@@ -739,15 +739,15 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXModel::CXModel` | done | `animation.rs` `AnimatedModel::new` and `model.rs` `Model::from_xfile`: 10 channels, 4800 ticks per second, empty box and rectangle. |
 | `CXModel::~CXModel` | replaced | Rust ownership. |
 | `CXModel::Cleanup` | replaced | Rust ownership; `Actor3d::reload` rebuilds the model and keeps the merged file list unless the model itself changes, as `Cleanup(false)` does. |
-| `CXModel::LoadFromFile` | partial | `model.rs` `Model::parse` and `luma-adventure/src/actor3d.rs` `load_model`: top-level objects under a root frame, failure without a top-level frame, bones resolved, channels created. Missing: the `ParentModel` argument, with which the bones are resolved in another model's frames; the original uses it for the actor's `SHADOW_MODEL`. Luma parses `SHADOW_MODEL` (`shadow_model_file`) and never loads it: shadows are cast from the main model. |
+| `CXModel::LoadFromFile` | done | `luma-3d/src/model.rs` `Model::parse` / `from_xfile`: top-level objects under a root frame, the first failing one fails the file, failure without a top-level frame, bones looked up; the channels are `AnimatedModel::new`. With a `ParentModel`: `Model::parse_with_parent` (bones and animation targets looked up in the parent's frames) and `luma-3d/src/animation.rs` `ShadowModel` (posed with the parent's combined matrices); `luma-adventure` uses it for `SHADOW_MODEL`. |
 | `CXModel::MergeFromFile` | done | `model.rs` `Model::merge_animations` and `actor3d.rs` `merge_into`, `merge_anims`: sets appended, bones of the new sets resolved, the file remembered once for saved games (`merged_files`). |
 | `CXModel::LoadAnimationSet` | done | `model.rs` `load_animation_set`: an unnamed set takes the file's base name. |
 | `CXModel::LoadAnimation` | done | `model.rs` `load_loose_animation`: an animation outside a set becomes a set named after the file. |
-| `CXModel::LoadFromFile #2` | partial | Direct3D 8 variant of `LoadFromFile`; same remark. |
+| `CXModel::LoadFromFile #2` | done | Direct3D 8 variant of `LoadFromFile`; same code in Luma. |
 | `CXModel::MergeFromFile #2` | done | Direct3D 8 variant of `MergeFromFile`. |
 | `CXModel::LoadAnimationSet #2` | done | Direct3D 8 variant of `LoadAnimationSet`. |
 | `CXModel::LoadAnimation #2` | done | Direct3D 8 variant of `LoadAnimation`. |
-| `CXModel::FindBones` | partial | `model.rs` `Model::find_bones`. The `ParentModel` branch (mesh bones and animation targets looked up in the parent model's root frame) is missing; see `LoadFromFile`. |
+| `CXModel::FindBones` | done | `luma-3d/src/model.rs` `Model::find_bones`: mesh bones (not for a merge) and the targets of every animation set, in the model's root frame or in the parent model's (`Model::parse_with_parent`). `luma-adventure` uses the parent form for `SHADOW_MODEL`. |
 | `CXModel::LoadName` | replaced | `xfile.rs` `DataObject::name`. |
 | `CXModel::LoadName #2` | replaced | `xfile.rs` `DataObject::name`; an unnamed object reads as empty. |
 | `CXModel::Update` | done | `animation.rs` `AnimatedModel::update`: rest pose, channels 0 to 9 in order (a later one overwrites the frames it animates), matrices, meshes. |
@@ -757,7 +757,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXModel::Reset` | done | `animation.rs` `pose` starts every frame from its loaded matrix. |
 | `CXModel::IsAnimPending` | done | `animation.rs` `AnimatedModel::is_playing`; an out-of-range channel reads false where the original indexes out of bounds. |
 | `CXModel::IsAnimPending #2` | done | `animation.rs` `AnimatedModel::is_playing_on_any_channel`. |
-| `CXModel::UpdateShadowVol` | partial | `draw3d.rs` `shadow_items` (stencil branch). The original builds the volume from `m_ShadowModel` when the actor has one; Luma always uses the main model (see `LoadFromFile`). |
+| `CXModel::UpdateShadowVol` | done | `draw3d.rs` `shadow_items` (stencil branch) builds the volume from `ModelDraw::casters`: the actor's `SHADOW_MODEL` (`luma_3d::ShadowModel`, bones looked up in the main model's frames) when it has one, else the main model. |
 | `CXModel::Render` | partial | `draw3d.rs` `model_items`: culling only when `DrawBackfaces` is false, vertex colours ignored. The pick matrices and offsets are not stored: Luma picks with the current projection (`Actor3d::is_transparent_at`). See `CXMesh::Render` for the alpha difference and `CXFrameNode::Render` for the order. |
 | `CXModel::GetBoneMatrix` | done | `animation.rs` `AnimatedModel::bone_matrix`. |
 | `CXModel::GetRootFrame` | replaced | `Model::frames[ROOT]`. |
@@ -765,7 +765,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXModel::UpdateBoundingRect` | done | `actor3d.rs` `project_box`, `update_bounding_rect`: the eight corners of the box (which contains the origin) projected to pixels, in scene coordinates. |
 | `CXModel::UpdateRect` | done | `actor3d.rs` `project_box` min and max of the truncated coordinates. |
 | `CXModel::GetAnimationSetByName` | done | `model.rs` `Model::animation_set`: first match without case. |
-| `CXModel::ParseAnim` | partial | `luma-3d/src/actor3d.rs` `AnimationDef::from_node`, `apply`. Differences: with several `NAME` keys in one block the original attaches each `EVENT` to the set named so far, Luma attaches all to the last name; an unknown set is logged by the original at the `NAME` key (`Error: Animation '...' cannot be found in the model.`), Luma returns the name for the caller to log (check the adventure table for the message). |
+| `CXModel::ParseAnim` | done | `luma-3d/src/actor3d.rs` `AnimationDef::from_node` (keys `NAME`, `LOOPING`, `EVENT` with the original's table; an unknown key stops the block) and `AnimationDef::apply_to`: each `EVENT` goes to the set of the `NAME` read so far, an unknown set is logged at its `NAME`, an `EVENT` before any `NAME` is logged and dropped, the last `LOOPING` goes to the set of the last `NAME` unless the block stopped on an error; returns the log lines and the result. `ParseEvent` is `AnimationEventDef::from_node` (its failure is ignored by `ParseAnim`). |
 | `CXModel::ParseAnim NAME` | done | `AnimationDef::from_node`: names the set, looked up without case. |
 | `CXModel::ParseAnim LOOPING` | done | `AnimationDef::apply`: applied only when the key is present. |
 | `CXModel::ParseAnim EVENT` | done | `AnimationDef::from_node`: ignored before `NAME` (the original logs `NAME filed must precede any EVENT fields`), added with `add_event`. |
@@ -782,4 +782,4 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXModel::Persist` | partial | `luma-adventure/src/actor3d.rs` `ModelSlot` (animation state, channels), `merged_files`, `materials`; the model is reloaded from its file and merged files. Not saved: effect files and parameters (no effects), and the shadow model. The box, rectangle and pick matrices are recomputed. |
 | `CXModel::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
 | `CXModel::RestoreDeviceObjects` | n/a | Direct3D device loss. |
-| `CXModel::UnloadAnimation` | partial | `animation.rs` `AnimatedModel::remove_animation_set` removes the first set of that name and frees the channels playing it. The original removes every set of that name that is not directly after another removed one (its loop skips an index after each removal). |
+| `CXModel::UnloadAnimation` | done | `luma-3d/src/model.rs` `Model::animation_sets_to_unload` / `remove_animation_set` and `animation.rs` `AnimatedModel::remove_animation_set` (the channels playing a removed set drop it). The original's loop advances its index once more after each removal, so the two sets that follow a removed one are not examined; reproduced, since which sets remain is observable. |

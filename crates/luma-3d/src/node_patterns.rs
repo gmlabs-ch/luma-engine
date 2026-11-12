@@ -5,15 +5,29 @@
 //! with a `GEOMETRY` root block of `NODE` blocks, each a name pattern and
 //! a role. After the file's nodes come three **built-in** nodes (`walk_*`,
 //! `blk_*`, `wpt_*`); a mesh takes the role of the first node whose pattern
-//! matches its name, and a mesh matching nothing is dropped. The format is
+//! matches its name, and a mesh matching nothing is dropped. A file that
+//! stops on an error keeps the nodes read before it. The format is
 //! described in `docs/formats/geometry.md`.
 //!
 //! Written with reference to the MIT-licensed Wintermute Engine 1.x sources
 //! (`AdGeomExt.cpp`, `AdGeomExtNode.cpp`, `utils.cpp`, Copyright (c)
 //! 2003-2013 Jan Nedoma). See `NOTICE` at the root of the repository.
 
-use luma_formats::def::{Document, Node, Nodes};
+use luma_formats::def::{Document, Node, keys};
 use luma_formats::{Error, Result};
+
+/// The keys of `CAdGeomExt::LoadBuffer`, in the order of its table.
+const GEOMETRY_KEYS: &[&str] = &["GEOMETRY", "NODE"];
+
+/// The keys of `CAdGeomExtNode::LoadBuffer`, in the order of its table.
+const NODE_KEYS: &[&str] = &[
+    "NODE",
+    "NAME",
+    "WALKPLANE",
+    "BLOCKED",
+    "WAYPOINT",
+    "RECEIVE_SHADOWS",
+];
 
 /// The role of a mesh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,38 +98,84 @@ impl NodePatterns {
             .push(NodePattern::new("wpt_*", NodeKind::Waypoint, false));
     }
 
-    /// Parses a `.geometry` file and appends the built-in nodes after its
-    /// own. Fails on a syntax error, a missing `GEOMETRY` root or a key the
-    /// original does not know (its parser stops on one), in which case the
-    /// original falls back to the built-in nodes alone, as [`Self::load`]
-    /// does.
-    pub fn parse(bytes: &[u8]) -> Result<NodePatterns> {
-        Self::from_document(&Document::parse(bytes)?)
+    /// Reads a `.geometry` file as the original does
+    /// (`CAdGeomExt::LoadBuffer`, then
+    /// `CAdSceneGeometry::GetGeometryExtension`) and returns the node
+    /// list a geometry gets from it, with the error that ended the
+    /// reading when there is one.
+    ///
+    /// The first statement must be the `GEOMETRY` block. Its `NODE`
+    /// blocks are read in order; one that fails (a key a node does not
+    /// know) is left out alone, since the error code it sets is
+    /// overwritten when the next statement is read. A `GEOMETRY` key
+    /// inside the block is ignored. Any other key stops the reading with
+    /// an error. In every case the built-in nodes come after the nodes
+    /// read: the original appends them itself when the file loads, and
+    /// its caller does when it fails, without dropping what was read.
+    pub fn read(bytes: &[u8]) -> (NodePatterns, Option<Error>) {
+        match Document::parse(bytes) {
+            Ok(doc) => Self::read_document(&doc),
+            Err(err) => (Self::standard(), Some(err.into())),
+        }
     }
 
-    /// Builds the list from a parsed document with a `GEOMETRY` root.
-    pub fn from_document(doc: &Document) -> Result<NodePatterns> {
-        let root = doc.get("GEOMETRY").ok_or_else(|| Error::Invalid {
-            reason: "'GEOMETRY' keyword expected".into(),
-        })?;
+    /// [`Self::read`] for a parsed document.
+    pub fn read_document(doc: &Document) -> (NodePatterns, Option<Error>) {
         let mut patterns = NodePatterns::default();
-        for node in root.nodes() {
-            if node.key.eq_ignore_ascii_case("NODE") {
-                patterns.nodes.push(NodePattern::from_node(node)?);
-            } else {
-                return Err(unknown_key(node));
+        let mut error = None;
+        match doc.root("GEOMETRY") {
+            None => {
+                error = Some(Error::Invalid {
+                    reason: "'GEOMETRY' keyword expected".into(),
+                });
+            }
+            Some(root) => {
+                for item in keys(root, GEOMETRY_KEYS, "geometry description") {
+                    match item {
+                        Ok(("NODE", node)) => {
+                            patterns.nodes.extend(NodePattern::from_node(node).ok());
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            error = Some(err.into());
+                            break;
+                        }
+                    }
+                }
             }
         }
         patterns.add_standard_nodes();
-        Ok(patterns)
+        (patterns, error)
     }
 
-    /// The list for a geometry: the parsed sidecar when it exists and
-    /// loads, otherwise the built-in nodes alone.
+    /// Parses a `.geometry` file: the nodes of [`Self::read`] when the
+    /// original's loader succeeds, its error otherwise (a syntax error, a
+    /// first statement other than `GEOMETRY`, an unknown key in the root
+    /// block). A geometry is classified with the nodes read even then:
+    /// see [`Self::load`].
+    pub fn parse(bytes: &[u8]) -> Result<NodePatterns> {
+        match Self::read(bytes) {
+            (patterns, None) => Ok(patterns),
+            (_, Some(err)) => Err(err),
+        }
+    }
+
+    /// [`Self::parse`] for a parsed document.
+    pub fn from_document(doc: &Document) -> Result<NodePatterns> {
+        match Self::read_document(doc) {
+            (patterns, None) => Ok(patterns),
+            (_, Some(err)) => Err(err),
+        }
+    }
+
+    /// The list for a geometry: the nodes of the sidecar when it exists,
+    /// as far as it could be read ([`Self::read`]), then the built-in
+    /// nodes; without a sidecar the built-in nodes alone.
     pub fn load(sidecar: Option<&[u8]>) -> NodePatterns {
-        sidecar
-            .and_then(|bytes| Self::parse(bytes).ok())
-            .unwrap_or_else(Self::standard)
+        match sidecar {
+            Some(bytes) => Self::read(bytes).0,
+            None => Self::standard(),
+        }
     }
 
     /// The first node whose pattern matches a mesh name, `None` when the
@@ -126,45 +186,28 @@ impl NodePatterns {
 }
 
 impl NodePattern {
-    /// Builds a node from a `NODE` block. Each role key that is `TRUE`
-    /// sets the role, so the last true one wins; none means generic. A
-    /// node without `NAME` has an empty pattern, which only matches an
-    /// empty name (the original would dereference a null pattern).
+    /// Builds a node from a `NODE` block (`CAdGeomExtNode::LoadBuffer`).
+    /// Each role key that is `TRUE` sets the role, so the last true one
+    /// wins; none means generic. `RECEIVE_SHADOWS` with an empty value
+    /// keeps the flag. A `NODE` key inside the block is ignored; any
+    /// other key fails the node. A node without `NAME` has an empty
+    /// pattern, which only matches an empty name (the original would
+    /// dereference a null pattern).
     pub fn from_node(node: &Node) -> Result<NodePattern> {
         let mut pattern = NodePattern::new("", NodeKind::Generic, false);
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "NAME" => pattern.pattern = child.as_str().unwrap_or("").to_string(),
-                "RECEIVE_SHADOWS" => pattern.receive_shadows = child.as_bool().unwrap_or(false),
-                "WALKPLANE" => {
-                    if child.as_bool().unwrap_or(false) {
-                        pattern.kind = NodeKind::Walkplane;
-                    }
-                }
-                "BLOCKED" => {
-                    if child.as_bool().unwrap_or(false) {
-                        pattern.kind = NodeKind::Blocked;
-                    }
-                }
-                "WAYPOINT" => {
-                    if child.as_bool().unwrap_or(false) {
-                        pattern.kind = NodeKind::Waypoint;
-                    }
-                }
-                "NODE" => {}
-                _ => return Err(unknown_key(child)),
+        for item in keys(node, NODE_KEYS, "geometry description") {
+            let (key, child) = item?;
+            let is_true = || child.as_bool() == Some(true);
+            match key {
+                "NAME" => pattern.pattern = child.text(),
+                "RECEIVE_SHADOWS" => child.read_bool(&mut pattern.receive_shadows),
+                "WALKPLANE" if is_true() => pattern.kind = NodeKind::Walkplane,
+                "BLOCKED" if is_true() => pattern.kind = NodeKind::Blocked,
+                "WAYPOINT" if is_true() => pattern.kind = NodeKind::Waypoint,
+                _ => {}
             }
         }
         Ok(pattern)
-    }
-}
-
-fn unknown_key(node: &Node) -> Error {
-    Error::Invalid {
-        reason: format!(
-            "line {}: unknown key '{}' in geometry description",
-            node.line, node.key
-        ),
     }
 }
 
@@ -322,20 +365,71 @@ mod tests {
         );
     }
 
+    /// `CAdGeomExt::LoadBuffer` and `GetGeometryExtension`: whatever
+    /// happens, the nodes read come first and the built-in ones after.
     #[test]
-    fn a_bad_sidecar_falls_back_to_the_standard_nodes() {
+    fn a_sidecar_that_fails_keeps_the_nodes_read_before_the_error() {
+        let names = |patterns: &NodePatterns| -> Vec<String> {
+            patterns.nodes.iter().map(|n| n.pattern.clone()).collect()
+        };
+        // An unknown key in the root block stops the file there.
+        let text = b"GEOMETRY { NODE { NAME = \"a_*\" BLOCKED = TRUE } OTHER = 1 NODE { NAME = \"b_*\" } }";
+        assert!(NodePatterns::parse(text).is_err());
+        let (patterns, error) = NodePatterns::read(text);
+        assert!(error.unwrap().to_string().contains("OTHER"));
+        assert_eq!(names(&patterns), ["a_*", "walk_*", "blk_*", "wpt_*"]);
+        assert_eq!(NodePatterns::load(Some(text)), patterns);
+        assert_eq!(patterns.classify("a_1").unwrap().kind, NodeKind::Blocked);
+        assert!(patterns.classify("b_1").is_none());
+
+        // A node that fails is left out alone and the file loads.
+        let text = b"GEOMETRY { NODE { NAME = \"x_*\" COLOR = 1 } NODE { NAME = \"y_*\" } }";
+        let patterns = NodePatterns::parse(text).unwrap();
+        assert_eq!(names(&patterns), ["y_*", "walk_*", "blk_*", "wpt_*"]);
+
+        // A GEOMETRY key inside the block is ignored.
+        let text = b"GEOMETRY { GEOMETRY { NODE { NAME = \"in_*\" } } NODE { NAME = \"z_*\" } }";
+        let patterns = NodePatterns::parse(text).unwrap();
+        assert_eq!(names(&patterns), ["z_*", "walk_*", "blk_*", "wpt_*"]);
+
+        // The GEOMETRY block must come first; a file that is not a
+        // definition file at all gives the built-in nodes.
         assert!(NodePatterns::parse(b"NOT_GEOMETRY { }").is_err());
-        assert!(NodePatterns::parse(b"GEOMETRY { NODE { NAME = \"x\" COLOR = 1 } }").is_err());
-        assert!(NodePatterns::parse(b"GEOMETRY { OTHER = 1 }").is_err());
+        assert!(NodePatterns::parse(b"NODE { NAME = \"n\" } GEOMETRY { }").is_err());
         assert!(NodePatterns::parse(b"{ GEOMETRY").is_err());
-        assert_eq!(NodePatterns::load(None), NodePatterns::standard());
         assert_eq!(
-            NodePatterns::load(Some(b"GEOMETRY { OTHER = 1 }")),
+            NodePatterns::load(Some(b"NOT_GEOMETRY { }")),
             NodePatterns::standard()
         );
+        assert_eq!(
+            NodePatterns::load(Some(b"{ GEOMETRY")),
+            NodePatterns::standard()
+        );
+        assert_eq!(NodePatterns::load(None), NodePatterns::standard());
         let loaded = NodePatterns::load(Some(b"GEOMETRY { NODE { NAME = \"g_*\" } }"));
         assert_eq!(loaded.nodes.len(), 4);
         assert_eq!(loaded.classify("g_1").unwrap().kind, NodeKind::Generic);
+    }
+
+    #[test]
+    fn node_values_are_scanned_as_the_original_does() {
+        let node = |text: &str| {
+            let doc = Document::parse(format!("NODE {{ {text} }}").as_bytes()).unwrap();
+            NodePattern::from_node(&doc.nodes[0])
+        };
+        // An empty RECEIVE_SHADOWS keeps the flag; the last one counts.
+        let n =
+            node("RECEIVE_SHADOWS = TRUE RECEIVE_SHADOWS { } NAME = \"a\" NAME = \"b\"").unwrap();
+        assert!(n.receive_shadows);
+        assert_eq!(n.pattern, "b");
+        // A role key that is false, or empty, changes nothing.
+        let n = node("WAYPOINT = TRUE BLOCKED = FALSE WALKPLANE { }").unwrap();
+        assert_eq!(n.kind, NodeKind::Waypoint);
+        // A nested NODE key is ignored; the keys match by prefix in the
+        // table's order, so a longer word is no key.
+        assert!(node("NODE { NAME = \"x\" }").is_ok());
+        assert!(node("NAMES = \"x\"").is_err());
+        assert!(node("NAME = \"x\" COLOR = 1").is_err());
     }
 
     #[test]

@@ -1645,6 +1645,7 @@ impl World {
                 if let Some(polygon) = actor.block_polygon(scene) {
                     blockers.push(polygon);
                 }
+                waypoints.extend(actor.waypoint_points(scene));
             }
         }
         for r in self.game_view.entity_refs() {

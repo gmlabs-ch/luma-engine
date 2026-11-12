@@ -127,7 +127,7 @@ pub(crate) fn parse_body(body: &[u8], float_size: u16) -> Result<(Vec<Template>,
     while let Some(token) = tokens.next_token()? {
         match token {
             Token::Template => templates.push(tokens.template()?),
-            Token::Name(template) => objects.push(tokens.object(template)?),
+            Token::Name(template) => objects.push(tokens.object(template, 0)?),
             other => return Err(tokens.unexpected(&other)),
         }
     }
@@ -295,7 +295,12 @@ impl Tokens<'_> {
     /// Reads a data object after its template name. The object's GUID may
     /// come before the brace (as in text) or right after it (as the
     /// binary grammar puts it).
-    fn object(&mut self, template: String) -> Result<DataObject> {
+    fn object(&mut self, template: String, depth: usize) -> Result<DataObject> {
+        if depth > crate::xfile::MAX_DEPTH {
+            return Err(error(ErrorKind::UnexpectedToken(
+                "an object nested too deep".to_string(),
+            )));
+        }
         let mut name = None;
         let mut guid = None;
         loop {
@@ -332,7 +337,7 @@ impl Tokens<'_> {
                 Token::FloatList(list) => object.values.extend(list.into_iter().map(Value::Float)),
                 Token::Str(s) => object.values.push(Value::Str(s)),
                 Token::Name(child_template) => {
-                    let child = self.object(child_template)?;
+                    let child = self.object(child_template, depth + 1)?;
                     object.children.push(Child::Object(child));
                 }
                 Token::OpenBrace => {

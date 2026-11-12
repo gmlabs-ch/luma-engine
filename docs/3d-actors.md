@@ -245,10 +245,12 @@ Derived values:
 `load`, `classify`, the wildcard matcher `matches_pattern`) and
 `luma_3d::scene_geometry::SceneGeometry::load_3ds`, specified in
 [formats/geometry.md](formats/geometry.md). Two details found while
-implementing: the original's sidecar parser **fails on any key it does
-not know** and the geometry then falls back to the three built-in nodes
-alone (reproduced by `NodePatterns::load`); and a light without a colour
-chunk has an undefined colour in the original, white in Luma.
+implementing: the original's sidecar parser **stops on any key it does
+not know** in the root block and the geometry is then classified with
+the nodes read before it, followed by the three built-in nodes, while a
+node with an unknown key is left out alone (reproduced by
+`NodePatterns::read` and `load`); and a light without a colour chunk has
+an undefined colour in the original, white in Luma.
 
 After parsing, each mesh is matched by name against the **node list** of
 the optional sidecar `<geometry name>.geometry` (same directory, same base
@@ -449,15 +451,22 @@ actor standing in a region of another layer would use that layer's
 ## 5. The actor definition file (`.act3d`)
 
 **As implemented** in `luma_3d::actor3d` (`Actor3dDef::parse`,
-`parse_with` for templates, `is_actor_x`, `AnimationDef::parse_file` for
-the sidecar and `AnimationDef::apply` onto a model) and specified in
+`parse_with` for templates, `build_models` for the keys that act on the
+model, `is_actor_x`, `AnimationFile` for the sidecar and
+`AnimationDef::apply_to` onto a model) and specified in
 [formats/actor3d.md](formats/actor3d.md), which is the reference; the
 table below is the summary. Found while implementing: an **unknown key
 fails the load** (the parser stops on a token it does not know),
-reproduced; a `SHADOW_TYPE` word that is neither a name nor a number gives
-`none` (`atoi` returns 0); `SHADOW_MODEL`, `ANIMATION` and `EFFECT` before
-any `MODEL` are dropped, not errors; the `.anim` sidecar is only looked
-for by `MergeAnims`, not by the `MODEL` keys.
+reproduced; a key whose file **fails to load does not** (a template, a
+model, a shadow model, a cursor: the error code is overwritten by the
+next statement), so the actor fails only on an unknown key or when it
+has no model at the end; the model keys act **at their place** (`MODEL`
+loads or merges, `ANIMATION` applies to the model as loaded so far,
+`SHADOW_MODEL` loads against it); a `SHADOW_TYPE` word that is neither a
+name nor a number gives `none` (`atoi` returns 0); `SHADOW_MODEL`,
+`ANIMATION` and `EFFECT` before any `MODEL` are dropped, not errors; the
+`.anim` sidecar is only looked for by `MergeAnims`, not by the `MODEL`
+keys.
 
 Same syntax as every definition file ([definition-files.md](formats/
 definition-files.md)). The keyword is `ACTOR3DX` for `.X` actors;
@@ -560,14 +569,29 @@ rejected if no top-level frame was found.
 | anything else | Ignored. |
 
 Templates are matched by **name** in Luma (D3DX matches the GUIDs of the
-registered templates). An **empty frame** (`Frame x { }`) fails the whole
-load in the original, an accident of its child loop; Luma accepts it.
+registered templates). A frame answers for its **last** object only, an
+accident of the original's child loop that Luma reproduces: an object
+that fails before the last one is left out alone, and a frame whose last
+object fails or that holds **no object at all** (`Frame x { }`) is
+dropped with what is under it and fails in turn, up to the top level,
+where a failure rejects the file ([formats/xfile.md](formats/xfile.md),
+section 2). The meshes are kept in the order the original walks them: a
+frame's own meshes before its child frames'.
 
 Merging a second file (`MergeFromFile`) takes only `AnimationSet` and
 `Animation` objects, searching the frames of the file recursively (the
 frames themselves are not added); the bones of the new animations are looked
 up by name in the existing skeleton (`FindBones`). An unnamed animation set
-takes the **file name without path and extension** as its name.
+takes the **file name without path and extension** as its name. A merge
+that fails part-way leaves the sets it had read in the model, bound to no
+frame ([formats/xfile.md](formats/xfile.md), 2.5).
+
+A model can be loaded **against a parent model** (`LoadFromFile(file,
+ParentModel)`, the `SHADOW_MODEL`): its mesh bones and animation targets
+are then looked up in the parent's frames, and its skinned meshes are
+posed with the parent's combined matrices every update
+(`Model::parse_with_parent`, `luma_3d::animation::ShadowModel`;
+[formats/xfile.md](formats/xfile.md), 2.6).
 
 ### 6.3 Meshes (what D3DX does, **[ext]**)
 
@@ -636,9 +660,8 @@ What WME makes of the result:
   every vertex).
 - **Rigid meshes** (no bones) are transformed every frame by their parent
   frame's combined matrix: **positions only**; the normals stay as loaded, so
-  the lighting of rigid parts on moving frames is slightly off. As
-  implemented, Luma transforms the normals as well (by the 3x3 part,
-  renormalised), a deliberate departure.
+  the lighting of rigid parts on moving frames is slightly off. Luma does
+  the same (`skin_mesh`): a game's models were lit that way.
 - **Bounding box.** Recomputed from the skinned vertices every frame
   (`D3DXComputeBoundingBox`, with a manual fallback when NaNs appear). The
   **model's** box (`UpdateBoundingRect`) starts at the origin and grows
@@ -825,7 +848,14 @@ the first key, and a zero gap met after a positive one resets the minimum
   `IsAnimPending(name)` over all channels is `is_playing_on_any_channel`.
 - **Unloading a set** (`UnloadAnim`, `AnimatedModel::remove_animation_set`)
   drops it from every channel slot that plays it; a transition in progress
-  keeps running and ends on whatever is left.
+  keeps running and ends on whatever is left. When several sets share the
+  name (two loose animations of one file, or the same file merged twice),
+  `CXModel::UnloadAnimation` removes the first and then **steps over the
+  two sets that follow each removed one** (its loop advances the index
+  once more after `RemoveAt`), so of three sets of that name in a row only
+  the first goes; the call can be repeated. Reproduced
+  (`Model::animation_sets_to_unload`), since which sets remain decides
+  what `PlayAnim` plays next.
 - **Outputs of an update**: the local and combined matrix of every frame
   (`local_matrices`, `combined_matrices`, `bone_matrix(name)` for
   attachments and `GetBonePosition*`), the skinned meshes
@@ -1275,8 +1305,10 @@ The effect on a frame:
   blending on with `SRCALPHA/INVSRCALPHA` (so translucent textures
   composite over what is behind). The actor's `BlendMode` property changes
   blending (additive, subtractive).
-- Filtering: linear, **mip filter linear** (trilinear), repeat addressing.
-  Untextured materials render with the lit colour **[ext]**.
+- Filtering: linear, `MIPFILTER LINEAR` set but the textures have a single
+  mip level (`MipLevels = 1`), repeat addressing. An untextured material is
+  drawn opaque (no texture reads as opaque white, so the material alpha is
+  ignored) with its lit colour.
 - Linear **vertex fog** when the scene has fog (`Scene.EnableFog(color,
   start, end)`), in world units of view depth.
 - Ambient: the scene's, or the actor's override; default black.
@@ -1302,7 +1334,10 @@ the **main** layer, the remaining free objects are drawn the same way. So:
   among equal `Y` is that of a `qsort`, i.e. unspecified.
 - Without geometry, 3D entity nodes of the layers are skipped; free 3D
   objects are not guarded in the original (undefined). Luma should draw no
-  3D object in a scene without geometry.
+  3D object in a scene without geometry. The update still runs: in a scene
+  without geometry or camera a 3D actor runs its whole state machine (walks end
+  at their target, `PlayAnim` and `Talk` end, `Ready` becomes true) on an empty
+  geometry, but has no 2D position, no region events and no rectangle.
 - The debug overlay (`Scene.ShowGeometry`) is drawn after all layers.
 
 **As implemented** (`luma_adventure::draw3d`, `World::draw`,
@@ -1417,10 +1452,8 @@ original, on purpose:
 - **Simple**: the unit quad of `CreateSimpleShadow` (`-1..1` in X/Z,
   the image mapped once), with `Scaling(size, 1, size) * RotationY(angle)
   * Translation(position)`, the actor's or the game's image decoded with
-  the magenta colour key and mipmapped, else a default image generated in
-  code (`default_shadow_image`: a 64x64 black blob, alpha 192 at the
-  centre falling smoothly to 0 at the edge, standing in for the
-  original's `shadow.png`), drawn **unlit** (emissive white, the texture's
+  the magenta colour key and mipmapped; with no image at all nothing is
+  drawn (`RenderSimple` returns without a shadow image), drawn **unlit** (emissive white, the texture's
   alpha), alpha-blended, depth test on, no depth writes.
 - **Flat**: no light-view pre-pass. The posed meshes of the model and of
   the attachments are drawn a second time with the world matrix followed
@@ -1452,7 +1485,11 @@ original, on purpose:
   the `StencilFill` in the shadow colour; the renderer counts them with
   wrapping increments and decrements as Direct3D did (the quads face
   inward, so a shadowed pixel counts to 255; see rendering.md). The
-  `SHADOW_MODEL` is not used yet: the display model casts.
+  `SHADOW_MODEL`, when the actor has one, casts instead of the display
+  model (`ModelDraw::casters`): it is loaded at its key's place against the
+  main model as `ParentModel` (its bones are the main model's frames),
+  posed by `luma_3d::ShadowModel::update` right after the main model, and
+  its meshes are uploaded under a key of their own.
 - **Receivers**: when `min(Game.MaxShadowType, Scene.MaxShadowType)` is
   stencil (`ThreeDFrame::stencil_shadows`), the active nodes flagged
   `RECEIVE_SHADOWS` (walk planes, blocks and generics alike, `SceneGeometry
@@ -1555,7 +1592,7 @@ success and `false` on failure.
 | `CreateParticleEmitterBone(bone, ox, oy, oz)` | The actor's particle emitter (created if needed, `CreateParticleEmitter(true)`), placed each frame at the projected position of the bone plus the offset in the bone's space (`UpdatePartEmitter`; an unknown bone leaves it at the actor's position, where the original uses an uninitialised point); returns the emitter. A later `CreateParticleEmitter` forgets the bone. |
 | inherited from `CAdObject3D`: `SkipTo(x, y)` | Place at the scene point (exact conversion; fails silently off the walk planes). |
 | `SkipTo3D(x, y, z)` | Place at a 3D point. |
-| `GetBonePosition2D(bone)` | Object `{X, Y}` in scene pixels, or no members on failure. |
+| `GetBonePosition2D(bone)` | Object `{X, Y}` of integers in scene pixels; both 0 for an unknown bone or without geometry. |
 | `GetBonePosition3D(bone)` | Object `{X, Y, Z}` in world units. |
 | `AddIgnoredLight(name)`, `RemoveIgnoredLight(name)` | Lights that do not affect this actor. |
 | inherited from `CBObject`: `SetShadowImage(file)`, `GetShadowImage()`, `SetLightPosition(x, y, z)` | Simple-shadow image; shadow light position relative to the actor. |
@@ -1588,7 +1625,7 @@ success and `false` on failure.
 
 ### 11.3 The attachment object
 
-Returned by `GetAttachment`: `PlayAnim`/`PlayAnimAsync(name)`, `StopAnim()`,
+Returned by `GetAttachment`: `PlayAnim`/`PlayAnimAsync(name)`, `StopAnim()` (all ten channels, at once),
 `StopAnimChannel(channel)`, `PlayAnimChannel`/`Async(channel, name)` (forced
 restart, channel 0 by default; they pass transition time 0, but the model's
 owner is the actor, so when the channel already plays something the actor's
@@ -1599,7 +1636,9 @@ of `CAdObject3D` (`PosX/Y/Z`, `Angle`, `Scale`, `Active`...), `Type` =
 **As implemented** (`natives_actor3d.rs`, `attachment3d_*`): `Type`
 (`attachment`), `Name`, `Filename` (the model file), `Active`, `Ready`
 (always true), `PosX`, `PosY`, `PosZ`, `Angle`, `DirectionAngle`/`DirAngle`
-(normalised on set), `Scale` (percent), `DrawBackfaces`, and `Bone`, the
+(normalised on set), `Scale` (percent), `DrawBackfaces` (true at the start; the
+drawing uses the **actor's** flag, since the attachment's model has the actor as
+its owner, which `CXModel::Render` culls by) and `Bone`, the
 parent bone, a Luma extension (the original keeps it private); the six
 animation methods above (`false` when the model has no such set; the
 blocking forms wait for the attachment, which is always ready), `SkipTo3D`
@@ -1691,9 +1730,9 @@ wrote itself (`IntersectTriangle`, `PickGetIntersect`,
 3. **The viewport** of the meshes is the quads' (letterboxed or not), so
    the projection of 4.1 is computed from the logical resolution and the
    meshes land where the 2D mapping says.
-4. **Textures** for meshes are uploaded with a CPU-built mipmap chain
-   (`Renderer::mesh_texture`) and sampled trilinearly with repeat
-   addressing; the colour key is already alpha `0` and the alpha test cuts
+4. **Textures** for meshes are uploaded with a single mip level
+   (`Texture::from_image`, as the original loads them) and sampled linearly
+   with repeat addressing; the colour key is already alpha `0` and the alpha test cuts
    it (`ALPHAREF 8`).
 5. Offscreen tests as for 2D (`crates/luma-render/tests/mesh.rs`): a lit
    textured mesh with directional, ambient, point and spot lights, the
@@ -1741,8 +1780,7 @@ timer, the scene's path) and `luma-3d` stays free of the renderer.
   as the original's texture stage ignores it (10.1).
 - **Shadows**: 10.4.
 - **Picking** uses the skinned triangles on the CPU (10.3), untouched.
-- **Not done**: the `SHADOW_MODEL` (the display model casts the shadow)
-  and the geometry overlay of `Scene.ShowGeometry` (wireframe in the
+- **Not done**: the geometry overlay of `Scene.ShowGeometry` (wireframe in the
   original, which needs a line pipeline the renderer does not have; the
   flag is not stored either).
 
@@ -1868,7 +1906,7 @@ read first.
 | 10 | **`luma-render` extension.** Depth/stencil buffer cleared once per frame, quads without depth, `MeshDraw` items of the `DrawList` drawn in order in the same pass, mesh upload and per-frame vertex update, tests of the depth test among meshes and of the viewport. **Done** (12.3, [rendering.md](rendering.md#3d-pass)). | `BRenderD3D.cpp` (`Fill`, `Setup2D`/`Setup3D`) | M | |
 | 11 | **Mesh pass.** Pipelines, dynamic skinned buffers, materials and textures with mipmaps and the colour key, lights (model of 3.4), ambient, fog, alpha test and blend mode, culling option. **Done** in `luma-render` (shader `mesh.wgsl`); the light *selection* per object (`EnableLights`) and the geometry debug overlay (`Scene.ShowGeometry`, the validation tool for task 7) move to task 13, which has the scene. | `BRenderD3D.cpp` (`Setup3D`), `XMesh.cpp` (`Render`), `3DMaterial.cpp`, `3DLight.cpp`, `AdSceneGeometry.cpp` (`Render`, `EnableLights`, `CreateLights`) | L | 7, 9, 10 |
 | 12a | **Simple shadows.** **Done** (10.4; the default image is generated). | `3DShadowGen.cpp` (`RenderSimple`) | S | 11 |
-| 12b | **Stencil shadows.** CPU shadow volumes, stencil passes, receiver depth prepass, attachments, `SHADOW_MODEL`. **Done** but the `SHADOW_MODEL` (10.4, the shadow items of `luma-render`). | `3DShadowVolume.cpp`, `AdActor3DX.cpp` (`DisplayShadowVolume`), `AdSceneGeometry.cpp` (`RenderShadowGeometry`), `XMesh.cpp` (`UpdateShadowVol`), `AdScene.cpp` (`TraverseNodes`) | M | 11, 9 |
+| 12b | **Stencil shadows.** CPU shadow volumes, stencil passes, receiver depth prepass, attachments, `SHADOW_MODEL`. **Done**, `SHADOW_MODEL` included (10.4). | `3DShadowVolume.cpp`, `AdActor3DX.cpp` (`DisplayShadowVolume`), `AdSceneGeometry.cpp` (`RenderShadowGeometry`), `XMesh.cpp` (`UpdateShadowVol`), `AdScene.cpp` (`TraverseNodes`) | M | 11, 9 |
 | 12c | **Flat shadows.** Light-view pre-pass to texture, projective floor quad. **Done** as a planar projection of the posed triangles with a stencil mask (10.4), not a pre-pass. | `3DShadowGen.cpp` (`Render`, `SetAdjustedProjectionMatrix`, `SetTextureMatrixStage0Stage1`) | M | 11 |
 
 ### Phase C: the actor in the game

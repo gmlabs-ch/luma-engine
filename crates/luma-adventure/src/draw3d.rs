@@ -21,9 +21,9 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use luma_3d::math::deg_to_rad;
-use luma_3d::{AnimatedModel, Mat4, Material, Mesh, Model, Plane, ShadowType, Vec3};
+use luma_3d::{AnimatedModel, Mat4, Material, Mesh, Model, Plane, ShadowType, SkinnedMesh, Vec3};
 use luma_formats::image::DEFAULT_COLOR_KEY;
-use luma_formats::{Image, Rgb, Rgba, Sprite};
+use luma_formats::{Rgb, Rgba, Sprite};
 use luma_render::{
     DepthOnlyDraw, Draw3d, Fog, Light, Lights, Matrix, MeshDraw, MeshHandle, MeshMaterial,
     MeshVertex, Renderer, ShadowVolumeDraw, StencilFill, Texture, matrix,
@@ -49,10 +49,6 @@ pub const SPOT_INNER_ANGLE: f32 = 0.5;
 pub const SPOT_OUTER_ANGLE: f32 = 1.0;
 /// The falloff exponent of a spot light.
 pub const SPOT_FALLOFF: f32 = 1.0;
-
-/// The size of the default simple shadow image, a soft dark blob that
-/// stands in for the original's `shadow.png`.
-const DEFAULT_SHADOW_SIZE: u32 = 64;
 
 /// A model mesh on the GPU.
 #[derive(Debug, Clone)]
@@ -277,30 +273,6 @@ fn sorted_indices(mesh: &Mesh) -> (Vec<u32>, Vec<Range<u32>>) {
     (indices, ranges)
 }
 
-/// The default image of the simple shadows: a soft black blob, opaque
-/// at the centre and fading to nothing at the edge of the quad.
-pub fn default_shadow_image() -> Image {
-    let size = DEFAULT_SHADOW_SIZE;
-    let mut pixels = Vec::with_capacity((size * size * 4) as usize);
-    let radius = size as f32 / 2.0;
-    for y in 0..size {
-        for x in 0..size {
-            let (dx, dy) = (x as f32 + 0.5 - radius, y as f32 + 0.5 - radius);
-            let distance = (dx * dx + dy * dy).sqrt() / radius;
-            let fade = (1.0 - distance).clamp(0.0, 1.0);
-            // A smooth step keeps the centre dark and the edge soft.
-            let alpha = fade * fade * (3.0 - 2.0 * fade);
-            pixels.extend_from_slice(&[0, 0, 0, (alpha * 192.0).round() as u8]);
-        }
-    }
-    Image {
-        width: size,
-        height: size,
-        pixels,
-        has_alpha_channel: true,
-    }
-}
-
 /// The unit quad of the simple shadows (`C3DShadowGen::
 /// CreateSimpleShadow`): `-1..1` in `x` and `z` at `y = 0`, the image
 /// mapped once over it.
@@ -384,10 +356,41 @@ impl ScriptTexture {
     }
 }
 
+/// A posed model: the data and the meshes as skinned this frame, of an
+/// actor's or attachment's model or of an actor's shadow model.
+#[derive(Clone, Copy)]
+struct Posed<'a> {
+    model: &'a Model,
+    meshes: &'a [SkinnedMesh],
+}
+
+impl<'a> Posed<'a> {
+    fn model(&self) -> &'a Model {
+        self.model
+    }
+
+    fn meshes(&self) -> &'a [SkinnedMesh] {
+        self.meshes
+    }
+
+    fn of(model: &'a AnimatedModel) -> Posed<'a> {
+        Posed {
+            model: model.model(),
+            meshes: model.meshes(),
+        }
+    }
+}
+
+/// The key under which the GPU meshes of an actor's shadow model are
+/// kept: its own handle with the top bit set, so that no object collides.
+fn shadow_key(id: NativeId) -> NativeId {
+    NativeId(id.0 | (1 << 63))
+}
+
 /// A model drawn this frame: the actor's or an attachment's.
 struct ModelDraw<'a> {
     id: NativeId,
-    model: &'a AnimatedModel,
+    model: Posed<'a>,
     world: Mat4,
     draw_backfaces: bool,
 }
@@ -396,7 +399,7 @@ impl<'a> ModelDraw<'a> {
     fn of_actor(draw: &Actor3dDraw<'a>) -> ModelDraw<'a> {
         ModelDraw {
             id: draw.id,
-            model: draw.model,
+            model: Posed::of(draw.model),
             world: draw.world,
             draw_backfaces: draw.draw_backfaces,
         }
@@ -405,10 +408,31 @@ impl<'a> ModelDraw<'a> {
     fn of_attachment(attachment: &AttachmentDraw<'a>) -> ModelDraw<'a> {
         ModelDraw {
             id: attachment.id,
-            model: attachment.model,
+            model: Posed::of(attachment.model),
             world: attachment.world,
             draw_backfaces: attachment.draw_backfaces,
         }
+    }
+
+    /// What casts the shadow: the actor's shadow model when it has one,
+    /// else its model (`CAdActor3DX::RenderModel`,
+    /// `DisplayShadowVolume`), then its attachments'.
+    fn casters(draw: &Actor3dDraw<'a>) -> Vec<ModelDraw<'a>> {
+        let first = match draw.shadow_model {
+            Some(shadow) => ModelDraw {
+                id: shadow_key(draw.id),
+                model: Posed {
+                    model: shadow.model(),
+                    meshes: shadow.meshes(),
+                },
+                world: draw.world,
+                draw_backfaces: draw.draw_backfaces,
+            },
+            None => ModelDraw::of_actor(draw),
+        };
+        std::iter::once(first)
+            .chain(draw.attachments.iter().map(ModelDraw::of_attachment))
+            .collect()
     }
 
     /// The actor's model, then its attachments', as they are drawn
@@ -435,7 +459,6 @@ pub struct Render3d {
     overrides: HashMap<(NativeId, String), ScriptTexture>,
     receivers: Option<Receivers>,
     quad: Option<MeshHandle>,
-    default_shadow: Option<Texture>,
     /// What went wrong, for the world's log.
     log: Vec<String>,
 }
@@ -454,7 +477,11 @@ impl Render3d {
         };
         let live: Vec<NativeId> = draws
             .iter()
-            .flat_map(|d| std::iter::once(d.id).chain(d.attachments.iter().map(|a| a.id)))
+            .flat_map(|d| {
+                std::iter::once(d.id)
+                    .chain(d.shadow_model.map(|_| shadow_key(d.id)))
+                    .chain(d.attachments.iter().map(|a| a.id))
+            })
             .collect();
         let overrides: Vec<(NativeId, &MaterialOverride)> = draws
             .iter()
@@ -478,19 +505,23 @@ impl Render3d {
                     }
                 }
             }
+            if let Some(shadow) = draw.shadow_model {
+                self.upload_model(
+                    renderer,
+                    shadow_key(draw.id),
+                    shadow.model(),
+                    shadow.meshes(),
+                );
+            }
             for material in draw.materials {
                 self.update_override(world, renderer, draw.id, material);
             }
             if draw.shadow_type == ShadowType::Simple {
                 need_quad = true;
-                match draw.shadow_image {
-                    Some(path) => self.ensure_texture(world, renderer, path, DEFAULT_COLOR_KEY),
-                    None => {
-                        if self.default_shadow.is_none() {
-                            self.default_shadow =
-                                Some(renderer.mesh_texture("shadow", &default_shadow_image()));
-                        }
-                    }
+                // Without any shadow image the original draws nothing
+                // (`C3DShadowGen::RenderSimple`).
+                if let Some(path) = draw.shadow_image {
+                    self.ensure_texture(world, renderer, path, DEFAULT_COLOR_KEY);
                 }
             }
         }
@@ -725,7 +756,14 @@ impl Render3d {
             .map_err(|e| e.to_string())
             .and_then(|bytes| luma_formats::image::decode(&bytes, key).map_err(|e| e.to_string()))
         {
-            Ok(image) => Some(renderer.mesh_texture(path, &image)),
+            // One mip level, as `D3DXCreateTextureFromFileInMemoryEx` is
+            // asked for in `CBSurfaceD3D::Create`: the sampler's mip filter
+            // has nothing to blend.
+            Ok(image) => Some(luma_render::Texture::from_image(
+                renderer.gpu(),
+                path,
+                &image,
+            )),
             Err(err) => {
                 self.log
                     .push(format!("Error loading texture '{path}': {err}"));
@@ -855,9 +893,7 @@ impl Render3d {
                 // image, no depth writes. Drawn unlit (section 10.4).
                 let (Some(quad), Some(texture)) = (
                     self.quad,
-                    draw.shadow_image
-                        .and_then(|path| self.texture(path))
-                        .or(self.default_shadow.as_ref()),
+                    draw.shadow_image.and_then(|path| self.texture(path)),
                 ) else {
                     return;
                 };
@@ -895,7 +931,7 @@ impl Render3d {
                 };
                 let flatten = shadow_matrix(plane, draw.shadow_light);
                 let reference = (draw.other_index % 255 + 1) as u8;
-                for model in ModelDraw::all(draw) {
+                for model in ModelDraw::casters(draw) {
                     let world = gpu_matrix(&(model.world * flatten));
                     for index in 0..model.model.model().meshes.len() {
                         let Some(uploaded) = self.meshes.get(&(model.id, index)) else {
@@ -920,7 +956,7 @@ impl Render3d {
                 let depth = light_vector.length() * EXTRUSION_FACTOR;
                 let direction = light_vector.normalized();
                 let mut vertices = Vec::new();
-                for model in ModelDraw::all(draw) {
+                for model in ModelDraw::casters(draw) {
                     let Some(inverse) = model.world.inverse() else {
                         continue;
                     };
@@ -1004,9 +1040,18 @@ impl Render3d {
                     items.push(Draw3d::Mesh(MeshDraw {
                         indices: Some(range.clone()),
                         texture,
-                        material: material.map_or_else(MeshMaterial::default, |m| MeshMaterial {
-                            diffuse: m.diffuse,
-                            emissive: m.emissive,
+                        // With no texture Direct3D yields alpha 1 (the texture
+                        // argument reads opaque white): the material's own
+                        // alpha only counts together with a texture.
+                        material: material.map_or_else(MeshMaterial::default, |m| {
+                            let mut diffuse = m.diffuse;
+                            if texture.is_none() {
+                                diffuse[3] = 1.0;
+                            }
+                            MeshMaterial {
+                                diffuse,
+                                emissive: m.emissive,
+                            }
                         }),
                         ambient,
                         lights,
@@ -1293,13 +1338,5 @@ mod tests {
         assert_eq!(&indices[0..3], &cube.triangles[0]);
         assert_eq!(&indices[3..6], &cube.triangles[2]);
         assert_eq!(&indices[18..21], &cube.triangles[1]);
-    }
-
-    #[test]
-    fn the_default_shadow_is_dark_in_the_middle_and_clear_at_the_corners() {
-        let image = default_shadow_image();
-        let centre = image.pixel(32, 32).unwrap();
-        assert!(centre.a > 180 && centre.r == 0);
-        assert_eq!(image.pixel(0, 0).unwrap().a, 0);
     }
 }
