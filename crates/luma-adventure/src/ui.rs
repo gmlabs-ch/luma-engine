@@ -2477,13 +2477,13 @@ impl World {
         if !control.window()?.clip_contents {
             return None;
         }
-        let (x, y) = (control.x + ox, control.y + oy);
+        let (x, y) = (control.x.saturating_add(ox), control.y.saturating_add(oy));
         let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
         Some((
             x.max(0),
             y.max(0),
-            (x + control.width).min(sw),
-            (y + control.height).min(sh),
+            x.saturating_add(control.width).min(sw),
+            y.saturating_add(control.height).min(sh),
         ))
     }
 
@@ -2577,7 +2577,7 @@ impl World {
                             let (mut ix, mut iy) = (bx, by);
                             if centre {
                                 if let Some((w, h)) = self.sprite_size_loaded(&path) {
-                                    ix += (bw - w) / 2;
+                                    ix = ix.saturating_add(bw.saturating_sub(w) / 2);
                                     iy += (bh - h) / 2;
                                 }
                             }

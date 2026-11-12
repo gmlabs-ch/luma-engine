@@ -155,7 +155,7 @@ impl World {
         let (left, right, bottom) = region
             .bounds()
             .map_or((0, 0, 0), |b| (b.left, b.right, b.bottom));
-        entity.x = left + (right - left) / 2;
+        entity.x = ((i64::from(left) + i64::from(right)) / 2) as i32;
         entity.y = bottom;
     }
 

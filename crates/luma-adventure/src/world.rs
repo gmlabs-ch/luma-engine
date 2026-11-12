@@ -564,8 +564,8 @@ impl World {
             return (
                 rect.left,
                 rect.top,
-                (rect.right - rect.left).max(0),
-                (rect.bottom - rect.top).max(0),
+                rect.right.saturating_sub(rect.left).max(0),
+                rect.bottom.saturating_sub(rect.top).max(0),
             );
         }
         self.scene_viewport.unwrap_or((
@@ -590,7 +590,7 @@ impl World {
             || self.scene_viewport.is_some()
         {
             let (x, y, w, h) = self.viewport();
-            return Some((x, y, x + w, y + h));
+            return Some((x, y, x.saturating_add(w), y.saturating_add(h)));
         }
         None
     }
