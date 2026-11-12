@@ -132,16 +132,16 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DJoint::C3DJoint` | todo | A bone of a Milkshape model (local rotation and translation, parent, absolute, relative and final matrices, current key index per channel). Luma has no Milkshape models (see `C3DModel::LoadFile`). |
-| `C3DJoint::~C3DJoint` | todo | Frees the joint's name; comes with the Milkshape models. |
-| `C3DJoint::Persist` | todo | Saves a joint's rotation, translation, three matrices, current key indices per channel and parent. Not in Luma. |
+| `C3DJoint::C3DJoint` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DJoint::~C3DJoint` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DJoint::Persist` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
 
 ## `wme_base/3DKeyframe.cpp`
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DKeyframe::C3DKeyframe` | todo | A rotation or translation key of a Milkshape joint animation (joint index, time, three values). Not in Luma. |
-| `C3DKeyframe::~C3DKeyframe` | todo | Comes with the Milkshape models. |
+| `C3DKeyframe::C3DKeyframe` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DKeyframe::~C3DKeyframe` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
 
 ## `wme_base/3DLight.cpp`
 
@@ -176,15 +176,15 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DLoaderMS3D::C3DLoaderMS3D` | todo | Reader of Milkshape 3D (`.ms3d`) files for the legacy `ACTOR3D` actors. Luma refuses these actors (`luma-3d/src/actor3d.rs`: `legacy Milkshape actor, which is not supported`). |
-| `C3DLoaderMS3D::~C3DLoaderMS3D` | todo | Comes with the Milkshape loader. |
-| `C3DLoaderMS3D::Cleanup` | todo | Frees the parsed vertices, triangles, groups, materials and joints. Not in Luma. |
-| `C3DLoaderMS3D::ParseFile` | todo | Parses the `.ms3d` file: header, vertices with bone ids, triangles with normals and texture coordinates, groups, materials, animation frame rate and total frames, joints with their rotation and translation keys. Not in Luma. |
-| `C3DLoaderMS3D::MergeMesh` | todo | Adds one named group of another `.ms3d` file to a model, bound to one bone (`Actor3D.AddMesh`). Not in Luma. |
-| `C3DLoaderMS3D::LoadModel` | todo | Fills a `C3DModel` from the parsed file: one mesh per group, the materials, the joints with their rotation and translation converted to the left-handed system. Not in Luma. |
-| `C3DLoaderMS3D::LoadAnimation` | todo | Cuts an animation out of the file's keys between `StartFrame` and `EndFrame` (an end frame of 0 means the end of the file; key times in milliseconds from the start frame; frame time from the file's frame rate). Not in Luma. |
-| `C3DLoaderMS3D::LoadMesh` | todo | Builds a mesh from a group: three vertices per triangle with the winding swapped, `z` negated, negative `t` coordinates wrapped, the group's hidden flag as `m_Visible`. Not in Luma. |
-| `C3DLoaderMS3D::LoadMaterial` | todo | Copies a Milkshape material (ambient, diffuse, specular, emissive, shininess) and loads its texture relative to the model. Not in Luma. |
+| `C3DLoaderMS3D::C3DLoaderMS3D` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::~C3DLoaderMS3D` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::Cleanup` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::ParseFile` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::MergeMesh` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::LoadModel` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::LoadAnimation` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::LoadMesh` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DLoaderMS3D::LoadMaterial` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
 
 ## `wme_base/3DMaterial.cpp`
 
@@ -217,44 +217,44 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DModel::C3DModel` | todo | A Milkshape (`.ms3d`) skeletal model, the model of the legacy `ACTOR3D` actors (`CAdActor3D`, `Game.LoadActor3D`). Luma refuses these actors (`luma-3d/src/actor3d.rs`: `legacy Milkshape actor, which is not supported`). |
-| `C3DModel::~C3DModel` | todo | Comes with the Milkshape models. |
-| `C3DModel::SetDefaults` | todo | Resets counts, the ten animation channels, the box, the rectangle and the stored pick matrices. Not in Luma. |
-| `C3DModel::Cleanup` | todo | Frees meshes, materials, joints, animations, the attached and deleted mesh lists. Not in Luma. |
-| `C3DModel::ClearLoaderCache` | todo | Drops the parsed `.ms3d` files kept while the actor file loads. Not in Luma. |
-| `C3DModel::LoadFile` | todo | Loads a `.ms3d` file (any other extension fails with `Error: no suitable loader found for file`). Not in Luma. |
-| `C3DModel::LoadFinalize` | todo | After the actor file: clears the loader cache, computes the joints' absolute matrices and moves the vertices into bone space, restarts the animations. Not in Luma. |
-| `C3DModel::Update` | todo | Advances the animations, re-skins the visible meshes and updates the bounding rectangle. Not in Luma. |
-| `C3DModel::Render` | todo | Draws each visible mesh with its material and texture (back faces culled unless `DrawBackfaces`), then stores the matrices and offsets for picking. Not in Luma. |
-| `C3DModel::PrepareMeshes` | todo | CPU skinning: each vertex and normal through its bone's final matrix (unbound vertices as loaded), and the bounding box of the result. Not in Luma. |
-| `C3DModel::AnimSetupJoints` | todo | Builds each joint's relative and absolute matrices from its Euler rotation and translation and brings vertices and normals into bone space. Not in Luma. |
-| `C3DModel::AnimRestart` | todo | Restarts every channel. Not in Luma. |
-| `C3DModel::AnimRestart #2` | todo | Restarts one channel: key indices to 0, final matrices to absolute, start time to the game timer, not finished. Not in Luma. |
-| `C3DModel::AnimAdvance` | todo | Per channel: local time, loop or finish (a finished animation on a channel other than 0 is dropped), events when the frame index changes, linear interpolation of translation and rotation keys per joint; the highest channel with a non-zero value wins per joint; final matrices down the hierarchy. Not in Luma. |
-| `C3DModel::SetAnimation` | todo | Selects the animation of a channel by name (none when not found) and restarts it when it changed or on `ForceReset`. Not in Luma. |
-| `C3DModel::UpdateBoundingRect` | todo | Projects the eight corners of the box to the screen rectangle. Not in Luma for these models (the `.X` equivalent is `CXModel::UpdateBoundingRect`). |
-| `C3DModel::UpdateRect` | todo | Grows the rectangle by a projected point. Not in Luma for these models. |
-| `C3DModel::IsTransparentAt` | todo | Pixel pick against the skinned triangles with the stored matrices. Not in Luma for these models (see `CBRenderer::GetObjectAt`, `m_Model` branch). |
-| `C3DModel::ShowMesh` | todo | Shows or hides the meshes of a name (`Actor3D.ShowMesh`, `HideMesh`), logging when none matches. Not in Luma. |
-| `C3DModel::IsMeshVisible` | todo | Whether the first mesh of a name is visible. Not in Luma. |
-| `C3DModel::DeleteMesh` | todo | Removes the meshes of a name and remembers the deletion for saved games (`Actor3D.DeleteMesh`). Not in Luma. |
-| `C3DModel::AddMesh` | todo | Adds a group of another `.ms3d` file bound to a named bone and remembers it for saved games (`Actor3D.AddMesh`). Not in Luma. |
-| `C3DModel::ParseFileMS3D` | todo | Parses a `.ms3d` file once and caches the loader by file name. Not in Luma. |
-| `C3DModel::ParseAnim` | todo | Reads an `ANIMATION` block of a legacy actor file and cuts the animation out of a `.ms3d` file. Not in Luma. |
-| `C3DModel::ParseAnim NAME` | todo | The animation's name. Not in Luma (legacy `ACTOR3D` files are refused). |
-| `C3DModel::ParseAnim LOOPING` | todo | Whether it loops, false by default in the block (the animation object's own default is true). Not in Luma. |
-| `C3DModel::ParseAnim START_FRAME` | todo | First frame of the range taken from the file, default 0. Not in Luma. |
-| `C3DModel::ParseAnim END_FRAME` | todo | Last frame of the range, default 0. Not in Luma. |
-| `C3DModel::ParseAnim MODEL` | todo | The `.ms3d` file to take the animation from, the model's own file by default. Not in Luma. |
-| `C3DModel::ParseAnim EVENT` | todo | An event block of the animation. Not in Luma. |
-| `C3DModel::ParseEvent` | todo | Reads an `EVENT` block; an event without a name is dropped. Not in Luma. |
-| `C3DModel::ParseEvent NAME` | todo | The event's name. Not in Luma. |
-| `C3DModel::ParseEvent FRAME` | todo | The frame the event fires on, stored minus one. Not in Luma. |
-| `C3DModel::IsAnimPending` | todo | Whether a channel plays an unfinished animation, optionally of a given name. Not in Luma for these models. |
-| `C3DModel::IsAnimPending #2` | todo | The same over all ten channels. Not in Luma for these models. |
-| `C3DModel::AnimStop` | todo | Clears a channel's animation. Not in Luma for these models. |
-| `C3DModel::AnimStop #2` | todo | Clears every channel. Not in Luma for these models. |
-| `C3DModel::Persist` | todo | Saves the box, rectangle, pick matrices, owner, joints, animations, the animation and start time of each channel, the deleted and attached meshes; reloads the file and replays the deletions and attachments on load. Not in Luma. |
+| `C3DModel::C3DModel` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::~C3DModel` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::SetDefaults` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::Cleanup` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ClearLoaderCache` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::LoadFile` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::LoadFinalize` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::Update` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::Render` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::PrepareMeshes` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimSetupJoints` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimRestart` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimRestart #2` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimAdvance` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::SetAnimation` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::UpdateBoundingRect` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::UpdateRect` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::IsTransparentAt` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ShowMesh` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::IsMeshVisible` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::DeleteMesh` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AddMesh` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseFileMS3D` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim NAME` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim LOOPING` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim START_FRAME` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim END_FRAME` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim MODEL` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseAnim EVENT` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseEvent` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseEvent NAME` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::ParseEvent FRAME` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::IsAnimPending` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::IsAnimPending #2` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimStop` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::AnimStop #2` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DModel::Persist` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
 
 ## `wme_base/3DRenderTarget.cpp`
 
@@ -307,12 +307,12 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `C3DSkelAnim::C3DSkelAnim` | todo | An animation of a Milkshape model (per-joint rotation and translation keys, total and frame time, looping true by default, events). Not in Luma (see `C3DModel::LoadFile`). |
-| `C3DSkelAnim::~C3DSkelAnim` | todo | Frees the joint animations and events. Not in Luma. |
-| `C3DSkelAnim::C3DJointAnim::C3DJointAnim` | todo | The animation of one joint of a Milkshape model: no rotation and no translation keys at first. Not in Luma (see `C3DModel::LoadFile`). |
-| `C3DSkelAnim::C3DJointAnim::~C3DJointAnim` | todo | Frees the two key arrays; would be Rust ownership once the type exists. Not in Luma. |
-| `C3DSkelAnim::Persist` | todo | Saves the animation: current frame, finished, frame time, looping, name, total time, events and every joint's keys. Not in Luma. |
-| `C3DSkelAnim::C3DJointAnim::Persist` | todo | Saves one joint: the two key counts, then joint index, parameter vector and time of every rotation key, then of every translation key. Not in Luma. |
+| `C3DSkelAnim::C3DSkelAnim` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DSkelAnim::~C3DSkelAnim` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DSkelAnim::C3DJointAnim::C3DJointAnim` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DSkelAnim::C3DJointAnim::~C3DJointAnim` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DSkelAnim::Persist` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
+| `C3DSkelAnim::C3DJointAnim::Persist` | excluded | excluded on 12 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses such a file with a message |
 
 ## `wme_base/3DUtils.cpp`
 
@@ -396,13 +396,13 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBRenderD3D::Fill` | done | `Renderer::render_direct`: the pass clears colour, depth and stencil over the whole target; the game always clears to black (`WindowConfig::clear`). The `rect` argument is ignored by the original too. |
 | `CBRenderD3D::ResetDevice` | replaced | wgpu surface reconfiguration on resize or loss (`window.rs`); textures survive, so nothing is reloaded. |
 | `CBRenderD3D::SwitchFullscreen` | n/a | Returns `E_FAIL` in the original (no longer supported). |
-| `CBRenderD3D::Setup2D` | partial | `luma-render/src/renderer.rs` quad pipeline and `quad.wgsl`: bilinear min/mag, no mipmaps, no depth test, texture times vertex colour for colour and alpha, alpha blending, no lighting or fog. Differences: (1) the original leaves the texture address mode at the Direct3D default (wrap), Luma clamps to the edge, so a scaled sprite's border does not bleed the opposite edge (deliberate); (2) the original culls counter-clockwise quads, so a sprite drawn with a negative scale on one axis disappears; Luma has no culling for quads and draws it flipped (check the callers that can pass a negative zoom); (3) the alpha test `>= 0` passes everything, same as none. |
+| `CBRenderD3D::Setup2D` | partial | deliberate: `luma-render/src/renderer.rs` quad pipeline and `quad.wgsl`: bilinear min/mag, no mipmaps, no depth test, texture times vertex colour for colour and alpha, alpha blending, no lighting or fog; the alpha test `>= 0` passes everything, same as none; the counter-clockwise culling shows only for a quad whose scale is negative on one axis, which `scene_view.rs` `place_transformed` does not draw. Deliberate difference: the original leaves the texture address mode at the Direct3D default (wrap), Luma clamps to the edge, so a scaled sprite's border does not bleed the opposite edge. |
 | `CBRenderD3D::Setup3D` | partial | `mesh.wgsl` and `Renderer::ensure_mesh_pipeline`: normalised normals, texture times lit colour, alpha from the texture only, alpha test at 8/255, depth test and write, trilinear filtering, ambient colour, lighting, linear vertex fog, near/far defaults 90 and 10000 with negative camera values meaning default (`luma-3d/src/camera.rs` `Projection::new`). Differences: (1) without a texture Direct3D takes the `TEXTURE` argument as opaque white, so alpha is 1 whatever the material; Luma uses the material's diffuse alpha (`mesh.wgsl` `select(in.color.a, texel.a, textured)`), unless `CXMesh::Render` changes the stage (see that row); (2) multisample antialiasing of the 3D pass is not done; (3) dithering has no counterpart (32-bit target); (4) `SPECULARENABLE` is on in the original: lights have no specular colour so it adds nothing, as `docs/rendering.md` says. |
 | `CBRenderD3D::SetAmbientLightRenderState` | done | `luma-adventure/src/draw3d.rs` `model_items`: the draw's ambient is the actor's override when it has one, else the scene's `ambient_light_color`, passed in `MeshDraw::ambient`. |
 | `CBRenderD3D::Setup3DCustom` | n/a | Only called by `CAdScene::Display3DContent`, itself reachable only from the commented-out mirror code in `CAdScene::TraverseNodes`. |
-| `CBRenderD3D::SetupLines` | todo | Wireframe, untextured, unlit state for `DrawLine`; Luma has no line pipeline (`docs/rendering.md`, Not yet). Users: accessibility hint and loading indicator bar (both drawn as filled rectangles: `draw_access_hint`, `World::draw_indicator`), geometry overlay (not drawn). |
+| `CBRenderD3D::SetupLines` | replaced | No render state to set: a line is drawn with the quad pipeline (`luma-render/src/draw.rs` `DrawList::line`), untextured through the white texture, unlit, alpha-blended. |
 | `CBRenderD3D::DrawSprite` | done | `luma-adventure/src/scene_view.rs` `place_transformed` then `DrawList::push_with`: zoom in percent per axis, no rotation. See `DrawSpriteEx` for the size truncation. |
-| `CBRenderD3D::DrawSpriteEx` | partial | `scene_view.rs` `place_transformed`, `renderer.rs` `quad_vertices`, `rotated_corners`: source rectangle over the texture size for the coordinates, mirror by swapping them, colour as tint, rotation around the centre in the same sense, letterbox offset. Differences: (1) the original's quad is `(right - left) * ScaleX` wide as a float, Luma truncates the scaled width and height to whole pixels (`(w * zx).trunc()`), so a zoomed sprite can be up to one pixel smaller; (2) `AlphaDisable` (opaque draw without blending, used by `CBSurfaceD3D::Display` and `DisplayZoom` for video frames) has no flag, harmless while such textures are fully opaque; (3) `m_ForceAlphaColor` replaces the colour of every sprite of a window with `ALPHA_COLOR`: `ui.rs` `window.alpha_color.unwrap_or(tint)` does it for the window's own drawing, to be verified per control in the UI table (TrueType text keeps its colour and takes only the alpha, `BFontTT.cpp`); (4) vertices are not moved by `-0.5` before the rotation (sub-pixel). |
+| `CBRenderD3D::DrawSpriteEx` | partial | `scene_view.rs` `place_transformed`, `renderer.rs` `quad_vertices`, `rotated_corners`: source rectangle over the texture size for the coordinates, mirror by swapping them, colour as tint, the size `(right - left) * Scale` as a float, rotation around the centre in the same sense, letterbox offset. Remaining: `AlphaDisable` (opaque draw without blending, used by `CBSurfaceD3D::Display` and `DisplayZoom` for video frames) has no flag, harmless while such textures are fully opaque; `m_ForceAlphaColor` replaces the colour of every sprite of a window with `ALPHA_COLOR`: `ui.rs` `window.alpha_color.unwrap_or(tint)` does it for the window's images and backs, not for its texts (the fonts wave's); vertices are not moved by `-0.5` before the rotation (sub-pixel). |
 | `CBRenderD3D::CommitSpriteBatch` | replaced | `Renderer::render_direct` draws consecutive quads of one texture and blend mode in one call. |
 | `CBRenderD3D::StartSpriteBatch` | replaced | Batching is automatic in `Renderer::render_direct`; no observable effect. |
 | `CBRenderD3D::EndSpriteBatch` | replaced | See `StartSpriteBatch`. |
@@ -410,15 +410,15 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBRenderD3D::TransformVertices` | done | `renderer.rs` `rotated_corners` (`x' = px + dx cos - dy sin`, `y' = py + dx sin + dy cos`). |
 | `CBRenderD3D::SetProjection` | done | `luma-3d/src/camera.rs` `Projection::new`: same aspect, `_11`/`_22` scale, integer margins and `_31`/`_32` terms; the offset is the scroll less the viewport origin (the letterbox offset cancels out in Luma, which projects in logical pixels). |
 | `CBRenderD3D::GetProjectionParams` | done | `luma-3d/src/camera.rs` `Projection::new` (`mod_width`, `mod_height`, a layer shorter than the screen raised to the screen height) and `ViewSetup::for_scene`. `Game->m_EditorResolutionWidth/Height` are never set at run time. |
-| `CBRenderD3D::DrawLine` | todo | Draws a one-pixel coloured line (after `SetupLines`). Luma has no line primitive: the geometry overlay is not drawn; the loading indicator bar (`CBGame::DisplayIndicator`) is a filled rectangle covering the same pixels as its horizontal lines (`World::draw_indicator`, `luma-adventure/src/world.rs`), the accessibility hint uses filled bars (see `CBRenderer::DrawRect`). |
+| `CBRenderD3D::DrawLine` | done | `luma-render/src/draw.rs` `DrawList::line`: the pixels of a Direct3D line list between two pixel centres, the last one left out; one quad for a horizontal or vertical line, a quad per run of pixels for a slanted one (`docs/rendering.md`, Lines). The letterbox offset is the renderer's. Users: the accessibility frame (`DrawList::rect_outline`); the loading indicator bar and the geometry overlay are their own rows. |
 | `CBRenderD3D::WindowedBlt` | n/a | Calls `Flip` from the Win32 paint path while paused. |
 | `CBRenderD3D::Fade` | done | A black rectangle of alpha `255 - Alpha` over the current viewport: Luma draws the scene-change fade as the screen fader's rectangle (`luma-adventure/src/input.rs` `draw_fade`, `world.rs` scheduled scene with `SCENE_FADE_MS`). The transition logic itself is `CBTransitionMgr` (game table). |
-| `CBRenderD3D::FadeToColor` | partial | `input.rs` `draw_fade` (whole screen) and `draw_scene_fade` (scene viewport), `ui.rs` window `fade_color`: an alpha-blended rectangle of the colour. Difference: the original fills the current viewport rectangle whichever caller it is; a window's `FADE_COLOR` drawn while a viewport is pushed is limited to it. Luma chooses the rectangle per caller; verify the window case in the UI table. |
+| `CBRenderD3D::FadeToColor` | done | `input.rs` `draw_fade` (whole screen), `draw_scene_fade` (scene viewport), `ui.rs` `draw_window` (`fade_color`): an alpha-blended rectangle of the colour. A fill pushed while a viewport is in force is cut to it by the draw list's clip rectangle, which is the original's "fills the current viewport" (a window's `FADE_COLOR` inside a clipping parent window). |
 | `CBRenderD3D::RestoreDeviceObjects` | replaced | wgpu buffers are created once in `Renderer::new` and grown on demand; no device-loss reload. |
 | `CBRenderD3D::CreateShaderQuad` | n/a | Full-screen quad for the post-processing effect scripts (`C3DEffectScript`), which no engine code path runs (see `C3DEffectScript` rows). |
 | `CBRenderD3D::DrawShaderQuad` | n/a | See `CreateShaderQuad`. |
 | `CBRenderD3D::InvalidateDeviceObjects` | replaced | No device-loss handling needed with wgpu. |
-| `CBRenderD3D::SetViewport` | todo | Sets the device viewport, which clips all drawing to a rectangle: the scene viewport (`CAdScene::TraverseNodes` through `PushViewport`), a window with `CLIP_CONTENTS`, entity containers. `luma-render` has no scissor or clip rectangle (`DrawList` has none): a scene larger than its viewport is drawn over the rest of the screen (`docs/game-loop.md` says so) and `clip_contents` in `luma-adventure/src/ui.rs` is stored but never applied. Note the 3D projection also depends on the viewport (already handled in `Projection::new`). |
+| `CBRenderD3D::SetViewport` | done | `luma-render/src/draw.rs` `DrawList::set_clip` (kept per quad and per 3D item) and `renderer.rs` `render_direct`, `scissor`: a scissor rectangle per draw batch, rounded to target pixels; a batch outside it is skipped. See `CBGame::PushViewport` for who sets it. |
 | `CBRenderD3D::TakeScreenshot` | partial | `luma-adventure/src/capture.rs` and `luma-player/src/main.rs` (`wants_frame`, `deliver_frame`, `Offscreen::read`). Differences: the original reads the front buffer at once, so the call returns the frame on screen and the script sees the result immediately; Luma captures the next frame rendered, after the call returned. The original's image is `m_RealWidth x m_RealHeight` clipped to the window (the letterbox bars included in full screen); Luma's is the logical frame. |
 | `CBRenderD3D::UsingStencilBuffer` | done | Always true in Luma: every target has a `Depth24PlusStencil8` buffer (`Renderer::ensure_depth`). |
 | `CBRenderD3D::EnableShadows` | replaced | Allocates the shadow generator; Luma builds shadow items per frame in `luma-adventure/src/draw3d.rs`, nothing to enable. |
@@ -454,10 +454,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBRenderDD::Setup2D` | n/a | Empty in the DirectDraw renderer. |
 | `CBRenderDD::Setup3D` | n/a | Empty in the DirectDraw renderer. |
 | `CBRenderDD::SetupLines` | n/a | Empty in the DirectDraw renderer. |
-| `CBRenderDD::DrawLine` | todo | GDI line on the back buffer; same gap as `CBRenderD3D::DrawLine`. |
+| `CBRenderDD::DrawLine` | replaced | DirectDraw path; `DrawList::line` (see `CBRenderD3D::DrawLine`). |
 | `CBRenderDD::Fade` | n/a | Returns at once (`// sloooow`): the DirectDraw renderer does not fade. |
 | `CBRenderDD::FadeToColor` | replaced | Fills the rectangle only when the colour is opaque; Luma always blends, as Direct3D does (`CBRenderD3D::FadeToColor`). |
-| `CBRenderDD::SetViewport` | todo | Stores the rectangle that `CBSurfaceDD` blits are clipped to; same gap as `CBRenderD3D::SetViewport`. |
+| `CBRenderDD::SetViewport` | replaced | DirectDraw path; `DrawList::set_clip` (see `CBRenderD3D::SetViewport`). |
 | `CBRenderDD::TakeScreenshot` | replaced | See `CBRenderD3D::TakeScreenshot`. |
 | `CBRenderDD::DisplayDebugInfo` | n/a | Video memory figures of DirectDraw in the debug overlay. |
 
@@ -468,7 +468,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBRenderer::CBRenderer` | partial | `luma-render/src/renderer.rs` `Renderer::new` and `window.rs` `WindowConfig`. `m_DrawOffsetX/Y` (letterbox) is `renderer::letterbox`; `m_Windowed` has no counterpart (Luma has no full-screen mode); `m_ForceAlphaColor` is the per-window tint in `luma-adventure/src/ui.rs` (see `CBRenderD3D::DrawSpriteEx`). |
 | `CBRenderer::~CBRenderer` | replaced | Rust ownership; the hit list is a `Vec` of `World`. No cursor clip to release (see `CBRenderer::ClipCursor`). |
 | `CBRenderer::InitLoop` | done | `luma-adventure/src/input.rs`: `World::hits` is rebuilt from scratch every frame before `object_at`, as `DeleteRectList` empties `m_RectList`. |
-| `CBRenderer::GetObjectAt` | partial | `luma-adventure/src/input.rs` `World::object_at`, `PixelArea::contains` (last drawn first, `PtInRect` bounds, frame formula with the source corner added before the zoom division, mirror as `Width - XX`). Differences: (1) `Mask::of` (`scene_view.rs`) calls a pixel opaque when alpha `> 128`, the original when alpha `>= 128` (`IsTransparentAt`: transparent when `< 128`); (2) a rotated sprite is hit where it is drawn, the original tests the unrotated rectangle (deliberate, documented in `unrotate`); (3) `CBActiveRect::ClipRect` is not ported: the original clips every rectangle to the current viewport (scene viewport, clipped window) and shifts the pixel lookup by `m_OffsetX/Y`, Luma hits objects outside the viewport; (4) a 3D model's rectangle is tested inclusive of right and bottom (`<=`), `PtInRect` excludes them; (5) the `m_Model` (`C3DModel`, MS3D) branch has no counterpart. |
+| `CBRenderer::GetObjectAt` | partial | deliberate: `luma-adventure/src/input.rs` `World::object_at`, `PixelArea::contains` (last drawn first, `PtInRect` bounds, the viewport's cut of `CBActiveRect::ClipRect`, frame formula with the source corner added before the zoom division, mirror as `Width - XX`, a pixel opaque from alpha 128). Deliberate difference: a rotated sprite is hit where it is drawn, the original tests the unrotated rectangle (documented in `unrotate`). 3D rows: a 3D model's rectangle is tested inclusive of right and bottom (`<=`), `PtInRect` excludes them; the `m_Model` (`C3DModel`, MS3D) branch has no counterpart. |
 | `CBRenderer::DeleteRectList` | replaced | `World::hits` is a `Vec` cleared and refilled each frame. |
 | `CBRenderer::SwitchFullscreen` | n/a | Only changes Win32 window styles, and `CBRenderD3D::SwitchFullscreen` returns `E_FAIL` (no longer supported in the original). |
 | `CBRenderer::Flip` | replaced | Base stub; presenting is `luma-render/src/window.rs` (`surface.present`), skipped on `Flow::Skip`. |
@@ -480,13 +480,13 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBRenderer::SetupLines` | replaced | Base stub; see `CBRenderD3D::SetupLines`. |
 | `CBRenderer::Setup3D` | replaced | Base stub; see `CBRenderD3D::Setup3D`. |
 | `CBRenderer::Setup3DCustom` | n/a | Base stub; see `CBRenderD3D::Setup3DCustom`. |
-| `CBRenderer::DrawLine` | todo | Base stub; see `CBRenderD3D::DrawLine`: Luma has no line primitive. |
-| `CBRenderer::DrawRect` | partial | Only caller is the accessibility hint (`BAccessMgr.cpp`): `luma-adventure/src/accessibility.rs` `draw_access_hint` draws four filled bars of width 4 instead of 4 nested 1-pixel outlines. The original's bottom and right lines lie on `Y2-i` and `X2-i` (so the frame covers `X1..=X2`, `Y1..=Y2`), Luma's bars cover `l..r`, `t..b` exclusive: one pixel short on the right and bottom. No general `DrawRect` exists. |
+| `CBRenderer::DrawLine` | done | Base stub; `DrawList::line` (see `CBRenderD3D::DrawLine`). |
+| `CBRenderer::DrawRect` | done | `luma-render/src/draw.rs` `DrawList::rect_outline`: the four lines of each of the nested outlines as the original draws them, the frame covering `X1..=X2`, `Y1..=Y2`; used by `luma-adventure/src/accessibility.rs` `draw_access_hint` (red, 4 wide). |
 | `CBRenderer::Fade` | replaced | Base stub; see `CBRenderD3D::Fade`. |
 | `CBRenderer::FadeToColor` | replaced | Base stub; see `CBRenderD3D::FadeToColor`. |
-| `CBRenderer::SetViewport` | todo | Base stub; see `CBRenderD3D::SetViewport`: Luma has no clip rectangle. |
-| `CBRenderer::SetScreenViewport` | todo | Resets the device viewport to the game rectangle after a clipped part (`CAdGame::DisplayContent`, `CAdScene`). Nothing to reset in Luma because nothing is ever clipped; comes with `CBRenderD3D::SetViewport`. |
-| `CBRenderer::SetViewport #2` | todo | Sets the clip rectangle from a `RECT` plus the letterbox offset (`CBGame::PushViewport`/`PopViewport`). Not in Luma; see `CBRenderD3D::SetViewport`. |
+| `CBRenderer::SetViewport` | done | Base stub; `DrawList::set_clip` (see `CBRenderD3D::SetViewport`). |
+| `CBRenderer::SetScreenViewport` | done | `DrawList::set_clip(None)`: no scissor, the whole game rectangle (`World::draw` after the scene). |
+| `CBRenderer::SetViewport #2` | done | `DrawList::set_clip` takes the rectangle in game pixels; the letterbox offset and scale are applied by `renderer.rs` `scissor`. |
 | `CBRenderer::TakeScreenshot` | replaced | Base stub; see `CBRenderD3D::TakeScreenshot`. |
 | `CBRenderer::ClipCursor` | todo | In full-screen mode confines the system cursor to the game rectangle (`m_DrawOffset`, `m_Width`, `m_Height`), so the mouse cannot go into the letterbox bars. Luma has neither a full-screen mode nor a cursor grab (`luma-render/src/window.rs`); the mouse can leave the game area and positions outside it are passed on. |
 | `CBRenderer::UnclipCursor` | todo | Releases the cursor confinement of `ClipCursor` (on exit and when the window loses focus). Comes with `ClipCursor`. |
@@ -528,10 +528,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBSurfaceD3D::Create` | partial | `luma-adventure/src/scene_view.rs` `SpriteBank::upload` with `luma-formats/src/image.rs` `decode` and `Texture::from_image`. Differences: (1) the colour key: the original replaces every pixel equal to the key with transparent black whatever the file (D3DX compares the 32-bit value with alpha `FF`, `CBImage::FillTexture` compares RGB), so a fully opaque key-coloured pixel of a PNG or TGA with an alpha channel is cut out too; Luma applies the key only to images without an alpha channel (rule taken from WME Lite); (2) keyed pixels are transparent black in the original, Luma gives them the average colour of their opaque neighbours (`clear_keyed_color`) so that a scaled edge does not darken (deliberate); (3) `savegame:<slot>` names (optionally `,g` for grey) load the thumbnail of a saved game as an image (served by `Vfs`, see `CBSaveThumbFile::Open`; the original's textures of a slot only change when loaded again, Luma's at once, `World::refresh_thumbnails`); (4) the format is taken from the file's content, the original's D3DX loader also reads DDS, DIB, PPM, HDR and PFM, which the `image` features (png, bmp, jpeg, tga) do not; (5) lifetime, `KeepLoaded` and the lazy load when `LifeTime != -1` are not reproduced (no visible effect). |
 | `CBSurfaceD3D::Display` | done | Opaque draw at 100 % (`AlphaDisable`), used for video frames: Luma's video quad (`luma-adventure/src/video.rs`) draws an opaque texture with normal blending, the same result. Tiles: see `CBImage::LoadFile`. |
 | `CBSurfaceD3D::DisplayTrans` | done | `scene_view.rs` `place_transformed` (unscaled branch) and `DrawList::push_with`: source rectangle, tint, blend mode, mirror. |
-| `CBSurfaceD3D::DisplayTransZoom` | partial | `scene_view.rs` `place_transformed` (scaled branch). The destination size is truncated to whole pixels where the original keeps `width * zoom` as a float (see `CBRenderD3D::DrawSpriteEx`). |
-| `CBSurfaceD3D::DisplayZoom` | partial | Zoomed draw with or without transparency; called for scaled video frames (`CVidRenderer::Display`, opaque). Luma's video quad (`luma-adventure/src/video.rs`) truncates the zoomed size to whole pixels (`(texture.width as f32 * zoom).trunc()`), the original keeps the float size. |
-| `CBSurfaceD3D::DisplayTransform` | partial | `scene_view.rs` `place_transformed` and `renderer.rs` `rotated_corners`: pivot at `X + HotX * zoom`, `Y + HotY * zoom` from the truncated corner, angle in degrees, same sense. Same size truncation as `DisplayTransZoom`. |
-| `CBSurfaceD3D::IsTransparentAt` | partial | `scene_view.rs` `Mask::of`, `is_opaque`. The original calls a pixel transparent when alpha `< 128` (32-bit textures); Luma when alpha `<= 128` (`p[3] > 128` is opaque): a pixel of alpha exactly 128 differs. Outside the image the original reads out of bounds, Luma says transparent. |
+| `CBSurfaceD3D::DisplayTransZoom` | done | `scene_view.rs` `place_transformed` (scaled branch): the corner truncated, the size `width * zoom` as a float. |
+| `CBSurfaceD3D::DisplayZoom` | done | Zoomed draw with or without transparency; called for scaled video frames (`CVidRenderer::Display`, opaque): the video quads of `luma-adventure/src/video.rs` and `scene_view.rs` keep the float size `width * zoom`. |
+| `CBSurfaceD3D::DisplayTransform` | done | `scene_view.rs` `place_transformed` and `renderer.rs` `rotated_corners`: pivot at `X + HotX * zoom`, `Y + HotY * zoom` from the truncated corner, angle in degrees, same sense, float size. |
+| `CBSurfaceD3D::IsTransparentAt` | partial | deliberate: `scene_view.rs` `Mask::of`, `is_opaque`: transparent when alpha `< 128`. Outside the image the original reads out of bounds; Luma says transparent. |
 | `CBSurfaceD3D::Create #2` | replaced | Empty texture for video frames: `Renderer::texture_from_rgba` and `write_texture` (`luma-adventure/src/video.rs`). |
 | `CBSurfaceD3D::CreateEmptyTexture` | n/a | Tile textures for images larger than the device limit and the 16-bit fallback; no meaning with wgpu. |
 | `CBSurfaceD3D::GetTextureFormat` | n/a | Direct3D texture format query; Luma textures are always `Rgba8Unorm`. |
@@ -540,7 +540,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBSurfaceD3D::GetPixel` | todo | Reads a pixel of a surface as A, R, G, B. Reached from scripts through `CBSubFrame::GetPixel` (the sub-frame object's pixel methods, to be confirmed in the game table) and from the tile loader. Luma has no pixel read on a sprite image. |
 | `CBSurfaceD3D::PutPixel` | todo | Writes a pixel (alpha kept when the `A` argument is not above 0). Reached from scripts through `CBSubFrame::PutPixel` and used by the video renderers (replaced there by `write_texture`). Luma cannot modify a sprite image. |
 | `CBSurfaceD3D::ComparePixel` | n/a | Never called by the engine. |
-| `CBSurfaceD3D::IsTransparentAtLite` | partial | Used by `CBFontBitmap::GetWidths` (`AUTO_WIDTH`): a pixel is transparent only when its alpha is 0. `luma-formats/src/font.rs` `measure_tile` counts a pixel only when alpha `> 128`, so the antialiased right edge of a glyph in a font image with an alpha channel is not measured and the automatic widths come out narrower than in the original. |
+| `CBSurfaceD3D::IsTransparentAtLite` | done | Used by `CBFontBitmap::GetWidths` (`AUTO_WIDTH`): `luma-formats/src/font.rs` `measure_tile` counts a pixel unless its alpha is 0. Its "not transparent" answer outside the image is never reached: `GetWidths` skips the pixels outside the image itself, as `measure_tile` stays inside it. |
 | `CBSurfaceD3D::Invalidate` | replaced | Frees the texture of a surface not used for its lifetime; Luma frees textures with their bank (scene change, object removal). Memory only. |
 | `CBSurfaceD3D::ReleaseTiles` | n/a | Tiles of oversized images; no texture-size subdivision in Luma. |
 | `CBSurfaceD3D::PrepareToDraw` | replaced | See `CBSurface::PrepareToDraw`. |

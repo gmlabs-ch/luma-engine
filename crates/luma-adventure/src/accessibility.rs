@@ -24,7 +24,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use luma_formats::Rgba;
-use luma_render::{DrawList, Quad, Rect, Texture};
+use luma_render::{DrawList, Texture};
 use luma_script::{Engine, NativeId, Value};
 
 use crate::objects::Kind;
@@ -534,35 +534,128 @@ impl World {
                 return objects;
             }
         }
-        let mut objects = Vec::new();
-        if let Some(view) = &self.scene {
-            for (layer_index, layer) in view.scene.layers.iter().enumerate() {
-                if layer.close_up {
-                    objects.clear();
-                }
-                for (index, node) in layer.nodes.iter().enumerate() {
-                    let luma_formats::scene::SceneNode::Entity(entity) = node else {
-                        continue;
-                    };
-                    if !entity.active || !entity.interactive {
-                        continue;
+        self.scene_access_objects()
+    }
+
+    /// The scene's objects the keyboard cycles through
+    /// (`CAdScene::GetSceneObjects` with `InteractiveOnly`): layer by
+    /// layer, a close-up layer dropping what was gathered below it; an
+    /// entity node when it is active and registrable; at a region node
+    /// the free objects standing in it or stuck to it, by `y`; at the
+    /// end the free objects not listed yet, by `y`.
+    fn scene_access_objects(&self) -> Vec<NativeId> {
+        use luma_formats::scene::SceneNode;
+        let Some(view) = &self.scene else {
+            return Vec::new();
+        };
+        let free = self.registrable_free_objects();
+        // `GetRegionObjects`: stuck to the region, or standing in it
+        // while stuck to none; every one without a region.
+        let in_region = |region: Option<(usize, usize, &luma_formats::Region)>| {
+            let mut found: Vec<(i32, NativeId)> = free
+                .iter()
+                .filter(|(_, object)| match region {
+                    None => true,
+                    Some((layer, node, r)) => {
+                        object.stick == Some((layer, node))
+                            || (object.stick.is_none() && r.contains(object.x, object.y))
                     }
-                    let r = EntityRef::Node {
-                        layer: layer_index,
-                        index,
-                    };
-                    if let Some(id) = self.node_id(r) {
-                        objects.push(id);
-                    }
-                }
+                })
+                .map(|(id, object)| (object.y, *id))
+                .collect();
+            found.sort_by_key(|(y, _)| *y);
+            found
+        };
+        let mut objects: Vec<NativeId> = Vec::new();
+        for (layer_index, layer) in view.scene.layers.iter().enumerate() {
+            if layer.close_up {
+                objects.clear();
             }
-            for (id, actor) in &self.actors {
-                if actor.def.active && actor.def.interactive && !objects.contains(id) {
-                    objects.push(*id);
+            for (index, node) in layer.nodes.iter().enumerate() {
+                match node {
+                    SceneNode::Entity(entity) => {
+                        if !entity.active || !entity.interactive {
+                            continue;
+                        }
+                        let r = EntityRef::Node {
+                            layer: layer_index,
+                            index,
+                        };
+                        if let Some(id) = self.node_id(r) {
+                            objects.push(id);
+                        }
+                    }
+                    SceneNode::Region(region) => {
+                        for (_, id) in in_region(Some((layer_index, index, region))) {
+                            if !objects.contains(&id) {
+                                objects.push(id);
+                            }
+                        }
+                    }
                 }
             }
         }
+        for (_, id) in in_region(None) {
+            if !objects.contains(&id) {
+                objects.push(id);
+            }
+        }
         objects
+    }
+
+    /// The active, registrable free objects, the game's first then the
+    /// scene's (`CAdGame::m_Objects`, `CAdScene::m_Objects`), with where
+    /// they stand and the region they stick to.
+    fn registrable_free_objects(&self) -> Vec<(NativeId, crate::scene_view::FreeObject)> {
+        use crate::scene_view::FreeObject;
+        let mut out = Vec::new();
+        let place = |id: NativeId, x: i32, y: i32| {
+            (
+                id,
+                FreeObject {
+                    x,
+                    y,
+                    stick: self.stick_region_of(id),
+                },
+            )
+        };
+        let actors = |out: &mut Vec<(NativeId, FreeObject)>, bound: bool| {
+            for (id, actor) in &self.actors {
+                if actor.scene_bound == bound && actor.def.active && actor.def.interactive {
+                    out.push(place(*id, actor.x, actor.y));
+                }
+            }
+            #[cfg(feature = "3d")]
+            for (id, actor) in &self.actors3d {
+                if actor.scene_bound == bound && actor.active && actor.interactive {
+                    out.push(place(*id, actor.x, actor.y));
+                }
+            }
+        };
+        actors(&mut out, false);
+        for r in self.game_view.entity_refs() {
+            let (Some(entity), Some(id)) = (self.game_view.entity(r), self.node_id(r)) else {
+                continue;
+            };
+            let attached = self
+                .object_state(id)
+                .is_some_and(|s| s.attached_to.is_some());
+            if entity.active && entity.interactive && !attached {
+                out.push(place(id, entity.x, entity.y));
+            }
+        }
+        if let Some(view) = &self.scene {
+            for (index, entity) in view.scene.free_entities.iter().enumerate() {
+                if !entity.active || !entity.interactive {
+                    continue;
+                }
+                if let Some(id) = self.node_id(EntityRef::Free(index)) {
+                    out.push(place(id, entity.x, entity.y));
+                }
+            }
+        }
+        actors(&mut out, true);
+        out
     }
 
     /// The buttons and editors under a window, depth first
@@ -645,29 +738,15 @@ impl World {
         let Some((left, top, right, bottom)) = self.access.hint else {
             return;
         };
-        let (l, t, r, b) = (left as f32, top as f32, right as f32, bottom as f32);
-        let width = 4.0;
         let red = Rgba {
             r: 255,
             g: 0,
             b: 0,
             a: 255,
         };
-        for dst in [
-            Rect::new(l, t, r - l, width),
-            Rect::new(l, b - width, r - l, width),
-            Rect::new(l, t, width, b - t),
-            Rect::new(r - width, t, width, b - t),
-        ] {
-            list.push(Quad {
-                texture: white,
-                dst,
-                src: None,
-                tint: red,
-                flip_x: false,
-                flip_y: false,
-            });
-        }
+        // `DrawRect(left, top, right, bottom, 0xFFFF0000, 4)`: four
+        // nested one-pixel outlines, the right and bottom edges included.
+        list.rect_outline(white, left, top, right, bottom, red, 4);
     }
 
     /// Pauses the game under a shield window (`CBGame::AccessPause`): a

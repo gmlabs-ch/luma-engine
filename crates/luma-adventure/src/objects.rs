@@ -207,6 +207,16 @@ pub struct ObjectState {
     /// false is not remembered between visits of its scene. An entity
     /// keeps its own (`SAVE_STATE`).
     pub save_state: bool,
+    /// `CBObject::m_Cursor` for the kinds that keep it nowhere else (an
+    /// item's own cursor, a region's, a layer's, a waypoint group's,
+    /// the response box's): set by `SetCursor`, shown while the object
+    /// is the one under the mouse.
+    pub cursor: Option<String>,
+    /// The regions of the main layer an entity stood in when it last
+    /// moved (`CAdObject::m_CurrentRegions`), as `(layer, node)`: what
+    /// `ActorEntry` and `ActorLeave` are raised against. An actor keeps
+    /// its own list.
+    pub current_regions: Vec<(usize, usize)>,
 }
 
 /// The inventory of an object other than the game (`CAdInventory`).
@@ -248,6 +258,8 @@ impl Default for ObjectState {
             freezable: true,
             filename: None,
             save_state: true,
+            cursor: None,
+            current_regions: Vec::new(),
         }
     }
 }
@@ -259,6 +271,8 @@ impl ObjectState {
     pub fn for_kind(kind: &Kind) -> ObjectState {
         ObjectState {
             non_int_mouse_events: matches!(kind, Kind::Control | Kind::Entity(EntityRef::Ui(_))),
+            // `CAdItem::CAdItem` sets `m_Movable = false`.
+            movable: !matches!(kind, Kind::Item),
             ..ObjectState::default()
         }
     }

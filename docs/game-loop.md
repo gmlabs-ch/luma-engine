@@ -22,13 +22,15 @@ Every frame then runs, in this order (`Runtime::tick`):
 1. a game load asked last frame (`Game.LoadGame`) happens, replacing
    everything below with the saved state (see [saving.md](saving.md));
    the timer advances by the frame's duration, at most a second;
-2. a scene change asked last frame happens (`SceneShutdown`, the old
-   scene's state noted, the new scene loaded and its remembered state
-   put back, its scripts attached), with a fade from black of 200 ms
-   when asked;
+2. a scene change asked earlier happens once no transition runs
+   (`SceneShutdown`, the old scene's state noted, the new scene loaded
+   and its remembered state put back, its scripts attached), and the
+   fade from black starts when asked (see
+   [Scene changes](#scene-changes));
 3. speech sounds that ended end their sentences; the fader advances;
 4. the scripts run (`Engine::tick`);
-5. the scene's entities and the game's own (see
+5. the view takes its scroll step towards the target set last frame;
+   the scene's entities and the game's own (see
    [formats/scene.md](formats/scene.md#entities-of-the-game-and-attachments))
    animate and talk; the actors walk, turn, talk; a sprite frame that
    becomes current plays its `SOUND`, stops the sprite's earlier frame
@@ -40,15 +42,23 @@ Every frame then runs, in this order (`Runtime::tick`):
    scripts by name (see [3d-actors.md](3d-actors.md), section 8); the
    particle emitters of the entities and actors follow their owner and
    emit (see [particles.md](particles.md));
-6. the view scrolls towards the main object; the objects' sounds follow
-   them;
+6. the main object sets the view's next scroll target; the objects'
+   sounds follow them;
 7. the object under the mouse is found and becomes the **active
    object**, raising `MouseLeave` and `MouseEntry`;
 8. the windows note the mouse: a button held under it is pressed, a
    press released on it fires, a dragged window moves, the focused
    window is checked; the cursor is chosen and animates;
-9. the events raised during the frame reach their scripts (they run
-   next frame).
+9. the transition of a scene change advances;
+10. the events raised during the frame reach their scripts (they run
+    next frame).
+
+While a full-screen video plays only the video is updated and drawn,
+with the loading icon and the quick messages over it. The quick
+messages (`Game.Msg`, script errors) are drawn after everything else on
+every frame and last three seconds of the live clock
+(`CBGame::m_CurrentTime`), so they also go away while a menu freezes the
+game.
 
 The mouse reaches the runtime between frames (`mouse_move`,
 `mouse_left_down`, `mouse_left_up`). A button needs one frame that sees
@@ -127,10 +137,12 @@ nodes, see [3d-actors.md](3d-actors.md) section 10), the windows marked
 `IN_GAME`, the inventory box, the response box while a dialogue waits
 for a choice, the other windows (so a menu opened during a dialogue
 covers the responses, and takes the clicks over them; `CAdGame::
-DisplayContent`), the sentences (not while the game is frozen by a
-system-exclusive window such as a menu: `DisplaySentences`; they come
-back when it closes), the cursor, the fader's
-colour over everything, the loading icon (see
+DisplayContent`), the sentences (while the game is frozen by a
+system-exclusive window such as a menu, not those of freezable
+speakers, which is every object but a window's own: `DisplaySentences`;
+they come back when it closes; the accessibility pause shows them all),
+the cursor, the fader's colour over everything, the black of a scene
+change's transition, the loading icon (see
 [saving.md](saving.md#loading-and-saving-screens-loading-icon)), and
 last the messages of `Game.Msg`: short
 texts in the system font from 20 pixels down the left edge, each for
@@ -218,13 +230,39 @@ exclusive window or a menu a shield covering the whole screen. The
 object under the mouse is the **last one drawn** whose area contains the
 point: a region by its polygon (in scene coordinates), a sprite by its
 rectangle on screen, and, when the sprite is `PRECISE` (the default),
-only where the pixel's alpha is above 128, with the sprite's scale (per
+only where the pixel's alpha is 128 or more, with the sprite's scale (per
 axis, `ScaleX`/`ScaleY`) and mirroring applied. A rotated sprite
 (`Rotatable`, see [scene.md](formats/scene.md#rotation-of-an-object)) is
 hit where it is seen: the point is turned back around the hotspot before
 the tests. The original engine registers the unrotated rectangle and
 hits a turned sprite where it would be unrotated; Luma follows the
 transform instead, deliberately.
+
+### Viewports
+
+A viewport limits what is drawn and what takes the mouse to a rectangle
+of the screen (`CBGame::PushViewport`, `CBRenderer::SetViewport`,
+`CBActiveRect::ClipRect`). Two things push one:
+
+- the scene, while its layers, objects and its own fader are drawn, when
+  it has a viewport of its own (`VIEWPORT`, `Scene.SetViewport`) or the
+  game has one (`SCENE_VIEWPORT`, `Game.SetSceneViewport`); without
+  either nothing is clipped;
+- a window whose `CLIP_CONTENTS` is on, for its back, image, title and
+  controls (not for the shield under it nor its `FADE_COLOR`, drawn
+  before): its rectangle, kept on the screen.
+
+A viewport replaces the one under it while it is pushed and gives it
+back afterwards: a clipping window inside another clipping window is cut
+to its own rectangle, not to both. An object's area is cut to the
+viewport it was drawn in, so the part of a sprite, a region or a button
+that lies outside is neither seen nor hit; the pixel test of a cut
+sprite still reads the right pixel. `Game.SetSceneViewport` and
+`Scene.SetViewport` take a width or height of zero or less as the
+screen's and keep the rectangle on the screen (`CBViewport::SetRect`).
+In Luma the viewport is the draw list's clip rectangle (see
+[rendering.md](rendering.md#clip-rectangle)) and a rectangle kept with
+each hit area (`World::scene_clip`, `World::window_clip`).
 
 While the game is not interactive there is no active object, so a
 click skips the sentences and nothing else (per `TALK_SKIP_BUTTON`).
@@ -355,9 +393,8 @@ add the scene's scroll offset and take off the scene viewport's origin
 `Scene.SetViewport` comes before it, see
 [formats/scene.md](formats/scene.md)). The viewport also sizes the view
 the scroll centres on the main object, and `Scene.IsPointInViewport`
-answers for it. The scene is not clipped to it yet: a scene taller than
-its viewport draws over whatever lies below, which the games seen so far
-cover with a window. `Game.ActiveObject` is the active object,
+answers for it. The scene is clipped to it (see [Viewports](#viewports)).
+`Game.ActiveObject` is the active object,
 `Game.SelectedItem` the inventory item in use. The inventory box, when
 `Game.InventoryVisible`, is drawn between the `IN_GAME` windows and the
 others, and its items are active objects through their sprites.
@@ -365,28 +402,43 @@ others, and its items are active objects through their sprites.
 ## Cursors
 
 The cursor drawn (`CBGame::ShowCursor`), in order: nothing while
-`Game.HideCursor`; the `NONINTERACTIVE_CURSOR` while the game is not
-interactive; the active object's own `CURSOR`; the `ACTIVE_CURSOR` over
+`Game.HideCursor`; the `NONINTERACTIVE_CURSOR`, or nothing without one,
+while the game is not interactive and runs (not while the response box
+waits for a pick: the cursors below show then, so the player can choose
+an answer during a non-interactive dialogue); the active object's own
+`CURSOR`; the `ACTIVE_CURSOR` over
 an active object that can be used (an entity, an actor or an item, the
 engine's `usable` flag; not a window or a button); the `CURSOR`. A cursor that was not shown last frame
-restarts its animation. `Game.SetActiveCursor`, `RemoveActiveCursor`,
+restarts its animation; cursors animate on the live timer, so they keep
+moving while a menu freezes the game (see
+[formats/sprite.md](formats/sprite.md#animation)). `Game.SetActiveCursor`, `RemoveActiveCursor`,
 `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`,
-`GetActiveCursor` and `GetWaitCursor` change and read them;
+`GetActiveCursor` and `GetWaitCursor` change and read them (a sprite
+that does not load leaves none: the old one is dropped first);
 `GetActiveCursorObject` and `GetWaitCursorObject` return them as
 sprite objects (see below), `null` without one. The system cursor is
 hidden over the window.
 
 An object's own cursor comes from its `CURSOR` key, or from `SetCursor`
-on the object (entities, actors and controls; `false` when the sprite
-does not load, and the old cursor stays). `RemoveCursor` takes it off,
+on the object; `false` when the sprite does not load, and the object is
+then left without a cursor, the old one being dropped first
+(`CBObject::SetCursor`). A file that is not there does load, as the
+placeholder image (see [formats/sprite.md](formats/sprite.md)); it is a
+definition that does not parse that fails. Every object has the methods: on the game they
+act on the normal cursor (`Game.SetCursor(file)` changes the `CURSOR`
+of the game file, `Game.RemoveCursor()` leaves none), on the scene on
+its `CURSOR`; items, regions, layers, waypoint groups and the response
+box keep one too, shown when the object is the one under the mouse (an
+item in the inventory box). `RemoveCursor` takes it off,
 `HasCursor` and `GetCursor` read it, and `GetCursorObject` returns it as
 a sprite object (frames, `CurrentFrame`, `Looping`, `Reset`, `Pause`,
 `Play`), sharing the animation the cursor shows. Scripts find the
 entity under the mouse change cursor from the next frame on, as in the
 original engine.
 
-While an inventory item is selected and the game is interactive, the
-item's `CURSOR` is drawn at the mouse, over the cursor above when the
+While an inventory item is selected, the game is interactive and runs
+(not frozen, the response box not waiting), the item's `CURSOR` is
+drawn at the mouse, over the cursor above when the
 item's `CURSOR_COMBINED` is on, instead of it otherwise; over an entity,
 an actor or an item its `CURSOR_HOVER` is drawn instead (only over
 objects that handle the item's event when `Game.SmartItemCursor` is
@@ -535,8 +587,37 @@ over `duration` milliseconds (500, black, opaque by default) and makes
 the script wait; `FadeIn` fades the colour away; the `Async` forms do
 not wait and the `System` forms run on the wall clock, so that a frozen
 game still fades. `GetFadeColor` reads the colour laid over the frame.
-A scene change fades in from black over 200 ms unless `ChangeScene` is
-told not to.
+
+### Scene changes
+
+`Game.ChangeScene(file, fadeOut, fadeIn)` goes through the transition
+manager (`CBTransitionMgr`, `Transition` in `fader.rs`), not through the
+fader above; both flags are on when left out.
+
+- With `fadeOut`, the screen goes to black over 200 ms with the game not
+  interactive (`Game.Interactive` reads false and comes back to what it
+  was, or to what a script set meanwhile, when the fade ends). The scene
+  changes at the start of the first frame after the fade
+  (`CAdGame::InitLoop` waits for `IsReady`); without `fadeOut`, at the
+  start of the next frame. `Game.ChangingScene` is true until then.
+- With `fadeIn`, the new scene comes back from black over 200 ms, the
+  game interactive; it starts even when the scene file failed to load.
+- The very first change of a game, while no scene is loaded, happens
+  inside the call (`CAdGame::ScheduleChangeScene`): the script goes on
+  with the scene there. Its fade-in runs; the fade-out asked with it is
+  dropped, as a transition cannot start while another runs. The same
+  holds for a change asked while a fade-in still runs: no fade-out, and
+  the change waits for the fade-in to end.
+
+The transition runs on the live clock, starting at the first frame that
+shows it, and ends once more than 200 ms have passed; it is black laid
+over the whole screen after everything else, the fader's colour and the
+cursor included, so a colour a script left with `Game.FadeOut` stays
+under it and a script waiting for the fader is not released by a scene
+change. It is not part of a saved game. A scene file that is missing
+leaves the current scene in place (the game's objects are reset and the
+scene's script properties cleared, as before any change); one that does
+not parse leaves no scene.
 
 The scene has a fader of its own (`Scene.FadeOut`, `FadeIn`, their
 `Async` forms and `Scene.GetFadeColor`, same arguments): its colour
@@ -640,10 +721,13 @@ and `GetNumResponses` raise a script runtime error (`response box is
 not defined`) and do nothing; `Game.LastResponse` and
 `LastResponseOrig` are empty strings until a choice is made.
 
-While the box waits (the original's semi-frozen state), and while an
-exclusive window is up, the windows and their controls take the mouse
-even when `Game.Interactive` is off, so a choice can be picked during
-the actors' lines; the scene's objects do not.
+The windows and their controls are found under the mouse even when
+`Game.Interactive` is off (`NonIntMouseEvents`); the scene's objects are
+not. A button however hovers and fires only while the game is
+interactive or the box waits (the original's semi-frozen state, which
+only the response box sets), so a choice can be picked during the
+actors' lines, and a system-exclusive window, which makes the game
+interactive while it freezes it, works as a menu.
 
 ## Accessibility
 
@@ -688,8 +772,11 @@ the next clickable object and Ctrl+Shift+Tab the previous one, cycling
 through the buttons and editors of the focused window (into its child
 windows, disabled ones skipped), else the response buttons while the
 dialogue waits for a pick, else the scene's active, interactive
-entities in layer order (a close-up layer hides what is below it) and
-its active, interactive actors. While Ctrl is held, the object picked
+objects in the order they are drawn (`CAdScene::GetSceneObjects`): the
+entities layer by layer (a close-up layer drops what is below it), at
+each region the free objects standing in it or stuck to it, sorted by
+`y`, and at the end the free objects not listed yet (the scene's free
+entities and actors, the game's actors and entities). While Ctrl is held, the object picked
 is framed in red, four pixels wide, over the windows; with
 `KeyboardCursorSkip` (on by default) the mouse cursor jumps to the
 centre of its area the frame it is picked, so that the next click goes
@@ -704,7 +791,3 @@ under a shield window covering the screen, system-exclusive so that
 every script but the window's stops, with "Game paused. Press
 Ctrl+Space to resume." (`/SYSENG0040/`) in the system font at the
 bottom centre; Ctrl+Space again closes it.
-
-## Not yet
-
-- Transitions other than the fade.

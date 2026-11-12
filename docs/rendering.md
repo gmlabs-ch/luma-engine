@@ -46,8 +46,8 @@ Wintermute format; the formats are in [docs/formats](formats/README.md).
    depth and stencil) and draws the list in order: the quads with the
    pipeline of each quad's blend mode (see [Transforms](#transforms)),
    the meshes where they were pushed (see [3D pass](#3d-pass)).
-   Consecutive quads with the same texture and blend mode are one draw
-   call; a mesh between them ends the batch.
+   Consecutive quads with the same texture, blend mode and clip
+   rectangle are one draw call; a mesh between them ends the batch.
 3. The window presents the swap chain texture, unless the application
    answered `Flow::Skip` for this frame, which keeps the previous one on
    screen; an `Offscreen` can be read back.
@@ -77,6 +77,32 @@ scale the pixels stay crisp without the uneven rows of plain nearest
 sampling. Scaled sprites, text and 3D actors are therefore smoothed at
 the game's resolution, as in the original, not at the window's.
 
+### Clip rectangle
+
+`DrawList::set_clip` sets a rectangle, in logical pixels, outside which
+the quads and 3D items pushed after it are not drawn; `None` removes it.
+It is the original's viewport (`CBRenderer::SetViewport`, the Direct3D
+viewport, which clips the pre-transformed sprites): a rectangle
+replaces the one before it, it is not intersected with it, and the
+offset does not move it. The renderer turns it into a scissor rectangle
+per draw batch, its edges rounded to pixels of the target and cut to
+it; a batch whose rectangle is empty or off the target is skipped. Who
+sets it is the game's business: a scene drawn in its viewport, a window
+that clips its contents (see [game-loop.md](game-loop.md#viewports)).
+
+### Lines
+
+`DrawList::line` draws a one-pixel line between two points given in
+whole pixels (`CBRenderD3D::DrawLine`). It covers the pixels a Direct3D
+line list covers between two pixel centres, without the last one: from
+`(0, 5)` to `(10, 5)`, `x` 0 to 9 of row 5; two equal ends draw
+nothing. Luma has no line pipeline: a horizontal or vertical line is one
+quad of the white texture, a slanted one a quad per run of pixels along
+its longer axis, so that the result is the same on every graphics
+back-end. A line is cut at 16384 pixels. `DrawList::rect_outline` is
+`CBRenderer::DrawRect`: nested one-pixel outlines whose right and bottom
+edges are included (the accessibility frame).
+
 Scrolling is the draw list's `offset`, added to the position of every
 quad pushed after it (a layer scrolled by `s` pixels uses an offset of
 `-s`): the renderer does not know about layers or cameras, the scene code
@@ -87,8 +113,14 @@ computes each layer's parallax offset (see [scene.md](formats/scene.md#camera)).
 A sprite's sub-frame is placed with its hotspot at the owner's position
 and scaled around it, by a separate factor on each axis when the object
 has a `ScaleX` or `ScaleY` (`CAdObject::GetScale`); the adventure layer
-computes the destination rectangle, with the engine's integer
-truncation, and the renderer draws it as it is.
+computes the destination rectangle and the renderer draws it as it is:
+the corner is truncated to a whole pixel (`CBSubFrame::Draw` hands
+integers on), the size is the sub-frame's times the scale, not rounded
+(`CBRenderD3D::DrawSpriteEx`), so a sprite at 150 % of 3 pixels is 4.5
+pixels wide and its last column is half covered. A scale that is
+negative on one axis only draws nothing, as the original culls the quad
+it turns over; a negative `Scale`, `ScaleX` or `ScaleY` of an object is
+"not set" and never gets that far.
 
 Rotation is a per-quad attribute: an angle in degrees and a pivot in
 logical pixels. The renderer turns the four corners of the destination
@@ -295,8 +327,8 @@ stencil differs from the reference and sets it to the reference
 (`NotEqual` / `Replace`), so that the overlapping triangles of a
 translucent silhouette darken the floor once (the flat shadows).
 
-Not in the renderer: the geometry debug overlay (`Scene.ShowGeometry`,
-wireframe in the original), which needs a line pipeline.
+Not drawn: the geometry debug overlay (`Scene.ShowGeometry`, wireframe
+in the original).
 
 ## Not yet
 

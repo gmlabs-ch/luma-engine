@@ -48,4 +48,14 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libasound2-dev pkg-config
       - run: cargo test --workspace
+        if: runner.os != 'Linux'
+      # On the Linux runner the renderer tests draw with Mesa's software
+      # Vulkan driver, and their process has died with SIGSEGV now and then
+      # (in the offscreen and mesh tests, never in an assertion) while
+      # several tests each drove a device of their own at the same time.
+      # One test at a time there, until the cause is known.
+      - run: cargo test --workspace
+        if: runner.os == 'Linux'
+        env:
+          RUST_TEST_THREADS: 1
       - run: cargo run --bin luma -- version

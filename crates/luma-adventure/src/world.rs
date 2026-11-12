@@ -20,7 +20,7 @@ use luma_script::{Context, Engine, Host, NativeId, Natives, Return, State, Value
 use crate::accessibility::{Accessibility, SpeechKind};
 use crate::actor::{Actor, ActorEvent, WalkContext, scene_obstacles};
 use crate::error::{Error, Result};
-use crate::fader::{Fader, SCENE_FADE_MS};
+use crate::fader::{Fader, Transition, TransitionKind};
 use crate::input::{Cursors, HitArea, Keyboard, Mouse};
 use crate::inventory::Inventory;
 use crate::objects::{Kind, Native, Objects};
@@ -41,7 +41,7 @@ use luma_formats::font::TextAlign;
 pub struct QuickMessage {
     /// The text shown.
     pub text: String,
-    /// When it was posted, on the game timer.
+    /// When it was posted, on the live clock (`m_CurrentTime`).
     pub start: u64,
     /// Its height in the system font, over the screen's width.
     pub height: i32,
@@ -126,6 +126,9 @@ pub struct World {
     pub(crate) prev_scene_name: String,
     pub(crate) prev_scene_filename: String,
     pub(crate) scheduled_scene: Option<(String, bool)>,
+    /// The transition manager (`CBGame::m_TransMgr`): the fades of a
+    /// scene change.
+    pub(crate) transition: Transition,
     pub(crate) scene_states: BTreeMap<String, SceneState>,
     pub(crate) offset_x: i32,
     pub(crate) offset_y: i32,
@@ -378,6 +381,7 @@ impl World {
             prev_scene_name: String::new(),
             prev_scene_filename: String::new(),
             scheduled_scene: None,
+            transition: Transition::default(),
             scene_states: BTreeMap::new(),
             offset_x: 0,
             offset_y: 0,
@@ -576,8 +580,8 @@ impl World {
             return (
                 rect.left,
                 rect.top,
-                (rect.right - rect.left).max(0),
-                (rect.bottom - rect.top).max(0),
+                rect.right.saturating_sub(rect.left).max(0),
+                rect.bottom.saturating_sub(rect.top).max(0),
             );
         }
         self.scene_viewport.unwrap_or((
@@ -586,6 +590,25 @@ impl World {
             self.settings.width as i32,
             self.settings.height as i32,
         ))
+    }
+
+    /// The viewport the scene pushes while it is drawn
+    /// (`CAdScene::TraverseNodes`): its own or the game's, as `(left,
+    /// top, right, bottom)`; `None` when neither is set, and nothing is
+    /// then clipped. Drawing and the hit areas of the scene's objects
+    /// are limited to it (`CBRenderer::SetViewport`,
+    /// `CBActiveRect::ClipRect`).
+    pub fn scene_clip(&self) -> Option<(i32, i32, i32, i32)> {
+        if self
+            .scene
+            .as_ref()
+            .is_some_and(|v| v.scene.viewport.is_some())
+            || self.scene_viewport.is_some()
+        {
+            let (x, y, w, h) = self.viewport();
+            return Some((x, y, x.saturating_add(w), y.saturating_add(h)));
+        }
+        None
     }
 
     /// The camera showing the scene at its current offset, in the
@@ -605,10 +628,10 @@ impl World {
         self.interactive
     }
 
-    /// Whether a window holds the game (`GAME_SEMI_FROZEN`,
-    /// `GAME_FROZEN`): an exclusive window is up or the response box
-    /// waits for a pick. Clicks then reach the windows even while the
-    /// game is not interactive.
+    /// Whether a window holds the game: an exclusive window is up or
+    /// the response box waits for a pick. Of these only the response box
+    /// is the original's `GAME_SEMI_FROZEN` ([`World::is_running`] and
+    /// the buttons' hover rule test it alone).
     pub fn semi_frozen(&self) -> bool {
         self.responses_visible()
             || self.ui.controls.values().any(|c| {
@@ -847,7 +870,8 @@ impl World {
     /// goes after the frame that showed it (`CAdGame::DisplayContent`
     /// deletes it after its first display); a persistent one animates.
     pub(crate) fn update_loading_icon(&mut self) {
-        let timer = self.timer;
+        // The icon's sprite has no owner: the live timer.
+        let timer = self.clock;
         let Some(icon) = self.loading_icon.as_mut() else {
             return;
         };
@@ -991,7 +1015,9 @@ impl World {
             .map_or(0, |font| font.text_height(text, width));
         self.quick_messages.push(QuickMessage {
             text: text.to_string(),
-            start: self.timer,
+            // `m_CurrentTime`, the live clock: the three seconds run
+            // while the game is frozen.
+            start: self.clock,
             height,
         });
     }
@@ -1004,9 +1030,9 @@ impl World {
     /// Drops the quick messages past their time and lays out the rest
     /// (`DisplayQuickMsg`'s update half).
     pub(crate) fn update_quick_messages(&mut self) {
-        let timer = self.timer;
+        let clock = self.clock;
         self.quick_messages
-            .retain(|m| timer.saturating_sub(m.start) < QUICK_MSG_MS);
+            .retain(|m| clock.saturating_sub(m.start) < QUICK_MSG_MS);
         let width = self.settings.width as i32;
         if let Some(font) = self
             .system_font
@@ -1241,10 +1267,90 @@ impl World {
         self.strings.expand(text)
     }
 
-    /// Asks for a scene change at the start of the next frame
-    /// (`Game.ChangeScene`).
+    /// Asks for a scene change at the start of the next frame, or of
+    /// the first frame after the transition running has ended.
     pub fn schedule_scene(&mut self, path: &str, fade_in: bool) {
         self.scheduled_scene = Some((path.to_string(), fade_in));
+    }
+
+    /// `CAdGame::ScheduleChangeScene`: the scene changes at once while
+    /// no scene is loaded yet (the first `Game.ChangeScene` of a game,
+    /// whose script goes on with the scene there), else at the start of
+    /// a later frame.
+    pub(crate) fn schedule_or_change_scene(
+        &mut self,
+        engine: &mut Engine,
+        path: &str,
+        fade_in: bool,
+    ) {
+        self.scheduled_scene = None;
+        if self.scene.is_none() {
+            self.change_scene(engine, path, fade_in);
+        } else {
+            self.schedule_scene(path, fade_in);
+        }
+    }
+
+    /// `CAdGame::ChangeScene`: loads the scene, then starts the fade-in
+    /// of the transition manager when asked, whether or not the scene
+    /// loaded.
+    pub(crate) fn change_scene(&mut self, engine: &mut Engine, path: &str, fade_in: bool) {
+        if let Err(err) = self.load_scene(engine, path) {
+            self.log(format!("cannot change scene to '{path}': {err}"));
+        }
+        if fade_in {
+            self.transition
+                .start(TransitionKind::FadeIn, false, &mut self.interactive);
+        }
+    }
+
+    /// The transition manager.
+    pub fn transition(&self) -> &Transition {
+        &self.transition
+    }
+
+    /// Starts the fade to black of a scene change
+    /// (`m_TransMgr->Start(TRANSITION_FADE_OUT, true)`): the game is not
+    /// interactive until it ends.
+    pub(crate) fn start_fade_out_transition(&mut self) {
+        self.transition
+            .start(TransitionKind::FadeOut, true, &mut self.interactive);
+    }
+
+    /// Sets `Game.Interactive` (`CBGame::SetInteractive`): the state a
+    /// transition gives back follows.
+    pub(crate) fn set_interactive(&mut self, interactive: bool) {
+        self.interactive = interactive;
+        self.transition.note_interactive(interactive);
+    }
+
+    /// One frame of the transition manager (`m_TransMgr->Update()` at
+    /// the end of `CAdGame::DisplayContent`), on the live clock.
+    pub(crate) fn update_transition(&mut self) {
+        let clock = self.clock;
+        self.transition.update(clock, &mut self.interactive);
+    }
+
+    /// Draws the transition's black over the whole screen
+    /// (`CBRenderer::Fade`), after the game's fader.
+    fn draw_transition<'a>(
+        &self,
+        list: &mut luma_render::DrawList<'a>,
+        white: &'a luma_render::Texture,
+    ) {
+        if let Some(a) = self.transition.opacity().filter(|a| *a > 0) {
+            let (w, h) = (self.settings.width as f32, self.settings.height as f32);
+            list.fill(
+                white,
+                luma_render::Rect::new(0.0, 0.0, w, h),
+                luma_formats::Rgba {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a,
+                },
+            );
+        }
     }
 
     /// Attaches a script to an object (`AttachScript`, `SCRIPT=`,
@@ -1498,22 +1604,65 @@ impl World {
 
     /// The floor an actor walks on: the scene, the polygons of the other
     /// active objects, and every waypoint but its own.
-    pub(crate) fn obstacles_for(
+    pub fn obstacles_for(
         &self,
         id: NativeId,
     ) -> (Vec<Vec<luma_formats::Point>>, Vec<luma_formats::Point>) {
         let Some(view) = &self.scene else {
             return (Vec::new(), Vec::new());
         };
-        let (mut blockers, mut waypoints) = scene_obstacles(&view.scene);
-        for (other, actor) in &self.actors {
-            if *other == id || !actor.def.active {
+        // The scene's waypoint groups and the free objects of the scene
+        // (`CAdScene::m_Objects`), then the game's (`CAdGame::m_Objects`):
+        // the entities that are nodes of a layer are not looked at, their
+        // `BLOCKED_REGION` and `WAYPOINTS` have no effect
+        // (`CAdScene::IsBlockedAt`, `GetPath`).
+        let scene = &view.scene;
+        let (mut blockers, mut waypoints) = scene_obstacles(scene);
+        for (index, entity) in scene.free_entities.iter().enumerate() {
+            if self.node_id(crate::scene_view::EntityRef::Free(index)) == Some(id) {
                 continue;
             }
-            if let Some(polygon) = actor.block_polygon(&view.scene) {
+            if let Some(polygon) = crate::actor::entity_block_polygon(scene, entity) {
                 blockers.push(polygon);
             }
-            waypoints.extend(actor.waypoints(&view.scene));
+            waypoints.extend(crate::actor::entity_waypoints(scene, entity));
+        }
+        for bound in [true, false] {
+            for (other, actor) in &self.actors {
+                if *other == id || !actor.def.active || actor.scene_bound != bound {
+                    continue;
+                }
+                if let Some(polygon) = actor.block_polygon(scene) {
+                    blockers.push(polygon);
+                }
+                waypoints.extend(actor.waypoints(scene));
+            }
+            #[cfg(feature = "3d")]
+            for (other, actor) in &self.actors3d {
+                if *other == id || !actor.active || actor.scene_bound != bound {
+                    continue;
+                }
+                if let Some(polygon) = actor.block_polygon(scene) {
+                    blockers.push(polygon);
+                }
+            }
+        }
+        for r in self.game_view.entity_refs() {
+            let (Some(entity), Some(other)) = (self.game_view.entity(r), self.node_id(r)) else {
+                continue;
+            };
+            // An attachment is not one of the game's objects.
+            if other == id
+                || self
+                    .object_state(other)
+                    .is_some_and(|s| s.attached_to.is_some())
+            {
+                continue;
+            }
+            if let Some(polygon) = crate::actor::entity_block_polygon(scene, entity) {
+                blockers.push(polygon);
+            }
+            waypoints.extend(crate::actor::entity_waypoints(scene, entity));
         }
         (blockers, waypoints)
     }
@@ -1661,7 +1810,9 @@ impl World {
             shown.extend(view.take_shown());
         }
         let random = self.next_random();
-        self.game_view.advance_with(timer, random);
+        // The game's own entities take the zoom of the scene shown.
+        let levels = self.scene.as_ref().map(|v| &v.scene);
+        self.game_view.advance_in(timer, random, levels);
         shown.extend(self.game_view.take_shown());
         for (r, sprite, index) in shown {
             let frame = self
@@ -1928,6 +2079,39 @@ impl World {
             .collect()
     }
 
+    /// The scene's free objects (`CAdScene::m_Objects`): its free
+    /// entities, then the actors loaded into it (`Scene.LoadActor`,
+    /// `LoadActor3D`). The original keeps them in the order they were
+    /// made; here the entities come first.
+    pub fn scene_free_objects(&self) -> Vec<NativeId> {
+        let Some(view) = &self.scene else {
+            return Vec::new();
+        };
+        let mut ids: Vec<NativeId> = (0..view.scene.free_entities.len())
+            .filter_map(|i| self.node_id(crate::scene_view::EntityRef::Free(i)))
+            .collect();
+        ids.extend(
+            self.actors
+                .iter()
+                .filter(|(_, a)| a.scene_bound)
+                .map(|(id, _)| *id),
+        );
+        ids.extend(self.scene_bound_actors3d());
+        ids
+    }
+
+    /// The name of a free object of the scene: an entity's or an
+    /// actor's.
+    pub(crate) fn free_object_name(&self, id: NativeId) -> Option<String> {
+        match &self.objects.get(id)?.kind {
+            Kind::Entity(r) => self.entity_def(*r).map(|e| e.name.clone()),
+            Kind::Actor => self.actor(id).map(|a| a.def.name.clone()),
+            #[cfg(feature = "3d")]
+            Kind::Actor3D => self.actor3d(id).map(|a| a.name.clone()),
+            _ => None,
+        }
+    }
+
     /// The free objects of the game drawn among the scene's: the active
     /// actors (the game's then the scene's), the active 3D actors at
     /// their projected positions, and the game's active entities that
@@ -2050,14 +2234,30 @@ impl World {
         white: Option<&'a luma_render::Texture>,
     ) {
         if self.draw_loading_screen(list, white) {
+            // `CBGame::DisplayQuickMsg` follows every frame drawn.
+            self.draw_quick_messages(list);
             return;
         }
         if self.is_video_playing() {
-            // Only the video is drawn while it plays (`DisplayContent`).
+            // Only the video is drawn while it plays (`DisplayContent`),
+            // then the loading icon and the quick messages as on any
+            // frame.
             self.draw_video(list);
+            self.draw_loading_icon(list);
+            self.draw_quick_messages(list);
             return;
         }
         if let Some(view) = &self.scene {
+            // The scene is drawn inside its viewport when it has one
+            // (`PushViewport` in `CAdScene::TraverseNodes`).
+            if let Some((l, t, r, b)) = self.scene_clip() {
+                list.set_clip(Some(luma_render::Rect::new(
+                    l as f32,
+                    t as f32,
+                    (r - l) as f32,
+                    (b - t) as f32,
+                )));
+            }
             let (drawables, overlays) = self.scene_draw_parts();
             view.draw_with_overlays(
                 list,
@@ -2073,6 +2273,7 @@ impl World {
             if let Some(white) = white {
                 self.draw_scene_fade(list, white);
             }
+            list.set_clip(None);
         }
         self.draw_windows(list, true, white);
         self.draw_inventory(list, white);
@@ -2109,6 +2310,7 @@ impl World {
         self.draw_cursor(list);
         if let Some(white) = white {
             self.draw_fade(list, white);
+            self.draw_transition(list, white);
         }
         self.draw_loading_icon(list);
         self.draw_quick_messages(list);
@@ -2135,10 +2337,43 @@ impl World {
         self.upload_3d(renderer);
     }
 
+    /// Resets the game's own actors and entities
+    /// (`m_Objects[i]->Reset()` in `CAdGame::ChangeScene`), those in
+    /// `skip` excepted: their animations and sentences end and the
+    /// scripts waiting for them go on.
+    fn reset_game_objects(&mut self, engine: &mut Engine, skip: &[NativeId]) {
+        for (id, actor) in &mut self.actors {
+            if actor.scene_bound || skip.contains(id) {
+                continue;
+            }
+            actor.reset();
+            engine.reset_object(*id);
+        }
+        #[cfg(feature = "3d")]
+        {
+            let bound = self.scene_bound_actors3d();
+            for (id, actor) in &mut self.actors3d {
+                if bound.contains(id) || skip.contains(id) {
+                    continue;
+                }
+                actor.reset();
+                engine.reset_object(*id);
+            }
+        }
+        for r in self.game_view.entity_refs() {
+            self.game_view.reset_anim(r);
+            self.game_view.stop_talk(r);
+            if let Some(id) = self.node_id(r) {
+                engine.reset_object(id);
+            }
+        }
+    }
+
     /// Loads a scene, replacing the current one (`CAdGame::ChangeScene`):
     /// the old scene gets `SceneShutdown`, its scripts and objects go, the
     /// new scene's scripts and its nodes' scripts are attached.
     pub fn load_scene(&mut self, engine: &mut Engine, path: &str) -> Result<()> {
+        let had_scene = self.scene.is_some();
         if let Some(old) = &self.scene {
             let (name, filename) = (old.scene.name.clone(), old.path.clone());
             let scene_id = self.scene_id;
@@ -2149,6 +2384,25 @@ impl World {
                 self.save_scene_state();
             }
             self.temp_disable_save_state = false;
+        }
+        // The scene's sound volume setting and its script properties
+        // start again (`m_Scene->m_SFXVolume = 100`, `m_ScProp->Cleanup`).
+        let scene_id = self.scene_id;
+        if let Some(sfx) = self.sounds.objects.get_mut(&scene_id) {
+            sfx.volume = 100;
+        }
+        // A file that is not there leaves the scene as it was
+        // (`LoadFile` fails before anything of the scene is removed):
+        // only the game's objects are reset and the scene's properties
+        // cleared.
+        if !self.vfs.exists(path) {
+            self.reset_game_objects(engine, &[]);
+            if let Some(scene) = self.objects.get_mut(scene_id) {
+                scene.props.clear();
+            }
+            if let Err(err) = self.vfs.read(path) {
+                return Err(err.into());
+            }
         }
         // Objects of the old scene, and the scripts attached to them.
         let mut scene_actors: Vec<NativeId> = self
@@ -2208,22 +2462,7 @@ impl World {
         }
         // The game's actors and entities are reset before the new scene
         // loads (`CAdGame::ChangeScene`).
-        for (id, actor) in &mut self.actors {
-            actor.reset();
-            engine.reset_object(*id);
-        }
-        #[cfg(feature = "3d")]
-        for (id, actor) in &mut self.actors3d {
-            actor.reset();
-            engine.reset_object(*id);
-        }
-        for r in self.game_view.entity_refs() {
-            self.game_view.reset_anim(r);
-            self.game_view.stop_talk(r);
-            if let Some(id) = self.node_id(r) {
-                engine.reset_object(id);
-            }
-        }
+        self.reset_game_objects(engine, &[]);
         self.pending_events.clear();
         for id in gone.iter().copied().chain([self.scene_id]) {
             for script in engine.scripts_of(id) {
@@ -2247,9 +2486,24 @@ impl World {
         if let Some(scene) = self.objects.get_mut(self.scene_id) {
             scene.props.clear();
         }
-        engine.remove_finished();
+        // Not while the first scene loads from inside a script
+        // (`ScheduleChangeScene`): nothing of an old scene is there to
+        // sweep, and the engine is in the middle of its scripts.
+        if had_scene {
+            engine.remove_finished();
+        }
 
-        let mut view = SceneView::load(&self.vfs, path)?;
+        // A file that does not parse leaves an empty scene behind: the
+        // original has cleaned the scene up before it reads the file.
+        let mut view = match SceneView::load(&self.vfs, path) {
+            Ok(view) => view,
+            Err(err) => {
+                self.scene = None;
+                self.active_object = None;
+                self.hits.clear();
+                return Err(err);
+            }
+        };
         // The scene object is the same across scenes and only `NAME`
         // changes its name: a file without one keeps the name of the
         // scene left behind (empty before the first scene).
@@ -2318,6 +2572,8 @@ impl World {
         for (file, reason) in view.missing() {
             self.log(format!("  missing: {file}: {reason}"));
         }
+        // `CAdScene::SetDefaults`, run by `Cleanup` at every load: the
+        // scroll settings of the scene left behind do not carry over.
         if view.scene.main_layer().is_none() {
             self.log(format!("Warning: scene '{path}' has no main layer."));
         }
@@ -2336,6 +2592,13 @@ impl World {
         self.offset_y = 0;
         self.target_offset_x = 0;
         self.target_offset_y = 0;
+        self.auto_scroll = true;
+        self.scroll_pixels_x = 1;
+        self.scroll_pixels_y = 1;
+        self.scroll_time_x = 10;
+        self.scroll_time_y = 10;
+        self.last_scroll_x = 0;
+        self.last_scroll_y = 0;
         self.active_object = None;
         self.hits.clear();
         self.scene = Some(view);
@@ -2346,6 +2609,8 @@ impl World {
         // (`CAdGame::ChangeScene`).
         for (_, slot) in self.objects.iter_mut() {
             slot.state.stick_region = None;
+            // `InvalidateCurrRegions`.
+            slot.state.current_regions.clear();
         }
         self.hide_taken_item_entities();
         for (_, actor) in &mut self.actors {
@@ -2418,6 +2683,7 @@ impl World {
                 self.apply_properties(id, &properties);
                 self.load_entity_sound(id);
                 self.register_entity_region(id);
+                self.update_entity_position(id);
                 for script in scripts {
                     self.attach(engine, id, &script);
                 }
@@ -2437,6 +2703,7 @@ impl World {
             self.apply_properties(id, &properties);
             self.load_entity_sound(id);
             self.register_entity_region(id);
+            self.update_entity_position(id);
             let scripts = self.scene().unwrap().scene.free_entities[i].scripts.clone();
             for script in scripts {
                 self.attach(engine, id, &script);
@@ -2530,7 +2797,9 @@ impl World {
     /// all of them, but those of freezable objects while the game is
     /// frozen.
     pub fn displayed_sentences(&self) -> impl Iterator<Item = &SentenceDraw> {
-        let frozen = self.is_frozen();
+        // During the accessibility pause every sentence shows
+        // (`m_AccessGlobalPaused`: `DisplaySentences(false)`).
+        let frozen = self.is_frozen() && !self.access.paused;
         self.sentences
             .iter()
             .filter(move |d| !(frozen && d.freezable))
@@ -3077,6 +3346,29 @@ impl World {
     /// The object the view follows (`Game.MainObject`).
     pub fn main_object(&self) -> Option<NativeId> {
         self.main_object.filter(|id| self.objects.contains(*id))
+    }
+
+    /// An entity or a 2D actor was moved by a script (`X`, `Y`,
+    /// `SkipTo`): `CAdObject::AfterMove` raises `ActorEntry` on the
+    /// regions of the main layer it entered and `ActorLeave` on those
+    /// it left, for entities as for actors.
+    pub(crate) fn object_moved(&mut self, id: NativeId) {
+        let position = match self.objects.get(id).map(|n| n.kind.clone()) {
+            Some(Kind::Actor) => self.actor(id).map(|a| (a.x, a.y)),
+            Some(Kind::Entity(r)) => self.entity_def(r).map(|e| (e.x, e.y)),
+            _ => None,
+        };
+        let (Some((x, y)), Some(view)) = (position, self.scene.as_ref()) else {
+            return;
+        };
+        let new = crate::scene_view::regions_at(&view.scene, x, y);
+        let mut events = Vec::new();
+        if let Some(actor) = self.actor_mut(id) {
+            actor.enter_regions(new, &mut events);
+        } else if let Some(state) = self.object_state_mut(id) {
+            crate::actor::region_events(&mut state.current_regions, new, &mut events);
+        }
+        self.queue_events(id, events);
     }
 
     /// Moves an actor to a point (`SkipTo`), raising the region events.
@@ -3837,29 +4129,11 @@ impl Runtime {
         self.world.advance_time(dt);
         self.world.apply_mouse_lock();
         self.world.reset_focused_window();
-        if let Some((path, fade_in)) = self.world.scheduled_scene.take() {
-            match self.world.load_scene(&mut self.engine, &path) {
-                Ok(()) => {
-                    if fade_in {
-                        let (timer, clock) = (self.world.timer, self.world.clock);
-                        self.world.fader.fade_in(
-                            luma_formats::Rgba {
-                                r: 0,
-                                g: 0,
-                                b: 0,
-                                a: 255,
-                            },
-                            SCENE_FADE_MS,
-                            true,
-                            timer,
-                            clock,
-                        );
-                    }
-                }
-                Err(err) => {
-                    self.world
-                        .log(format!("cannot change scene to '{path}': {err}"));
-                }
+        // `CAdGame::InitLoop`: a scheduled scene waits for the
+        // transition manager, so that the fade to black ends first.
+        if self.world.transition.is_ready() {
+            if let Some((path, fade_in)) = self.world.scheduled_scene.take() {
+                self.world.change_scene(&mut self.engine, &path, fade_in);
             }
         }
         self.world.sounds.audio.tick(dt);
@@ -3868,6 +4142,8 @@ impl Runtime {
             // A video takes the frame: no scripts, no scene, no windows
             // (`CAdGame::DisplayContent`).
             self.world.update_video(&mut self.engine);
+            self.world.update_quick_messages();
+            self.world.update_loading_icon();
             self.settle_input();
             return self.world.take_log();
         }
@@ -3880,11 +4156,14 @@ impl Runtime {
         self.world.flush_removed_objects(&mut self.engine);
         self.engine.tick(&mut self.world);
         self.world.flush_removed_objects(&mut self.engine);
+        // `CAdScene::TraverseNodes(true)`: the view takes its scroll step
+        // first, then the objects update and the main object sets the
+        // next target.
+        self.world.scroll_step();
         self.world.update_scene();
         self.world.update_entity_videos();
         self.world.update_actors();
         self.world.update_emitters();
-        self.world.scroll_step();
         self.world.update_sounds();
         self.world.collect_hits();
         self.world.update_active_object();
@@ -3896,6 +4175,7 @@ impl Runtime {
         self.world.update_loading_icon();
         self.world.update_cursor();
         self.world.update_item_cursor(&self.engine);
+        self.world.update_transition();
         self.world.apply_pending_events(&mut self.engine);
         self.settle_input();
         self.world.take_log()
@@ -3933,7 +4213,8 @@ impl Runtime {
     fn mouse_in_viewport(&self) -> bool {
         let (x, y) = (self.world.mouse.x, self.world.mouse.y);
         let (vx, vy, vw, vh) = self.world.viewport();
-        self.world.scene.is_some() && x >= vx && y >= vy && x < vx + vw && y < vy + vh
+        // Edges included (`X<=Left+Width`).
+        self.world.scene.is_some() && x >= vx && y >= vy && x <= vx + vw && y <= vy + vh
     }
 
     /// Raises a mouse event (`CAdGame::OnMouseLeftDown` and the like):

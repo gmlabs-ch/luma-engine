@@ -987,10 +987,13 @@ impl Scene {
         if !scalable {
             return (100.0, 100.0);
         }
-        match scale_xy {
+        // A negative value is "not set" (`m_Scale < 0`), wherever it
+        // comes from.
+        let set = |v: Option<f32>| v.filter(|s| *s >= 0.0);
+        match (set(scale_xy.0), set(scale_xy.1)) {
             (None, None) => {
-                let s =
-                    scale.unwrap_or_else(|| self.zoom_at(position.0, position.1) + relative_scale);
+                let s = set(scale)
+                    .unwrap_or_else(|| self.zoom_at(position.0, position.1) + relative_scale);
                 (s, s)
             }
             (x, y) => (x.unwrap_or(100.0), y.unwrap_or(100.0)),

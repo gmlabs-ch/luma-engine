@@ -383,7 +383,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `20` today |
+| 4 | layout version, little-endian; `21` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -424,7 +424,12 @@ context of every once-per-game response chosen (it kept the id alone);
 with each sentence being said its speech file and position, whether it
 is hidden by a freeze, and its talk definition (`.talk`) with the sprite
 it is at; and what each item is doing (a sentence, a played animation).
-Version 20 keeps the caption slots 2 to 7 in the remembered scene
+Version 20 added to every object's runtime state the cursor of its own
+(`SetCursor` on an item, a region, a layer, a waypoint group, the
+response box) and the regions an entity stood in when it last moved,
+for its `ActorEntry` and `ActorLeave` events.
+
+Version 21 keeps the caption slots 2 to 7 in the remembered scene
 states, the `SaveState` flag of region nodes, the sounds of sprite
 frames still playing, the videos, and the bytecode of the scripts saved
 in the middle of their code.

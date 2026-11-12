@@ -117,7 +117,7 @@ How the list was made. For every class with a script interface, the names tested
 | `SkipTo` | method | **done** | Moves the object to (x, y) immediately, or to another object's position. |
 | `Caption` | method | **done** | Returns a caption slot (1 to 7; 0 is 1) of any object: game, scene objects, controls, items. |
 | `SetCaption` | method | **done** | Sets a caption slot (text, slot), expanded through the string table. |
-| `SetCursor` | method | **done** | Sets the cursor shown when the mouse is over the object (entities, actors, controls); false when the sprite does not load. Items keep their normal / hover cursors (`SetNormalCursor`). |
+| `SetCursor` | method | **done** | Sets the object's own cursor, shown when the mouse is over it; false when the sprite does not load, and the object is then left without one. On every object: the game's is its normal cursor, the scene's its `CURSOR`. Items also keep their normal / hover cursors (`SetNormalCursor`). |
 | `RemoveCursor` | method | **done** | Removes the object's own cursor. |
 | `GetCursor` | method | **done** | Returns the object's cursor file. |
 | `GetCursorObject` | method | **done** | Returns the object's cursor as a sprite object sharing the cursor's animation. |
@@ -137,15 +137,15 @@ How the list was made. For every class with a script interface, the names tested
 | `X`, `Y` | get/set | **done** | Position in scene coordinates. |
 | `Height` | get | **done** | Height of the current frame, scaled. |
 | `Ready` | get | **done** | False while the object is talking, walking or playing an animation a script waits for. |
-| `Movable` | get/set | **done** | Whether the engine may move the object. Kept per object; WME 1.x only reads it in `CBSprite::Draw`, which no scene object goes through, so it changes nothing on screen in either engine. |
+| `Movable` | get/set | **done** | Whether the engine may move the object; false for an inventory item, true for the rest. Kept per object; WME 1.x only reads it in `CBSprite::Draw`, which no scene object goes through, so it changes nothing on screen in either engine. |
 | `Registrable` | get/set | **done** | Whether the object is registered for mouse interaction (same as `Interactive`). |
 | `Interactive` | get/set | **done** | Whether the object reacts to the mouse. |
 | `Zoomable`, `Scalable` | get/set | **done** | Whether the scene's scale levels apply to the object. |
 | `Rotatable` | get/set | **done** | Whether the scene's rotation levels (and `Rotate`, `RelativeRotate`) apply; the sprite turns around its hotspot. |
 | `AlphaColor` | get/set | **done** | Tint colour and alpha (0xAARRGGBB). |
 | `BlendMode` | get/set | **done** | Blend mode (0 normal, 1 additive, 2 subtractive; another value is normal). Pipeline states of the renderer, see `docs/rendering.md`. |
-| `Scale` | get/set | **done** | Absolute scale in percent (null = use the scene's scale). |
-| `ScaleX`, `ScaleY` | get/set | **done** | Independent horizontal / vertical scale in percent (null = unset); when either is set they replace `Scale` and the scene's, the other axis at 100 (`CAdObject::GetScale`). The hit area follows. |
+| `Scale` | get/set | **done** | Absolute scale in percent (null, or a negative number, = use the scene's scale; it then reads null). |
+| `ScaleX`, `ScaleY` | get/set | **done** | Independent horizontal / vertical scale in percent (null or negative = unset); when either is set they replace `Scale` and the scene's, the other axis at 100 (`CAdObject::GetScale`). The hit area follows. |
 | `RelativeScale` | get/set | **done** | Scale adjustment in percent added to the scene's scale. |
 | `Rotate` | get/set | **done** | Absolute rotation in degrees (null = use the scene's), applied when `Rotatable`. Luma also hit-tests the sprite where it is drawn turned; WME tests it where it would be unrotated. |
 | `RelativeRotate` | get/set | **done** | Rotation added to the scene's rotation level, when `Rotatable` and no `Rotate` is set. |
@@ -167,7 +167,7 @@ How the list was made. For every class with a script interface, the names tested
 |----------|------|-------|------|
 | `LOG` | method | **done** | Writes to the log (same as the global `LOG`). |
 | `Caption` | method | **done** | Returns the caption (CBObject.Caption; the game has one). WME also refreshes the window title; Luma's player sets the title once at start. |
-| `Msg` | method | **done** | Shows a short on-screen message for three seconds in the system font (and logs it). |
+| `Msg` | method | **done** | Shows a short on-screen message for three seconds of the live clock in the system font (and logs it). |
 | `RunScript` | method | **done** | Obsolete alias of `AttachScript` on the game (logs a warning). |
 | `LoadStringTable` | method | **done** | Loads a string table, optionally keeping the old strings. |
 | `ValidObject` | method | **done** | True when a handle still refers to a live object. |
@@ -268,7 +268,7 @@ How the list was made. For every class with a script interface, the names tested
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `ChangeScene` | method | **done** | Changes scene at the start of the next frame (scene file, fade-in flag). |
+| `ChangeScene` | method | **done** | `(file, fadeOut, fadeIn)`, both on by default: the screen fades to black over 200 ms with the game not interactive, the scene changes, and the new one fades in (`docs/game-loop.md`, Scene changes). The first change of a game happens inside the call. |
 | `LoadActor` | method | **done** | Loads a 2D actor from an `.actor` file and returns it. |
 | `LoadActor3D` | method | **done** | Loads a 3D actor (`.act3d`, X model) kept across scenes (the `3d` feature; see `docs/3d-actors.md`). `LoadActor` does the same for an `ACTOR3DX` file, as WME sniffs the keyword. |
 | `LoadEntity` | method | **done** | Loads an entity from an `.entity` file as an entity of the game, kept across scene changes (`TEMPLATE` is not followed). |
@@ -304,7 +304,7 @@ How the list was made. For every class with a script interface, the names tested
 | `PrevScene`, `PreviousScene`, `PrevSceneFilename`, `PreviousSceneFilename` | get | **done** | Name / file of the previous scene. |
 | `LastResponse`, `LastResponseOrig` | get | **done** | Text (expanded / original) of the last chosen response. |
 | `InventoryObject` | get/set | **done** | The object whose inventory the box shows (the game itself by default); the box's scroll position is kept per inventory. |
-| `TalkSkipButton` | get/set | **done** | Mouse button that skips speech. |
+| `TalkSkipButton` | get/set | **done** | Mouse button that skips speech (0 left, 1 right, 2 both, 3 none; a value set outside 0..3 is brought to the nearer end). |
 | `VideoSkipButton` | get/set | **done** | Mouse button that skips videos. |
 | `ChangingScene` | get | **done** | True while a scene change is pending. |
 | `StartupScene` | get/set | **done** | The `STARTUP_SCENE` of `default.game`, a name for the game's scripts (the engine does not load it by itself); `null` when none, settable, saved with the game. |
@@ -339,15 +339,15 @@ How the list was made. For every class with a script interface, the names tested
 | `ScrollTo`, `ScrollToAsync` | method | **done** | Scrolls the view to a position or object, waiting or not. |
 | `GetLayer` | method | **done** | Layer by index or name. |
 | `GetWaypointGroup` | method | **done** | Waypoint group by index, as an object. |
-| `GetNode` | method | **done** | Any node (entity or region) by name. |
-| `GetFreeNode` | method | **done** | Free (layer-less) entity by index or name. |
+| `GetNode` | method | **done** | Any node (entity or region) by name, then a free entity, then a waypoint group. |
+| `GetFreeNode` | method | **done** | A free object of the scene by index or name: its free entities, then the actors loaded into it. |
 | `GetRegionAt` | method | **done** | Region under a point (optionally including decorations). |
 | `IsBlockedAt`, `IsWalkableAt` | method | **done** | Walkplane tests at a point. |
 | `GetScaleAt`, `GetRotationAt` | method | **done** | Scale / rotation level at a point. |
 | `IsScrolling` | method | **done** | True while the view scrolls. |
 | `FadeOut`, `FadeOutAsync`, `FadeIn`, `FadeInAsync` | method | **done** | Fades only the scene viewport (not the UI), on the game timer; the scene's own fader, new with every scene. |
 | `GetFadeColor` | method | **done** | Colour of the scene fade (0xAARRGGBB, the alpha as it is now). |
-| `IsPointInViewport` | method | **done** | True when a point is inside the scene viewport. |
+| `IsPointInViewport` | method | **done** | True when a point is inside the scene viewport, its right and bottom edges included. |
 | `EnableNode3D`, `DisableNode3D`, `IsNode3DEnabled` | method | **done** | Shows / hides / queries a mesh node of the scene's 3D geometry. |
 | `EnableLight`, `DisableLight`, `IsLightEnabled`, `GetLightName`, `SetLightColor`, `GetLightColor`, `GetLightPosition` | method | **done** | Controls the lights of the scene's 3D geometry, by name; `GetLightColor` packs the colour with full alpha. |
 | `SetActiveCamera` | method | **done** | Selects a camera of the 3D geometry by name (a runtime error when it does not exist). |
@@ -362,7 +362,7 @@ How the list was made. For every class with a script interface, the names tested
 | `PersistentState` | get/set | **done** | Whether the scene keeps its state between visits. |
 | `PersistentStateSprites` | get/set | **done** | Whether sprite state is kept too. |
 | `ScrollPixelsX`, `ScrollPixelsY`, `ScrollSpeedX`, `ScrollSpeedY` | get/set | **done** | Auto-scroll step and speed. |
-| `OffsetX`, `OffsetY` | get/set | **done** | Current view offset. |
+| `OffsetX`, `OffsetY` | get/set | **done** | Current view offset. Set: the point to centre the view on, kept inside the scene. |
 | `GeometryFile` | get | **done** | The 3D geometry file, `null` without one. |
 | `WaypointsHeight` | get/set | **done** | Height of the 3D waypoints over the floor; setting it drops them again. |
 | `Width`, `Height` | get | **done** | Scene size in pixels. |
