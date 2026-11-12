@@ -449,15 +449,22 @@ actor standing in a region of another layer would use that layer's
 ## 5. The actor definition file (`.act3d`)
 
 **As implemented** in `luma_3d::actor3d` (`Actor3dDef::parse`,
-`parse_with` for templates, `is_actor_x`, `AnimationDef::parse_file` for
-the sidecar and `AnimationDef::apply` onto a model) and specified in
+`parse_with` for templates, `build_models` for the keys that act on the
+model, `is_actor_x`, `AnimationFile` for the sidecar and
+`AnimationDef::apply_to` onto a model) and specified in
 [formats/actor3d.md](formats/actor3d.md), which is the reference; the
 table below is the summary. Found while implementing: an **unknown key
 fails the load** (the parser stops on a token it does not know),
-reproduced; a `SHADOW_TYPE` word that is neither a name nor a number gives
-`none` (`atoi` returns 0); `SHADOW_MODEL`, `ANIMATION` and `EFFECT` before
-any `MODEL` are dropped, not errors; the `.anim` sidecar is only looked
-for by `MergeAnims`, not by the `MODEL` keys.
+reproduced; a key whose file **fails to load does not** (a template, a
+model, a shadow model, a cursor: the error code is overwritten by the
+next statement), so the actor fails only on an unknown key or when it
+has no model at the end; the model keys act **at their place** (`MODEL`
+loads or merges, `ANIMATION` applies to the model as loaded so far,
+`SHADOW_MODEL` loads against it); a `SHADOW_TYPE` word that is neither a
+name nor a number gives `none` (`atoi` returns 0); `SHADOW_MODEL`,
+`ANIMATION` and `EFFECT` before any `MODEL` are dropped, not errors; the
+`.anim` sidecar is only looked for by `MergeAnims`, not by the `MODEL`
+keys.
 
 Same syntax as every definition file ([definition-files.md](formats/
 definition-files.md)). The keyword is `ACTOR3DX` for `.X` actors;

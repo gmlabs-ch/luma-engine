@@ -4,19 +4,22 @@
 //! The file is a [definition file](https://github.com/gmlabs-ch/luma-engine/blob/main/docs/formats/definition-files.md)
 //! naming the `.X` model(s) of the actor, its speeds, its shadow and the
 //! looping flag and events of its animation sets. [`Actor3dDef`] is the
-//! typed result; it holds paths, not loaded files, so that the caller
-//! loads the model through its own file system and then applies the
-//! animation blocks with [`AnimationDef::apply`]. The keys and their
-//! defaults are described in `docs/formats/actor3d.md`.
+//! typed result; it holds paths, not loaded files. The keys that act on
+//! the model in the original (`MODEL`, `ANIMATION`, `SHADOW_MODEL`) are
+//! also kept in file order ([`Actor3dDef::steps`]), and
+//! [`Actor3dDef::build_models`] carries them out through a closure that
+//! reads a file, so that the caller keeps its own file system. The keys
+//! and their defaults are described in `docs/formats/actor3d.md`.
 //!
 //! Written with reference to the MIT-licensed Wintermute Engine 1.x
 //! sources (`AdActor3DX.cpp`, `AdActor3D.cpp`, `AdObject3D.cpp`,
 //! `XModel.cpp`, `BObject.cpp`, Copyright (c) 2003-2013 Jan Nedoma). See
 //! `NOTICE` at the root of the repository.
 
-use luma_formats::def::{Document, Node, Nodes, Scalar, Value};
+use luma_formats::def::{Document, Node, Scalar, document_keys, keys, scan_floats};
 use luma_formats::{Error, Property, Region, Result, Rgba, WaypointGroup};
 
+use crate::animation::ShadowModel;
 use crate::math::Vec3;
 use crate::model::Model;
 
@@ -56,11 +59,13 @@ impl ShadowType {
         }
     }
 
-    /// The value of a `SHADOW_TYPE` key: one of the names `none`,
-    /// `simple`, `flat`, `stencil` (ignoring case), else the number it
-    /// starts with (`atoi`), clamped.
+    /// The value of a `SHADOW_TYPE` key: exactly one of the names `none`,
+    /// `simple`, `flat`, `stencil` (ignoring case, `stricmp`), else the
+    /// number it starts with (`atoi`, which skips leading blanks),
+    /// clamped. A name with a blank around it, as a value written in
+    /// braces has, is therefore not a name and reads as 0.
     pub fn parse(text: &str) -> ShadowType {
-        let t = text.trim();
+        let t = text;
         if t.eq_ignore_ascii_case("none") {
             ShadowType::None
         } else if t.eq_ignore_ascii_case("simple") {
@@ -86,30 +91,107 @@ pub struct AnimationEventDef {
     /// The event name (`NAME`).
     pub name: String,
     /// The 1-based frame (`FRAME`), clamped to the set's frames when
-    /// applied; 0 when absent.
+    /// applied; -1 when absent, as the original's event starts.
     pub frame: i32,
 }
 
-/// An `ANIMATION` block: properties of a named animation set of the
-/// model.
+/// One thing `CXModel::ParseAnim` does while it reads an `ANIMATION`
+/// block, in the order of the block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnimationOp {
+    /// A `NAME` key: the set the events that follow attach to, and the
+    /// set `LOOPING` applies to when it is the last `NAME` of the block.
+    /// The set is looked up at once and reported when the model lacks it.
+    Name(String),
+    /// A well-formed `EVENT` block, for the set of the `NAME` read last.
+    Event(AnimationEventDef),
+    /// An `EVENT` block that gives no event (a key other than `NAME` and
+    /// `FRAME`, or no `NAME`). It still needs a `NAME` before it.
+    DroppedEvent,
+}
+
+/// An `ANIMATION` block: properties of named animation sets of the
+/// model, as `CXModel::ParseAnim` reads them.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AnimationDef {
-    /// The set's name (`NAME`), matched ignoring ASCII case.
+    /// The set's name: the last `NAME` of the block, empty without one.
     pub name: String,
-    /// `LOOPING`, when the block has it.
+    /// The `LOOPING` value applied to the set of the last `NAME` once the
+    /// block is read: the last `LOOPING` key. `None` when the block has
+    /// no such key and when the block stops on an error, since the
+    /// original then returns before applying it.
     pub looping: Option<bool>,
-    /// The events, in file order.
+    /// The well-formed events that follow a `NAME`, in file order,
+    /// whatever set each one attaches to (see [`Self::ops`]).
     pub events: Vec<AnimationEventDef>,
+    /// What the block does, in order.
+    pub ops: Vec<AnimationOp>,
+    /// Why the block stopped before its end, when it did: a key other
+    /// than `NAME`, `LOOPING` and `EVENT`, or a syntax error. What comes
+    /// before it in [`Self::ops`] is applied, `LOOPING` is not.
+    pub error: Option<String>,
+}
+
+/// What applying an `ANIMATION` block, or a file of them, did.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Applied {
+    /// Whether the original's function returns success.
+    pub ok: bool,
+    /// The lines the original writes to its log, in order.
+    pub log: Vec<String>,
+}
+
+/// An `.anim` sidecar as `CAdActor3DX::MergeAnimations2` reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AnimationFile {
+    /// The `ANIMATION` blocks read before the end of the file or the
+    /// first statement that is not one.
+    pub animations: Vec<AnimationDef>,
+    /// Why reading stopped before the end of the file, when it did: a
+    /// top-level key other than `ANIMATION`, or a syntax error. The
+    /// blocks before it are applied all the same, and the merge fails.
+    pub error: Option<String>,
 }
 
 /// An `EFFECT` block: an HLSL effect on a material. Parsed and kept, not
-/// applied (effects are not planned).
+/// applied (Direct3D 9 material effects are excluded from the port).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectDef {
     /// The material name (`MATERIAL`), a texture file stem.
     pub material: String,
     /// The `.fx` file (`EFFECT_FILE`).
     pub effect_file: String,
+}
+
+/// A key of the actor file that acts on the model at its place in the
+/// file (`CAdActor3DX::LoadBuffer`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelStep {
+    /// `MODEL`: loads the model when the actor has none yet, else merges
+    /// the file's animation sets into it.
+    Model(String),
+    /// `ANIMATION`: applies the block to the model as loaded so far.
+    Animation(AnimationDef),
+    /// `SHADOW_MODEL`: loads a second model with the model as its parent.
+    ShadowModel(String),
+}
+
+/// The models of an actor, built by [`Actor3dDef::build_models`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuiltModels {
+    /// The model: the first `MODEL` that loaded, with the sets of the
+    /// later ones merged and the `ANIMATION` blocks applied in order.
+    pub model: Model,
+    /// The file [`Self::model`] was loaded from.
+    pub model_file: String,
+    /// The `MODEL` files merged into it without error, in order.
+    pub merged_files: Vec<String>,
+    /// The `SHADOW_MODEL`, when the last one loaded.
+    pub shadow: Option<ShadowModel>,
+    /// The file [`Self::shadow`] was loaded from.
+    pub shadow_file: Option<String>,
+    /// The lines the original writes to its log on the way.
+    pub warnings: Vec<String>,
 }
 
 /// A parsed `.act3d` file.
@@ -122,9 +204,15 @@ pub struct Actor3dDef {
     /// The last `TEMPLATE` key, recorded by [`Actor3dDef::parse`] and
     /// loaded in place by [`Actor3dDef::parse_with`].
     pub template: Option<String>,
+    /// The path of the last template file that could be read, when there
+    /// is one: the original's `LoadFile` on a template overwrites the
+    /// actor's file name, so this is what the actor's `Filename` answers.
+    pub filename_override: Option<String>,
     /// Font of the actor's speech (`FONT`).
     pub font: Option<String>,
-    /// Cursor sprite shown over the actor (`CURSOR`).
+    /// Cursor sprite shown over the actor (the last `CURSOR`). The
+    /// original loads it at the key; when it cannot be loaded the actor
+    /// has no cursor and the load goes on.
     pub cursor: Option<String>,
     /// Scripts attached to the actor (`SCRIPT`, repeatable).
     pub scripts: Vec<String>,
@@ -150,10 +238,11 @@ pub struct Actor3dDef {
     pub drop_to_floor: bool,
     /// Draw both sides of the triangles (`DRAW_BACKFACES`).
     pub draw_backfaces: bool,
-    /// The `.X` files (`MODEL`, repeatable): the first is the model, the
-    /// others merge their animation sets into it.
+    /// The `.X` files (`MODEL`, repeatable), in file order. See
+    /// [`Self::steps`] for what the original does with each.
     pub models: Vec<String>,
-    /// The low-polygon model used for shadows (`SHADOW_MODEL`).
+    /// The low-polygon model used for shadows: the last `SHADOW_MODEL`
+    /// that follows a `MODEL` key.
     pub shadow_model: Option<String>,
     /// The actor's own shadow type (`SHADOW_TYPE`, `SHADOW`,
     /// `SIMPLE_SHADOW`).
@@ -169,15 +258,23 @@ pub struct Actor3dDef {
     /// Position of the shadow-casting light relative to the actor
     /// (`LIGHT_POSITION`).
     pub light_position: Vec3,
-    /// The `ANIMATION` blocks that followed a `MODEL`.
+    /// The `ANIMATION` blocks with a `NAME` that follow a `MODEL` key.
     pub animations: Vec<AnimationDef>,
     /// The `EFFECT` blocks that followed a `MODEL`.
     pub effects: Vec<EffectDef>,
+    /// The `MODEL`, `ANIMATION` and `SHADOW_MODEL` keys in file order,
+    /// since the last point where the original drops the model (the
+    /// start of the file and of every template that could be read):
+    /// what [`Self::build_models`] carries out.
+    pub steps: Vec<ModelStep>,
     /// The private blocked polygon for 2D path finding
     /// (`BLOCKED_REGION`).
     pub blocked_region: Option<Region>,
     /// The private waypoints for 2D path finding (`WAYPOINTS`).
     pub waypoints: Option<WaypointGroup>,
+    /// The lines the original writes to its log while it reads the file:
+    /// a template that cannot be read or loaded.
+    pub log: Vec<String>,
 }
 
 impl Default for Actor3dDef {
@@ -186,6 +283,7 @@ impl Default for Actor3dDef {
             name: luma_formats::UNNAMED.to_string(),
             caption: String::new(),
             template: None,
+            filename_override: None,
             font: None,
             cursor: None,
             scripts: Vec::new(),
@@ -213,8 +311,10 @@ impl Default for Actor3dDef {
             light_position: Vec3::new(-40.0, 200.0, -40.0),
             animations: Vec::new(),
             effects: Vec::new(),
+            steps: Vec::new(),
             blocked_region: None,
             waypoints: None,
+            log: Vec::new(),
         }
     }
 }
@@ -222,6 +322,61 @@ impl Default for Actor3dDef {
 /// A source of template files for [`Actor3dDef::parse_with`]: the bytes
 /// of a path, `None` when it cannot be read.
 pub type TemplateSource<'a> = dyn FnMut(&str) -> Option<Vec<u8>> + 'a;
+
+/// The keys of `CAdActor3DX::LoadBuffer`, in the order of its table.
+const ACTOR3DX_KEYS: &[&str] = &[
+    "ACTOR3DX",
+    "X",
+    "Y",
+    "Z",
+    "ANGLE",
+    "VELOCITY",
+    "ANGULAR_VELOCITY",
+    "TEMPLATE",
+    "NAME",
+    "REGISTRABLE",
+    "INTERACTIVE",
+    "ACTIVE",
+    "MODEL",
+    "EVENTS",
+    "FONT",
+    "CURSOR",
+    "DROP_TO_FLOOR",
+    "SCRIPT",
+    "CAPTION",
+    "PROPERTY",
+    "ANIMATION",
+    "EDITOR_PROPERTY",
+    "SHADOW_IMAGE",
+    "SHADOW_SIZE",
+    "SIMPLE_SHADOW",
+    "SHADOW_COLOR",
+    "SHADOW_MODEL",
+    "SHADOW_TYPE",
+    "LIGHT_POSITION",
+    "SHADOW",
+    "SCALE",
+    "DRAW_BACKFACES",
+    "BLOCKED_REGION",
+    "WAYPOINTS",
+    "EFFECT",
+];
+
+/// The keys of `CXModel::ParseAnim`.
+const ANIMATION_KEYS: &[&str] = &["NAME", "LOOPING", "EVENT"];
+
+/// The keys of `CXModel::ParseEvent`.
+const EVENT_KEYS: &[&str] = &["NAME", "FRAME"];
+
+/// The keys of `CAdActor3DX::ParseEffect`.
+const EFFECT_KEYS: &[&str] = &["MATERIAL", "EFFECT_FILE"];
+
+/// The keys of `CAdActor3DX::MergeAnimations2`.
+const ANIMATION_FILE_KEYS: &[&str] = &["ANIMATION"];
+
+/// How deep `TEMPLATE` files may load one another. The original has no
+/// bound and a file naming itself overflows its stack.
+const MAX_TEMPLATE_DEPTH: u32 = 16;
 
 impl Actor3dDef {
     /// Whether a file is a `.X` actor definition: its first keyword is
@@ -247,33 +402,40 @@ impl Actor3dDef {
     /// `MODEL`.
     pub fn parse(bytes: &[u8]) -> Result<Actor3dDef> {
         let mut def = Actor3dDef::default();
-        def.apply_file(bytes, None)?;
-        if def.models.is_empty() && def.template.is_none() {
-            return Err(no_model());
-        }
+        def.apply_file(bytes, None, 0)?;
         Ok(def)
     }
 
     /// Parses an `.act3d` file and loads its `TEMPLATE` files in place
     /// through `templates`, as the original does: at the key, the
     /// template file (itself an `ACTOR3DX` file, with templates of its
-    /// own) is applied over the values read so far, after dropping the
-    /// models, shadow model, animation and effect blocks collected so
-    /// far. A template that cannot be read or parsed fails the load, and
-    /// so does a result without `MODEL`.
+    /// own) is loaded over the values read so far by the same function,
+    /// which first drops the model and the shadow model.
+    ///
+    /// A template that cannot be read changes nothing; one that fails
+    /// (a syntax error, an unknown key, no `MODEL`) keeps what it had
+    /// applied before failing. Neither fails the actor: the original
+    /// sets an error code there that the next statement overwrites. Both
+    /// are reported in [`Self::log`].
+    ///
+    /// Fails on a syntax error or an unknown key of the file itself, on
+    /// a root other than `ACTOR3DX`, and when no `MODEL` key is left
+    /// (whether a model really loads is known by
+    /// [`Self::build_models`]).
     pub fn parse_with(bytes: &[u8], templates: &mut TemplateSource<'_>) -> Result<Actor3dDef> {
         let mut def = Actor3dDef::default();
-        def.apply_file(bytes, Some(templates))?;
-        if def.models.is_empty() {
-            return Err(no_model());
-        }
+        def.apply_file(bytes, Some(templates), 0)?;
         Ok(def)
     }
 
+    /// `CAdActor3DX::LoadBuffer`: the keys of the root block in order,
+    /// over what the definition holds. On an error what was read before
+    /// it stays applied.
     fn apply_file(
         &mut self,
         bytes: &[u8],
         mut templates: Option<&mut TemplateSource<'_>>,
+        depth: u32,
     ) -> Result<()> {
         let doc = Document::parse(bytes)?;
         let root = doc.nodes.first().ok_or_else(|| Error::Invalid {
@@ -291,61 +453,84 @@ impl Actor3dDef {
                 reason: format!("'{KEYWORD}' keyword expected"),
             });
         }
-        for child in root.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
+        // The original deletes the model and the shadow model here.
+        self.drop_models();
+        for item in keys(root, ACTOR3DX_KEYS, KEYWORD) {
+            let (key, child) = item?;
+            match key {
                 "TEMPLATE" => {
-                    let path = text(child);
-                    self.models.clear();
-                    self.shadow_model = None;
-                    self.animations.clear();
-                    self.effects.clear();
+                    let path = child.text();
                     self.template = Some(path.clone());
-                    if let Some(source) = templates.as_deref_mut() {
-                        let bytes = source(&path).ok_or_else(|| Error::Invalid {
-                            reason: format!(
-                                "line {}: template '{path}' cannot be read",
-                                child.line
-                            ),
-                        })?;
-                        self.apply_file(&bytes, Some(source))?;
+                    match templates.as_deref_mut() {
+                        // Not loaded: what a template would drop is
+                        // dropped.
+                        None => self.drop_models(),
+                        Some(_) if depth >= MAX_TEMPLATE_DEPTH => self.log.push(format!(
+                            "Error: template '{path}' is nested too deep and is not loaded"
+                        )),
+                        Some(source) => match source(&path) {
+                            None => self
+                                .log
+                                .push(format!("CAdActor3DX::LoadFile failed for file '{path}'")),
+                            Some(bytes) => {
+                                self.filename_override = Some(path.clone());
+                                if let Err(err) = self.apply_file(&bytes, Some(source), depth + 1) {
+                                    self.log.push(err.to_string());
+                                    self.log
+                                        .push(format!("Error parsing ACTOR3D file '{path}'"));
+                                }
+                            }
+                        },
                     }
                 }
-                "NAME" => self.name = text(child),
-                "CAPTION" => self.caption = text(child),
-                "FONT" => self.font = Some(text(child)),
-                "CURSOR" => self.cursor = Some(text(child)),
-                "SCRIPT" => self.scripts.push(text(child)),
+                "NAME" => self.name = child.text(),
+                "CAPTION" => self.caption = child.text(),
+                "FONT" => self.font = Some(child.text()),
+                "CURSOR" => self.cursor = Some(child.text()),
+                "SCRIPT" => self.scripts.push(child.text()),
                 "PROPERTY" => self.properties.extend(Property::from_node(child)),
-                "EDITOR_PROPERTY" | "EVENTS" => {}
-                "ACTIVE" => self.active = boolean(child),
-                "INTERACTIVE" | "REGISTRABLE" => self.interactive = boolean(child),
-                "X" => self.position.x = float(child),
-                "Y" => self.position.y = float(child),
-                "Z" => self.position.z = float(child),
+                "ACTIVE" => child.read_bool(&mut self.active),
+                "INTERACTIVE" | "REGISTRABLE" => child.read_bool(&mut self.interactive),
+                "X" => child.read_float(&mut self.position.x),
+                "Y" => child.read_float(&mut self.position.y),
+                "Z" => child.read_float(&mut self.position.z),
                 // The original computes the normalised angle and discards
                 // it, so the value stays as written.
-                "ANGLE" => self.angle = float(child),
-                "SCALE" => self.scale = float(child) / 100.0,
-                "VELOCITY" => self.velocity = float(child),
-                "ANGULAR_VELOCITY" => self.angular_velocity = float(child),
-                "DROP_TO_FLOOR" => self.drop_to_floor = boolean(child),
-                "DRAW_BACKFACES" => self.draw_backfaces = boolean(child),
-                "MODEL" => self.models.push(text(child)),
+                "ANGLE" => child.read_float(&mut self.angle),
+                // The division follows the scan whether or not it read a
+                // value.
+                "SCALE" => {
+                    child.read_float(&mut self.scale);
+                    self.scale /= 100.0;
+                }
+                "VELOCITY" => child.read_float(&mut self.velocity),
+                "ANGULAR_VELOCITY" => child.read_float(&mut self.angular_velocity),
+                "DROP_TO_FLOOR" => child.read_bool(&mut self.drop_to_floor),
+                "DRAW_BACKFACES" => child.read_bool(&mut self.draw_backfaces),
+                "MODEL" => {
+                    let path = child.text();
+                    self.models.push(path.clone());
+                    self.steps.push(ModelStep::Model(path));
+                }
                 "SHADOW_MODEL" => {
+                    let path = child.text();
                     // Without a model before it, the original logs an
                     // error and ignores the key.
                     if !self.models.is_empty() {
-                        self.shadow_model = Some(text(child));
+                        self.shadow_model = Some(path.clone());
                     }
+                    self.steps.push(ModelStep::ShadowModel(path));
                 }
                 "SHADOW_TYPE" => self.shadow_type = ShadowType::parse(child.as_str().unwrap_or("")),
+                // An empty value leaves an uninitialised flag in the
+                // original; it changes nothing here.
                 "SHADOW" => {
-                    if !boolean(child) {
+                    if child.as_bool() == Some(false) {
                         self.shadow_type = ShadowType::None;
                     }
                 }
                 "SIMPLE_SHADOW" => {
-                    if boolean(child) {
+                    if child.as_bool() == Some(true) {
                         self.shadow_type = ShadowType::Simple;
                     }
                 }
@@ -359,20 +544,30 @@ impl Actor3dDef {
                         a: channel(3),
                     };
                 }
-                "SHADOW_IMAGE" => self.shadow_image = Some(text(child)),
-                "SHADOW_SIZE" => self.shadow_size = float(child).max(0.0),
+                "SHADOW_IMAGE" => self.shadow_image = Some(child.text()),
+                "SHADOW_SIZE" => {
+                    child.read_float(&mut self.shadow_size);
+                    self.shadow_size = self.shadow_size.max(0.0);
+                }
+                // `%f,%f,%f`: the coordinates the scan reaches are set,
+                // the others keep their value.
                 "LIGHT_POSITION" => {
-                    let v = floats(child);
-                    let get = |i: usize| v.get(i).copied().unwrap_or(0.0);
-                    self.light_position = Vec3::new(get(0), get(1), get(2));
+                    let values = scan_floats(child.as_str().unwrap_or(""));
+                    let light = &mut self.light_position;
+                    for (slot, value) in [&mut light.x, &mut light.y, &mut light.z]
+                        .into_iter()
+                        .zip(values)
+                    {
+                        *slot = value as f32;
+                    }
                 }
                 "ANIMATION" => {
+                    let animation = AnimationDef::from_node(child);
                     // The original needs a model to attach the block to.
-                    if !self.models.is_empty() {
-                        if let Some(animation) = AnimationDef::from_node(child) {
-                            self.animations.push(animation);
-                        }
+                    if !self.models.is_empty() && animation.has_name() {
+                        self.animations.push(animation.clone());
                     }
+                    self.steps.push(ModelStep::Animation(animation));
                 }
                 "EFFECT" => {
                     if !self.models.is_empty() {
@@ -381,30 +576,137 @@ impl Actor3dDef {
                         }
                     }
                 }
-                "BLOCKED_REGION" => self.blocked_region = Some(Region::from_node(child, false)?),
-                "WAYPOINTS" => self.waypoints = Some(WaypointGroup::from_node(child)?),
-                _ => {
-                    return Err(Error::Invalid {
-                        reason: format!(
-                            "line {}: unknown key '{}' in {KEYWORD} definition",
-                            child.line, child.key
-                        ),
-                    });
-                }
+                // A region or a group that cannot be read leaves the
+                // actor without one, and the load goes on.
+                "BLOCKED_REGION" => self.blocked_region = Region::from_node(child, false).ok(),
+                "WAYPOINTS" => self.waypoints = WaypointGroup::from_node(child).ok(),
+                // `ACTOR3DX` and `EVENTS` are in the table and have no
+                // case; `EDITOR_PROPERTY` only acts in the editor.
+                _ => {}
             }
+        }
+        if self.models.is_empty() && (templates.is_some() || self.template.is_none()) {
+            return Err(no_model());
         }
         Ok(())
     }
 
-    /// Applies the `ANIMATION` blocks to a loaded model: the looping flag
-    /// and the events of each named set. Returns the names of the blocks
-    /// whose set the model does not have (the original logs them).
+    /// What `SAFE_DELETE(m_ModelX)` and `SAFE_DELETE(m_ShadowModel)` at
+    /// the start of `LoadBuffer` undo: everything that acted on them.
+    fn drop_models(&mut self) {
+        self.models.clear();
+        self.shadow_model = None;
+        self.animations.clear();
+        self.effects.clear();
+        self.steps.clear();
+    }
+
+    /// Loads the models as the original does while it reads the file:
+    /// the steps of [`Self::steps`] in order, reading each file through
+    /// `read` (`None` when it cannot be read).
+    ///
+    /// - `MODEL` loads the model when there is none yet; a file that
+    ///   fails leaves the actor without a model, and the next `MODEL` is
+    ///   then the one loaded. With a model, it merges the animation sets
+    ///   of the file ([`Model::merge_animations`]); a failure is logged
+    ///   and the sets read before it stay.
+    /// - `ANIMATION` applies its block to the model as loaded so far
+    ///   ([`AnimationDef::apply_to`]): a set a later `MODEL` brings is
+    ///   reported as missing. Without a model the block is only logged.
+    /// - `SHADOW_MODEL` drops the shadow model and loads the file with
+    ///   the model as its parent ([`ShadowModel::parse`]); a failure
+    ///   leaves the actor without a shadow model. Without a model the
+    ///   key is only logged.
+    ///
+    /// None of these failures stops the load in the original (it sets an
+    /// error code that the next statement overwrites). The load fails
+    /// when, at the end, **no model is loaded**; the error is then the
+    /// log, its last line saying so. `file_name` is the actor's file,
+    /// for the messages.
+    pub fn build_models(
+        &self,
+        file_name: &str,
+        read: &mut dyn FnMut(&str) -> Option<Vec<u8>>,
+    ) -> std::result::Result<BuiltModels, Vec<String>> {
+        let mut log = Vec::new();
+        let mut model: Option<(Model, String)> = None;
+        let mut merged_files = Vec::new();
+        let mut shadow: Option<(ShadowModel, String)> = None;
+        for step in &self.steps {
+            match step {
+                ModelStep::Model(path) => match (&mut model, read(path)) {
+                    (None, None) => log.push(format!("Error loading model '{path}'")),
+                    (None, Some(bytes)) => match Model::parse(&bytes, path) {
+                        Ok(loaded) => model = Some((loaded, path.clone())),
+                        Err(err) => log.push(format!("Error loading model '{path}': {err}")),
+                    },
+                    (Some(_), None) => log.push(format!("Error merging model '{path}'")),
+                    (Some((model, _)), Some(bytes)) => match model.merge_animations(&bytes, path) {
+                        Ok(_) => merged_files.push(path.clone()),
+                        Err(err) => log.push(format!("Error merging model '{path}': {err}")),
+                    },
+                },
+                ModelStep::Animation(animation) => match &mut model {
+                    Some((model, _)) => log.extend(animation.apply_to(model).log),
+                    None => log.push(format!(
+                        "Error: a MODEL= line must precede any animation definitions (file: {file_name})"
+                    )),
+                },
+                ModelStep::ShadowModel(path) => match &model {
+                    Some((model, _)) => {
+                        shadow = None;
+                        match read(path) {
+                            None => log.push(format!("Error loading shadow model '{path}'")),
+                            Some(bytes) => match ShadowModel::parse(&bytes, path, model) {
+                                Ok(loaded) => shadow = Some((loaded, path.clone())),
+                                Err(err) => {
+                                    log.push(format!("Error loading shadow model '{path}': {err}"));
+                                }
+                            },
+                        }
+                    }
+                    None => log.push(format!(
+                        "Error: a MODEL= line must precede shadow model assignment (file: {file_name})"
+                    )),
+                },
+            }
+        }
+        let Some((model, model_file)) = model else {
+            log.push("Error: No model has been loaded for 3D actor".to_string());
+            return Err(log);
+        };
+        let (shadow, shadow_file) = match shadow {
+            Some((shadow, file)) => (Some(shadow), Some(file)),
+            None => (None, None),
+        };
+        Ok(BuiltModels {
+            model,
+            model_file,
+            merged_files,
+            shadow,
+            shadow_file,
+            warnings: log,
+        })
+    }
+
+    /// Applies every block of [`Self::animations`] to a loaded model,
+    /// whatever its place among the `MODEL` keys, and returns the names
+    /// the blocks give that the model has no set for.
+    /// [`Self::build_models`] is the original's order, where a block
+    /// only sees the sets of the `MODEL` keys before it.
     pub fn apply_animations(&self, model: &mut Model) -> Vec<String> {
-        self.animations
-            .iter()
-            .filter(|animation| !animation.apply(model))
-            .map(|animation| animation.name.clone())
-            .collect()
+        let mut missing = Vec::new();
+        for animation in &self.animations {
+            for op in &animation.ops {
+                if let AnimationOp::Name(name) = op {
+                    if model.animation_set(name).is_none() {
+                        missing.push(name.clone());
+                    }
+                }
+            }
+            animation.apply_to(model);
+        }
+        missing
     }
 
     /// The `.anim` sidecar of a model file: the same directory and base
@@ -420,74 +722,211 @@ impl Actor3dDef {
 }
 
 impl AnimationDef {
-    /// Builds a block from an `ANIMATION` node (`CXModel::ParseAnim`):
-    /// `NAME`, `LOOPING`, and `EVENT` blocks, which must come **after**
-    /// the `NAME` (earlier ones are dropped) and need a `NAME` of their
-    /// own. `None` without a `NAME`, since the block then names no set.
-    /// Other keys are ignored.
-    pub fn from_node(node: &Node) -> Option<AnimationDef> {
+    /// Reads an `ANIMATION` block as `CXModel::ParseAnim` does: the keys
+    /// `NAME`, `LOOPING` and `EVENT` in order. Any other key, or a place
+    /// where the block is not a sequence of statements, stops the block
+    /// there ([`Self::error`]). An `EVENT` block knows `NAME` and
+    /// `FRAME` (`ParseEvent`); with another key, or without a `NAME`, it
+    /// gives no event, and the block goes on.
+    pub fn from_node(node: &Node) -> AnimationDef {
         let mut animation = AnimationDef::default();
+        // `ScanStr("%b")` leaves the flag alone on an empty value.
+        let mut looping = false;
+        let mut looping_set = false;
         let mut named = false;
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
+        for item in keys(node, ANIMATION_KEYS, "ANIMATION") {
+            let (key, child) = match item {
+                Ok(item) => item,
+                Err(err) => {
+                    animation.error = Some(err.to_string());
+                    break;
+                }
+            };
+            match key {
                 "NAME" => {
-                    animation.name = text(child);
+                    animation.name = child.text();
+                    animation.ops.push(AnimationOp::Name(child.text()));
                     named = true;
                 }
-                "LOOPING" => animation.looping = Some(boolean(child)),
-                "EVENT" if named => {
-                    let name = child.get("NAME").map(text);
-                    let frame = child.get("FRAME").map(integer).unwrap_or(0);
-                    if let Some(name) = name {
-                        animation.events.push(AnimationEventDef { name, frame });
-                    }
+                "LOOPING" => {
+                    child.read_bool(&mut looping);
+                    looping_set = true;
                 }
-                _ => {}
+                _ => match AnimationEventDef::from_node(child) {
+                    Some(event) => {
+                        if named {
+                            animation.events.push(event.clone());
+                        }
+                        animation.ops.push(AnimationOp::Event(event));
+                    }
+                    None => animation.ops.push(AnimationOp::DroppedEvent),
+                },
             }
         }
-        named.then_some(animation)
+        if animation.error.is_none() && looping_set {
+            animation.looping = Some(looping);
+        }
+        animation
     }
 
-    /// Parses an `.anim` sidecar: top-level `ANIMATION` blocks and nothing
-    /// else (`MergeAnimations2`). Fails on a syntax error.
+    /// Whether the block has a `NAME` key.
+    pub fn has_name(&self) -> bool {
+        self.ops.iter().any(|op| matches!(op, AnimationOp::Name(_)))
+    }
+
+    /// Parses an `.anim` sidecar and returns its blocks, or the error
+    /// that stopped the reading. The original applies the blocks read
+    /// before such an error; [`AnimationFile::parse`] keeps them.
     pub fn parse_file(bytes: &[u8]) -> Result<Vec<AnimationDef>> {
-        let doc = Document::parse(bytes)?;
-        Ok(doc
-            .nodes
-            .iter()
-            .filter(|node| node.key.eq_ignore_ascii_case("ANIMATION"))
-            .filter_map(AnimationDef::from_node)
-            .collect())
+        let file = AnimationFile::parse(bytes);
+        match file.error {
+            Some(reason) => Err(Error::Invalid { reason }),
+            None => Ok(file.animations),
+        }
     }
 
-    /// Applies the block to the model's animation set of that name
-    /// (ignoring ASCII case): sets `looping` when the block has it and
-    /// adds the events, clamped to the set's frames. `false` when the
-    /// model has no such set.
-    pub fn apply(&self, model: &mut Model) -> bool {
+    /// Applies the block to a model as `CXModel::ParseAnim` does while it
+    /// reads it, and returns what the original logs and answers:
+    ///
+    /// - at each `NAME`, a set the model lacks (looked up ignoring ASCII
+    ///   case) is logged;
+    /// - each event is added to the set of the `NAME` read last, when the
+    ///   model has it, its frame clamped to the set's frames; an `EVENT`
+    ///   before any `NAME` is logged and dropped;
+    /// - a block that stopped on an error fails here, the events before
+    ///   the error added and `LOOPING` not applied;
+    /// - else the last `LOOPING` is applied to the set of the last
+    ///   `NAME`, when the model has it.
+    pub fn apply_to(&self, model: &mut Model) -> Applied {
         let ticks = model.ticks_per_second;
-        let Some(set) = model.animation_set_mut(&self.name) else {
-            return false;
+        let mut log = Vec::new();
+        let mut current: Option<&str> = None;
+        for op in &self.ops {
+            match op {
+                AnimationOp::Name(name) => {
+                    current = Some(name);
+                    if model.animation_set(name).is_none() {
+                        log.push(format!(
+                            "Error: Animation '{name}' cannot be found in the model."
+                        ));
+                    }
+                }
+                AnimationOp::Event(_) | AnimationOp::DroppedEvent => {
+                    let Some(name) = current else {
+                        log.push(
+                            "Error: NAME filed must precede any EVENT fields in actor definition files."
+                                .to_string(),
+                        );
+                        continue;
+                    };
+                    if let (AnimationOp::Event(event), Some(set)) =
+                        (op, model.animation_set_mut(name))
+                    {
+                        set.add_event(&event.name, event.frame, ticks);
+                    }
+                }
+            }
+        }
+        if self.error.is_some() {
+            return Applied { ok: false, log };
+        }
+        if let (Some(name), Some(looping)) = (current, self.looping) {
+            if let Some(set) = model.animation_set_mut(name) {
+                set.looping = looping;
+            }
+        }
+        Applied { ok: true, log }
+    }
+
+    /// [`Self::apply_to`] without its log: whether the original's
+    /// `ParseAnim` succeeds.
+    pub fn apply(&self, model: &mut Model) -> bool {
+        self.apply_to(model).ok
+    }
+}
+
+impl AnimationEventDef {
+    /// `CXModel::ParseEvent`: the keys `NAME` and `FRAME`, the last of
+    /// each counting. `None` when the block has another key or no
+    /// `NAME`: the original then drops the event.
+    fn from_node(node: &Node) -> Option<AnimationEventDef> {
+        let mut name = None;
+        let mut frame = -1;
+        for item in keys(node, EVENT_KEYS, "EVENT") {
+            let (key, child) = item.ok()?;
+            match key {
+                "NAME" => name = Some(child.text()),
+                _ => child.read_int(&mut frame),
+            }
+        }
+        Some(AnimationEventDef { name: name?, frame })
+    }
+}
+
+impl AnimationFile {
+    /// Reads an `.anim` sidecar as `CAdActor3DX::MergeAnimations2` does:
+    /// top-level `ANIMATION` blocks, up to the end of the file or to the
+    /// first statement that is something else, where the original stops
+    /// with `Syntax error in animation definition file`.
+    pub fn parse(bytes: &[u8]) -> AnimationFile {
+        let mut file = AnimationFile::default();
+        let doc = match Document::parse(bytes) {
+            Ok(doc) => doc,
+            Err(err) => {
+                // Not a statement to begin with.
+                file.error = Some(format!("Syntax error in animation definition file: {err}"));
+                return file;
+            }
         };
-        if let Some(looping) = self.looping {
-            set.looping = looping;
+        for item in document_keys(&doc, ANIMATION_FILE_KEYS, "animation") {
+            match item {
+                Ok((_, node)) => file.animations.push(AnimationDef::from_node(node)),
+                Err(err) => {
+                    file.error = Some(format!("Syntax error in animation definition file: {err}"));
+                    break;
+                }
+            }
         }
-        for event in &self.events {
-            set.add_event(&event.name, event.frame, ticks);
+        file
+    }
+
+    /// Applies the blocks to a model in order and returns what the
+    /// original logs and answers. A block that fails does not fail the
+    /// file (the error code it sets is overwritten when the next
+    /// statement is read); the file fails only when its reading stopped
+    /// on [`Self::error`], after the blocks before it were applied.
+    pub fn apply_to(&self, model: &mut Model) -> Applied {
+        let mut log = Vec::new();
+        for animation in &self.animations {
+            log.extend(animation.apply_to(model).log);
         }
-        true
+        if let Some(error) = &self.error {
+            log.push(error.clone());
+        }
+        Applied {
+            ok: self.error.is_none(),
+            log,
+        }
     }
 }
 
 impl EffectDef {
-    /// Builds a block from an `EFFECT` node (`ParseEffect`): kept only
-    /// when both `MATERIAL` and `EFFECT_FILE` are present.
+    /// Builds a block from an `EFFECT` node (`ParseEffect`): the keys
+    /// `MATERIAL` and `EFFECT_FILE`, the last of each counting; kept
+    /// only when both are present and the block has no other key.
     pub fn from_node(node: &Node) -> Option<EffectDef> {
-        let material = node.get("MATERIAL").map(text)?;
-        let effect_file = node.get("EFFECT_FILE").map(text)?;
+        let mut material = None;
+        let mut effect_file = None;
+        for item in keys(node, EFFECT_KEYS, "EFFECT") {
+            let (key, child) = item.ok()?;
+            match key {
+                "MATERIAL" => material = Some(child.text()),
+                _ => effect_file = Some(child.text()),
+            }
+        }
         Some(EffectDef {
-            material,
-            effect_file,
+            material: material?,
+            effect_file: effect_file?,
         })
     }
 }
@@ -495,48 +934,6 @@ impl EffectDef {
 fn no_model() -> Error {
     Error::Invalid {
         reason: "no MODEL has been given for the 3D actor".into(),
-    }
-}
-
-fn text(node: &Node) -> String {
-    node.as_str().unwrap_or("").to_string()
-}
-
-fn boolean(node: &Node) -> bool {
-    node.as_bool().unwrap_or(false)
-}
-
-fn integer(node: &Node) -> i32 {
-    node.as_int()
-        .unwrap_or(0)
-        .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
-}
-
-fn float(node: &Node) -> f32 {
-    node.as_float().unwrap_or(0.0) as f32
-}
-
-/// The value as floats: a list block `{ a, b, c }` or a comma-separated
-/// scalar; a part that is not a number ends the list.
-fn floats(node: &Node) -> Vec<f32> {
-    match &node.value {
-        Value::List(items) => items
-            .iter()
-            .map_while(|s| s.as_float().map(|f| f as f32))
-            .collect(),
-        Value::Scalar(s) => s
-            .text
-            .split(',')
-            .map_while(|part| {
-                Scalar {
-                    text: part.trim().to_string(),
-                    quoted: false,
-                }
-                .as_float()
-                .map(|f| f as f32)
-            })
-            .collect(),
-        _ => Vec::new(),
     }
 }
 
@@ -726,17 +1123,34 @@ AnimationSet idle {
         assert_eq!(def.blocked_region.as_ref().unwrap().points.len(), 3);
         assert_eq!(def.waypoints.as_ref().unwrap().points.len(), 1);
         // A block without NAME names no set; events before the NAME and
-        // events without a NAME are dropped; FRAME defaults to 0.
+        // events without a NAME are dropped; FRAME starts at -1.
         assert_eq!(def.animations.len(), 1);
         assert_eq!(def.animations[0].name, "walk");
         assert_eq!(def.animations[0].looping, None);
+        let late = AnimationEventDef {
+            name: "late".into(),
+            frame: -1,
+        };
+        assert_eq!(def.animations[0].events, vec![late.clone()]);
         assert_eq!(
-            def.animations[0].events,
-            vec![AnimationEventDef {
-                name: "late".into(),
-                frame: 0
-            }]
+            def.animations[0].ops,
+            vec![
+                AnimationOp::Event(AnimationEventDef {
+                    name: "early".into(),
+                    frame: 1
+                }),
+                AnimationOp::Name("walk".into()),
+                AnimationOp::DroppedEvent,
+                AnimationOp::Event(late),
+            ]
         );
+        // Every model key is a step, in file order, the block without a
+        // name included.
+        assert_eq!(def.steps.len(), 5);
+        assert_eq!(def.steps[0], ModelStep::Model("a.x".into()));
+        assert_eq!(def.steps[1], ModelStep::Model("b.x".into()));
+        assert_eq!(def.steps[2], ModelStep::ShadowModel("low.x".into()));
+        assert!(matches!(&def.steps[3], ModelStep::Animation(a) if !a.has_name()));
     }
 
     #[test]
@@ -830,21 +1244,132 @@ AnimationSet idle {
         assert_eq!(def.velocity, 5.0);
         assert_eq!(def.angular_velocity, 90.0);
 
-        // A template that cannot be read fails the load.
-        let mut none = |_: &str| None;
-        let err = Actor3dDef::parse_with(outer.as_bytes(), &mut none).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("template 'base.act3d' cannot be read")
+        assert_eq!(def.filename_override.as_deref(), Some("base.act3d"));
+        assert!(def.log.is_empty());
+        // The steps start again at the template: `lost.x` is gone.
+        assert_eq!(
+            def.steps
+                .iter()
+                .filter_map(|step| match step {
+                    ModelStep::Model(path) => Some(path.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec!["base.x", "extra.x"]
         );
-        // A template without MODEL, and nothing after it, fails too.
-        let mut empty = |_: &str| Some(b"ACTOR3DX { NAME = \"e\" }".to_vec());
+
+        // A template that cannot be read changes nothing and does not
+        // fail the load: the model keys before it stay.
+        let mut none = |_: &str| None;
+        let def = Actor3dDef::parse_with(outer.as_bytes(), &mut none).unwrap();
+        assert_eq!(def.models, vec!["lost.x", "extra.x"]);
+        assert_eq!(def.name, "outer");
+        assert_eq!(def.filename_override, None);
+        assert_eq!(
+            def.log,
+            vec!["CAdActor3DX::LoadFile failed for file 'base.act3d'"]
+        );
+        // A template without MODEL fails, which the file that names it
+        // does not see: its own MODEL, after the key, is the model.
+        let mut empty = |_: &str| Some(b"ACTOR3DX { NAME = \"e\" VELOCITY = 3 }".to_vec());
+        let def = Actor3dDef::parse_with(outer.as_bytes(), &mut empty).unwrap();
+        assert_eq!(def.models, vec!["extra.x"]);
+        assert_eq!(def.name, "e");
+        assert_eq!(def.filename_override.as_deref(), Some("base.act3d"));
+        assert_eq!(def.log.len(), 2);
+        assert!(def.log[0].contains("no MODEL"), "{:?}", def.log);
+        assert_eq!(def.log[1], "Error parsing ACTOR3D file 'base.act3d'");
+        // With nothing after it, the actor has no model.
         let only_template = b"ACTOR3DX { TEMPLATE = \"e.act3d\" }";
         assert!(Actor3dDef::parse_with(only_template, &mut empty).is_err());
         assert!(
             Actor3dDef::parse(only_template).is_ok(),
             "recorded, not loaded"
         );
+    }
+
+    /// A template that stops on an error keeps what it applied before
+    /// it, the model included; a template that is not an actor file
+    /// leaves the model alone; templates cannot nest without end.
+    #[test]
+    fn a_failing_template_keeps_what_it_read() {
+        let outer = b"ACTOR3DX { MODEL = \"first.x\" TEMPLATE = \"t.act3d\" VELOCITY = 9 }";
+        let mut broken = |_: &str| {
+            Some(b"ACTOR3DX { MODEL = \"t.x\" SCALE = 50 BOGUS = 1 ANGLE = 90 }".to_vec())
+        };
+        let def = Actor3dDef::parse_with(outer, &mut broken).unwrap();
+        assert_eq!(def.models, vec!["t.x"]);
+        assert_eq!(def.scale, 0.5);
+        assert_eq!(def.angle, 0.0, "not reached");
+        assert_eq!(def.velocity, 9.0);
+        assert!(def.log[0].contains("unknown key `BOGUS`"), "{:?}", def.log);
+        assert_eq!(def.log[1], "Error parsing ACTOR3D file 't.act3d'");
+
+        // The root keyword is checked before the model is dropped.
+        let mut other = |_: &str| Some(b"ENTITY { NAME = \"x\" }".to_vec());
+        let def = Actor3dDef::parse_with(outer, &mut other).unwrap();
+        assert_eq!(def.models, vec!["first.x"]);
+        assert!(def.log[0].contains("'ACTOR3DX' keyword expected"));
+
+        // A template that names itself stops at a bound.
+        let mut reads = 0;
+        let mut itself = |_: &str| {
+            reads += 1;
+            Some(b"ACTOR3DX { MODEL = \"m.x\" TEMPLATE = \"self.act3d\" }".to_vec())
+        };
+        let def =
+            Actor3dDef::parse_with(b"ACTOR3DX { TEMPLATE = \"self.act3d\" }", &mut itself).unwrap();
+        assert_eq!(reads, MAX_TEMPLATE_DEPTH);
+        assert_eq!(def.models, vec!["m.x"]);
+        assert!(def.log.iter().any(|line| line.contains("nested too deep")));
+    }
+
+    /// The values are read as `CAdActor3DX::LoadBuffer` scans them.
+    #[test]
+    fn values_are_scanned_as_the_original_does() {
+        let parse = |keys: &str| {
+            Actor3dDef::parse(format!("ACTOR3DX {{ MODEL = \"m.x\" {keys} }}").as_bytes())
+        };
+        // An empty value leaves the variable; SCALE is divided all the
+        // same.
+        let def =
+            parse("X { } VELOCITY { } ACTIVE { } SCALE { } SHADOW { } SIMPLE_SHADOW { }").unwrap();
+        assert_eq!(def.position.x, 0.0);
+        assert_eq!(def.velocity, 1.0);
+        assert!(def.active);
+        assert_eq!(def.scale, 0.01);
+        assert_eq!(def.shadow_type, ShadowType::Stencil);
+        // Text that is not a number reads as 0.
+        assert_eq!(parse("VELOCITY = fast").unwrap().velocity, 0.0);
+        // The light keeps the coordinates the scan does not reach.
+        let def = parse("LIGHT_POSITION { 1, 2 }").unwrap();
+        assert_eq!(def.light_position, Vec3::new(1.0, 2.0, -40.0));
+        // A name in braces carries its blanks and is no name.
+        assert_eq!(
+            parse("SHADOW_TYPE { flat }").unwrap().shadow_type,
+            ShadowType::None
+        );
+        assert_eq!(
+            parse("SHADOW_TYPE { 2 }").unwrap().shadow_type,
+            ShadowType::Flat
+        );
+        // A region or waypoint group that cannot be read is left out and
+        // the load goes on; the same key replaces what was there.
+        let def = parse(
+            "BLOCKED_REGION { POINT { 0, 0 } } BLOCKED_REGION { COLOR = 1 } WAYPOINTS { BOGUS = 1 } NAME = \"after\"",
+        )
+        .unwrap();
+        assert!(def.blocked_region.is_none() && def.waypoints.is_none());
+        assert_eq!(def.name, "after");
+        // The table is matched by prefix, in its order: `NAMES` is
+        // `NAME` followed by something that is no key.
+        assert!(parse("NAMES = \"x\"").is_err());
+        assert!(parse("ZOOM = 1").is_err());
+        // The root keyword and EVENTS are in the table and do nothing.
+        assert!(parse("ACTOR3DX { NAME = \"inner\" } EVENTS { X = 1 }").is_ok());
+        // An EFFECT block with another key is dropped alone.
+        let def = parse("EFFECT { MATERIAL = \"m\" EFFECT_FILE = \"f\" COLOR = 1 }").unwrap();
+        assert!(def.effects.is_empty());
     }
 
     #[test]
@@ -863,7 +1388,8 @@ AnimationSet idle {
             "invalid definition: no MODEL has been given for the 3D actor"
         );
         let err = Actor3dDef::parse(b"ACTOR3DX { MODEL = \"m.x\"\n COLOR = 1 }").unwrap_err();
-        assert!(err.to_string().contains("line 2: unknown key 'COLOR'"));
+        assert!(err.to_string().contains("line 2"), "{err}");
+        assert!(err.to_string().contains("unknown key `COLOR`"), "{err}");
         // A shadow model, animation or effect before any model is ignored.
         let def = Actor3dDef::parse(
             b"ACTOR3DX { SHADOW_MODEL = \"l.x\" ANIMATION { NAME = \"a\" } EFFECT { MATERIAL = \"m\" EFFECT_FILE = \"f\" } MODEL = \"m.x\" }",
@@ -894,18 +1420,18 @@ AnimationSet idle {
         let anim = r#"
 ANIMATION { NAME = "WALK" LOOPING = FALSE EVENT { NAME = "step" FRAME = 0 } }
 ANIMATION { NAME = "run" }
-OTHER { }
 ANIMATION { LOOPING = TRUE }
 "#;
         let defs = AnimationDef::parse_file(anim.as_bytes()).unwrap();
-        assert_eq!(defs.len(), 2);
-        let mut missing = Vec::new();
-        for d in &defs {
-            if !d.apply(&mut model) {
-                missing.push(d.name.clone());
-            }
-        }
-        assert_eq!(missing, vec!["run"]);
+        assert_eq!(defs.len(), 3);
+        let file = AnimationFile::parse(anim.as_bytes());
+        assert_eq!(file.animations, defs);
+        let applied = file.apply_to(&mut model);
+        assert!(applied.ok);
+        assert_eq!(
+            applied.log,
+            vec!["Error: Animation 'run' cannot be found in the model."]
+        );
         let walk = model.animation_set("walk").unwrap();
         assert!(!walk.looping);
         assert_eq!(walk.events.len(), 3);
@@ -914,6 +1440,216 @@ ANIMATION { LOOPING = TRUE }
         // one that does not start with a key is a syntax error.
         assert!(AnimationDef::parse_file(b"ANIMATION { NAME = ").is_ok());
         assert!(AnimationDef::parse_file(b"{ ANIMATION").is_err());
+        assert!(AnimationDef::parse_file(b"").unwrap().is_empty());
+    }
+
+    /// `CXModel::ParseAnim`, key by key.
+    #[test]
+    fn an_animation_block_acts_in_the_order_of_its_keys() {
+        let block = |text: &str| {
+            let doc = Document::parse(format!("ANIMATION {{ {text} }}").as_bytes()).unwrap();
+            AnimationDef::from_node(&doc.nodes[0])
+        };
+        let events = |model: &Model, set: &str| -> Vec<String> {
+            model
+                .animation_set(set)
+                .unwrap()
+                .events
+                .iter()
+                .map(|e| e.name.clone())
+                .collect()
+        };
+        let fresh = || Model::parse(MODEL.as_bytes(), "m.x").unwrap();
+
+        // Each EVENT goes to the set of the NAME read so far; LOOPING,
+        // the last one, goes to the set of the last NAME.
+        let def = block(
+            "EVENT { NAME = \"lost\" } NAME = \"walk\" LOOPING = TRUE EVENT { NAME = \"a\" FRAME = 2 } NAME = \"IDLE\" EVENT { NAME = \"b\" } LOOPING = FALSE",
+        );
+        assert_eq!(def.name, "IDLE");
+        assert_eq!(def.looping, Some(false));
+        let mut model = fresh();
+        model.animation_set_mut("idle").unwrap().looping = true;
+        let applied = def.apply_to(&mut model);
+        assert!(applied.ok);
+        assert_eq!(
+            applied.log,
+            vec!["Error: NAME filed must precede any EVENT fields in actor definition files."]
+        );
+        assert_eq!(events(&model, "walk"), ["a"]);
+        assert_eq!(events(&model, "idle"), ["b"]);
+        assert!(!model.animation_set("walk").unwrap().looping);
+        assert!(!model.animation_set("idle").unwrap().looping);
+
+        // A set the model lacks is reported at its NAME; its events and
+        // LOOPING go nowhere.
+        let def = block("NAME = \"walk\" NAME = \"jump\" EVENT { NAME = \"x\" } LOOPING = TRUE");
+        let mut model = fresh();
+        let applied = def.apply_to(&mut model);
+        assert!(applied.ok);
+        assert_eq!(
+            applied.log,
+            vec!["Error: Animation 'jump' cannot be found in the model."]
+        );
+        assert!(events(&model, "walk").is_empty());
+        assert!(!model.animation_set("walk").unwrap().looping);
+
+        // An unknown key stops the block: the events before it stay,
+        // LOOPING is not applied, what follows is not read.
+        let def = block(
+            "NAME = \"walk\" LOOPING = TRUE EVENT { NAME = \"kept\" } SPEED = 2 EVENT { NAME = \"never\" }",
+        );
+        assert!(def.error.as_deref().unwrap().contains("SPEED"));
+        assert_eq!(def.looping, None);
+        let mut model = fresh();
+        let applied = def.apply_to(&mut model);
+        assert!(!applied.ok);
+        assert!(!def.apply(&mut fresh()));
+        assert!(applied.log.is_empty());
+        assert_eq!(events(&model, "walk"), ["kept"]);
+        assert!(!model.animation_set("walk").unwrap().looping);
+
+        // An EVENT with a key of its own kind is dropped alone; an empty
+        // LOOPING keeps the value read before it.
+        let def = block(
+            "NAME = \"walk\" EVENT { NAME = \"bad\" TIME = 3 } EVENT { FRAME = 2 } LOOPING = TRUE LOOPING { } EVENT { NAME = \"good\" FRAME = 2 NAME = \"better\" }",
+        );
+        assert_eq!(def.error, None);
+        assert_eq!(def.looping, Some(true));
+        let mut model = fresh();
+        assert!(def.apply(&mut model));
+        assert_eq!(events(&model, "walk"), ["better"]);
+        assert_eq!(model.animation_set("walk").unwrap().events[0].frame, 2);
+        assert!(model.animation_set("walk").unwrap().looping);
+    }
+
+    /// `CAdActor3DX::MergeAnimations2`.
+    #[test]
+    fn an_anim_file_stops_at_what_is_not_an_animation() {
+        let text = r#"
+ANIMATION { NAME = "walk" LOOPING = TRUE }
+ANIMATION { NAME = "idle" BOGUS = 1 LOOPING = TRUE }
+ANIMATION { NAME = "idle" EVENT { NAME = "blink" } }
+OTHER { }
+ANIMATION { NAME = "idle" LOOPING = TRUE }
+"#;
+        let file = AnimationFile::parse(text.as_bytes());
+        assert_eq!(file.animations.len(), 3);
+        assert!(file.error.as_deref().unwrap().contains("OTHER"));
+        assert!(AnimationDef::parse_file(text.as_bytes()).is_err());
+        let mut model = Model::parse(MODEL.as_bytes(), "m.x").unwrap();
+        let applied = file.apply_to(&mut model);
+        // The file fails on OTHER, after the blocks before it were
+        // applied; the block that failed did not fail it.
+        assert!(!applied.ok);
+        assert_eq!(applied.log.len(), 1);
+        assert!(applied.log[0].starts_with("Syntax error in animation definition file"));
+        assert!(model.animation_set("walk").unwrap().looping);
+        let idle = model.animation_set("idle").unwrap();
+        assert!(!idle.looping);
+        assert_eq!(idle.events.len(), 1);
+
+        // A file whose blocks all load succeeds even when one fails.
+        let file = AnimationFile::parse(b"ANIMATION { BOGUS = 1 } ANIMATION { NAME = \"walk\" }");
+        assert_eq!(file.error, None);
+        assert!(file.apply_to(&mut model).ok);
+    }
+
+    /// `CAdActor3DX::LoadBuffer` acts on the model at each key's place.
+    #[test]
+    fn builds_the_models_in_the_order_of_the_file() {
+        const RUN: &str = r#"xof 0303txt 0032
+AnimationSet run {
+ Animation {
+  { Bone }
+  AnimationKey { 2; 1; 0;3;0,0,0;;; }
+ }
+}
+"#;
+        const LOW: &str = r#"xof 0303txt 0032
+Frame LowRoot {
+ Mesh low {
+  3; 0;0;0;, 1;0;0;, 0;0;1;; 1; 3;0,1,2;;
+  SkinWeights { "Bone"; 3; 0,1,2; 1.0,1.0,1.0; 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1;; }
+ }
+}
+"#;
+        let mut read = |path: &str| match path {
+            "m.x" => Some(MODEL.as_bytes().to_vec()),
+            "run.x" => Some(RUN.as_bytes().to_vec()),
+            "low.x" => Some(LOW.as_bytes().to_vec()),
+            "broken.x" => Some(b"not an x file".to_vec()),
+            _ => None,
+        };
+        let text = r#"ACTOR3DX
+{
+  ANIMATION { NAME = "walk" LOOPING = TRUE }
+  SHADOW_MODEL = "low.x"
+  MODEL = "broken.x"
+  MODEL = "m.x"
+  ANIMATION { NAME = "run" LOOPING = TRUE }
+  MODEL = "run.x"
+  MODEL = "missing.x"
+  SHADOW_MODEL = "low.x"
+  ANIMATION { NAME = "idle" LOOPING = TRUE }
+}
+"#;
+        let def = Actor3dDef::parse(text.as_bytes()).unwrap();
+        let built = def.build_models("a.act3d", &mut read).unwrap();
+        // The first MODEL that loads is the model; the later ones merge.
+        assert_eq!(built.model_file, "m.x");
+        assert_eq!(built.merged_files, vec!["run.x"]);
+        assert_eq!(built.model.file_name, "m.x");
+        // The block for `run` came before the file that brings the set.
+        assert!(!built.model.animation_set("run").unwrap().looping);
+        assert!(built.model.animation_set("idle").unwrap().looping);
+        // The block before any model did nothing.
+        assert!(!built.model.animation_set("walk").unwrap().looping);
+        // The shadow model found its bone in the model.
+        let shadow = built.shadow.as_ref().unwrap();
+        assert_eq!(built.shadow_file.as_deref(), Some("low.x"));
+        assert_eq!(
+            shadow.model().meshes[0].bones[0].frame,
+            built.model.find_frame("Bone")
+        );
+        assert_eq!(built.warnings.len(), 5, "{:#?}", built.warnings);
+        assert_eq!(
+            built.warnings[0],
+            "Error: a MODEL= line must precede any animation definitions (file: a.act3d)"
+        );
+        assert_eq!(
+            built.warnings[1],
+            "Error: a MODEL= line must precede shadow model assignment (file: a.act3d)"
+        );
+        assert!(built.warnings[2].starts_with("Error loading model 'broken.x'"));
+        assert_eq!(
+            built.warnings[3],
+            "Error: Animation 'run' cannot be found in the model."
+        );
+        assert_eq!(built.warnings[4], "Error merging model 'missing.x'");
+
+        // The whole-file application the steps replace finds `run`.
+        let mut model = Model::parse(MODEL.as_bytes(), "m.x").unwrap();
+        model.merge_animations(RUN.as_bytes(), "run.x").unwrap();
+        assert!(def.apply_animations(&mut model).is_empty());
+        assert!(model.animation_set("run").unwrap().looping);
+
+        // A shadow model that fails to load leaves none, the earlier one
+        // included; the actor loads.
+        let def = Actor3dDef::parse(
+            b"ACTOR3DX { MODEL = \"m.x\" SHADOW_MODEL = \"low.x\" SHADOW_MODEL = \"broken.x\" }",
+        )
+        .unwrap();
+        let built = def.build_models("a.act3d", &mut read).unwrap();
+        assert!(built.shadow.is_none() && built.shadow_file.is_none());
+        assert_eq!(built.warnings.len(), 1);
+
+        // No model at the end fails the actor.
+        let def =
+            Actor3dDef::parse(b"ACTOR3DX { MODEL = \"broken.x\" MODEL = \"missing.x\" }").unwrap();
+        let log = def.build_models("a.act3d", &mut read).unwrap_err();
+        assert_eq!(log.len(), 3);
+        assert_eq!(log[2], "Error: No model has been loaded for 3D actor");
     }
 
     #[test]
