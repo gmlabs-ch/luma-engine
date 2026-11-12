@@ -45,6 +45,9 @@ const MAX_FRAME_TEXTS: usize = 512;
 /// screen a game draws on, so nothing visible is lost.
 const MAX_UNBOUNDED_WIDTH: i32 = 4096;
 
+/// The widest box a text is rendered into.
+const MAX_BOXED_WIDTH: i32 = 8192;
+
 /// The tallest image a text is rendered to.
 const MAX_TEXT_HEIGHT: i32 = 4096;
 
@@ -1236,7 +1239,8 @@ impl TrueTypeFont {
             text_height = wrapped_height;
         }
         let (width, align) = if boxed {
-            (width.max(1), align)
+            // A script names the box: it must not ask for gigabytes.
+            (width.clamp(1, MAX_BOXED_WIDTH), align)
         } else {
             // The widest line, with room for a last glyph that reaches
             // past its advance (an italic).
@@ -1249,7 +1253,7 @@ impl TrueTypeFont {
         let mut image = Image {
             width: width as u32,
             height: text_height as u32,
-            pixels: vec![0; (width * text_height * 4) as usize],
+            pixels: vec![0; width as usize * text_height as usize * 4],
             has_alpha_channel: true,
         };
         let mut baseline = self.line_height - self.descender as i32;

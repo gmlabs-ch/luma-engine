@@ -325,12 +325,35 @@ pub fn system_face_with_glyph(ch: char) -> Option<usize> {
     if let Some(known) = found.lock().ok().and_then(|f| f.get(&ch).copied()) {
         return known;
     }
-    let face = FaceSet::system().face_with_glyph(ch, FALLBACK_FAMILIES);
+    // Characters no font draws (private use, noncharacters) are not
+    // looked for, and a text made of characters the machine has no font
+    // for must not make the engine read every installed font once per
+    // character: after some misses the search is given up for the run.
+    let code = u32::from(ch);
+    let unassigned = matches!(code, 0xE000..=0xF8FF | 0xF_0000..=0x10_FFFF)
+        || code & 0xFFFE == 0xFFFE
+        || (0xFDD0..=0xFDEF).contains(&code);
+    let misses = found
+        .lock()
+        .map_or(0, |f| f.values().filter(|face| face.is_none()).count());
+    let face = if unassigned || misses >= MAX_FALLBACK_MISSES {
+        None
+    } else {
+        FaceSet::system().face_with_glyph(ch, FALLBACK_FAMILIES)
+    };
     if let Ok(mut found) = found.lock() {
-        found.insert(ch, face);
+        // The answers are kept up to a bound; past it they are computed
+        // again, which costs nothing once the search is given up.
+        if found.len() < 65_536 {
+            found.insert(ch, face);
+        }
     }
     face
 }
+
+/// How many characters may be searched in vain in the system's fonts
+/// before the search is given up.
+const MAX_FALLBACK_MISSES: usize = 64;
 
 #[cfg(test)]
 mod tests {
