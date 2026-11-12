@@ -136,6 +136,7 @@ const ACTOR_FILE: &str = r#"ACTOR3DX
   ANGLE = 0.0
   SCALE = 100
   MODEL = "actors\bob.x"
+  SHADOW_IMAGE = "shadow.png"
   LIGHT_POSITION { -100.0, 150.0, -40.0 }
   ANIMATION { NAME = "idle"  LOOPING = TRUE }
 }
@@ -185,6 +186,18 @@ fn game(max_shadow_type: u8) -> std::path::PathBuf {
 }}"
         )
         .into_bytes(),
+    );
+    // Without a shadow image the simple shadow is not drawn.
+    pkg.add_stored_file(
+        "shadow.png",
+        Image {
+            width: 8,
+            height: 8,
+            pixels: [0u8, 0, 0, 192].repeat(64),
+            has_alpha_channel: true,
+        }
+        .to_png()
+        .unwrap(),
     );
     pkg.add_file("scenes\\geo.3ds", geometry());
     pkg.add_file("actors\\bob.x", MODEL.as_bytes().to_vec());

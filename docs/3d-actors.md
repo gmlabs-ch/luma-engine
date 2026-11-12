@@ -1302,8 +1302,10 @@ The effect on a frame:
   blending on with `SRCALPHA/INVSRCALPHA` (so translucent textures
   composite over what is behind). The actor's `BlendMode` property changes
   blending (additive, subtractive).
-- Filtering: linear, **mip filter linear** (trilinear), repeat addressing.
-  Untextured materials render with the lit colour **[ext]**.
+- Filtering: linear, `MIPFILTER LINEAR` set but the textures have a single
+  mip level (`MipLevels = 1`), repeat addressing. An untextured material is
+  drawn opaque (no texture reads as opaque white, so the material alpha is
+  ignored) with its lit colour.
 - Linear **vertex fog** when the scene has fog (`Scene.EnableFog(color,
   start, end)`), in world units of view depth.
 - Ambient: the scene's, or the actor's override; default black.
@@ -1447,10 +1449,8 @@ original, on purpose:
 - **Simple**: the unit quad of `CreateSimpleShadow` (`-1..1` in X/Z,
   the image mapped once), with `Scaling(size, 1, size) * RotationY(angle)
   * Translation(position)`, the actor's or the game's image decoded with
-  the magenta colour key and mipmapped, else a default image generated in
-  code (`default_shadow_image`: a 64x64 black blob, alpha 192 at the
-  centre falling smoothly to 0 at the edge, standing in for the
-  original's `shadow.png`), drawn **unlit** (emissive white, the texture's
+  the magenta colour key and mipmapped; with no image at all nothing is
+  drawn (`RenderSimple` returns without a shadow image), drawn **unlit** (emissive white, the texture's
   alpha), alpha-blended, depth test on, no depth writes.
 - **Flat**: no light-view pre-pass. The posed meshes of the model and of
   the attachments are drawn a second time with the world matrix followed
@@ -1723,9 +1723,9 @@ wrote itself (`IntersectTriangle`, `PickGetIntersect`,
 3. **The viewport** of the meshes is the quads' (letterboxed or not), so
    the projection of 4.1 is computed from the logical resolution and the
    meshes land where the 2D mapping says.
-4. **Textures** for meshes are uploaded with a CPU-built mipmap chain
-   (`Renderer::mesh_texture`) and sampled trilinearly with repeat
-   addressing; the colour key is already alpha `0` and the alpha test cuts
+4. **Textures** for meshes are uploaded with a single mip level
+   (`Texture::from_image`, as the original loads them) and sampled linearly
+   with repeat addressing; the colour key is already alpha `0` and the alpha test cuts
    it (`ALPHAREF 8`).
 5. Offscreen tests as for 2D (`crates/luma-render/tests/mesh.rs`): a lit
    textured mesh with directional, ambient, point and spot lights, the

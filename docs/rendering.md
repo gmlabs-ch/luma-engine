@@ -257,9 +257,14 @@ texture is bound, so the shader is the same). The alpha test discards
 fragments below `8/255` (`ALPHAREF 8`, `GREATEREQUAL`); the magenta
 colour key is already alpha `0` in the decoded image, so keyed texels
 are cut out and the blend mode then composites the rest. Mesh textures
-are sampled with repeat addressing and trilinear filtering, the Direct3D
-defaults with `MIPFILTER LINEAR`; `Renderer::mesh_texture` builds the
-mipmap chain on the CPU (a box filter whose colours are weighted by
+are sampled with repeat addressing and linear filtering. The original
+loads them as ordinary surfaces with a single mip level
+(`D3DXCreateTextureFromFileInMemoryEx` is given `MipLevels = 1` in
+`CBSurfaceD3D::Create`), so its `MIPFILTER LINEAR` has nothing to blend
+and distant textures are as sharp as the filter allows: the game's model
+and shadow textures are uploaded with one level
+(`luma_render::Texture::from_image`). `Renderer::mesh_texture` remains for
+callers that want a mipmapped mesh texture; it builds the chain on the CPU (a box filter whose colours are weighted by
 alpha, so that transparent texels do not bleed a fringe into the smaller
 levels; `mip_level` is public for tests). 2D textures have no mipmaps
 and the 2D sampler clamps, as before.
