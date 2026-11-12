@@ -666,28 +666,26 @@ impl AnimatedModel {
             .is_some_and(|ch| ch.transitioning)
     }
 
-    /// Removes an animation set by name (`UnloadAnim`): the channels
-    /// playing it drop it first. `false` when the model has no such set.
+    /// Removes the animation sets of a name (`CXModel::UnloadAnimation`):
+    /// the sets [`Model::remove_animation_set`] removes, after the
+    /// channels playing them have dropped them. `false` when the model
+    /// has no such set.
     pub fn remove_animation_set(&mut self, name: &str) -> bool {
-        let Some(index) = self
-            .model
-            .animation_sets
-            .iter()
-            .position(|set| set.name.eq_ignore_ascii_case(name))
-        else {
+        let removed = self.model.animation_sets_to_unload(name);
+        if removed.is_empty() {
             return false;
-        };
+        }
         for channel in &mut self.channels {
             for slot in &mut channel.anims {
-                match slot {
-                    Some(anim) if anim.set == index => *slot = None,
-                    Some(anim) if anim.set > index => anim.set -= 1,
-                    _ => {}
+                let Some(anim) = slot else { continue };
+                if removed.contains(&anim.set) {
+                    *slot = None;
+                } else {
+                    anim.set -= removed.iter().filter(|&&index| index < anim.set).count();
                 }
             }
         }
-        self.model.animation_sets.remove(index);
-        true
+        self.model.remove_animation_set(name)
     }
 
     /// The animation state for a saved game: the timer, every channel's
@@ -892,8 +890,9 @@ impl AnimatedModel {
 /// positions and `weight * (normal * palette)` for the normals of the
 /// vertices the bone weights, the normals then normalised; a vertex no
 /// bone weights keeps its loaded position (what D3DX does with it is not
-/// known). A rigid mesh transforms its positions by its frame's combined
-/// matrix; its normals too, where the original leaves them as loaded.
+/// known). A rigid mesh moves its positions by its frame's combined
+/// matrix and keeps its normals as loaded, as the original does: a rigid
+/// mesh in a turned frame is lit as if it had not turned.
 fn skin_mesh(mesh: &Mesh, combined: &[Mat4], out: &mut SkinnedMesh) {
     if out.vertices.len() != mesh.vertices.len() {
         out.vertices = mesh.vertices.clone();
@@ -935,7 +934,6 @@ fn skin_mesh(mesh: &Mesh, combined: &[Mat4], out: &mut SkinnedMesh) {
         for (target, source) in out.vertices.iter_mut().zip(&mesh.vertices) {
             let [x, y, z, _] = world.transform(source.position);
             target.position = Vec3::new(x, y, z);
-            target.normal = world.transform_normal(source.normal).normalized();
         }
     }
     out.bounds = BoundingBox::of_points(out.vertices.iter().map(|v| v.position));
@@ -1480,6 +1478,71 @@ AnimationSet raise_tip {
         assert_vec(quad_of(&rig)[0].position, 0.0, 0.0, 0.0);
         let s = (PI / 4.0).sin();
         assert_vec(quad_of(&rig)[2].position, 2.0 - s, 0.0, s);
+    }
+
+    /// `CXModel::UnloadAnimation` steps over the two sets that follow a
+    /// removed one.
+    #[test]
+    fn removing_a_set_skips_the_two_sets_after_it() {
+        let mut model = Model::parse(RIG.as_bytes(), "rig.x").unwrap();
+        let lift = model.animation_set("lift").unwrap().clone();
+        let named = |name: &str| {
+            let mut set = lift.clone();
+            set.name = name.to_string();
+            set
+        };
+        model.animation_sets = ["a", "x", "X", "x", "x", "b", "x"]
+            .iter()
+            .map(|name| named(name))
+            .collect();
+        assert_eq!(model.animation_sets_to_unload("X"), vec![1, 4]);
+        let mut rig = AnimatedModel::new(model);
+        rig.play_with(0, "x", 0, 0, false);
+        rig.play_with(1, "b", 0, 0, false);
+        assert!(rig.remove_animation_set("X"));
+        let names: Vec<&str> = rig
+            .model()
+            .animation_sets
+            .iter()
+            .map(|set| set.name.as_str())
+            .collect();
+        assert_eq!(names, ["a", "X", "x", "b", "x"]);
+        assert_eq!(rig.current_animation(0), None);
+        assert_eq!(rig.current_animation(1), Some("b"));
+        // The next call removes the first of the two left side by side,
+        // and the one after `b`.
+        assert!(rig.remove_animation_set("x"));
+        assert_eq!(rig.model().animation_sets.len(), 3);
+        assert_eq!(rig.current_animation(1), Some("b"));
+        assert!(rig.remove_animation_set("x"));
+        assert!(!rig.remove_animation_set("x"));
+        assert_eq!(rig.model().animation_sets.len(), 2);
+    }
+
+    /// `CXMesh::Update` moves the positions of a mesh without bones and
+    /// leaves its normals as loaded.
+    #[test]
+    fn a_rigid_mesh_keeps_its_loaded_normals() {
+        // The frame turns +X into +Y.
+        let text = r#"xof 0303txt 0032
+Frame Turned {
+ FrameTransformMatrix { 0,1,0,0, -1,0,0,0, 0,0,1,0, 0,0,0,1;; }
+ Mesh plate {
+  3;
+  1.0;0.0;0.0;,
+  2.0;0.0;0.0;,
+  1.0;0.0;1.0;;
+  1;
+  3;0,1,2;;
+  MeshNormals { 1; 1.0;0.0;0.0;; 1; 3;0,0,0;; }
+ }
+}
+"#;
+        let rig = AnimatedModel::new(Model::parse(text.as_bytes(), "plate.x").unwrap());
+        let vertices = &rig.meshes()[0].vertices;
+        assert_vec(vertices[0].position, 0.0, 1.0, 0.0);
+        assert_vec(vertices[1].position, 0.0, 2.0, 0.0);
+        assert_vec(vertices[0].normal, 1.0, 0.0, 0.0);
     }
 
     #[test]

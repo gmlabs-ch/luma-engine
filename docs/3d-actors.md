@@ -636,9 +636,8 @@ What WME makes of the result:
   every vertex).
 - **Rigid meshes** (no bones) are transformed every frame by their parent
   frame's combined matrix: **positions only**; the normals stay as loaded, so
-  the lighting of rigid parts on moving frames is slightly off. As
-  implemented, Luma transforms the normals as well (by the 3x3 part,
-  renormalised), a deliberate departure.
+  the lighting of rigid parts on moving frames is slightly off. Luma does
+  the same (`skin_mesh`): a game's models were lit that way.
 - **Bounding box.** Recomputed from the skinned vertices every frame
   (`D3DXComputeBoundingBox`, with a manual fallback when NaNs appear). The
   **model's** box (`UpdateBoundingRect`) starts at the origin and grows
@@ -825,7 +824,14 @@ the first key, and a zero gap met after a positive one resets the minimum
   `IsAnimPending(name)` over all channels is `is_playing_on_any_channel`.
 - **Unloading a set** (`UnloadAnim`, `AnimatedModel::remove_animation_set`)
   drops it from every channel slot that plays it; a transition in progress
-  keeps running and ends on whatever is left.
+  keeps running and ends on whatever is left. When several sets share the
+  name (two loose animations of one file, or the same file merged twice),
+  `CXModel::UnloadAnimation` removes the first and then **steps over the
+  two sets that follow each removed one** (its loop advances the index
+  once more after `RemoveAt`), so of three sets of that name in a row only
+  the first goes; the call can be repeated. Reproduced
+  (`Model::animation_sets_to_unload`), since which sets remain decides
+  what `PlayAnim` plays next.
 - **Outputs of an update**: the local and combined matrix of every frame
   (`local_matrices`, `combined_matrices`, `bone_matrix(name)` for
   attachments and `GetBonePosition*`), the skinned meshes

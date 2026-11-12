@@ -594,19 +594,35 @@ impl Model {
             .find(|set| set.name.eq_ignore_ascii_case(name))
     }
 
-    /// Removes an animation set by name, ignoring case (`UnloadAnim`).
-    pub fn remove_animation_set(&mut self, name: &str) -> bool {
-        match self
-            .animation_sets
-            .iter()
-            .position(|set| set.name.eq_ignore_ascii_case(name))
-        {
-            Some(index) => {
-                self.animation_sets.remove(index);
-                true
+    /// The indices of the sets `CXModel::UnloadAnimation` removes for a
+    /// name (ignoring ASCII case), in increasing order. The original walks
+    /// the sets with an index that it advances once more after each
+    /// removal, on top of the loop's own step, so the two sets that
+    /// follow a removed one are not looked at: of three sets of the same
+    /// name in a row only the first goes.
+    pub fn animation_sets_to_unload(&self, name: &str) -> Vec<usize> {
+        let mut removed = Vec::new();
+        let mut index = 0;
+        while index < self.animation_sets.len() {
+            if self.animation_sets[index].name.eq_ignore_ascii_case(name) {
+                removed.push(index);
+                index += 3;
+            } else {
+                index += 1;
             }
-            None => false,
         }
+        removed
+    }
+
+    /// Removes the animation sets of a name (`CXModel::UnloadAnimation`):
+    /// those [`Self::animation_sets_to_unload`] lists. `false` when the
+    /// model has no such set.
+    pub fn remove_animation_set(&mut self, name: &str) -> bool {
+        let removed = self.animation_sets_to_unload(name);
+        for &index in removed.iter().rev() {
+            self.animation_sets.remove(index);
+        }
+        !removed.is_empty()
     }
 
     /// Milliseconds to key ticks, as the original converts a local time
