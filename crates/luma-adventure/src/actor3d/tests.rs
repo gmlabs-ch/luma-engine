@@ -121,6 +121,21 @@ fn stop_anim_of_an_attachment_stops_every_channel() {
     assert!(!attachment.stop_all_anims());
 }
 
+#[test]
+fn the_waypoints_of_a_3d_actor_follow_it_for_the_2d_path_finder() {
+    let mut actor = actor();
+    let mut group = luma_formats::WaypointGroup::default();
+    group.points.push(Point { x: 10, y: -4 });
+    actor.waypoints = Some(group);
+    actor.x = 100;
+    actor.y = 200;
+    let scene = Scene::default();
+    assert_eq!(
+        actor.waypoint_points(&scene),
+        vec![Point { x: 110, y: 196 }]
+    );
+}
+
 fn vfs() -> Vfs {
     let mut vfs = Vfs::new();
     vfs.add_resource("main.x", TRIANGLE.as_bytes().to_vec());

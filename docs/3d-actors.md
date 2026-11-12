@@ -1589,7 +1589,7 @@ success and `false` on failure.
 | `CreateParticleEmitterBone(bone, ox, oy, oz)` | The actor's particle emitter (created if needed, `CreateParticleEmitter(true)`), placed each frame at the projected position of the bone plus the offset in the bone's space (`UpdatePartEmitter`; an unknown bone leaves it at the actor's position, where the original uses an uninitialised point); returns the emitter. A later `CreateParticleEmitter` forgets the bone. |
 | inherited from `CAdObject3D`: `SkipTo(x, y)` | Place at the scene point (exact conversion; fails silently off the walk planes). |
 | `SkipTo3D(x, y, z)` | Place at a 3D point. |
-| `GetBonePosition2D(bone)` | Object `{X, Y}` in scene pixels, or no members on failure. |
+| `GetBonePosition2D(bone)` | Object `{X, Y}` of integers in scene pixels; both 0 for an unknown bone or without geometry. |
 | `GetBonePosition3D(bone)` | Object `{X, Y, Z}` in world units. |
 | `AddIgnoredLight(name)`, `RemoveIgnoredLight(name)` | Lights that do not affect this actor. |
 | inherited from `CBObject`: `SetShadowImage(file)`, `GetShadowImage()`, `SetLightPosition(x, y, z)` | Simple-shadow image; shadow light position relative to the actor. |

@@ -1767,6 +1767,17 @@ impl Actor3d {
         Some(matrix.transform_coord(offset))
     }
 
+    /// The waypoints the actor offers the 2D path finder of the other
+    /// objects, in scene coordinates (`UpdateBlockRegion`).
+    pub fn waypoint_points(&self, scene: &Scene) -> Vec<Point> {
+        match &self.waypoints {
+            Some(group) => {
+                crate::actor::mimic(&group.points, scene.scale_at(self.y), self.x, self.y)
+            }
+            None => Vec::new(),
+        }
+    }
+
     /// The polygon the actor blocks for the 2D path finder, in scene
     /// coordinates (`UpdateBlockRegion`), at the actor's 2D position
     /// and the scene's scale at its `y`.

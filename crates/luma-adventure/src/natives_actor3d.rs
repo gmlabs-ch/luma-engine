@@ -36,15 +36,24 @@ fn color_of(v: i32) -> luma_formats::Rgba {
 /// An object `{ X, Y }` or `{ X, Y, Z }`; an empty object when the
 /// position is unknown (`GetBonePosition2D/3D` of an unknown bone leave
 /// the result without members).
-fn point_object(point: Option<(f64, f64, Option<f64>)>) -> Value {
+/// The answer of `GetBonePosition3D`: `X`, `Y`, `Z` as floats, all 0 for an
+/// unknown bone (`CAdObject3D::ScCallMethod` fills a zero vector first).
+fn point_object(point: Option<(f64, f64, f64)>) -> Value {
+    let (x, y, z) = point.unwrap_or((0.0, 0.0, 0.0));
     let mut props = Properties::new();
-    if let Some((x, y, z)) = point {
-        props.insert("X".to_string(), Value::Float(x));
-        props.insert("Y".to_string(), Value::Float(y));
-        if let Some(z) = z {
-            props.insert("Z".to_string(), Value::Float(z));
-        }
-    }
+    props.insert("X".to_string(), Value::Float(x));
+    props.insert("Y".to_string(), Value::Float(y));
+    props.insert("Z".to_string(), Value::Float(z));
+    Value::Object(props)
+}
+
+/// The answer of `GetBonePosition2D`: `X` and `Y` as integers, 0 for an
+/// unknown bone or a scene without geometry.
+fn point_object_2d(point: Option<(i32, i32)>) -> Value {
+    let (x, y) = point.unwrap_or((0, 0));
+    let mut props = Properties::new();
+    props.insert("X".to_string(), Value::Int(x));
+    props.insert("Y".to_string(), Value::Int(y));
     Value::Object(props)
 }
 
@@ -499,18 +508,15 @@ impl World {
                     .actor3d(id)
                     .and_then(|a| a.bone_position(&bone, Vec3::ZERO))
                     .zip(projection)
-                    .map(|(p, projection)| {
-                        let (x, y) = projection.project(p);
-                        (f64::from(x), f64::from(y), None)
-                    });
-                Return::value(point_object(point))
+                    .map(|(p, projection)| projection.project(p));
+                Return::value(point_object_2d(point))
             }
             "GetBonePosition3D" => {
                 let bone = arg(0).get_string(self);
                 let point = self
                     .actor3d(id)
                     .and_then(|a| a.bone_position(&bone, Vec3::ZERO))
-                    .map(|p| (f64::from(p.x), f64::from(p.y), Some(f64::from(p.z))));
+                    .map(|p| (f64::from(p.x), f64::from(p.y), f64::from(p.z)));
                 Return::value(point_object(point))
             }
             "AddIgnoredLight" => {
@@ -794,18 +800,15 @@ impl World {
                     .attachment3d(id)
                     .and_then(|(_, a)| a.bone_position(&bone, Vec3::ZERO))
                     .zip(projection)
-                    .map(|(p, projection)| {
-                        let (x, y) = projection.project(p);
-                        (f64::from(x), f64::from(y), None)
-                    });
-                Return::value(point_object(point))
+                    .map(|(p, projection)| projection.project(p));
+                Return::value(point_object_2d(point))
             }
             "GetBonePosition3D" => {
                 let bone = arg(0).get_string(self);
                 let point = self
                     .attachment3d(id)
                     .and_then(|(_, a)| a.bone_position(&bone, Vec3::ZERO))
-                    .map(|p| (f64::from(p.x), f64::from(p.y), Some(f64::from(p.z))));
+                    .map(|p| (f64::from(p.x), f64::from(p.y), f64::from(p.z)));
                 Return::value(point_object(point))
             }
             _ => return None,
