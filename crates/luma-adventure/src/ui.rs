@@ -232,9 +232,13 @@ pub struct StaticState {
 pub struct EditState {
     /// The font of the selected part of the text.
     pub font_selected: Option<String>,
-    /// Start of the selection, in bytes.
+    /// Start of the selection, in bytes of the text. A value past the
+    /// end of the text stands for a character index past its last
+    /// character, as far past it as the value is past the end (see
+    /// [`selection_index`]): the original keeps the number a script or
+    /// its constructor gave until the editor is next drawn.
     pub sel_start: usize,
-    /// End of the selection and position of the caret, in bytes.
+    /// End of the selection and position of the caret, as `sel_start`.
     pub sel_end: usize,
     /// First character shown.
     pub scroll_offset: usize,
@@ -254,22 +258,53 @@ pub struct EditState {
     /// text and the caret when right-to-left text sits against the
     /// right edge (`CUIEdit::Display`'s `AlignOffset`), 0 otherwise.
     pub align_offset: i32,
+    /// The parts of the text the editor draws this frame, laid out by
+    /// the last update; not saved.
+    #[serde(skip)]
+    pub pieces: Vec<EditPiece>,
+    /// The caret this frame, when the editor has the focus; not saved.
+    #[serde(skip)]
+    pub caret: Option<EditPiece>,
+    /// The height the parts are drawn in: the taller letter of the two
+    /// fonts; not saved.
+    #[serde(skip)]
+    pub line_height: i32,
+}
+
+/// A part of an editor's text as `CUIEdit::Display` draws it: the text
+/// before the selection, the selection, the text after it, the caret.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EditPiece {
+    /// The characters drawn.
+    pub text: String,
+    /// Where the part starts, from the editor's left edge.
+    pub x: i32,
+    /// The room left up to the right frame, which the part is cut at.
+    pub width: i32,
+    /// Whether it is drawn with `FONT_SELECTED`.
+    pub selected: bool,
 }
 
 impl Default for EditState {
     fn default() -> Self {
         EditState {
             font_selected: None,
-            sel_start: usize::MAX,
-            sel_end: usize::MAX,
+            // `m_SelStart = m_SelEnd = 10000`: past any text until the
+            // editor is drawn.
+            sel_start: 10000,
+            sel_end: 10000,
             scroll_offset: 0,
             frame_width: 0,
             max_length: -1,
             cursor_char: "|".to_string(),
-            cursor_blink_rate: 600,
+            // `GetCaretBlinkTime()` on a Windows left at its default.
+            cursor_blink_rate: 530,
             last_blink: 0,
             cursor_visible: true,
             align_offset: 0,
+            pieces: Vec::new(),
+            caret: None,
+            line_height: 0,
         }
     }
 }
@@ -532,14 +567,19 @@ impl Control {
             .or_else(|| self.image.as_ref().map(|_| ImageSlot::Image))
     }
 
-    /// Sets the text; `|` becomes a line break (`SetText`). The caret
-    /// stays inside the new text, between two characters.
+    /// Sets the text; `|` becomes a line break (`SetText`). An editor's
+    /// selection keeps its character indexes, as the original keeps
+    /// `m_SelStart` and `m_SelEnd` untouched: past the end of a shorter
+    /// text until the editor is next drawn.
     pub fn set_text(&mut self, text: &str) {
-        self.text = luma_formats::window::control_text(text);
+        let text = luma_formats::window::control_text(text);
         if let ControlKind::Edit(e) = &mut self.kind {
-            e.sel_start = char_floor(&self.text, e.sel_start);
-            e.sel_end = char_floor(&self.text, e.sel_end);
+            let start = selection_index(&self.text, e.sel_start);
+            let end = selection_index(&self.text, e.sel_end);
+            e.sel_start = selection_offset(&text, start);
+            e.sel_end = selection_offset(&text, end);
         }
+        self.text = text;
     }
 
     /// Whether the control is drawn pressed.
@@ -556,14 +596,26 @@ fn forced_color(tint: Rgba) -> Option<Rgba> {
     (tint != Rgba::OPAQUE_WHITE).then_some(tint)
 }
 
-/// The two lines an editor shows, from the first character in view:
-/// the text alone, and the text with the caret's character at the
-/// caret.
-fn edit_lines(text: &str, scroll: usize, caret: usize, cursor_char: &str) -> (String, String) {
-    let shown = text.get(scroll..).unwrap_or("");
-    let before = text.get(scroll.min(caret)..caret).unwrap_or("");
-    let after = text.get(caret..).unwrap_or("");
-    (shown.to_string(), format!("{before}{cursor_char}{after}"))
+/// The character index a selection end stands for (`m_SelStart`,
+/// `m_SelEnd`): the characters before its byte offset, or, past the end
+/// of the text, as many more as it is past it.
+pub(crate) fn selection_index(text: &str, at: usize) -> usize {
+    match at.checked_sub(text.len()) {
+        Some(past) => text.chars().count().saturating_add(past),
+        None => text[..char_floor(text, at)].chars().count(),
+    }
+}
+
+/// The selection end of a character index: the byte offset of that
+/// character, or, past the last character, as far past the end of the
+/// text.
+pub(crate) fn selection_offset(text: &str, index: usize) -> usize {
+    match text.char_indices().nth(index) {
+        Some((at, _)) => at,
+        None => text
+            .len()
+            .saturating_add(index - text.chars().count().min(index)),
+    }
 }
 
 /// The windows of a game and what freezing them holds.
@@ -1005,8 +1057,11 @@ impl World {
     fn apply_edit_def(&mut self, engine: &mut Engine, id: NativeId, def: &EditDef) {
         self.apply_control_def(engine, id, &def.base);
         let font_selected = self.load_control_font(&def.font_selected);
+        // `Game->m_StringTable->Expand(&m_Text)`; an editor holds
+        // characters.
+        let text = self.display_text(&self.expand(&def.text));
         if let Some(control) = self.control_mut(id) {
-            control.set_text(&def.text);
+            control.set_text(&text);
             control.can_focus = true;
             control.kind = ControlKind::Edit(Box::new(EditState {
                 font_selected,
@@ -2134,6 +2189,32 @@ impl World {
         }
     }
 
+    /// The width of a part of an editor's text in a font. The part is
+    /// characters; the fonts take text as the game holds it.
+    fn edit_width(&mut self, font: &str, part: &str) -> i32 {
+        if part.is_empty() {
+            return 0;
+        }
+        let text = self.game_text(part);
+        self.measure_text_width(Some(font), &text)
+    }
+
+    /// The half of `CUIEdit::Display` that changes the editor: the
+    /// selection is brought inside the text, the first character shown
+    /// moves on until the text up to the caret fits, the parts to draw
+    /// are laid out, and the caret blinks.
+    ///
+    /// The parts are the text before the selection, the selection (in
+    /// `FONT_SELECTED`) and the text after it, with the caret where the
+    /// selection ends. Each is drawn in the room left up to the right
+    /// frame and one letter high, so the line is cut there. The caret
+    /// keeps its room while the editor has the focus, shown or not.
+    ///
+    /// Deliberate: the original measures the parts with `GetTextWidth`
+    /// and a length, which its TrueType font ignores: with such a font
+    /// every part is as wide as all the text that follows, and a caret
+    /// inside the text stands far from its place. The parts are
+    /// measured for what they are here, as with a bitmap font.
     fn update_edit(&mut self, id: NativeId) {
         self.step_control_image(id, ImageSlot::Image);
         let clock = self.clock;
@@ -2148,56 +2229,126 @@ impl World {
         let font = self.control_font(control.font.as_deref());
         let rtl = self.text_rtl;
         let Some(e) = control.edit() else { return };
-        let (frame, sel_end, mut scroll, blink_rate, last_blink, cursor_char) = (
-            e.frame_width,
-            e.sel_end.min(text.len()),
-            e.scroll_offset.min(text.len()),
-            e.cursor_blink_rate,
-            e.last_blink,
-            e.cursor_char.clone(),
-        );
-        // Keep the caret in view.
-        let mut align_offset = 0;
-        if let Some(font) = &font {
-            // The editor's text and caret are characters, whatever the
-            // game's encoding (`CUIEdit::Display` draws them as ANSI);
-            // the fonts take text as the game holds it.
-            let cursor_width = self.measure_text_width(Some(font), &self.game_text(&cursor_char));
+        let selected_font = e.font_selected.clone().or_else(|| font.clone());
+        let (frame, cursor_char) = (e.frame_width, e.cursor_char.clone());
+        let len = text.len();
+        let sel_start = char_floor(&text, e.sel_start);
+        let sel_end = char_floor(&text, e.sel_end);
+        let mut scroll = char_floor(&text, e.scroll_offset);
+        let part = |from: usize, to: usize| text.get(from..to.max(from)).unwrap_or("");
+        let mut pieces = Vec::new();
+        let mut caret = None;
+        let (mut align_offset, mut line_height) = (0, 0);
+        if let (Some(font), Some(selected_font)) = (&font, &selected_font) {
+            let cursor_width = self.edit_width(font, &cursor_char);
+            let room = width - cursor_width - 2 * frame;
+            // The selection runs from `first` to `last`; the caret is at
+            // the end the user moves, before it or after it.
+            let caret_first = sel_start >= sel_end;
+            let (first, last) = (sel_start.min(sel_end), sel_start.max(sel_end));
             loop {
-                let shown = self.game_text(text.get(scroll..sel_end).unwrap_or(""));
-                let w = self.measure_text_width(Some(font), &shown);
-                if w <= width - cursor_width - 2 * frame || scroll >= text.len() {
+                let used = if caret_first {
+                    self.edit_width(font, part(scroll, sel_end))
+                } else {
+                    let from = scroll.max(sel_start);
+                    self.edit_width(font, part(scroll, sel_start))
+                        + self.edit_width(selected_font, part(from, sel_end))
+                };
+                if used <= room {
                     break;
                 }
                 scroll += 1;
-                while scroll < text.len() && !text.is_char_boundary(scroll) {
+                while scroll < len && !text.is_char_boundary(scroll) {
                     scroll += 1;
+                }
+                if scroll >= len {
+                    break;
                 }
             }
             scroll = scroll.min(sel_end);
-            let (shown, with_caret) = edit_lines(&text, scroll, sel_end, &cursor_char);
-            let (shown, with_caret) = (self.game_text(&shown), self.game_text(&with_caret));
+            let shown_first = first.max(scroll);
+            let before = self.edit_width(font, part(scroll, first));
+            let selection = self.edit_width(selected_font, part(shown_first, last));
+            let after = self.edit_width(font, part(last, len));
+            let caret_room = if focused { cursor_width } else { 0 };
             // Right-to-left text sits against the right edge: it starts
             // after the room the text and the caret leave.
             if rtl {
-                let used = self.measure_text_width(Some(font), &shown)
-                    + if focused { cursor_width } else { 0 };
-                align_offset = (width - 2 * frame - used).max(0);
+                align_offset = (width - 2 * frame - before - caret_room - selection - after).max(0);
             }
-            if let Some(f) = self.fonts.get_mut(font) {
-                f.prepare(&shown, -1, TextAlign::Left, -1);
-                f.prepare(&with_caret, -1, TextAlign::Left, -1);
+            line_height = [font, selected_font]
+                .iter()
+                .filter_map(|f| self.fonts.get(f))
+                .map(crate::text::Font::line_height)
+                .max()
+                .unwrap_or(0);
+            let right = width - frame;
+            let mut x = frame + align_offset;
+            let piece = |x: i32, text: &str, selected: bool| EditPiece {
+                text: text.to_string(),
+                x,
+                width: right - x,
+                selected,
+            };
+            let caret_piece = |x: i32| {
+                // The caret is measured whole and drawn as its first
+                // character.
+                let first: String = cursor_char.chars().take(1).collect();
+                EditPiece {
+                    text: first,
+                    x,
+                    width: right - x,
+                    selected: false,
+                }
+            };
+            if first > scroll {
+                pieces.push(piece(x, part(scroll, first), false));
+                x += before;
+            }
+            if focused && caret_first {
+                caret = Some(caret_piece(x));
+                x += cursor_width;
+            }
+            if last > shown_first {
+                pieces.push(piece(x, part(shown_first, last), true));
+                x += selection;
+            }
+            if focused && !caret_first {
+                caret = Some(caret_piece(x));
+                x += cursor_width;
+            }
+            pieces.push(piece(x, part(last, len), false));
+            // Nothing is drawn of an empty part, nor in no room at all.
+            pieces.retain(|p| !p.text.is_empty() && p.width > 0);
+            caret = caret.filter(|p| !p.text.is_empty() && p.width > 0);
+            // A TrueType font draws a text it was given before.
+            for p in pieces.iter().chain(&caret) {
+                let name = if p.selected { selected_font } else { font };
+                let shown = self.game_text(&p.text);
+                if let Some(f) = self.fonts.get_mut(name) {
+                    f.prepare(&shown, p.width, TextAlign::Left, line_height);
+                }
             }
         }
-        let blink = blink_rate > 0 && clock.saturating_sub(last_blink) >= blink_rate as u64;
         if let Some(e) = self.control_mut(id).and_then(Control::edit_mut) {
+            e.sel_start = sel_start;
+            e.sel_end = sel_end;
             e.scroll_offset = scroll;
             e.align_offset = align_offset;
-            if !focused {
-                e.cursor_visible = false;
-            } else if blink || last_blink == 0 {
-                e.cursor_visible = last_blink == 0 || !e.cursor_visible;
-                e.last_blink = clock;
+            e.pieces = pieces;
+            e.caret = caret;
+            e.line_height = line_height;
+            // The caret changes each time the blink rate has passed
+            // since it last did. The original compares unsigned numbers,
+            // against a clock that has run for long: a caret that never
+            // blinked is due, and a negative rate never is.
+            if focused && e.cursor_blink_rate >= 0 {
+                let due = e.last_blink == 0
+                    || clock.saturating_sub(e.last_blink) >= e.cursor_blink_rate as u64;
+                if due {
+                    e.last_blink = clock;
+                    e.cursor_visible = !e.cursor_visible;
+                }
             }
         }
     }
@@ -2964,34 +3115,26 @@ impl World {
             .control_font(control.font.as_deref())
             .and_then(|f| self.fonts.get(&f));
         let Some(font) = font else { return };
-        // The two lines `update_edit` prepared: a TrueType font only
-        // draws a text it was given before.
-        let (shown, with_caret) = edit_lines(
-            &control.text,
-            e.scroll_offset.min(control.text.len()),
-            e.sel_end.min(control.text.len()),
-            &e.cursor_char,
-        );
-        let frame = e.frame_width + e.align_offset;
-        if e.cursor_visible && self.is_focused(id) {
-            font.draw(
+        let selected_font = e
+            .font_selected
+            .as_deref()
+            .and_then(|f| self.fonts.get(f))
+            .unwrap_or(font);
+        // The parts `update_edit` laid out: the text around the
+        // selection in the editor's font, the selection in
+        // `FONT_SELECTED`, the caret while it shows.
+        let caret = e.caret.as_ref().filter(|_| e.cursor_visible);
+        for piece in e.pieces.iter().chain(caret) {
+            let font = if piece.selected { selected_font } else { font };
+            font.draw_forced(
                 list,
-                &self.game_text(&with_caret),
-                x + frame,
+                &self.game_text(&piece.text),
+                x + piece.x,
                 y + e.frame_width,
-                -1,
+                piece.width,
                 TextAlign::Left,
-                -1,
-            );
-        } else {
-            font.draw(
-                list,
-                &self.game_text(&shown),
-                x + frame,
-                y + e.frame_width,
-                -1,
-                TextAlign::Left,
-                -1,
+                e.line_height,
+                forced_color(tint),
             );
         }
     }

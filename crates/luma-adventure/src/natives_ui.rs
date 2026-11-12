@@ -103,11 +103,19 @@ impl World {
                 _ => return None,
             },
             ControlKind::Edit(e) => match name {
-                "SelStart" => Value::Int(e.sel_start.min(c.text.len()) as i32),
-                "SelEnd" => Value::Int(e.sel_end.min(c.text.len()) as i32),
+                // Character indexes, and the number the editor holds:
+                // past the text until it is next drawn.
+                "SelStart" => {
+                    let index = crate::ui::selection_index(&c.text, e.sel_start);
+                    Value::Int(i32::try_from(index).unwrap_or(i32::MAX))
+                }
+                "SelEnd" => {
+                    let index = crate::ui::selection_index(&c.text, e.sel_end);
+                    Value::Int(i32::try_from(index).unwrap_or(i32::MAX))
+                }
                 "FrameWidth" => Value::Int(e.frame_width),
                 "MaxLength" => Value::Int(e.max_length),
-                "CursorChar" => Value::from(e.cursor_char.clone()),
+                "CursorChar" => Value::from(self.game_text(&e.cursor_char)),
                 "CursorBlinkRate" => Value::Int(e.cursor_blink_rate),
                 _ => return None,
             },
@@ -231,12 +239,15 @@ impl World {
                         _ => false,
                     },
                     ControlKind::Edit(e) => match name {
+                        // Character indexes, kept inside the text.
                         "SelStart" => {
-                            e.sel_start = int.max(0) as usize;
+                            let index = (int.max(0) as usize).min(c.text.chars().count());
+                            e.sel_start = crate::ui::selection_offset(&c.text, index);
                             true
                         }
                         "SelEnd" => {
-                            e.sel_end = int.max(0) as usize;
+                            let index = (int.max(0) as usize).min(c.text.chars().count());
+                            e.sel_end = crate::ui::selection_offset(&c.text, index);
                             true
                         }
                         "FrameWidth" => {
@@ -247,9 +258,11 @@ impl World {
                             e.max_length = int;
                             true
                         }
+                        // The whole string is kept (`SetCursorChar`): it
+                        // is measured whole and its first character
+                        // drawn.
                         "CursorChar" => {
-                            e.cursor_char =
-                                text.chars().next().map(String::from).unwrap_or_default();
+                            e.cursor_char = edit_text;
                             true
                         }
                         "CursorBlinkRate" => {

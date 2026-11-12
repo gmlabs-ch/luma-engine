@@ -697,8 +697,8 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 |----------|------|-------|------|
 | `SetSelectedFont` | method | **done** | Font for the selected text. |
 | `Type` | get | **done** | `editor`. |
-| `SelStart`, `SelEnd` | get/set | **done** | Selection range. |
-| `CursorBlinkRate`, `CursorChar` | get/set | **done** | Caret blink time and caret character. |
+| `SelStart`, `SelEnd` | get/set | **done** | Selection range, in characters; `SelEnd` is where the caret is. |
+| `CursorBlinkRate`, `CursorChar` | get/set | **done** | Caret blink time and caret string (its first character is drawn). |
 | `FrameWidth` | get/set | **done** | Width of the border around the text. |
 | `MaxLength` | get/set | **done** | Maximum text length. |
 | `Text` | get/set | **done** | Edited text. |

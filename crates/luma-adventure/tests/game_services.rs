@@ -183,6 +183,17 @@ fn game() -> std::path::PathBuf {
             .to_vec(),
     );
     pkg.add_file(
+        "wide.font",
+        b"FONT { IMAGE=\"art\\green.png\" COLUMNS=4 TILE_WIDTH=2 TILE_HEIGHT=2 DEFAULT_WIDTH=2 }"
+            .to_vec(),
+    );
+    pkg.add_file(
+        "sel.window",
+        b"WINDOW { NAME=\"s\" X=0 Y=0 WIDTH=60 HEIGHT=40
+          EDIT { NAME=\"name\" X=5 Y=3 WIDTH=20 HEIGHT=6 FONT=\"bm.font\" FONT_SELECTED=\"wide.font\" FRAME_WIDTH=2 TEXT=\"abcdefgh\" }
+          EDIT { NAME=\"greeting\" X=5 Y=20 WIDTH=20 HEIGHT=6 FONT=\"bm.font\" TEXT=\"/GREET/Hello\" } }".to_vec(),
+    );
+    pkg.add_file(
         "tint.window",
         b"WINDOW { NAME=\"tint\" X=0 Y=0 WIDTH=60 HEIGHT=40 ALPHA_COLOR { 10,20,30 } ALPHA=128
           STATIC { NAME=\"bm\" X=0 Y=0 WIDTH=50 HEIGHT=4 FONT=\"bm.font\" TEXT=\"ab\" }
@@ -547,54 +558,270 @@ fn an_editor_with_a_truetype_font_shows_what_is_typed() {
     for ch in "Lab axe".chars() {
         runtime.world.edit_key(edit, 0, Some(ch));
     }
-    // The caret goes inside the text: the line with the caret is the
-    // one prepared.
+    // The caret goes inside the text: the text before it, the caret and
+    // the text after it are prepared, each in the room left to it.
     runtime.world.edit_key(edit, 37, None);
+    runtime.world.focus_control(edit);
     runtime.tick(16);
     let Some(Font::TrueType(font)) = runtime.world.fonts().get("tt.font") else {
         eprintln!("skipped: no system font to stand for the game's");
         std::fs::remove_dir_all(&dir).ok();
         return;
     };
-    let cursor = runtime
-        .world
-        .control(edit)
-        .unwrap()
-        .edit()
-        .unwrap()
-        .cursor_char
-        .clone();
-    let with_caret = format!("Lab ax{cursor}e");
-    for line in ["Lab axe", with_caret.as_str()] {
+    let state = runtime.world.control(edit).unwrap().edit().unwrap().clone();
+    let texts: Vec<&str> = state.pieces.iter().map(|p| p.text.as_str()).collect();
+    assert_eq!(texts, ["Lab ax", "e"]);
+    let caret = state.caret.clone().expect("a focused editor has a caret");
+    assert_eq!(caret.text, state.cursor_char);
+    assert!(state.line_height >= 8);
+    for piece in state.pieces.iter().chain(&state.caret) {
         let (width, height) = font
-            .prepared_size(line, -1, TextAlign::Left, -1)
-            .unwrap_or_else(|| panic!("{line:?} is not prepared"));
-        assert!(width > 20 && height >= 8, "{line:?}: {width}x{height}");
+            .prepared_size(&piece.text, piece.width, TextAlign::Left, state.line_height)
+            .unwrap_or_else(|| panic!("{piece:?} is not prepared"));
+        assert_eq!(width as i32, piece.width, "as wide as the room left");
+        assert!(height >= 8, "{piece:?}: {height}");
     }
+    // The parts follow one another, and none passes the right frame.
+    assert!(state.pieces[0].x < caret.x && caret.x < state.pieces[1].x);
+    assert!(state.pieces.iter().all(|p| p.x + p.width == 56));
 
-    // Drawn, the line is a quad of that size (needs a GPU for the text's
-    // texture).
+    // Drawn, each part is a quad of that size (needs a GPU for the
+    // text's texture).
     if let Ok(gpu) = luma_render::Gpu::headless() {
         let renderer = luma_render::Renderer::new(gpu);
         runtime.world.upload(&renderer);
-        let Some(Font::TrueType(font)) = runtime.world.fonts().get("tt.font") else {
-            unreachable!()
-        };
-        let (width, _) = font
-            .prepared_size("Lab axe", -1, TextAlign::Left, -1)
-            .unwrap();
-        let (caret_width, _) = font
-            .prepared_size(&with_caret, -1, TextAlign::Left, -1)
-            .unwrap();
         let mut list = luma_render::DrawList::new(64.0, 48.0);
         runtime.draw(&mut list, None);
-        assert!(
-            list.quads()
-                .iter()
-                .any(|q| q.dst.w == width as f32 || q.dst.w == caret_width as f32),
-            "the editor's line is drawn"
-        );
+        for piece in &state.pieces {
+            assert!(
+                list.quads()
+                    .iter()
+                    .any(|q| q.dst.x == (2 + piece.x) as f32 && q.dst.w == piece.width as f32),
+                "{piece:?} is drawn"
+            );
+        }
     }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The parts of the editor `sel.window` shows, as (text, x, width,
+/// selected), and its caret as (text, x).
+type Parts = (Vec<(String, i32, i32, bool)>, Option<(String, i32)>);
+
+fn parts(runtime: &Runtime, edit: luma_script::NativeId) -> Parts {
+    let state = runtime.world.control(edit).unwrap().edit().unwrap();
+    (
+        state
+            .pieces
+            .iter()
+            .map(|p| (p.text.clone(), p.x, p.width, p.selected))
+            .collect(),
+        state.caret.as_ref().map(|p| (p.text.clone(), p.x)),
+    )
+}
+
+fn part(text: &str, x: i32, width: i32, selected: bool) -> (String, i32, i32, bool) {
+    (text.to_string(), x, width, selected)
+}
+
+/// `CUIEdit::Display`: the text before the selection, the selection in
+/// `FONT_SELECTED` and the text after it, each cut at the right frame;
+/// the caret where the selection ends, keeping its room while it blinks.
+#[test]
+fn an_editor_draws_its_selection_its_caret_and_stops_at_the_right_frame() {
+    use luma_script::Natives;
+    let (dir, mut runtime, _) = start();
+    assert!(runtime.world.load_string_table("ansi.tab", true));
+    let game = runtime.world.game_id();
+    let window = call_native(
+        &mut runtime,
+        game,
+        "LoadWindow",
+        &[Value::from("sel.window")],
+    )
+    .as_native()
+    .unwrap();
+    let widget = |runtime: &mut Runtime, name: &str| {
+        call_native(runtime, window, "GetWidget", &[Value::from(name)])
+            .as_native()
+            .unwrap()
+    };
+    let edit = widget(&mut runtime, "name");
+    let set = |runtime: &mut Runtime, name: &str, value: Value| {
+        assert!(runtime.world.set_property(edit, name, &value));
+    };
+    let get = |runtime: &Runtime, name: &str| runtime.world.get_property(edit, name).unwrap();
+
+    // `TEXT` goes through the string table.
+    let greeting = widget(&mut runtime, "greeting");
+    assert_eq!(runtime.world.control(greeting).unwrap().text, "café");
+
+    // Before the editor is drawn its selection is where the constructor
+    // put it; drawing brings it inside the text.
+    assert_eq!(get(&runtime, "SelStart"), Value::Int(10000));
+    assert_eq!(get(&runtime, "CursorBlinkRate"), Value::Int(530));
+    runtime.world.focus_control(greeting);
+    runtime.tick(16);
+    assert_eq!(get(&runtime, "SelStart"), Value::Int(8));
+    assert_eq!(get(&runtime, "SelEnd"), Value::Int(8));
+    // The font is 1 pixel a character, the frame 2: the text starts at
+    // 2 and has the room up to 18. Without the focus there is no caret.
+    assert_eq!(
+        parts(&runtime, edit),
+        (vec![part("abcdefgh", 2, 16, false)], None)
+    );
+    let state = runtime.world.control(edit).unwrap().edit().unwrap();
+    assert_eq!(state.line_height, 2, "the taller of the two fonts");
+
+    // With the focus, the caret stands after the text. It is hidden by
+    // the first blink and keeps its room.
+    runtime.world.focus_control(edit);
+    runtime.tick(16);
+    let focused = (
+        vec![part("abcdefgh", 2, 16, false)],
+        Some(("|".to_string(), 10)),
+    );
+    assert_eq!(parts(&runtime, edit), focused);
+    let visible = |runtime: &Runtime| {
+        runtime
+            .world
+            .control(edit)
+            .unwrap()
+            .edit()
+            .unwrap()
+            .cursor_visible
+    };
+    assert!(!visible(&runtime), "the first blink hides it");
+    runtime.tick(500);
+    assert!(!visible(&runtime));
+    runtime.tick(40);
+    assert!(visible(&runtime), "530 ms later it shows");
+    assert_eq!(parts(&runtime, edit), focused);
+
+    // A selection made from left to right: the caret after it. The
+    // selected font is 2 pixels a character.
+    set(&mut runtime, "SelStart", Value::Int(2));
+    set(&mut runtime, "SelEnd", Value::Int(5));
+    runtime.tick(16);
+    assert_eq!(
+        parts(&runtime, edit),
+        (
+            vec![
+                part("ab", 2, 16, false),
+                part("cde", 4, 14, true),
+                part("fgh", 11, 7, false)
+            ],
+            Some(("|".to_string(), 10))
+        )
+    );
+    // From right to left: the caret before it.
+    set(&mut runtime, "SelStart", Value::Int(5));
+    set(&mut runtime, "SelEnd", Value::Int(2));
+    runtime.tick(16);
+    assert_eq!(
+        parts(&runtime, edit),
+        (
+            vec![
+                part("ab", 2, 16, false),
+                part("cde", 5, 13, true),
+                part("fgh", 11, 7, false)
+            ],
+            Some(("|".to_string(), 4))
+        )
+    );
+
+    // A text longer than the editor, the caret at its start: the text
+    // is given the room up to the right frame and no more.
+    let long = "abcdefghijklmnopqrstuvwxyz";
+    set(&mut runtime, "Text", Value::from(long));
+    set(&mut runtime, "SelStart", Value::Int(0));
+    set(&mut runtime, "SelEnd", Value::Int(0));
+    runtime.tick(16);
+    assert_eq!(
+        parts(&runtime, edit),
+        (vec![part(long, 3, 15, false)], Some(("|".to_string(), 2)))
+    );
+    if let Ok(gpu) = luma_render::Gpu::headless() {
+        let renderer = luma_render::Renderer::new(gpu);
+        runtime.world.upload(&renderer);
+        let mut list = luma_render::DrawList::new(64.0, 48.0);
+        runtime.draw(&mut list, None);
+        // The editor is at (5, 3): its line is at y 5, from x 8.
+        let drawn: Vec<f32> = list
+            .quads()
+            .iter()
+            .filter(|q| q.dst.y == 5.0 && q.dst.w == 1.0 && q.dst.x >= 8.0)
+            .map(|q| q.dst.x)
+            .collect();
+        assert_eq!(drawn.len(), 15, "cut at the right frame: {drawn:?}");
+        assert!(drawn.iter().all(|x| *x < 23.0));
+    }
+    // The caret at its end: the first characters leave the view until
+    // the text up to the caret fits in the room the caret leaves.
+    set(&mut runtime, "SelStart", Value::Int(26));
+    set(&mut runtime, "SelEnd", Value::Int(26));
+    runtime.tick(16);
+    assert_eq!(
+        parts(&runtime, edit),
+        (
+            vec![part(&long[11..], 2, 16, false)],
+            Some(("|".to_string(), 17))
+        )
+    );
+
+    // The caret is the whole string a script gives, measured whole and
+    // drawn as its first character.
+    set(&mut runtime, "CursorChar", Value::from("<>"));
+    assert_eq!(get(&runtime, "CursorChar"), Value::from("<>"));
+    runtime.tick(16);
+    assert_eq!(
+        parts(&runtime, edit),
+        (
+            vec![part(&long[12..], 2, 16, false)],
+            Some(("<".to_string(), 16))
+        )
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// `SelStart` and `SelEnd` count characters, as the original's count the
+/// bytes of its ANSI text (`CUIEdit::ScGetProperty`, `ScSetProperty`).
+#[test]
+fn a_script_places_the_selection_by_characters() {
+    use luma_script::Natives;
+    use luma_script::classes::text_to_utf8;
+    let (dir, mut runtime, _) = start();
+    assert!(runtime.world.load_string_table("utf8.tab", true));
+    let edit = load_edit(&mut runtime);
+    let set = |runtime: &mut Runtime, name: &str, value: Value| {
+        assert!(runtime.world.set_property(edit, name, &value));
+    };
+    let get = |runtime: &Runtime, name: &str| runtime.world.get_property(edit, name).unwrap();
+    set(&mut runtime, "Text", Value::from(text_to_utf8("éàüö")));
+    set(&mut runtime, "SelStart", Value::Int(1));
+    set(&mut runtime, "SelEnd", Value::Int(3));
+    assert_eq!(get(&runtime, "SelStart"), Value::Int(1));
+    assert_eq!(get(&runtime, "SelEnd"), Value::Int(3));
+    // The selection is the two characters in between.
+    runtime.world.edit_key(edit, 0, Some('x'));
+    assert_eq!(runtime.world.control(edit).unwrap().text, "éxö");
+    assert_eq!(get(&runtime, "SelEnd"), Value::Int(2));
+    // Kept inside the text.
+    set(&mut runtime, "SelEnd", Value::Int(99));
+    assert_eq!(get(&runtime, "SelEnd"), Value::Int(3));
+    set(&mut runtime, "SelStart", Value::Int(-4));
+    assert_eq!(get(&runtime, "SelStart"), Value::Int(0));
+    // A new text leaves the numbers as they are until the editor is
+    // drawn.
+    set(&mut runtime, "Text", Value::from("ab"));
+    assert_eq!(get(&runtime, "SelEnd"), Value::Int(3));
+    runtime.tick(16);
+    assert_eq!(get(&runtime, "SelEnd"), Value::Int(2));
+    set(&mut runtime, "SelStart", Value::Int(2));
+    set(&mut runtime, "Text", Value::from(text_to_utf8("ééééé")));
+    assert_eq!(get(&runtime, "SelEnd"), Value::Int(2));
+    runtime.world.edit_key(edit, 0, Some('z'));
+    assert_eq!(runtime.world.control(edit).unwrap().text, "éézééé");
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -772,6 +999,10 @@ fn a_shorter_text_keeps_the_caret_between_two_characters() {
             runtime
                 .world
                 .set_property(edit, "Text", &Value::from(short));
+            // The keys and the next frame bring it inside the text.
+            runtime.world.edit_key(edit, 8, None);
+            runtime.world.edit_key(edit, 0, Some('z'));
+            runtime.tick(16);
             let control = runtime.world.control(edit).unwrap();
             let e = control.edit().unwrap();
             assert!(e.sel_start <= control.text.len() && e.sel_end <= control.text.len());
@@ -783,9 +1014,6 @@ fn a_shorter_text_keeps_the_caret_between_two_characters() {
                 control.text.is_char_boundary(e.sel_end),
                 "{short:?} {caret}"
             );
-            runtime.world.edit_key(edit, 8, None);
-            runtime.world.edit_key(edit, 0, Some('z'));
-            runtime.tick(16);
         }
     }
     std::fs::remove_dir_all(&dir).ok();
