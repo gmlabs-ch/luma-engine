@@ -6260,6 +6260,31 @@ fn a_game_whose_items_file_is_missing_does_not_start() {
     }
 }
 
+/// `CBUtils::RandomInt` draws from the C library's 15-bit `rand()`, so a
+/// span wider than that is never covered; `CBUtils::GetUsedMemMB` is 0
+/// in a release build of the original.
+#[test]
+fn random_numbers_have_the_range_of_rand_and_used_memory_is_zero() {
+    use luma_script::Host;
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    let mut highest = 0;
+    for _ in 0..500 {
+        let value = runtime.world.random(0, 1_000_000);
+        assert!((0..=32767).contains(&value), "{value}");
+        highest = highest.max(value);
+        let small = runtime.world.random(10, 12);
+        assert!((10..=12).contains(&small));
+    }
+    assert!(highest > 20_000, "the whole range of rand() is used");
+    let game = runtime.world.game_id();
+    assert_eq!(
+        runtime.world.get_property(game, "UsedMemory"),
+        Some(Value::Int(0))
+    );
+}
+
 /// `CBGame::LoadSettings`: `SAVED_GAME_EXT` names the extension of the
 /// slot files, and `ALLOW_ACCESSIBILITY_TAB` is read from the settings.
 #[test]

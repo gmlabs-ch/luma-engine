@@ -34,7 +34,7 @@ How the list was made. For every class with a script interface, the names tested
 | `LOG` | function | **done** | Writes its argument to the game log (`sc: ...`). |
 | `Sleep` | function | **done** | Suspends the calling script for N milliseconds. |
 | `WaitFor` | function | **done** | Suspends the script until an object is ready (finished walking, talking, animating). |
-| `Random` | function | **done** | Random integer in [min, max]. Luma uses its own seeded generator, so sequences differ from WME's. |
+| `Random` | function | **done** | Random integer in [min, max], drawn from 15 bits as the original's `rand()`: never above min + 32767. Luma uses its own seeded generator, so sequences differ from WME's. |
 | `SetScriptTimeSlice` | function | **done** | Limits how long the calling script runs per frame before yielding. |
 | `MakeRGBA`, `MakeRGB`, `RGB` | function | **done** | Packs r, g, b (and a) into the engine's 0xAARRGGBB integer. |
 | `MakeHSL` | function | **done** | Builds an opaque colour integer from hue, saturation and lightness in 0..=255 (`CBUtils::HSLtoRGB`), single-precision arithmetic and byte truncation included. |
@@ -253,7 +253,7 @@ How the list was made. For every class with a script interface, the names tested
 | `Direct3DDevice`, `DirectDrawInterface` | get | **no-op** | Raw Direct3D / DirectDraw interface pointers (Windows only). |
 | `AccTTSEnabled`, `AccTTSTalk`, `AccTTSCaptions`, `AccTTSKeypress` | get | **done** | Accessibility: text-to-speech master switch and which texts it reads out (sentences without a speech file, captions of the object under the mouse, keys typed). From the `Accessibility` section of `settings.ini` (WME: of the registry, through its settings dialog). |
 | `AccKeyboardEnabled`, `AccKeyboardCursorSkip`, `AccKeyboardPause` | get | **done** | Accessibility: Ctrl+Tab cycling through the clickable objects with a red frame while Ctrl is held, the cursor jumping to the object picked, Ctrl+Space pausing under a shield window. Same source. Luma moves the cursor whether or not Ctrl is still held, and does not list objects through region nodes (see `docs/game-loop.md`). |
-| `UsedMemory` | get | **no-op** | Memory use statistic. |
+| `UsedMemory` | get | **no-op** | Memory use statistic: answers 0, as a release build of the original does. |
 | `MaxActiveLights` | get | **done** | Number of simultaneous 3D lights the device supports; Luma reads 8, the number its renderer lights an actor with. |
 | `HardwareTL` | get | **no-op** | True when the Direct3D device does hardware transform and lighting; no meaning with wgpu. |
 | `AutorunDisabled` | get/set | **no-op** | Windows CD autorun switch; no meaning on macOS. |

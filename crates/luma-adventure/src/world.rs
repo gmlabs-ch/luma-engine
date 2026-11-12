@@ -3199,7 +3199,10 @@ impl Host for World {
         self.rng ^= self.rng >> 12;
         self.rng ^= self.rng << 25;
         self.rng ^= self.rng >> 27;
-        let value = self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32;
+        // `CBUtils::RandomInt`: `rand() % (to - from + 1) + from`, and
+        // the C library's `rand()` gives 15 bits: a span wider than
+        // 32768 is never covered.
+        let value = (self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 49) & 0x7FFF;
         let span = i64::from(to) - i64::from(from) + 1;
         if span <= 0 {
             return from;

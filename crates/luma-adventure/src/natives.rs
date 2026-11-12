@@ -412,6 +412,9 @@ impl World {
                     .unwrap_or_else(|| self.settings.game_file.clone()),
             ),
             "Caption" => Value::from(self.caption.clone()),
+            // `CBUtils::GetUsedMemMB`: the working set in the original's
+            // debug builds, 0 in its release builds.
+            "UsedMemory" => Value::Int(0),
             "CurrentTime" => Value::Int(self.timer() as i32),
             // `timeGetTime`: a clock that runs while the game is frozen.
             "WindowsTime" => Value::Int(self.clock as i32),
