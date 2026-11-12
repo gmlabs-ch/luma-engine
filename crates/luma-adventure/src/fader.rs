@@ -100,6 +100,18 @@ impl Fader {
         }
     }
 
+    /// After a saved game (`CBFader::Persist`, loading): a fade on the
+    /// wall clock gets a start time of 0, which ends it at the next
+    /// update, the original's clock being the time since the machine
+    /// started; one on the game timer goes on. Luma's clock starts with
+    /// the game, so the fade is ended by its duration instead.
+    pub fn after_load(&mut self) {
+        if self.system {
+            self.start_time = 0;
+            self.duration = 0;
+        }
+    }
+
     /// Stops the fade (`Deactivate`).
     pub fn deactivate(&mut self) {
         self.active = false;

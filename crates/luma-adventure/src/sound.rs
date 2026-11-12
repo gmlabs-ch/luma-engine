@@ -152,8 +152,11 @@ pub struct Sounds {
     pub speech_dirs: Vec<String>,
     /// The sounds of sprite frames playing (`CBFrame::m_Sound`), by the
     /// object showing the sprite; beside the object's own sound, dropped
-    /// when they end, and not kept in saved games.
+    /// when they end. A saved game keeps those still playing, by file
+    /// and position (`frame_sound_files`).
     pub(crate) frame_sounds: HashMap<NativeId, Vec<SoundId>>,
+    /// The file of each frame sound playing, for saved games.
+    pub(crate) frame_sound_files: HashMap<SoundId, String>,
 }
 
 impl Sounds {
@@ -168,6 +171,7 @@ impl Sounds {
             crossfade: None,
             speech_dirs: vec!["speech\\".to_string()],
             frame_sounds: HashMap::new(),
+            frame_sound_files: HashMap::new(),
         }
     }
 
@@ -616,6 +620,48 @@ impl World {
         }
         self.sounds.audio.play(id, false);
         self.sounds.frame_sounds.entry(owner).or_default().push(id);
+        self.sounds.frame_sound_files.insert(id, file.to_string());
+    }
+
+    /// The frame sounds still going, as a saved game keeps them
+    /// (`CBSound::Persist` of each `CBFrame::m_Sound`): the object
+    /// showing the sprite, the file and the position.
+    pub(crate) fn frame_sounds_state(&self) -> Vec<(NativeId, String, u64)> {
+        let audio = &self.sounds.audio;
+        let mut state: Vec<(NativeId, String, u64)> = Vec::new();
+        for (owner, ids) in &self.sounds.frame_sounds {
+            for id in ids {
+                if !audio.is_active(*id) {
+                    continue;
+                }
+                if let Some(file) = self.sounds.frame_sound_files.get(id) {
+                    state.push((*owner, file.clone(), audio.position_ms(*id)));
+                }
+            }
+        }
+        state.sort();
+        state
+    }
+
+    /// Starts the saved frame sounds again where they were
+    /// (`CBSound::SetSoundSimple`).
+    pub(crate) fn restore_frame_sounds(&mut self, state: Vec<(NativeId, String, u64)>) {
+        self.sounds.frame_sounds.clear();
+        self.sounds.frame_sound_files.clear();
+        for (owner, file, position) in state {
+            let before = self.frame_sounds_of(owner);
+            self.play_frame_sound(owner, &file);
+            if self.frame_sounds_of(owner) > before {
+                if let Some(id) = self
+                    .sounds
+                    .frame_sounds
+                    .get(&owner)
+                    .and_then(|ids| ids.last())
+                {
+                    self.sounds.audio.set_position_ms(*id, position);
+                }
+            }
+        }
     }
 
     /// Stops the frame sounds of an object's sprite
@@ -624,6 +670,7 @@ impl World {
     pub(crate) fn kill_frame_sounds(&mut self, owner: NativeId) {
         for id in self.sounds.frame_sounds.remove(&owner).unwrap_or_default() {
             self.sounds.audio.remove(id);
+            self.sounds.frame_sound_files.remove(&id);
         }
     }
 
@@ -638,6 +685,7 @@ impl World {
     /// Forgets the frame sounds that ended.
     fn drop_ended_frame_sounds(&mut self) {
         let audio = &mut self.sounds.audio;
+        let files = &mut self.sounds.frame_sound_files;
         self.sounds.frame_sounds.retain(|_, ids| {
             ids.retain(|id| {
                 // A sound the freeze holds has not ended.
@@ -645,6 +693,7 @@ impl World {
                     true
                 } else {
                     audio.remove(*id);
+                    files.remove(id);
                     false
                 }
             });

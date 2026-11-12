@@ -25,7 +25,7 @@ use crate::scene_view::{EntityRef, VideoOverlay};
 use crate::world::World;
 
 /// How a video is placed on the screen (`TVideoPlayback`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum VideoPlayback {
     /// At a position, at 100 % (`VID_PLAY_POS`, 0).
     Pos,
@@ -342,6 +342,15 @@ pub struct VideoPlayer {
     pub subtitler: Option<Subtitler>,
     /// The height of the subtitle shown, measured this frame.
     pub subtitle_height: i32,
+    /// The file of the alpha mask (`m_AlphaFilename`), for saved games.
+    pub alpha_file: Option<String>,
+    /// The volume in percent the sound track was opened at (`m_Volume`).
+    pub volume: i32,
+    /// The subtitle file asked for, when not the video's own `.sub`.
+    pub subtitle_file: Option<String>,
+    /// A video loaded paused from a saved game: it shows one frame and
+    /// then pauses (`m_SavedState`).
+    pause_after_frame: bool,
 }
 
 impl std::fmt::Debug for VideoPlayer {
@@ -391,6 +400,10 @@ impl VideoPlayer {
             finished: false,
             subtitler: None,
             subtitle_height: 0,
+            alpha_file: None,
+            volume: 100,
+            subtitle_file: None,
+            pause_after_frame: false,
         }
     }
 
@@ -441,6 +454,76 @@ impl VideoPlayer {
     pub fn is_running(&self) -> bool {
         !self.finished && !self.paused
     }
+
+    /// The video as a saved game keeps it, on the clock `now` that
+    /// times it (`CVidTheoraPlayer::Persist`): the position is the movie
+    /// time (`GetMovieTime`), held at the pause for a paused video.
+    fn saved(&self, audio: &Audio, now: u64) -> SavedVideo {
+        let now = self.pause_started.unwrap_or(now);
+        let sound_position = match self.sound.filter(|_| self.started) {
+            Some(sound) if audio.is_playing(sound) => Some(audio.position_ms(sound)),
+            Some(_) => Some(match self.sound_heard {
+                Some((clock, position)) => position + now.saturating_sub(clock),
+                None => now.saturating_sub(self.start_clock) + self.time_offset_ms,
+            }),
+            None => None,
+        };
+        SavedVideo {
+            filename: self.filename.clone(),
+            alpha_file: self.alpha_file.clone(),
+            subtitle_file: self.subtitle_file.clone(),
+            position_ms: self.movie_time_ms(now, sound_position),
+            paused: self.paused || self.pause_after_frame,
+            playback: self.playback,
+            x: self.x,
+            y: self.y,
+            zoom: self.zoom,
+            looping: self.looping,
+            volume: self.volume,
+            freeze_game: self.freeze_game,
+            dont_drop_frames: self.dont_drop_frames,
+        }
+    }
+}
+
+/// A video as a saved game keeps it (`CVidTheoraPlayer::Persist`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SavedVideo {
+    /// The file played.
+    pub filename: String,
+    /// The file of the alpha mask.
+    pub alpha_file: Option<String>,
+    /// The subtitle file asked for, when not the video's own.
+    pub subtitle_file: Option<String>,
+    /// The movie time in milliseconds.
+    pub position_ms: u64,
+    /// Whether it was paused.
+    pub paused: bool,
+    /// How it is placed.
+    pub playback: VideoPlayback,
+    /// Where the corner of its coded frame is.
+    pub x: i32,
+    /// See `x`.
+    pub y: i32,
+    /// Scale in percent.
+    pub zoom: f32,
+    /// Whether it starts again at its end.
+    pub looping: bool,
+    /// The volume of its sound track in percent.
+    pub volume: i32,
+    /// Whether the game froze for it and unfreezes at its end.
+    pub freeze_game: bool,
+    /// Whether every frame is shown.
+    pub dont_drop_frames: bool,
+}
+
+/// The videos of a saved game.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct VideosState {
+    /// The game's video (`Game.PlayTheora`).
+    pub game: Option<SavedVideo>,
+    /// The entities' videos (`Entity.PlayTheora`), by entity.
+    pub entities: Vec<(NativeId, SavedVideo)>,
 }
 
 /// A video shown in an entity's place (`CAdEntity::m_Theora`).
@@ -549,10 +632,11 @@ pub(crate) fn step_player(
     if ended && player.pending.is_none() {
         return true;
     }
+    let mut audio = audio;
     if !player.started {
         player.started = true;
         player.start_clock = now;
-        if let (Some(sound), Some(audio)) = (player.sound, audio) {
+        if let (Some(sound), Some(audio)) = (player.sound, audio.as_deref_mut()) {
             // `Play` starts a sound where its start position says, and
             // keeps that position for the next play: set it each time.
             audio.set_start_ms(sound, player.time_offset_ms);
@@ -570,6 +654,15 @@ pub(crate) fn step_player(
         }
         player.frame = frame;
         player.frame_serial += 1;
+        if std::mem::take(&mut player.pause_after_frame) {
+            // `Pause()` once the first frame of a video saved paused is
+            // on screen.
+            player.paused = true;
+            player.pause_started = Some(now);
+            if let (Some(sound), Some(audio)) = (player.sound, audio) {
+                audio.pause(sound);
+            }
+        }
     }
     if let Some(subtitler) = player.subtitler.as_mut() {
         let frame = player.info.frame_at_ms(movie_time) as i64;
@@ -825,6 +918,10 @@ impl World {
             finished: false,
             subtitler,
             subtitle_height: 0,
+            alpha_file: None,
+            volume,
+            subtitle_file: subtitle_file.map(str::to_string),
+            pause_after_frame: false,
         });
         self.update_video(engine);
         true
@@ -1039,8 +1136,26 @@ impl World {
             _ => self.entity_def(r).and_then(|e| e.scale),
         };
         let zoom = scale.filter(|s| *s >= 0.0).unwrap_or(100.0);
-        self.stop_entity_video(owner);
         let volume = self.sounds.objects.get(&owner).map_or(100, |s| s.volume);
+        self.start_entity_video(owner, filename, looping, alpha_file, start_ms, zoom, volume)
+    }
+
+    /// Opens a video in an entity's place at a zoom and a volume: what
+    /// `PlayTheora` does once it has read them from the entity, and
+    /// what a saved game does with the values it kept
+    /// (`CVidTheoraPlayer::InitializeSimple`).
+    #[allow(clippy::too_many_arguments, reason = "the engine's own signature")]
+    fn start_entity_video(
+        &mut self,
+        owner: NativeId,
+        filename: &str,
+        looping: bool,
+        alpha_file: Option<&str>,
+        start_ms: u64,
+        zoom: f32,
+        volume: i32,
+    ) -> bool {
+        self.stop_entity_video(owner);
         let Some((video, sound)) = self.open_video(filename, volume) else {
             return false;
         };
@@ -1095,6 +1210,10 @@ impl World {
             finished: false,
             subtitler,
             subtitle_height: 0,
+            alpha_file: alpha_file.map(str::to_string),
+            volume,
+            subtitle_file: None,
+            pause_after_frame: false,
         };
         self.entity_videos.insert(
             owner,
@@ -1231,6 +1350,139 @@ impl World {
                 self.stop_entity_video(owner);
             }
         }
+    }
+
+    /// The videos playing, as a saved game keeps them
+    /// (`CVidTheoraPlayer::Persist`): the game's and each entity's.
+    pub(crate) fn videos_state(&self) -> VideosState {
+        let audio = &self.sounds.audio;
+        let game = self
+            .video
+            .as_ref()
+            .filter(|p| !p.finished)
+            .map(|p| p.saved(audio, self.clock));
+        let mut entities: Vec<(NativeId, SavedVideo)> = self
+            .entity_videos
+            .iter()
+            .filter(|(_, v)| !v.player.finished)
+            .map(|(owner, v)| (*owner, v.player.saved(audio, self.timer)))
+            .collect();
+        entities.sort_by_key(|(owner, _)| *owner);
+        VideosState { game, entities }
+    }
+
+    /// Opens the saved videos again where they were
+    /// (`CVidTheoraPlayer::InitializeSimple`): the file, the alpha mask,
+    /// the placement, the zoom, the looping, from the saved position; a
+    /// video saved paused shows one frame and pauses. A file that no
+    /// longer opens leaves no video: the entity shows its sprite, and a
+    /// game the video had frozen is unfrozen.
+    pub(crate) fn restore_videos(&mut self, engine: &mut Engine, state: VideosState) {
+        // What the running game was playing goes; its sounds went with
+        // the others.
+        if let Some(texture) = self.video_texture.take() {
+            self.dropped_textures.push(texture);
+        }
+        self.video = None;
+        self.video_uploaded = 0;
+        for (_, mut video) in std::mem::take(&mut self.entity_videos) {
+            if let Some(texture) = video.texture.take() {
+                self.dropped_textures.push(texture);
+            }
+        }
+        if let Some(saved) = state.game {
+            match self.open_saved_video(&saved) {
+                Some(mut player) => {
+                    let screen = (self.settings.width as f32, self.settings.height as f32);
+                    let coded = (
+                        player.info.coded_width as f32,
+                        player.info.coded_height as f32,
+                    );
+                    // `Play` places a stretched or centred video again;
+                    // one at a position keeps the saved zoom.
+                    let (x, y, zoom) = placement(saved.playback, saved.x, saved.y, screen, coded);
+                    player.x = x;
+                    player.y = y;
+                    if saved.playback != VideoPlayback::Pos {
+                        player.zoom = zoom;
+                    }
+                    self.video = Some(player);
+                    self.update_video(engine);
+                }
+                None if saved.freeze_game => self.unfreeze(engine),
+                None => {}
+            }
+        }
+        for (owner, saved) in state.entities {
+            if !self.objects.contains(owner) {
+                continue;
+            }
+            let started = self.start_entity_video(
+                owner,
+                &saved.filename,
+                saved.looping,
+                saved.alpha_file.as_deref(),
+                saved.position_ms,
+                saved.zoom,
+                saved.volume,
+            );
+            if !started {
+                continue;
+            }
+            if let Some(video) = self.entity_videos.get_mut(&owner) {
+                video.player.dont_drop_frames = saved.dont_drop_frames;
+                // The first frame may already be up (the game not being
+                // frozen): pause now; else after it.
+                if saved.paused {
+                    if video.player.frame.is_some() {
+                        video.player.paused = true;
+                        video.player.pause_started = Some(self.timer);
+                        if let Some(sound) = video.player.sound {
+                            self.sounds.audio.pause(sound);
+                        }
+                    } else {
+                        video.player.pause_after_frame = true;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The player of the game's saved video, not started yet.
+    fn open_saved_video(&mut self, saved: &SavedVideo) -> Option<VideoPlayer> {
+        let (video, sound) = self.open_video(&saved.filename, saved.volume)?;
+        let info = video.info().clone();
+        let subtitler = self.load_subtitler(&saved.filename, saved.subtitle_file.as_deref());
+        Some(VideoPlayer {
+            filename: saved.filename.clone(),
+            video,
+            info,
+            playback: saved.playback,
+            x: saved.x,
+            y: saved.y,
+            zoom: saved.zoom,
+            freeze_game: saved.freeze_game,
+            dont_drop_frames: saved.dont_drop_frames,
+            looping: saved.looping,
+            paused: false,
+            time_offset_ms: saved.position_ms,
+            alpha: None,
+            started: false,
+            start_clock: 0,
+            pause_started: None,
+            sound_heard: None,
+            sound,
+            pending: None,
+            frame: None,
+            frame_serial: 0,
+            finished: false,
+            subtitler,
+            subtitle_height: 0,
+            alpha_file: None,
+            volume: saved.volume,
+            subtitle_file: saved.subtitle_file.clone(),
+            pause_after_frame: saved.paused,
+        })
     }
 
     /// The videos drawn in the scene's entities' places this frame: an
@@ -1827,6 +2079,10 @@ mod tests {
             finished: false,
             subtitler: None,
             subtitle_height: 0,
+            alpha_file: None,
+            volume: 100,
+            subtitle_file: None,
+            pause_after_frame: false,
         }
     }
 

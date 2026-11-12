@@ -212,8 +212,10 @@ with the object's pan when it pans its sounds and the object's sound
 effect, both as they are when it starts, once. A
 frame marked `KILL_SOUND` stops the sprite's earlier frame sounds when
 it becomes current, and `Reset` stops them too (`CBSprite::
-KillAllSounds`). Frame sounds that ended are forgotten each frame; they
-are not kept in saved games.
+KillAllSounds`). Frame sounds that ended are forgotten each frame; one
+still playing when the game is saved plays on from its position after
+the load (`CBSound::Persist` of the frame's sound), with the object's
+pan and effect as they are then.
 
 ## Sound effects
 

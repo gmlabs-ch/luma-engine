@@ -81,6 +81,21 @@ pub struct Vfs {
     warnings: Vec<String>,
     /// The files opened to read the data of other packages' directories.
     external: Mutex<HashMap<PathBuf, File>>,
+    /// Files made on demand, by the prefix of their name.
+    virtual_sources: Vec<(String, VirtualSource)>,
+}
+
+/// What makes the files of a name prefix on demand
+/// ([`Vfs::add_virtual_source`]).
+struct VirtualSource(VirtualReader);
+
+/// Answers a name with the file's bytes, `None` when it does not exist.
+type VirtualReader = Box<dyn Fn(&str) -> Option<Vec<u8>> + Send + Sync>;
+
+impl std::fmt::Debug for VirtualSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VirtualSource")
+    }
 }
 
 /// The `[Resource]` section of a `wme.ini` shipped with a game: the
@@ -243,6 +258,32 @@ impl Vfs {
         self
     }
 
+    /// Adds a source of files made on demand: every name that starts
+    /// with `prefix` (ignoring case) is answered by `source` alone, given
+    /// the whole name, before the loose files and the packages
+    /// (`CBFileManager::OpenFileRaw` opens the names starting with
+    /// `savegame:` this way). `None` means the file does not exist.
+    pub fn add_virtual_source(
+        &mut self,
+        prefix: &str,
+        source: impl Fn(&str) -> Option<Vec<u8>> + Send + Sync + 'static,
+    ) -> &mut Self {
+        self.virtual_sources
+            .push((prefix.to_string(), VirtualSource(Box::new(source))));
+        self
+    }
+
+    /// The source answering a name, if the name has a virtual prefix.
+    fn virtual_source(&self, name: &str) -> Option<&VirtualSource> {
+        self.virtual_sources
+            .iter()
+            .find(|(prefix, _)| {
+                name.get(..prefix.len())
+                    .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+            })
+            .map(|(_, source)| source)
+    }
+
     fn resource(&self, name: &str) -> Option<&Vec<u8>> {
         self.resources.get(&name.to_ascii_uppercase())
     }
@@ -386,6 +427,9 @@ impl Vfs {
 
     /// Whether the file exists: loose, packaged or built in.
     pub fn exists(&self, name: &str) -> bool {
+        if let Some(source) = self.virtual_source(name) {
+            return (source.0)(name).is_some();
+        }
         self.find_loose(name).is_some()
             || self.find_packaged(name).is_some()
             || self.resource(name).is_some()
@@ -397,6 +441,11 @@ impl Vfs {
     /// the original then tries the next source; when nothing else has
     /// the name, its error is returned.
     pub fn read(&self, name: &str) -> Result<Vec<u8>> {
+        if let Some(source) = self.virtual_source(name) {
+            return (source.0)(name).ok_or_else(|| Error::NotFound {
+                name: name.to_string(),
+            });
+        }
         let mut loose_error = None;
         if let Some(path) = self.find_loose(name) {
             match read_loose(&path) {
@@ -909,5 +958,31 @@ mod tests {
             );
         }
         fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod virtual_source_tests {
+    use super::*;
+
+    #[test]
+    fn a_virtual_source_answers_the_names_of_its_prefix_alone() {
+        let mut vfs = Vfs::new();
+        vfs.add_resource("thumb:2", b"resource".to_vec());
+        vfs.add_resource("other.txt", b"other".to_vec());
+        vfs.add_virtual_source("thumb:", |name| {
+            name.ends_with('1').then(|| name.as_bytes().to_vec())
+        });
+        // The prefix is matched without case, the whole name is passed.
+        assert!(vfs.exists("thumb:1"));
+        assert_eq!(vfs.read("THUMB:1").unwrap(), b"THUMB:1");
+        // The source's answer is final: no other file of the name.
+        assert!(!vfs.exists("thumb:2"));
+        assert!(matches!(vfs.read("thumb:2"), Err(Error::NotFound { .. })));
+        // Other names are not its business, even shorter than the
+        // prefix or cut inside a character.
+        assert_eq!(vfs.read("other.txt").unwrap(), b"other");
+        assert!(!vfs.exists("thu"));
+        assert!(!vfs.exists("thum\u{e9}:1"));
     }
 }

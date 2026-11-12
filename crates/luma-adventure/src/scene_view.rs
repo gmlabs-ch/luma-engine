@@ -346,7 +346,7 @@ impl SpriteBank {
                 "file not found, the placeholder image is shown".to_string(),
             ));
             Sprite::from_image(crate::resources::INVALID_IMAGE)
-        } else if Sprite::is_image_path(path) {
+        } else if Sprite::is_image_path(path) || crate::save::is_thumbnail_path(path) {
             Sprite::from_image(path)
         } else {
             match vfs
@@ -369,6 +369,39 @@ impl SpriteBank {
             },
         );
         true
+    }
+
+    /// Looks again at the images whose name starts with `prefix` (the
+    /// thumbnails of saved games, `savegame:<slot>`, after a slot was
+    /// written or emptied): a sprite made of such an image shows it
+    /// when it exists now and the placeholder when it does not, and the
+    /// textures made of them are returned, to be released; the next
+    /// upload decodes the images again.
+    pub(crate) fn refresh_prefixed(&mut self, vfs: &Vfs, prefix: &str) -> Vec<Texture> {
+        let prefix = key(prefix);
+        for (k, loaded) in &mut self.sprites {
+            if !k.starts_with(&prefix) || loaded.edited {
+                continue;
+            }
+            if vfs.exists(k) {
+                loaded.sprite = Sprite::from_image(k.clone());
+            } else if vfs.exists(crate::resources::INVALID_IMAGE) {
+                loaded.sprite = Sprite::from_image(crate::resources::INVALID_IMAGE);
+            }
+        }
+        self.missing
+            .retain(|(path, _)| !key(path).starts_with(&prefix));
+        self.masks.retain(|k, _| !k.starts_with(&prefix));
+        let stale: Vec<String> = self
+            .textures
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        stale
+            .into_iter()
+            .filter_map(|k| self.textures.remove(&k))
+            .collect()
     }
 
     /// Whether a loaded sprite has this `NAME` (the key of its `.sprite`
@@ -837,6 +870,13 @@ impl SceneView {
     /// available.
     pub fn add_sprite(&mut self, vfs: &Vfs, path: &str) -> bool {
         self.bank.add_sprite(vfs, path)
+    }
+
+    /// Looks at the saved games' thumbnails again
+    /// ([`SpriteBank::refresh_prefixed`]).
+    pub(crate) fn refresh_thumbnails(&mut self, vfs: &Vfs) -> Vec<Texture> {
+        self.bank
+            .refresh_prefixed(vfs, crate::save::THUMBNAIL_PREFIX)
     }
 
     /// Loads the sprites the scene's state names, after a saved game:
@@ -1689,7 +1729,7 @@ impl SceneView {
 /// that is not there does (the `invalid.bmp` placeholder takes its
 /// place), an image does, and a sprite definition does when it parses.
 pub(crate) fn sprite_file_loads(vfs: &Vfs, path: &str) -> bool {
-    if Sprite::is_image_path(path) {
+    if Sprite::is_image_path(path) || crate::save::is_thumbnail_path(path) {
         return true;
     }
     match vfs.read(path) {

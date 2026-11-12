@@ -1047,3 +1047,51 @@ fn attachments_textures_and_bone_emitters() {
     assert!(draws[0].attachments.is_empty());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// `CAdActor3DX::Persist`, `CAdPathPoint3D::Persist`: a game saved in
+/// the frame a 3D actor waits for its path loads with the actor asking
+/// for the path again, so that it walks and the script waiting for it
+/// goes on.
+#[test]
+fn a_3d_actor_saved_while_waiting_for_its_path_walks_after_the_load() {
+    let dir = game();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    let bob = start(&mut runtime);
+    let target = Vec3::new(70.0, 0.0, 90.0);
+    let projection = runtime.world.projection_3d().expect("a camera");
+    let (tx, ty) = projection.project(target);
+    set_result(&mut runtime, "tx", Value::Int(tx));
+    set_result(&mut runtime, "ty", Value::Int(ty));
+    raise(&mut runtime, "walk");
+    let mut ticks = 0;
+    while runtime.world.actor3d(bob).unwrap().state != Actor3dState::WaitingPath && ticks < 10 {
+        runtime.tick(16);
+        ticks += 1;
+    }
+    assert_eq!(
+        runtime.world.actor3d(bob).unwrap().state,
+        Actor3dState::WaitingPath
+    );
+    runtime.save_game(9, "waiting", true).unwrap();
+    runtime.load_game(9).unwrap();
+    assert_eq!(
+        runtime.world.actor3d(bob).unwrap().state,
+        Actor3dState::WaitingPath
+    );
+    let mut ticks = 0;
+    while !runtime.world.actor3d(bob).unwrap().ready && ticks < 1000 {
+        runtime.tick(16);
+        ticks += 1;
+    }
+    let actor = runtime.world.actor3d(bob).unwrap();
+    assert_eq!(actor.state, Actor3dState::Ready);
+    assert!(
+        (actor.position - target).length() < 1.0,
+        "{:?}",
+        actor.position
+    );
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "arrived"), Value::Bool(true));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

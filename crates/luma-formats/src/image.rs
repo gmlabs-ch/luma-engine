@@ -192,6 +192,21 @@ impl Image {
         }
     }
 
+    /// Turns the image grey (`CBImage::Grayscale`): each pixel's red,
+    /// green and blue become `0.30 R + 0.59 G + 0.11 B`, truncated; the
+    /// alpha stays.
+    pub fn grayscale(&mut self) {
+        for pixel in self.pixels.chunks_exact_mut(4) {
+            let gray = 0.30 * f64::from(pixel[0])
+                + 0.59 * f64::from(pixel[1])
+                + 0.11 * f64::from(pixel[2]);
+            let gray = gray as u8;
+            pixel[0] = gray;
+            pixel[1] = gray;
+            pixel[2] = gray;
+        }
+    }
+
     /// The pixel at `(x, y)`, or `None` outside the image.
     pub fn pixel(&self, x: u32, y: u32) -> Option<Rgba> {
         if x >= self.width || y >= self.height {
@@ -447,5 +462,27 @@ mod tests {
     fn rejects_garbage() {
         let err = decode(b"not an image", DEFAULT_COLOR_KEY).unwrap_err();
         assert!(matches!(err, Error::Image { .. }), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod grayscale_tests {
+    use super::*;
+
+    #[test]
+    fn grayscale_weighs_the_channels_and_keeps_the_alpha() {
+        let mut image = Image {
+            width: 3,
+            height: 1,
+            pixels: vec![255, 0, 0, 255, 0, 255, 0, 7, 0, 0, 255, 0],
+            has_alpha_channel: true,
+        };
+        image.grayscale();
+        // 0.30 * 255 = 76.5, 0.59 * 255 = 150.45, 0.11 * 255 = 28.05,
+        // truncated as the original's conversion to a byte does.
+        assert_eq!(
+            image.pixels,
+            [76, 76, 76, 255, 150, 150, 150, 7, 28, 28, 28, 0]
+        );
     }
 }

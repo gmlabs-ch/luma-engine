@@ -30,6 +30,13 @@ pub enum Capture {
     /// The frame scaled to the game's thumbnail size and kept for the
     /// next saved game.
     Thumbnail,
+    /// The frame scaled to the game's thumbnail size and put into a
+    /// saved game just written without one (`CBPersistMgr::InitSave`
+    /// takes the picture when `StoreSaveThumbnail` stored none).
+    SaveThumbnail {
+        /// The saved game's file.
+        path: PathBuf,
+    },
 }
 
 /// Encodes an image as the file's extension says: PNG for `.png`, else
@@ -142,6 +149,15 @@ impl World {
         self.save_thumbnail.as_deref()
     }
 
+    /// Whether the picture of a saved game's thumbnail is due: the frame
+    /// drawn now is the one captured, without the saving screen and the
+    /// indicator.
+    pub(crate) fn save_thumbnail_due(&self) -> bool {
+        self.captures
+            .iter()
+            .any(|c| matches!(c, Capture::SaveThumbnail { .. }))
+    }
+
     /// Whether a script asked for a capture, so that the front-end
     /// should render the next frame where it can be read back and pass
     /// it to [`World::deliver_frame`].
@@ -176,6 +192,19 @@ impl World {
                     if let Some((w, h)) = self.thumbnail_size() {
                         match frame.resized(w, h).to_png() {
                             Ok(png) => self.save_thumbnail = Some(png),
+                            Err(err) => self.log(format!("Error storing thumbnail: {err}")),
+                        }
+                    }
+                }
+                Capture::SaveThumbnail { path } => {
+                    if let Some((w, h)) = self.thumbnail_size() {
+                        let result = frame
+                            .resized(w, h)
+                            .to_png()
+                            .map_err(|e| e.to_string())
+                            .and_then(|png| crate::save::patch_thumbnail(&path, png));
+                        match result {
+                            Ok(()) => self.refresh_thumbnails(),
                             Err(err) => self.log(format!("Error storing thumbnail: {err}")),
                         }
                     }

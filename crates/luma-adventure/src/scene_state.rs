@@ -22,6 +22,9 @@ pub struct NodeState {
     pub active: bool,
     /// The caption, for an entity.
     pub caption: Option<String>,
+    /// The entity's caption slots 2 to 7 (`SetCaption(text, slot)`),
+    /// those that were set.
+    pub captions: BTreeMap<u8, String>,
     /// The sprite shown when the player left; `Some("")` when the scene
     /// keeps no sprites (`PERSISTENT_STATE_SPRITES=FALSE`); `None` for
     /// regions and for hotspot entities (a `REGION` without sprite).
@@ -34,8 +37,11 @@ pub struct NodeState {
 
 impl NodeState {
     /// Notes an entity's state (`CAdNodeState::TransferEntity`, saving).
-    fn note(&mut self, e: &Entity, including_sprites: bool) {
+    fn note(&mut self, e: &Entity, captions: &BTreeMap<u8, String>, including_sprites: bool) {
         self.caption = Some(e.caption.clone());
+        for (slot, text) in captions {
+            self.captions.insert(*slot, text.clone());
+        }
         if e.region.is_none() {
             if let Some(sprite) = &e.sprite {
                 self.sprite = Some(if including_sprites {
@@ -116,34 +122,62 @@ impl World {
             return;
         }
         let including = scene.persistent_state_sprites;
-        let state = self.scene_states.entry(state_key(&view.path)).or_default();
-        let nodes = scene.layers.iter().flat_map(|l| l.nodes.iter());
-        for node in nodes {
-            match node {
-                SceneNode::Entity(e) if e.save_state => {
-                    state
-                        .nodes
-                        .entry(e.name.to_ascii_lowercase())
-                        .or_default()
-                        .note(e, including);
+        let key = state_key(&view.path);
+        let mut state = self.scene_states.get(&key).cloned().unwrap_or_default();
+        let no_captions = BTreeMap::new();
+        // The caption slots 2 to 7 are kept with the entity's handle.
+        let captions_of = |r: EntityRef| {
+            self.node_id(r)
+                .and_then(|id| self.object_state(id))
+                .map_or(&no_captions, |s| &s.captions)
+        };
+        for (layer, l) in scene.layers.iter().enumerate() {
+            for (index, node) in l.nodes.iter().enumerate() {
+                match node {
+                    SceneNode::Entity(e) if e.save_state => {
+                        state
+                            .nodes
+                            .entry(e.name.to_ascii_lowercase())
+                            .or_default()
+                            .note(e, captions_of(EntityRef::Node { layer, index }), including);
+                    }
+                    SceneNode::Region(r) => {
+                        // A region a script gave `SaveState = false` is
+                        // left out (`CBObject::m_SaveState`).
+                        let kept = self
+                            .region_id(layer, index)
+                            .and_then(|id| self.object_state(id))
+                            .is_none_or(|s| s.save_state);
+                        if kept {
+                            state
+                                .nodes
+                                .entry(r.name.to_ascii_lowercase())
+                                .or_default()
+                                .active = r.active;
+                        }
+                    }
+                    SceneNode::Entity(_) => {}
                 }
-                SceneNode::Region(r) => {
-                    state
-                        .nodes
-                        .entry(r.name.to_ascii_lowercase())
-                        .or_default()
-                        .active = r.active;
-                }
-                SceneNode::Entity(_) => {}
             }
         }
-        for e in scene.free_entities.iter().filter(|e| e.save_state) {
+        for (i, e) in scene.free_entities.iter().enumerate() {
+            if e.save_state {
+                state
+                    .nodes
+                    .entry(e.name.to_ascii_lowercase())
+                    .or_default()
+                    .note(e, captions_of(view.free_ref(i)), including);
+            }
+        }
+        // The waypoint groups' `Active` flag, under their name.
+        for group in &scene.waypoint_groups {
             state
                 .nodes
-                .entry(e.name.to_ascii_lowercase())
+                .entry(group.name.to_ascii_lowercase())
                 .or_default()
-                .note(e, including);
+                .active = group.active;
         }
+        self.scene_states.insert(key, state);
     }
 
     /// Puts the remembered state back on the scene just loaded
@@ -183,6 +217,11 @@ impl World {
                 }
             }
         }
+        for group in &mut view.scene.waypoint_groups {
+            if let Some(node) = state.nodes.get(&group.name.to_ascii_lowercase()) {
+                group.active = node.active;
+            }
+        }
         let mut failed = Vec::new();
         for (r, sprite) in switches {
             if view.add_sprite(&self.vfs, &sprite) {
@@ -196,6 +235,37 @@ impl World {
         }
         for sprite in failed {
             self.log(format!("SetSprite method failed for file '{sprite}'"));
+        }
+    }
+
+    /// Puts the remembered caption slots 2 to 7 back on the entities of
+    /// the scene just loaded (the caption loop of `TransferEntity`),
+    /// once they have their handles.
+    pub(crate) fn restore_scene_captions(&mut self) {
+        let Some(view) = self.scene.as_ref() else {
+            return;
+        };
+        if !view.scene.persistent_state {
+            return;
+        }
+        let Some(state) = self.scene_states.get(&state_key(&view.path)) else {
+            return;
+        };
+        let mut captions: Vec<(EntityRef, BTreeMap<u8, String>)> = Vec::new();
+        for r in view.entity_refs() {
+            let Some(e) = view.entity(r).filter(|e| e.save_state) else {
+                continue;
+            };
+            if let Some(node) = state.nodes.get(&e.name.to_ascii_lowercase()) {
+                if !node.captions.is_empty() {
+                    captions.push((r, node.captions.clone()));
+                }
+            }
+        }
+        for (r, slots) in captions {
+            if let Some(object) = self.node_id(r).and_then(|id| self.object_state_mut(id)) {
+                object.captions.extend(slots);
+            }
         }
     }
 
@@ -233,7 +303,7 @@ mod tests {
             a: 4,
         });
         let mut state = NodeState::default();
-        state.note(&from, true);
+        state.note(&from, &BTreeMap::new(), true);
         let mut to = Entity {
             name: "door".into(),
             sprite: Some("art\\closed.sprite".into()),
@@ -249,7 +319,7 @@ mod tests {
         assert_eq!(to.tint, from.tint);
         // Without sprites, the sprite is noted empty and never applied.
         let mut bare = NodeState::default();
-        bare.note(&from, false);
+        bare.note(&from, &BTreeMap::new(), false);
         assert_eq!(bare.sprite.as_deref(), Some(""));
         assert_eq!(bare.apply(&mut to, false), None);
     }

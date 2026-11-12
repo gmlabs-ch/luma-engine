@@ -207,7 +207,7 @@ How the list was made. For every class with a script interface, the names tested
 | `OpenDocument` | method | **done** | Opens a file or URL with the system's default application (`open`, `xdg-open`, `start`). WME also minimizes a fullscreen window first. |
 | `DEBUG_DumpClassRegistry` | method | **no-op** | Writes the class registry to the log; debugging aid. |
 | `SetLoadingScreen` | method | **done** | Sets the image shown while a saved game loads (file, x, y; `null` removes it). Luma draws it over black in the frame between `LoadGame` and the load (see `docs/saving.md`). |
-| `SetSavingScreen` | method | **no-op** | Sets the image shown while saving (file, x, y). Luma keeps and saves the value, but a save completes inside the frame that asks for it, so no frame can show the image. |
+| `SetSavingScreen` | method | **done** | Sets the image shown while saving (file, x, y). A Luma save completes inside one frame: the image and the progress indicator are drawn in that frame, over the game without its normal windows (not for a quick save; `docs/saving.md`). |
 | `SetWaitCursor`, `RemoveWaitCursor`, `GetWaitCursor` | method | **done** | Sets, removes, reads the cursor shown while the game is not interactive. |
 | `GetWaitCursorObject` | method | **done** | The wait cursor as a sprite object; `null` without one. |
 | `ClearScriptCache` | method | **done** | Empties the compiled-script cache and returns true: running scripts keep their program, the next script started from a file reads the file again. |
@@ -216,7 +216,7 @@ How the list was made. For every class with a script interface, the names tested
 | `DumpTextureStats` | method | **no-op** | Writes texture memory statistics to a file (D3D only); debugging aid. |
 | `AccOutputText` | method | **done** | Speaks text through the accessibility text-to-speech (text, type: 0 caption, 1 talk, 2 keypress), when it is on and the type's switch allows it. The backend is macOS's `say`; elsewhere the text-to-speech is unavailable, as WME's is without a SAPI voice. |
 | `IsShadowTypeSupported` | method | **done** | True when the renderer supports a 3D shadow type: the four types (0..3) with wgpu, where WME asks the device. |
-| `StoreSaveThumbnail`, `DeleteSaveThumbnail` | method | **done** | Captures / discards the screenshot stored in the next save file (size from `THUMBNAIL_WIDTH/HEIGHT`). The capture is the next frame rendered; a save without a stored thumbnail carries none, where WME takes one at save time. |
+| `StoreSaveThumbnail`, `DeleteSaveThumbnail` | method | **done** | Captures / discards the screenshot stored in the next save file (size from `THUMBNAIL_WIDTH/HEIGHT`). The capture is the next frame rendered. A save without a stored thumbnail gets the picture of the frame that follows it, where WME takes one at save time. |
 | `GetFileChecksum` | method | **done** | CRC-32 of a file in the virtual file system, as integer or hex string; `null` for a missing file. |
 | `EnableScriptProfiling`, `DisableScriptProfiling` | method | **done** | Turns the script profiler on / off: the real time each script file runs is added up, and turning it off writes WME's table to the log (see `docs/scripting.md`, The profiler). |
 | `Type` | get | **done** | `game`. |
