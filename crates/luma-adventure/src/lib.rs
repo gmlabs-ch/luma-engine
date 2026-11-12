@@ -50,6 +50,7 @@ pub mod actor;
 #[cfg(feature = "3d")]
 pub mod actor3d;
 pub mod capture;
+pub mod code_page;
 #[cfg(feature = "3d")]
 pub mod draw3d;
 mod error;
@@ -83,7 +84,10 @@ pub mod scene_view;
 pub mod settings;
 pub mod sound;
 pub mod talk;
+#[cfg(test)]
+mod test_font;
 pub mod text;
+mod text_shape;
 #[cfg(not(feature = "3d"))]
 mod three_d_off;
 pub mod ui;

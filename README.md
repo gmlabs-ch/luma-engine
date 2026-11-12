@@ -56,7 +56,7 @@ Luma Engine reads the same game data with a new engine built for today:
 | `luma-render` | 2D/2.5D renderer on wgpu | `luma-formats`, `wgpu`, `winit` |
 | `luma-audio` | Music, sound effects and voice | `kira` (Symphonia for decoding, `cpal` with the `device` feature) |
 | `luma-video` | Ogg Theora videos decoded to frames | `ogg`, `oxideav-theora`, `oxideav-core` |
-| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves; 3D actors on scene geometry with its `3d` feature | the six run-time core crates, `fontdue`, `fontdb`, `serde`, `postcard`, `flate2`, `luma-3d` with the `3d` feature, `luma-compiler` with the `compiler` feature (and for its tests) |
+| `luma-adventure` | Actors, scenes, speech, inventory, dialogue, pathfinding, saves; 3D actors on scene geometry with its `3d` feature | the six run-time core crates, `fontdue`, `fontdb`, `ttf-parser`, `encoding_rs`, `unicode-bidi`, `serde`, `postcard`, `flate2`, `luma-3d` with the `3d` feature, `luma-compiler` with the `compiler` feature (and for its tests) |
 | `luma-lumen` | Lumen, the scenario format for games made for Luma: parser, checker, text runner | nothing |
 | `luma-3d` | 3D characters on painted backgrounds: `.3ds` scene geometry, the camera mapping, `.x` models with their skin and animations, the Direct3D maths conventions | `luma-formats`, `flate2`, `serde` with the `serde` feature |
 | `luma` | The engine in one crate: the core re-exported, the modules behind features | the six core crates, `luma-adventure` with the `adventure` feature, `luma-lumen` with `lumen`, `luma-3d` and `luma-adventure/3d` with `3d`, `luma-adventure/compiler` with `compiler` |

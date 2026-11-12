@@ -149,17 +149,23 @@ height; a button without image nor text is 100 by 100.
 | `VERTICAL_ALIGN` | `top`, `center`, `bottom` | `center` | Vertical placement of the text in the height. |
 
 A static never catches the mouse. `SizeToFit` sets its size to its
-text; `HeightToFit` only its height.
+text (the width of the text on one line, then its height in that
+width); `HeightToFit` only its height. Both need the static's own
+`FONT` and a text; an empty text set by a script counts: it is 0 wide
+and as high as the font makes an empty text (one line of a bitmap font,
+0 for a TrueType font). A file's empty `TEXT` is not told from none in
+Luma Engine. A script setting `TextAlign` or `VerticalAlign` to a
+number that is no alignment gets the first one (left, top).
 
 ## `EDIT`
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `TEXT` | string | | The text being edited. |
-| `FONT_SELECTED` | string | | The font of the selected part of the text. |
+| `TEXT` | string | | The text being edited, expanded through the string table. |
+| `FONT_SELECTED` | string | the editor's `FONT` | The font of the selected part of the text. |
 | `MAX_LENGTH` | int | `-1` | Longest text accepted; `-1` for no limit. |
 | `FRAME_WIDTH` | int | `0` | Margin between the frame and the text. |
-| `CURSOR_BLINK_RATE` | int | `600` | Milliseconds between blinks of the caret. |
+| `CURSOR_BLINK_RATE` | int | `530` | Milliseconds between blinks of the caret. The original takes its default from Windows (`GetCaretBlinkTime`), 530 on a system left as installed. A negative rate never blinks; `0` changes the caret every frame. |
 
 An editor can take the focus (`Tab` moves it between the focusable
 controls of a window) and reads the keys: printable characters are
@@ -172,16 +178,42 @@ the right edge, `Backspace` deletes the character after the caret and
 `Delete` the one before, `Home` and `End` swap, and a typed character
 leaves the caret before it, as the original engine's editor does.
 
-The editor shows its text on one line, from the first character that
-keeps the caret inside the box, at `FRAME_WIDTH` from the left and the
-top of the control, with the caret's character at the caret while it
-blinks on. The original engine (`CUIEdit::Display`) draws the parts
-before and after the caret separately, each in the width left up to
-the right edge of the box and one line high, so that a text longer
-than the box stops at the last word that fits; Luma Engine draws the
-line whole, without a box (a font width of `-1`, see
-[font.md](font.md#truetype-fonts-ttfont)), so the end of a text longer
-than the box runs past its right edge.
+The editor shows its text on one line, at `FRAME_WIDTH` from the left
+and the top of the control (`CUIEdit::Display`):
+
+- **The parts.** The text before the selection, the selection, and the
+  text after it are drawn one after the other; the selection in
+  `FONT_SELECTED`, the rest in `FONT` (the game's system font without
+  one). The caret stands where the selection ends, the end the keys
+  move: after a selection made from left to right, before one made from
+  right to left.
+- **The right frame.** Each part is drawn in the room left up to
+  `FRAME_WIDTH` from the right edge, one letter high (the taller letter
+  of the two fonts): a bitmap font stops before the first character
+  that does not fit, a TrueType font before the last space that fits or
+  the first character that does not. Nothing runs past the frame.
+- **The first character shown.** When the text from the first character
+  shown up to the caret (the selection measured in its own font) is
+  wider than the box less the frames and the caret, the first character
+  shown moves on one by one until it fits; it never passes the caret.
+- **The caret.** `CursorChar` is measured whole and its first character
+  is drawn. While the editor has the focus the caret keeps its room,
+  whether it shows or not, so the text after it does not move when it
+  blinks. It changes each time `CURSOR_BLINK_RATE` milliseconds have
+  passed since it last did; the first frame of a new editor hides it.
+- **Right to left** (`Game.TextRTL`): the line starts after the room the
+  parts and the caret leave, so it sits against the right frame.
+
+One defect of the original is not reproduced: its TrueType font ignores
+the length `GetTextWidth` is given, so the editor measures every part as
+all the text that follows it, and a caret inside the text is drawn far
+to the right of its place. Luma Engine measures the parts themselves, as
+the original's bitmap fonts do.
+
+`SelStart` and `SelEnd` are character indexes. They hold the number
+they were given until the editor is next drawn: 10000 in a new editor,
+and a position past the end after a shorter `Text`; drawing brings them
+inside the text.
 
 The text of an editor is made of characters, and the caret moves by
 whole characters. In a UTF-8 game (`Game.TextEncoding` 1) a script

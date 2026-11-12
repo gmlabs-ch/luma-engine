@@ -116,7 +116,16 @@ pub const VK_MBUTTON: i32 = 4;
 /// receives characters in on a western system (`a` is 97, `é` 233, `€`
 /// 128); the Unicode code point of a character the code page lacks.
 pub fn char_code(ch: char) -> i32 {
-    match crate::text::ansi_byte(ch) {
+    char_code_in(ch, crate::code_page::CodePage::WESTERN)
+}
+
+/// The code of a typed character in a game made for another system: the
+/// character's byte in that system's ANSI code page (`ж` is 230 in
+/// Windows-1251), which is how Windows sends a character to the original
+/// engine; the Unicode code point of a character the code page lacks or
+/// writes with two bytes.
+pub fn char_code_in(ch: char, page: crate::code_page::CodePage) -> i32 {
+    match page.byte(ch) {
         Some(byte) => i32::from(byte),
         None => u32::from(ch) as i32,
     }
@@ -1287,6 +1296,10 @@ mod tests {
         assert_eq!(char_code('é'), 233);
         assert_eq!(char_code('€'), 128);
         assert_eq!(char_code('ж'), 0x436);
+        let cyrillic = crate::code_page::CodePage::new(1251).unwrap();
+        assert_eq!(char_code_in('ж', cyrillic), 230);
+        assert_eq!(char_code_in('a', cyrillic), 97);
+        assert_eq!(char_code_in('é', cyrillic), 233, "its code point");
     }
 
     /// A 4x2 image whose left half is opaque and right half clear.

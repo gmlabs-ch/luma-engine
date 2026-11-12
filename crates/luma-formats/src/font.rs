@@ -263,7 +263,9 @@ impl BitmapFontDef {
     }
 
     /// The measured width of tile `index`: one more than the right-most
-    /// column with a pixel that is not fully transparent.
+    /// column with a pixel that is not fully transparent
+    /// (`IsTransparentAtLite`: alpha 0), so the soft edge of a smoothed
+    /// character counts.
     fn measure_tile(&self, image: &Image, index: i32) -> i32 {
         let x0 = (index % self.columns) * self.tile_width;
         let y0 = (index / self.columns) * self.tile_height;
@@ -482,9 +484,11 @@ pub struct TrueTypeFontDef {
     pub underline: bool,
     /// `STRIKE`.
     pub strike: bool,
-    /// `CHARSET`: the character set the text's bytes are read in when the
-    /// game is not UTF-8 (0 and 1: the system's, read as Windows-1252;
-    /// see `charset_code_page`).
+    /// `CHARSET`: the Windows character set of the font, by the engine's
+    /// number (`CBFontTT::GetWindowsCharset`: 3 Baltic, 5 Eastern Europe,
+    /// 7 Greek, 10 Russian...). In a game that is not UTF-8 it decides
+    /// the code page the text's bytes are read in; 0, the default, is
+    /// the system's.
     pub charset: i32,
     /// The layers, in drawing order; at least one.
     pub layers: Vec<FontLayer>,
@@ -511,7 +515,9 @@ impl TrueTypeFontDef {
         let mut def = TrueTypeFontDef {
             size: 12,
             face: "Arial".to_string(),
-            filename: "arial.ttf".to_string(),
+            // No file by default (`m_FontFile` is null): the face is then
+            // looked for among the system's fonts alone.
+            filename: String::new(),
             bold: false,
             italic: false,
             underline: false,
@@ -648,7 +654,7 @@ mod tests {
         else {
             panic!()
         };
-        assert_eq!(plain.filename, "arial.ttf");
+        assert_eq!(plain.filename, "", "no font file without `FILENAME`");
         assert_eq!(plain.face, "Arial", "the typeface without `FACE`");
         assert_eq!(plain.layers.len(), 1);
         assert_eq!(
@@ -783,6 +789,12 @@ mod tests {
         };
         let widths = def.widths(Some(&image));
         assert_eq!(&widths[..4], &[0, 3, 4, 0]);
+        // A pixel that is barely there is ink too: only alpha 0 is
+        // transparent (`IsTransparentAtLite`).
+        let mut soft = image.clone();
+        soft.pixels[3] = 1;
+        soft.pixels[(8 + 7) * 4 + 3] = 40;
+        assert_eq!(&def.widths(Some(&soft))[..4], &[1, 4, 4, 0]);
         // The space takes half of m + i: both are outside the image, so 0.
         assert_eq!(widths[b' ' as usize], 0);
         let expanded = BitmapFontDef {

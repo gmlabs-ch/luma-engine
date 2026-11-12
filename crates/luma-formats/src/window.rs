@@ -828,7 +828,7 @@ impl Default for EditDef {
             font_selected: None,
             max_length: -1,
             frame_width: 0,
-            cursor_blink_rate: 600,
+            cursor_blink_rate: 530,
         }
     }
 }

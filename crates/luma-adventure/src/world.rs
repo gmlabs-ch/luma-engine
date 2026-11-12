@@ -663,28 +663,48 @@ impl World {
     }
 
     /// A text of the game as characters, for a front-end to show or
-    /// speak: its bytes read as UTF-8 in a UTF-8 game.
+    /// speak (`CBTextUtils::NativeToUnicode`): its bytes read as UTF-8
+    /// in a UTF-8 game, in the game's ANSI code page otherwise
+    /// (`AnsiToUnicode`, see [`ansi_code_page`](Self::ansi_code_page)).
     pub fn display_text(&self, text: &str) -> String {
         if self.text_utf8() {
             luma_script::classes::utf8_to_text(text)
         } else {
-            text.to_string()
+            self.ansi_code_page().decode(text)
         }
     }
 
     /// A text made of characters (typed, or an editor's) as the game
-    /// holds text: its UTF-8 bytes in a UTF-8 game.
+    /// holds text: its UTF-8 bytes in a UTF-8 game, its bytes in the
+    /// game's ANSI code page otherwise. A character that page lacks
+    /// stays as it is when it cannot be taken for a byte, so that an
+    /// editor shows what was typed.
     pub(crate) fn game_text(&self, text: &str) -> String {
         if self.text_utf8() {
             luma_script::classes::text_to_utf8(text)
         } else {
-            text.to_string()
+            self.ansi_code_page().encode_text(text)
         }
     }
 
+    /// The ANSI code page of the system the game was made for: the one
+    /// the original engine takes from Windows (`CP_ACP`) to convert
+    /// between ANSI text and characters, and for the fonts whose
+    /// `CHARSET` stands for the system's. See
+    /// [`FontBank::ansi_code_page`](crate::text::FontBank::ansi_code_page).
+    pub fn ansi_code_page(&self) -> crate::code_page::CodePage {
+        self.fonts.ansi_code_page()
+    }
+
+    /// Sets the game's ANSI code page (a front-end's choice), or with
+    /// `None` leaves it to what the game's fonts tell.
+    pub fn set_ansi_code_page(&mut self, page: Option<crate::code_page::CodePage>) {
+        self.fonts.set_ansi_code_page(page);
+    }
+
     /// Sets right-to-left text (`Game.TextRTL`, a string table's
-    /// `@right-to-left`): the TrueType fonts lay their lines out from
-    /// the last glyph and the editors mirror their keys.
+    /// `@right-to-left`): the TrueType fonts read their lines from the
+    /// right and the editors mirror their keys.
     pub fn set_text_rtl(&mut self, rtl: bool) {
         self.text_rtl = rtl;
         self.fonts.set_rtl(rtl);
@@ -725,6 +745,7 @@ impl World {
             self.timer_delta = dt;
         }
         self.clock += dt;
+        self.fonts.set_time(self.clock);
         self.fps_time += dt;
         self.fps_frames += 1;
         if self.fps_time > 1000 {
@@ -4044,7 +4065,7 @@ impl Runtime {
         if self.world.is_video_playing() {
             return;
         }
-        let code = crate::input::char_code(ch);
+        let code = crate::input::char_code_in(ch, self.world.ansi_code_page());
         self.handle_keypress(true, code, Some(ch), shift, alt, control);
     }
 

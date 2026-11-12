@@ -10,10 +10,14 @@
 //!
 //! The text a font is given is the game's, held as its files hold it:
 //! one `char` per byte. A font reads it in the game's encoding
-//! (`Game.TextEncoding`, see [`FontBank::set_utf8`]): the bytes are
-//! Windows-1252 characters in an ANSI game, UTF-8 in a UTF-8 game.
+//! (`Game.TextEncoding`, see [`FontBank::set_utf8`]): UTF-8 in a UTF-8
+//! game; in an ANSI game the bytes are characters of a Windows code
+//! page, the one of a TrueType font's `CHARSET` (see
+//! [`CodePage`](crate::code_page::CodePage)).
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use luma_archive::Vfs;
 use luma_formats::font::{BitmapFontDef, FontFile, TextAlign, TrueTypeFontDef};
@@ -21,15 +25,28 @@ use luma_formats::{DEFAULT_COLOR_KEY, Image, Rgb, Rgba, Sprite};
 use luma_render::{DrawList, Quad, Rect, Renderer, Texture};
 use luma_script::classes::utf8_to_text;
 
-use crate::font_face::{FaceChoice, FaceOrigin, FaceSet, choose_face, resolve_face};
+use crate::code_page::CodePage;
+use crate::font_face::{
+    FaceChoice, FaceOrigin, FaceSet, choose_face, resolve_face, system_face_with_glyph,
+};
 use crate::scene_view::key;
+use crate::text_shape::{join_arabic, visual_order};
 
-/// The number of rendered texts a TrueType font keeps.
-const CACHED_TEXTS: usize = 30;
+/// The number of rendered texts a TrueType font keeps
+/// (`NUM_CACHED_TEXTS`).
+const CACHED_TEXTS: usize = 50;
+
+/// The most texts one font keeps for a single frame, whatever the frame
+/// asks for: past it the least used goes even though the frame wanted
+/// it.
+const MAX_FRAME_TEXTS: usize = 512;
 
 /// The widest image a text without a box is rendered to: wider than any
 /// screen a game draws on, so nothing visible is lost.
 const MAX_UNBOUNDED_WIDTH: i32 = 4096;
+
+/// The widest box a text is rendered into.
+const MAX_BOXED_WIDTH: i32 = 8192;
 
 /// The tallest image a text is rendered to.
 const MAX_TEXT_HEIGHT: i32 = 4096;
@@ -68,140 +85,22 @@ pub fn latin1(text: &str) -> Vec<u8> {
         .collect()
 }
 
-/// The characters Windows-1252 puts at `0x80..=0x9F`, where Latin-1 has
-/// control codes; U+FFFD for the five bytes it leaves unused.
-const WINDOWS_1252: [char; 32] = [
-    '€', '\u{fffd}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{fffd}', 'Ž',
-    '\u{fffd}', '\u{fffd}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{fffd}',
-    'ž', 'Ÿ',
-];
-
-/// The characters of an ANSI game's text, for a TrueType font: each
-/// byte is a Windows-1252 character, the code page the original engine
-/// draws ANSI text with on a western system. Characters beyond a byte
-/// are kept.
-fn ansi_to_text(raw: &str) -> String {
-    raw.chars()
-        .map(|c| match u32::from(c) {
-            code @ 0x80..=0x9F => match WINDOWS_1252[(code - 0x80) as usize] {
-                '\u{fffd}' => c,
-                mapped => mapped,
-            },
-            _ => c,
-        })
-        .collect()
-}
-
-/// Windows-1250 (Central Europe) from 0x80 to 0xFF; U+FFFD where the
-/// code page has no character.
-const WINDOWS_1250: &str = "€\u{fffd}‚\u{fffd}„…†‡\u{fffd}‰Š‹ŚŤŽŹ\u{fffd}‘’“”•–—\u{fffd}™š›śťžź\u{a0}ˇ˘Ł¤Ą¦§¨©Ş«¬\u{ad}®Ż°±˛ł´µ¶·¸ąş»Ľ˝ľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖ×ŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőö÷řůúűüýţ˙";
-
-/// Windows-1251 (Cyrillic) from 0x80 to 0xBF; 0xC0 to 0xFF are the
-/// letters U+0410 to U+044F.
-const WINDOWS_1251: &str =
-    "ЂЃ‚ѓ„…†‡€‰Љ‹ЊЌЋЏђ‘’“”•–—\u{fffd}™љ›њќћџ\u{a0}ЎўЈ¤Ґ¦§Ё©Є«¬\u{ad}®Ї°±Ііґµ¶·ё№є»јЅѕї";
-
-/// Windows-1253 (Greek) from 0x80 to 0xBF; the letters follow from
-/// U+0390, with two holes.
-const WINDOWS_1253: &str = "€\u{fffd}‚ƒ„…†‡\u{fffd}‰\u{fffd}‹\u{fffd}\u{fffd}\u{fffd}\u{fffd}\u{fffd}‘’“”•–—\u{fffd}™\u{fffd}›\u{fffd}\u{fffd}\u{fffd}\u{fffd}\u{a0}΅Ά£¤¥¦§¨©\u{fffd}«¬\u{ad}®―°±²³΄µ¶·ΈΉΊ»Ό½ΎΏ";
-
-/// Windows-1257 (Baltic) from 0x80 to 0xFF.
-const WINDOWS_1257: &str = "€\u{fffd}‚\u{fffd}„…†‡\u{fffd}‰\u{fffd}‹\u{fffd}¨ˇ¸\u{fffd}‘’“”•–—\u{fffd}™\u{fffd}›\u{fffd}¯˛\u{fffd}\u{a0}\u{fffd}¢£¤\u{fffd}¦§Ø©Ŗ«¬\u{ad}®Æ°±²³´µ¶·ø¹ŗ»¼½¾æĄĮĀĆÄÅĘĒČÉŹĖĢĶĪĻŠŃŅÓŌÕÖ×ŲŁŚŪÜŻŽßąįāćäåęēčéźėģķīļšńņóōõö÷ųłśūüżž˙";
-
-/// The character a byte from 0x80 up stands for in the code page of a
-/// font's `CHARSET` (`CBFontTT::GetWindowsCharset`: the character set
-/// GDI is given with the font, which decides how it reads ANSI text).
-/// `None` for the character sets read as Windows-1252: 0 and 1 (the
-/// system's), and those Luma has no table for.
-fn charset_character(charset: i32, byte: u8) -> Option<char> {
-    let index = usize::from(byte.checked_sub(0x80)?);
-    let from = |table: &'static str| table.chars().nth(index);
-    let character = match charset {
-        // BALTIC_CHARSET
-        3 => from(WINDOWS_1257)?,
-        // EASTEUROPE_CHARSET
-        5 => from(WINDOWS_1250)?,
-        // GREEK_CHARSET
-        7 => match byte {
-            0x80..=0xBF => from(WINDOWS_1253)?,
-            0xD2 | 0xFF => '\u{fffd}',
-            _ => char::from_u32(0x0390 + u32::from(byte) - 0xC0)?,
-        },
-        // RUSSIAN_CHARSET
-        10 => match byte {
-            0x80..=0xBF => from(WINDOWS_1251)?,
-            _ => char::from_u32(0x0410 + u32::from(byte) - 0xC0)?,
-        },
-        // TURKISH_CHARSET: Windows-1252 but for six letters.
-        13 => match byte {
-            0xD0 => 'Ğ',
-            0xDD => 'İ',
-            0xDE => 'Ş',
-            0xF0 => 'ğ',
-            0xFD => 'ı',
-            0xFE => 'ş',
-            0x8E | 0x9E => '\u{fffd}',
-            _ => return None,
-        },
-        _ => return None,
-    };
-    Some(character)
-}
-
-/// The characters of an ANSI game's text for a TrueType font of a given
-/// `CHARSET`: each byte is a character of the font's code page, of
-/// Windows-1252 when the character set has none of its own here.
-fn ansi_to_text_in(raw: &str, charset: i32) -> String {
-    let high = |c: char| u8::try_from(u32::from(c)).ok().filter(|b| *b >= 0x80);
-    if !raw.chars().any(|c| high(c).is_some()) {
-        return raw.to_string();
-    }
-    raw.chars()
-        .map(
-            |c| match high(c).and_then(|byte| charset_character(charset, byte)) {
-                Some('\u{fffd}') | None => ansi_to_text(&c.to_string()).chars().next().unwrap_or(c),
-                Some(mapped) => mapped,
-            },
-        )
-        .collect()
-}
-
-/// The Windows-1252 bytes of a text, `?` for the characters the code
-/// page lacks (`CBTextUtils::Utf8ToAnsi`): what a bitmap font draws of
-/// a UTF-8 game's text.
-fn text_to_ansi(text: &str) -> Vec<u8> {
-    text.chars()
-        .map(|c| match u32::from(c) {
-            code @ (0..=0x7F | 0xA0..=0xFF) => code as u8,
-            _ => WINDOWS_1252
-                .iter()
-                .position(|&w| w == c && w != '\u{fffd}')
-                .map_or(b'?', |at| 0x80 + at as u8),
-        })
-        .collect()
-}
-
-/// The Windows-1252 byte of a character, `None` when the code page
-/// lacks it.
-pub(crate) fn ansi_byte(c: char) -> Option<u8> {
-    match u32::from(c) {
-        code @ (0..=0x7F | 0xA0..=0xFF) => Some(code as u8),
-        _ => WINDOWS_1252
-            .iter()
-            .position(|&w| w == c && w != '\u{fffd}')
-            .map(|at| 0x80 + at as u8),
-    }
-}
-
 impl Font {
     /// Loads a `.font` file and what it needs (the tile image, the
     /// TrueType file).
     pub fn load(vfs: &Vfs, path: &str) -> Result<Font, String> {
+        Font::load_among(vfs, path, &mut FontFiles::default())
+    }
+
+    /// Loads a `.font` file as [`load`](Self::load) does, a TrueType
+    /// font among the game's font files registered so far (its own is
+    /// added to them).
+    pub fn load_among(vfs: &Vfs, path: &str, files: &mut FontFiles) -> Result<Font, String> {
         let bytes = vfs.read(path).map_err(|e| e.to_string())?;
         match FontFile::parse(&bytes).map_err(|e| e.to_string())? {
             FontFile::Bitmap(def) => BitmapFont::load(vfs, def).map(|f| Font::Bitmap(Box::new(f))),
             FontFile::TrueType(def) => {
-                TrueTypeFont::load(vfs, def).map(|f| Font::TrueType(Box::new(f)))
+                TrueTypeFont::load_among(vfs, def, files).map(|f| Font::TrueType(Box::new(f)))
             }
         }
     }
@@ -226,7 +125,7 @@ impl Font {
     pub fn text_width(&mut self, text: &str) -> i32 {
         match self {
             Font::Bitmap(f) => f.def.text_width(&f.widths, &f.codes(text), -1),
-            Font::TrueType(f) => f.measure(&f.characters(text), -1).0,
+            Font::TrueType(f) => f.line_width(&f.characters(text)),
         }
     }
 
@@ -255,7 +154,18 @@ impl Font {
         }
     }
 
-    /// Lays TrueType text out right to left (`Game.TextRTL`); bitmap
+    /// Sets the ANSI code page of the system the game was made for
+    /// (`CP_ACP`): the one a bitmap font converts a UTF-8 game's text
+    /// to, and the one a TrueType font whose `CHARSET` stands for the
+    /// system's reads an ANSI game's text in.
+    pub fn set_code_page(&mut self, page: CodePage) {
+        match self {
+            Font::Bitmap(f) => f.page = page,
+            Font::TrueType(f) => f.set_system_code_page(page),
+        }
+    }
+
+    /// Has TrueType text read from the right (`Game.TextRTL`); bitmap
     /// fonts are unaffected, as in the original engine, where only the
     /// GDI text of `CBFontTT` reads the flag.
     pub fn set_rtl(&mut self, rtl: bool) {
@@ -277,9 +187,39 @@ impl Font {
         align: TextAlign,
         max_height: i32,
     ) {
+        self.draw_forced(list, text, x, y, width, align, max_height, None);
+    }
+
+    /// Draws a text as [`draw`](Self::draw) does, inside a window that
+    /// forces a colour on what it draws (`ALPHA_COLOR` and `ALPHA`, the
+    /// renderer's `m_ForceAlphaColor`): a bitmap font's characters are
+    /// tinted with the colour, as every image is; a TrueType font keeps
+    /// the colours of its layers and takes the colour's opacity
+    /// (`CBFontTT::DrawTextD3D`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_forced<'a>(
+        &'a self,
+        list: &mut DrawList<'a>,
+        text: &str,
+        x: i32,
+        y: i32,
+        width: i32,
+        align: TextAlign,
+        max_height: i32,
+        force: Option<Rgba>,
+    ) {
         match self {
-            Font::Bitmap(f) => f.draw(list, text, x, y, width, align, max_height),
-            Font::TrueType(f) => f.draw(list, text, x, y, width, align, max_height),
+            Font::Bitmap(f) => f.draw(list, text, x, y, width, align, max_height, force),
+            Font::TrueType(f) => f.draw(list, text, x, y, width, align, max_height, force),
+        }
+    }
+
+    /// Tells the font the time on the clock that never stops
+    /// (`Game->m_LiveTimer`), which a bitmap font made of an animated
+    /// sprite changes its frame by.
+    pub fn set_time(&mut self, now: u64) {
+        if let Font::Bitmap(f) = self {
+            f.now = now;
         }
     }
 }
@@ -292,94 +232,168 @@ fn unbounded(width: i32) -> i32 {
     if width < 0 { i32::MAX / 2 } else { width }
 }
 
-/// A bitmap font with its tile image.
+/// The image of one frame of a bitmap font: the tiles.
+#[derive(Debug)]
+struct TileImage {
+    path: String,
+    image: Image,
+    texture: Option<Texture>,
+}
+
+/// A frame of a bitmap font's sprite.
+#[derive(Debug)]
+struct FontFrame {
+    /// The image of the frame's first sub-frame; a frame without one
+    /// draws nothing.
+    tiles: Option<TileImage>,
+    /// How long the frame stays, in milliseconds.
+    delay: u64,
+}
+
+/// A bitmap font with its tile image, or with the frames of its sprite.
 #[derive(Debug)]
 pub struct BitmapFont {
     /// The definition.
     pub def: BitmapFontDef,
     /// The width of each character.
     pub widths: [u8; 256],
-    /// The tile image's path.
+    /// The tile image's path: the first frame's for a sprite.
     pub image_path: String,
-    image: Image,
-    texture: Option<Texture>,
+    /// The frames: one for an `IMAGE`, those of the `SPRITE` otherwise.
+    frames: Vec<FontFrame>,
+    /// Whether the sprite starts again after its last frame.
+    looping: bool,
+    /// The frame characters are drawn from (`m_Sprite->m_CurrentFrame`).
+    current: Cell<usize>,
+    /// When the current frame was first drawn, on the clock that never
+    /// stops; 0 before the font has drawn anything.
+    frame_since: Cell<u64>,
+    /// Whether a sprite that does not loop has shown its last frame.
+    finished: Cell<bool>,
+    /// The clock that never stops (`Game->m_LiveTimer`).
+    now: u64,
     /// Whether the text is UTF-8 (`Game.TextEncoding`).
     utf8: bool,
+    /// The ANSI code page a UTF-8 game's text is converted to.
+    page: CodePage,
 }
 
 impl BitmapFont {
     /// Loads the tiles and measures the widths (the end of
-    /// `CBFontBitmap::LoadBuffer`). A `SPRITE` that loads is used, and
-    /// `IMAGE` only without one; `AUTO_WIDTH` then measures the frame
-    /// `WIDTHS_FRAME` of the sprite. The tiles drawn are those of the
-    /// sprite's first frame.
+    /// `CBFontBitmap::LoadBuffer`). A `SPRITE` that loads is used, with
+    /// all its frames, and `IMAGE` only without one.
     pub fn load(vfs: &Vfs, def: BitmapFontDef) -> Result<BitmapFont, String> {
-        let decode = |path: &str, key| -> Result<Image, String> {
+        let decode = |path: &str, color_key: Rgb| -> Result<TileImage, String> {
             let bytes = vfs.read(path).map_err(|e| e.to_string())?;
-            luma_formats::image::decode(&bytes, key).map_err(|e| e.to_string())
+            let image =
+                luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())?;
+            Ok(TileImage {
+                path: path.to_string(),
+                image,
+                texture: None,
+            })
         };
-        // The first sub-frame of a frame of the sprite: its image and
-        // colour key.
-        let tiles_of = |sprite: &Sprite, frame: usize| {
-            let sub = sprite.frames.get(frame)?.subframes.first()?;
-            Some((sub.image.clone()?, sub.color_key))
-        };
-        let sprite = def.sprite.as_deref().and_then(|path| {
-            let bytes = vfs.read(path).ok()?;
+        // The sprite, when the font names one that loads: every character
+        // is drawn from the first sub-frame of the sprite's current frame
+        // (`CBFontBitmap::DrawChar`).
+        let sprite = def.sprite.as_deref().and_then(|sprite_path| {
+            let bytes = vfs.read(sprite_path).ok()?;
             let sprite = Sprite::parse(&bytes).ok()?;
-            tiles_of(&sprite, 0).map(|tiles| (sprite, tiles))
-        });
-        let (image_path, image, measured) = match (sprite, &def.image) {
-            (Some((sprite, (path, key))), _) => {
-                let image = decode(&path, key)?;
-                // The widths come from the frame `WIDTHS_FRAME`; a frame
-                // the sprite has not leaves nothing to measure.
-                let measured = match usize::try_from(def.widths_frame) {
-                    Ok(0) => Some(image.clone()),
-                    Ok(frame) => {
-                        tiles_of(&sprite, frame).and_then(|(path, key)| decode(&path, key).ok())
-                    }
-                    Err(_) => None,
-                };
-                (path, image, measured)
+            let mut frames = Vec::with_capacity(sprite.frames.len());
+            for frame in &sprite.frames {
+                let tiles = frame
+                    .subframes
+                    .first()
+                    .and_then(|sub| sub.image.as_ref().map(|image| (image, sub.color_key)))
+                    .and_then(|(image, key)| decode(image, key).ok());
+                frames.push(FontFrame {
+                    tiles,
+                    delay: u64::from(frame.delay_ms),
+                });
             }
-            (None, Some(path)) => {
-                let image = decode(path, def.transparent.unwrap_or(DEFAULT_COLOR_KEY))?;
-                (path.clone(), image.clone(), Some(image))
+            if frames.iter().all(|f| f.tiles.is_none()) {
+                return None;
+            }
+            Some((frames, sprite.looping))
+        });
+        let (frames, looping) = match (sprite, &def.image) {
+            (Some(sprite), _) => sprite,
+            (None, Some(image)) => {
+                let key = def.transparent.unwrap_or(DEFAULT_COLOR_KEY);
+                let frame = FontFrame {
+                    tiles: Some(decode(image, key)?),
+                    delay: 0,
+                };
+                (vec![frame], true)
             }
             (None, None) => return Err("Incomplete font definition".to_string()),
         };
-        let widths = def.widths(measured.as_ref());
-        Ok(BitmapFont {
-            def,
-            widths,
-            image_path,
-            image,
-            texture: None,
-            utf8: false,
-        })
+        Ok(BitmapFont::from_frames(def, frames, looping))
     }
 
     /// A font from a definition and an already decoded image (tests).
     pub fn from_image(def: BitmapFontDef, image_path: &str, image: Image) -> BitmapFont {
-        let widths = def.widths(Some(&image));
+        BitmapFont::from_images(def, vec![(image_path.to_string(), image, 0)], true)
+    }
+
+    /// A font from a definition and the already decoded images of its
+    /// sprite's frames, each with its path and its delay in
+    /// milliseconds (tests).
+    pub fn from_images(
+        def: BitmapFontDef,
+        images: Vec<(String, Image, u64)>,
+        looping: bool,
+    ) -> BitmapFont {
+        let frames = images
+            .into_iter()
+            .map(|(path, image, delay)| FontFrame {
+                tiles: Some(TileImage {
+                    path,
+                    image,
+                    texture: None,
+                }),
+                delay,
+            })
+            .collect();
+        BitmapFont::from_frames(def, frames, looping)
+    }
+
+    fn from_frames(def: BitmapFontDef, frames: Vec<FontFrame>, looping: bool) -> BitmapFont {
+        // `CBFontBitmap::GetWidths` measures the frame `WIDTHS_FRAME`
+        // names; when the sprite has no such frame, or the frame no
+        // image, nothing is measured and the widths stay 0.
+        let measured = usize::try_from(def.widths_frame)
+            .ok()
+            .and_then(|at| frames.get(at))
+            .and_then(|frame| frame.tiles.as_ref());
+        let widths = def.widths(measured.map(|tiles| &tiles.image));
+        let image_path = frames
+            .iter()
+            .find_map(|f| f.tiles.as_ref())
+            .map(|tiles| tiles.path.clone())
+            .unwrap_or_default();
         BitmapFont {
             def,
             widths,
-            image_path: image_path.to_string(),
-            image,
-            texture: None,
+            image_path,
+            frames,
+            looping,
+            current: Cell::new(0),
+            frame_since: Cell::new(0),
+            finished: Cell::new(false),
+            now: 0,
             utf8: false,
+            page: CodePage::WESTERN,
         }
     }
 
     /// The tile codes of a text: its bytes in an ANSI game; in a UTF-8
-    /// game its characters converted to the ANSI code page, `?` for
-    /// those it lacks (`CBFontBitmap::TextHeightDraw` calls
+    /// game its characters converted to the system's ANSI code page,
+    /// `?` for those it lacks (`CBFontBitmap::TextHeightDraw` calls
     /// `Utf8ToAnsi`).
     fn codes(&self, text: &str) -> Vec<u8> {
         if self.utf8 {
-            text_to_ansi(&utf8_to_text(text))
+            self.page.encode(&utf8_to_text(text))
         } else {
             latin1(text)
         }
@@ -400,9 +414,45 @@ impl BitmapFont {
     }
 
     fn upload(&mut self, renderer: &Renderer) {
-        if self.texture.is_none() {
-            self.texture = Some(renderer.texture(&self.image_path, &self.image));
+        for tiles in self.frames.iter_mut().filter_map(|f| f.tiles.as_mut()) {
+            if tiles.texture.is_none() {
+                tiles.texture = Some(renderer.texture(&tiles.path, &tiles.image));
+            }
         }
+    }
+
+    /// The frame of the sprite the font draws from now.
+    pub fn current_frame(&self) -> usize {
+        self.current.get()
+    }
+
+    /// Moves the sprite on when its frame has been shown long enough
+    /// (`CBSprite::GetCurrentFrame`, which `DrawChar` calls for every
+    /// character it draws): the clock is the one that never stops, the
+    /// first character drawn starts the first frame's time, a sprite
+    /// that does not loop stays on its last frame. The sprite only
+    /// moves while the font draws; a frame with no delay lasts one
+    /// character.
+    fn step_frame(&self) {
+        let Some(frame) = self.frames.get(self.current.get()) else {
+            return;
+        };
+        let since = self.frame_since.get();
+        if since == 0 {
+            self.frame_since.set(self.now);
+            return;
+        }
+        if self.finished.get() || self.now < since.saturating_add(frame.delay) {
+            return;
+        }
+        if self.current.get() + 1 < self.frames.len() {
+            self.current.set(self.current.get() + 1);
+        } else if self.looping {
+            self.current.set(0);
+        } else {
+            self.finished.set(true);
+        }
+        self.frame_since.set(self.now);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -415,10 +465,8 @@ impl BitmapFont {
         width: i32,
         align: TextAlign,
         max_height: i32,
+        force: Option<Rgba>,
     ) {
-        let Some(texture) = &self.texture else {
-            return;
-        };
         let layout = self.def.layout(
             &self.widths,
             &self.codes(text),
@@ -431,13 +479,21 @@ impl BitmapFont {
         for line in &layout.lines {
             let mut cx = x + line.x;
             for &c in &line.chars {
+                self.step_frame();
+                let texture = self
+                    .frames
+                    .get(self.current.get())
+                    .and_then(|frame| frame.tiles.as_ref())
+                    .and_then(|tiles| tiles.texture.as_ref());
                 let (tx, ty, tw, th) = self.def.tile(&self.widths, c);
-                if tw > 0 {
+                if let (Some(texture), true) = (texture, tw > 0) {
                     list.push(Quad {
                         texture,
                         dst: Rect::new(cx as f32, (y + line.y) as f32, tw as f32, th as f32),
                         src: Some(Rect::new(tx as f32, ty as f32, tw as f32, th as f32)),
-                        tint: Rgba::OPAQUE_WHITE,
+                        // The image's own colours, unless a window forces
+                        // its colour on what it draws.
+                        tint: force.unwrap_or(Rgba::OPAQUE_WHITE),
                         flip_x: false,
                         flip_y: false,
                     });
@@ -448,6 +504,67 @@ impl BitmapFont {
     }
 }
 
+/// The game's TrueType files made available to every font
+/// (`CBFontStorage::RegisterTTFont`): the original registers each
+/// `FILENAME` with Windows for the whole process, so that the `FACE` of
+/// any font can name a typeface another font's file brought. A file is
+/// read once; one that cannot be read is remembered too.
+#[derive(Debug, Default)]
+pub struct FontFiles {
+    files: Vec<RegisteredFile>,
+}
+
+#[derive(Debug)]
+struct RegisteredFile {
+    key: String,
+    path: String,
+    faces: Option<Arc<FaceSet>>,
+}
+
+impl FontFiles {
+    /// Registers a file of the game and returns its place; the file is
+    /// read when it is new.
+    fn register(&mut self, vfs: &Vfs, path: &str) -> usize {
+        let k = key(path);
+        if let Some(at) = self.files.iter().position(|f| f.key == k) {
+            return at;
+        }
+        let faces = vfs
+            .read(path)
+            .ok()
+            .map(FaceSet::from_bytes)
+            .filter(|set| !set.faces().is_empty())
+            .map(Arc::new);
+        self.files.push(RegisteredFile {
+            key: k,
+            path: path.to_string(),
+            faces,
+        });
+        self.files.len() - 1
+    }
+
+    /// The files that hold faces, the one at `first` before the others,
+    /// which follow in the order they were registered.
+    fn readable(&self, first: usize) -> Vec<(&str, Arc<FaceSet>)> {
+        let all = self.files.iter().enumerate();
+        let (own, others): (Vec<_>, Vec<_>) = all.partition(|(at, _)| *at == first);
+        own.into_iter()
+            .chain(others)
+            .filter_map(|(_, f)| Some((f.path.as_str(), f.faces.clone()?)))
+            .collect()
+    }
+
+    /// How many files are registered.
+    pub fn len(&self) -> usize {
+        self.files.len()
+    }
+
+    /// Whether no file is registered.
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+}
+
 /// A rasterised glyph.
 #[derive(Debug)]
 struct Glyph {
@@ -455,7 +572,61 @@ struct Glyph {
     coverage: Vec<u8>,
 }
 
+/// A face that draws the characters the font's own face lacks.
+struct Fallback {
+    font: Arc<fontdue::Font>,
+    embolden: bool,
+    slant: bool,
+}
+
+impl std::fmt::Debug for Fallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Fallback").finish_non_exhaustive()
+    }
+}
+
+/// The system's faces loaded to stand in for missing characters, shared
+/// by every font of the process: a face is parsed once.
+fn system_fallback_font(index: usize) -> Option<Arc<fontdue::Font>> {
+    static LOADED: OnceLock<Mutex<HashMap<usize, Option<Arc<fontdue::Font>>>>> = OnceLock::new();
+    let loaded = LOADED.get_or_init(Mutex::default);
+    if let Some(known) = loaded.lock().ok().and_then(|l| l.get(&index).cloned()) {
+        return known;
+    }
+    let font = FaceSet::system()
+        .with_data(index, |bytes, face| parse_face(bytes, face, 40.0).ok())
+        .flatten()
+        .map(Arc::new);
+    if let Ok(mut loaded) = loaded.lock() {
+        loaded.insert(index, font.clone());
+    }
+    font
+}
+
+fn parse_face(bytes: &[u8], index: u32, px: f32) -> Result<fontdue::Font, &'static str> {
+    let settings = fontdue::FontSettings {
+        collection_index: index,
+        scale: px,
+        ..fontdue::FontSettings::default()
+    };
+    fontdue::Font::from_bytes(bytes, settings)
+}
+
 impl Glyph {
+    /// The glyph of a character in a face, at a size, with the bold and
+    /// the italic to imitate.
+    fn of(font: &fontdue::Font, ch: char, px: f32, embolden: usize, slant: bool) -> Glyph {
+        let (metrics, coverage) = font.rasterize(ch, px);
+        let mut glyph = Glyph { metrics, coverage };
+        if embolden > 0 {
+            glyph = glyph.emboldened(embolden);
+        }
+        if slant {
+            glyph = glyph.slanted(SLANT);
+        }
+        glyph
+    }
+
     /// The glyph's top above the baseline (FreeType's `bitmap_top`).
     fn bearing_y(&self) -> i32 {
         self.metrics.ymin + self.metrics.height as i32
@@ -520,6 +691,32 @@ impl Glyph {
     }
 }
 
+/// The pixels a glyph is thickened by to imitate a bold: a regular
+/// stroke is about a twelfth of the size, a bold one half as much again.
+fn embolden_by(px: f32) -> usize {
+    ((px / 24.0).round() as usize).max(1)
+}
+
+/// A horizontal line a face draws along a line of text (the underline,
+/// the strike-through): how far above the baseline its top is, and its
+/// thickness, in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Rule {
+    top: i32,
+    thickness: i32,
+}
+
+impl Rule {
+    /// The rule a face gives (`position` is its top above the baseline,
+    /// in the font's units), at `scale` pixels per unit.
+    fn scaled(position: i16, thickness: i16, scale: f32) -> Rule {
+        Rule {
+            top: (f32::from(position) * scale).round() as i32,
+            thickness: ((f32::from(thickness) * scale).round() as i32).max(1),
+        }
+    }
+}
+
 /// A text rendered to an image, kept for reuse.
 #[derive(Debug)]
 struct CachedText {
@@ -528,9 +725,11 @@ struct CachedText {
     align: TextAlign,
     max_height: i32,
     image: Image,
-    offset: i32,
     texture: Option<Texture>,
     priority: u32,
+    /// Asked for since the textures were last uploaded: the frame being
+    /// put together draws it.
+    wanted: bool,
 }
 
 /// A TrueType font: the rasteriser, its glyphs, and the texts rendered.
@@ -553,32 +752,79 @@ pub struct TrueTypeFont {
     ascender: f32,
     descender: f32,
     max_char_height: i32,
+    /// Where `UNDERLINE` draws its line.
+    underline: Rule,
+    /// Where `STRIKE` draws its line.
+    strike: Rule,
     glyphs: HashMap<char, Option<Glyph>>,
+    /// The faces loaded so far for the characters the font's own lacks.
+    fallbacks: Vec<Fallback>,
+    /// The game's font files, searched for those characters: the font's
+    /// own first.
+    files: Vec<Arc<FaceSet>>,
+    /// The faces of `files` (file, face) looked at already.
+    tried: Vec<(usize, usize)>,
+    /// Whether the system's fonts are searched after the game's files.
+    system_fallback: bool,
+    /// Whether `FACE` was found, as a family name, in one of the game's
+    /// files.
+    family_found: bool,
     texts: Vec<CachedText>,
     /// Whether lines are laid out right to left (`Game.TextRTL`).
     rtl: bool,
     /// Whether the text is UTF-8 (`Game.TextEncoding`).
     utf8: bool,
+    /// The ANSI code page of the system the game was made for.
+    system_page: CodePage,
 }
 
 impl TrueTypeFont {
+    /// Loads the face the definition asks for (`CBFontTT::CreateWinFont`)
+    /// with no other font file of the game than its own; see
+    /// [`load_among`](Self::load_among).
+    pub fn load(vfs: &Vfs, def: TrueTypeFontDef) -> Result<TrueTypeFont, String> {
+        TrueTypeFont::load_among(vfs, def, &mut FontFiles::default())
+    }
+
     /// Loads the face the definition asks for (`CBFontTT::CreateWinFont`):
     /// the typeface `FACE` in the weight and slant of `BOLD` and
-    /// `ITALIC`, from the game's `FILENAME` file when that file is of
-    /// that typeface, else from the system's fonts. When neither has
-    /// the typeface the game's file is used whatever its name, and a
-    /// usual system font without one. A bold or an italic the face found
-    /// lacks is imitated.
-    pub fn load(vfs: &Vfs, def: TrueTypeFontDef) -> Result<TrueTypeFont, String> {
-        let game = vfs.read(&def.filename).ok().map(FaceSet::from_bytes);
-        let game_faces = game.as_ref().map_or(&[][..], FaceSet::faces);
-        let (face, bold, italic) = (def.face.clone(), def.bold, def.italic);
-        // The system's fonts are only listed when the game's file is not
-        // the typeface asked for.
-        let found = match choose_face(game_faces, Some(&face), bold, italic) {
-            Some(choice) => Some((FaceOrigin::Game, choice)),
-            None => resolve_face(&[], FaceSet::system().faces(), &face, bold, italic),
+    /// `ITALIC`. The font's `FILENAME` is registered among the game's
+    /// font files (`CBFontStorage::RegisterTTFont`); the typeface is
+    /// looked for in that file, then in the other files registered,
+    /// then among the system's fonts. When none has the typeface the
+    /// font's own file is used whatever its name, and a usual system
+    /// font without one. A bold or an italic the face found lacks is
+    /// imitated.
+    pub fn load_among(
+        vfs: &Vfs,
+        def: TrueTypeFontDef,
+        files: &mut FontFiles,
+    ) -> Result<TrueTypeFont, String> {
+        let own = files.register(vfs, &def.filename);
+        let game = files.readable(own);
+        let sets: Vec<Arc<FaceSet>> = game.iter().map(|(_, set)| set.clone()).collect();
+        let finish = |mut font: TrueTypeFont, family_found: bool| {
+            font.files = sets.clone();
+            font.system_fallback = true;
+            font.family_found = family_found;
+            font
         };
+        let (face, bold, italic) = (def.face.clone(), def.bold, def.italic);
+        // A file of the game that is of the typeface asked for.
+        for (path, set) in &game {
+            let Some(choice) = choose_face(set.faces(), Some(&face), bold, italic) else {
+                continue;
+            };
+            let loaded = set.with_data(choice.index, |bytes, index| {
+                TrueTypeFont::from_face(def.clone(), path, bytes, index, choice)
+            });
+            if let Some(Ok(font)) = loaded {
+                return Ok(finish(font, true));
+            }
+        }
+        // The system's fonts, listed only now that the game has not the
+        // typeface.
+        let found = resolve_face(&[], FaceSet::system().faces(), &face, bold, italic);
         if let Some((FaceOrigin::System, choice)) = found {
             let system = FaceSet::system();
             let source = system.path(choice.index).unwrap_or_else(|| face.clone());
@@ -588,22 +834,16 @@ impl TrueTypeFont {
             // A system file that went away or does not parse is not the
             // end: the fallbacks below still apply.
             if let Some(Ok(font)) = loaded {
-                return Ok(font);
+                return Ok(finish(font, false));
             }
         }
-        // The game's own file: the face asked for, or, when no font has
-        // that typeface, the closest style of whatever the file holds.
-        if let Some(game) = &game {
-            let choice = match found {
-                Some((FaceOrigin::Game, choice)) => Some(choice),
-                _ => choose_face(game.faces(), None, bold, italic),
-            };
-            if let Some(choice) = choice {
-                let source = def.filename.clone();
-                if let Some(font) = game.with_data(choice.index, |bytes, index| {
-                    TrueTypeFont::from_face(def.clone(), &source, bytes, index, choice)
+        // The font's own file: the closest style of whatever it holds.
+        if let Some((path, set)) = game.first().filter(|_| files.files[own].faces.is_some()) {
+            if let Some(choice) = choose_face(set.faces(), None, bold, italic) {
+                if let Some(font) = set.with_data(choice.index, |bytes, index| {
+                    TrueTypeFont::from_face(def.clone(), path, bytes, index, choice)
                 }) {
-                    return font;
+                    return font.map(|font| finish(font, false));
                 }
             }
         }
@@ -618,7 +858,7 @@ impl TrueTypeFont {
             if let Some(font) = set.with_data(choice.index, |bytes, index| {
                 TrueTypeFont::from_face(def.clone(), path, bytes, index, choice)
             }) {
-                return font;
+                return font.map(|font| finish(font, false));
             }
         }
         Err(format!(
@@ -651,13 +891,7 @@ impl TrueTypeFont {
         choice: FaceChoice,
     ) -> Result<TrueTypeFont, String> {
         let px = def.pixel_size();
-        let settings = fontdue::FontSettings {
-            collection_index: index,
-            scale: px,
-            ..fontdue::FontSettings::default()
-        };
-        let font =
-            fontdue::Font::from_bytes(bytes, settings).map_err(|e| format!("{source}: {e}"))?;
+        let font = parse_face(bytes, index, px).map_err(|e| format!("{source}: {e}"))?;
         let metrics = font
             .horizontal_line_metrics(px)
             .ok_or_else(|| format!("{source}: no horizontal metrics"))?;
@@ -665,27 +899,50 @@ impl TrueTypeFont {
         let descender = -metrics.descent;
         let line_height = metrics.new_line_size.ceil() as i32 + 2;
         let max_char_height = (metrics.ascent - metrics.descent).ceil() as i32;
+        // The lines of the face, as GDI draws them from the font's own
+        // metrics; a face without them gets the usual places: half the
+        // descent under the baseline, a quarter of the size above it.
+        let stroke = ((px / 14.0).round() as i32).max(1);
+        let mut underline = Rule {
+            top: -((descender / 2.0).round() as i32).max(1),
+            thickness: stroke,
+        };
+        let mut strike = Rule {
+            top: (px * 0.26).round() as i32,
+            thickness: stroke,
+        };
+        if let Ok(face) = ttf_parser::Face::parse(bytes, index) {
+            let scale = px / f32::from(face.units_per_em().max(1));
+            if let Some(m) = face.underline_metrics() {
+                underline = Rule::scaled(m.position, m.thickness, scale);
+            }
+            if let Some(m) = face.strikeout_metrics() {
+                strike = Rule::scaled(m.position, m.thickness, scale);
+            }
+        }
         Ok(TrueTypeFont {
             def,
             source: source.to_string(),
             font,
             px,
-            // A regular stroke is about a twelfth of the size; a bold
-            // one half as much again.
-            embolden: if choice.embolden {
-                ((px / 24.0).round() as usize).max(1)
-            } else {
-                0
-            },
+            embolden: if choice.embolden { embolden_by(px) } else { 0 },
             slant: choice.slant,
             line_height,
             ascender,
             descender,
             max_char_height,
+            underline,
+            strike,
             glyphs: HashMap::new(),
+            fallbacks: Vec::new(),
+            files: Vec::new(),
+            tried: Vec::new(),
+            system_fallback: false,
+            family_found: false,
             texts: Vec::new(),
             rtl: false,
             utf8: false,
+            system_page: CodePage::WESTERN,
         })
     }
 
@@ -709,20 +966,42 @@ impl TrueTypeFont {
         }
     }
 
-    /// The characters of a game text in the game's encoding
-    /// (`CBTextUtils::ConvertToNative`): what [`wrap`](Self::wrap),
-    /// [`measure`](Self::measure) and [`render`](Self::render) take.
-    pub fn characters(&self, text: &str) -> String {
-        if self.utf8 {
-            utf8_to_text(text)
-        } else {
-            // The font's `CHARSET` picks the code page of ANSI text.
-            ansi_to_text_in(text, self.def.charset)
+    /// The code page the font reads an ANSI game's text in: the one of
+    /// its `CHARSET` (`CBFontTT::GetWindowsCharset`, the character set
+    /// `CreateFont` is given, in whose code page GDI reads the bytes).
+    pub fn code_page(&self) -> CodePage {
+        CodePage::of_charset(self.def.charset, self.system_page)
+    }
+
+    /// Sets the ANSI code page of the system the game was made for; the
+    /// texts rendered so far go when the font reads its text in it.
+    pub fn set_system_code_page(&mut self, page: CodePage) {
+        let before = self.code_page();
+        self.system_page = page;
+        if self.code_page() != before && !self.utf8 {
+            self.texts.clear();
         }
     }
 
-    /// Lays lines out right to left when `rtl`; the texts rendered so
-    /// far go when the direction changes.
+    /// The characters of a game text in the game's encoding
+    /// (`CBTextUtils::ConvertToNative`, and for ANSI text what GDI does
+    /// with the bytes): what [`wrap`](Self::wrap),
+    /// [`measure`](Self::measure) and [`render`](Self::render) take.
+    /// Arabic letters come out in the forms their neighbours call for,
+    /// as Windows shapes them when it draws: a form the face lacks while
+    /// it has the plain letter is left as the letter.
+    pub fn characters(&self, text: &str) -> String {
+        let characters = if self.utf8 {
+            utf8_to_text(text)
+        } else {
+            self.code_page().decode(text)
+        };
+        let has = |c: char| self.font.lookup_glyph_index(c) != 0;
+        join_arabic(&characters, |form, letter| has(form) || !has(letter))
+    }
+
+    /// Reads lines from the right when `rtl` (`Game.TextRTL`); the texts
+    /// rendered so far go when the direction changes.
     pub fn set_rtl(&mut self, rtl: bool) {
         if self.rtl != rtl {
             self.rtl = rtl;
@@ -730,26 +1009,105 @@ impl TrueTypeFont {
         }
     }
 
+    /// Gives the font another file of the game to look in for the
+    /// characters its face lacks, after those it has. The characters
+    /// found missing so far are looked for again.
+    pub fn add_fallback_file(&mut self, faces: Arc<FaceSet>) {
+        if self.files.iter().any(|f| Arc::ptr_eq(f, &faces)) {
+            return;
+        }
+        self.files.push(faces);
+        self.glyphs.retain(|_, glyph| glyph.is_some());
+        self.texts.clear();
+    }
+
+    /// The glyph of a character: the face's own, else that of another
+    /// face that has the character, where Windows substitutes a font
+    /// too. The other faces of the game's font files are looked at
+    /// first (the font's own file, then the others registered), then
+    /// the system's fonts. `None` when no face has the character: it is
+    /// skipped.
     fn glyph(&mut self, ch: char) -> Option<&Glyph> {
-        let font = &self.font;
-        let (px, embolden, slant) = (self.px, self.embolden, self.slant);
-        self.glyphs
-            .entry(ch)
-            .or_insert_with(|| {
-                if font.lookup_glyph_index(ch) == 0 {
-                    return None;
+        if !self.glyphs.contains_key(&ch) {
+            let glyph = self.rasterize(ch);
+            self.glyphs.insert(ch, glyph);
+        }
+        self.glyphs.get(&ch).and_then(Option::as_ref)
+    }
+
+    fn rasterize(&mut self, ch: char) -> Option<Glyph> {
+        let (px, embolden) = (self.px, self.embolden);
+        if self.font.lookup_glyph_index(ch) != 0 {
+            return Some(Glyph::of(&self.font, ch, px, embolden, self.slant));
+        }
+        // A symbol font's character (`CHARSET=12`) in a face that keeps
+        // its symbols at the plain codes.
+        if let code @ 0xF020..=0xF0FF = u32::from(ch) {
+            let plain = char::from((code - 0xF000) as u8);
+            if self.font.lookup_glyph_index(plain) != 0 {
+                return Some(Glyph::of(&self.font, plain, px, embolden, self.slant));
+            }
+        }
+        // A control character draws nothing: no other face is asked for
+        // one, which some fonts give a sign.
+        if ch.is_control() {
+            return None;
+        }
+        let fallback = self.fallback_for(ch)?;
+        let face = &self.fallbacks[fallback];
+        let embolden = if face.embolden { embolden_by(px) } else { 0 };
+        Some(Glyph::of(&face.font, ch, px, embolden, face.slant))
+    }
+
+    /// The face, among those loaded for missing characters or still to
+    /// load, that has a character.
+    fn fallback_for(&mut self, ch: char) -> Option<usize> {
+        let loaded = |fallbacks: &[Fallback]| {
+            fallbacks
+                .iter()
+                .position(|f| f.font.lookup_glyph_index(ch) != 0)
+        };
+        if let Some(at) = loaded(&self.fallbacks) {
+            return Some(at);
+        }
+        let (bold, italic, px) = (self.def.bold, self.def.italic, self.px);
+        for (file, set) in self.files.clone().iter().enumerate() {
+            for face in 0..set.faces().len() {
+                if self.tried.contains(&(file, face)) || !set.has_glyph(face, ch) {
+                    continue;
                 }
-                let (metrics, coverage) = font.rasterize(ch, px);
-                let mut glyph = Glyph { metrics, coverage };
-                if embolden > 0 {
-                    glyph = glyph.emboldened(embolden);
+                self.tried.push((file, face));
+                let described = &set.faces()[face];
+                let font = set
+                    .with_data(face, |bytes, index| parse_face(bytes, index, px).ok())
+                    .flatten();
+                if let Some(font) = font {
+                    self.fallbacks.push(Fallback {
+                        font: Arc::new(font),
+                        embolden: bold && described.weight < crate::font_face::BOLD_ENOUGH,
+                        slant: italic && !described.italic,
+                    });
+                    return Some(self.fallbacks.len() - 1);
                 }
-                if slant {
-                    glyph = glyph.slanted(SLANT);
-                }
-                Some(glyph)
-            })
-            .as_ref()
+            }
+        }
+        if self.system_fallback {
+            let system = FaceSet::system();
+            let choice = system.styled(system_face_with_glyph(ch)?, ch, bold, italic);
+            let font = system_fallback_font(choice.index)?;
+            // A face that claims the character and gives no glyph for it
+            // must not be loaded again and again.
+            if font.lookup_glyph_index(ch) == 0 {
+                return None;
+            }
+            self.fallbacks.push(Fallback {
+                font,
+                embolden: choice.embolden,
+                slant: choice.slant,
+            });
+            return Some(self.fallbacks.len() - 1);
+        }
+        None
     }
 
     fn kerning(&self, left: char, right: char) -> f32 {
@@ -767,105 +1125,113 @@ impl TrueTypeFont {
     }
 
     /// Breaks a text (its characters) into lines for a box of `max_width`
-    /// (`CBFontTT::WrapText`): each line with its width. Negative limits
-    /// mean none.
+    /// (`CBFontTT::FormatText`, `FormatTextW`): each line with its
+    /// width. A negative height means no limit; a negative width means
+    /// no box (lines only end where the text says so), which is Luma
+    /// Engine's own convention.
+    ///
+    /// A line takes characters while the text up to them fits. `\n` ends
+    /// it. When a character does not fit, the line ends before the last
+    /// space that fitted, and that space is dropped; without one it ends
+    /// before the character. A first character that does not fit ends
+    /// the text, and so does a line that would pass `max_height`. After
+    /// a line that held a space the original skips one character more:
+    /// the space it broke at, or the line break that ended it, and then
+    /// a second line break is taken with it, so the empty line of two
+    /// line breaks in a row is dropped after a line with a space and
+    /// kept after a line without one. Texts are laid out for that, so
+    /// it is reproduced.
     pub fn wrap(&mut self, text: &str, max_width: i32, max_height: i32) -> Vec<(String, i32)> {
         let chars: Vec<char> = text.chars().collect();
         let mut lines: Vec<(String, i32)> = Vec::new();
-        let mut curr_width = 0;
-        let mut prev_char: Option<char> = None;
-        let mut prev_space_index: Option<usize> = None;
-        let mut prev_space_width = 0;
-        let mut line_start = 0;
-        let mut i = 0;
-        while i < chars.len() {
-            let ch = chars[i];
-            if ch == ' ' {
-                prev_space_index = Some(i);
-                prev_space_width = curr_width;
-            }
-            let mut char_width = 0;
-            if ch != '\n' {
-                match self.advance(prev_char, ch) {
-                    Some(advance) => {
-                        char_width = advance;
-                        prev_char = Some(ch);
-                    }
-                    None => {
-                        i += 1;
-                        continue;
-                    }
-                }
-            }
-            let line_too_long = max_width >= 0 && curr_width + char_width > max_width;
-            if line_too_long && curr_width == 0 {
+        let mut start = 0;
+        while start < chars.len() {
+            if max_height >= 0 && (lines.len() as i32 + 1) * self.line_height > max_height {
                 break;
             }
-            if ch == '\n' || i == chars.len() - 1 || line_too_long {
-                let (mut break_point, mut break_width, break_on_space);
-                match prev_space_index {
-                    Some(space) if line_too_long => {
-                        break_point = space;
-                        break_width = prev_space_width;
-                        break_on_space = true;
-                    }
-                    _ => {
-                        break_point = i;
-                        break_width = curr_width;
-                        break_on_space = ch == '\n';
-                        if i == chars.len() - 1 {
-                            break_point += 1;
-                            break_width += char_width;
-                        }
-                    }
-                }
-                if max_height >= 0 && (lines.len() as i32 + 1) * self.line_height > max_height {
+            // `taken` characters are measured; `width` is what those that
+            // fit take.
+            let (mut taken, mut width, mut over) = (0, 0, false);
+            // The last space that fitted: the characters before it and
+            // their width.
+            let mut last_space: Option<(usize, i32)> = None;
+            let mut prev: Option<char> = None;
+            while start + taken < chars.len() {
+                let ch = chars[start + taken];
+                if ch == '\n' {
                     break;
                 }
-                let line: String = chars[line_start..break_point.max(line_start)]
-                    .iter()
-                    .collect();
-                lines.push((line, break_width));
-                curr_width = 0;
-                prev_char = None;
-                prev_space_index = None;
-                if break_on_space {
-                    break_point += 1;
+                taken += 1;
+                let advance = self.advance(prev, ch);
+                let wider = width + advance.unwrap_or(0);
+                if max_width >= 0 && wider > max_width {
+                    over = true;
+                    break;
                 }
-                line_start = break_point;
-                i = break_point;
-                continue;
+                if ch == ' ' {
+                    last_space = Some((taken - 1, width));
+                }
+                if advance.is_some() {
+                    prev = Some(ch);
+                }
+                width = wider;
             }
-            curr_width += char_width;
-            i += 1;
+            if over && taken == 1 {
+                break;
+            }
+            let (mut length, line_width) = match (over, last_space) {
+                (true, Some((before, width))) => (before, width),
+                (true, None) => (taken - 1, width),
+                (false, _) => (taken, width),
+            };
+            lines.push((chars[start..start + length].iter().collect(), line_width));
+            if last_space.is_some() {
+                length += 1;
+            }
+            start += length;
+            if chars.get(start) == Some(&'\n') {
+                start += 1;
+            }
         }
         lines
     }
 
-    /// The width and height of a text in a box.
+    /// The width of a text on one line (`CBFontTT::GetTextWidth`): the
+    /// whole text, as the original gives it to GDI in one piece. A line
+    /// break counts for nothing here; what GDI makes of one depends on
+    /// the font.
+    pub fn line_width(&mut self, text: &str) -> i32 {
+        let mut prev: Option<char> = None;
+        let mut width = 0;
+        for ch in text.chars().filter(|&ch| ch != '\n') {
+            if let Some(advance) = self.advance(prev, ch) {
+                width += advance;
+                prev = Some(ch);
+            }
+        }
+        width
+    }
+
+    /// The width of a text on one line, and its height in a box of
+    /// `max_width` (`CBFontTT::GetTextWidth`, `GetTextHeight`).
     pub fn measure(&mut self, text: &str, max_width: i32) -> (i32, i32) {
         let lines = self.wrap(text, max_width, -1);
         let height = lines.len() as i32 * self.line_height;
-        let width = lines.iter().map(|l| l.1).max().unwrap_or(0);
-        (width, height)
+        (self.line_width(text), height)
     }
 
-    /// Renders a text to an image (`CBFontTT::RenderTextToTexture`):
-    /// white glyphs with their coverage as alpha, to be tinted by each
-    /// layer. Returns the image and the offset the engine draws it
-    /// higher by.
+    /// Renders a text to an image (`CBFontTT::DrawTextD3D`, the half
+    /// that draws the lines `FormatText` breaks the text into): white
+    /// glyphs with their coverage as alpha, to be tinted by each layer.
+    /// Every line has its baseline `line height - descender` under its
+    /// top, with the underline and the strike-through of the font across
+    /// its width.
     ///
     /// A negative width means no box, as for [`wrap`](Self::wrap) and
     /// for the bitmap fonts: the lines are never broken for their
     /// length, start at the left whatever the alignment, and the image
     /// is as wide as the widest of them (an editor's line).
-    pub fn render(
-        &mut self,
-        text: &str,
-        width: i32,
-        align: TextAlign,
-        max_height: i32,
-    ) -> (Image, i32) {
+    pub fn render(&mut self, text: &str, width: i32, align: TextAlign, max_height: i32) -> Image {
         let boxed = width >= 0;
         let lines = self.wrap(text, if boxed { width } else { -1 }, max_height);
         let wrapped_height = lines.len() as i32 * self.line_height;
@@ -874,7 +1240,8 @@ impl TrueTypeFont {
             text_height = wrapped_height;
         }
         let (width, align) = if boxed {
-            (width.max(1), align)
+            // A script names the box: it must not ask for gigabytes.
+            (width.clamp(1, MAX_BOXED_WIDTH), align)
         } else {
             // The widest line, with room for a last glyph that reaches
             // past its advance (an italic).
@@ -887,31 +1254,23 @@ impl TrueTypeFont {
         let mut image = Image {
             width: width as u32,
             height: text_height as u32,
-            pixels: vec![0; (width * text_height * 4) as usize],
+            pixels: vec![0; width as usize * text_height as usize * 4],
             has_alpha_channel: true,
         };
-        let mut pos_y = self.line_height - self.descender as i32;
-        let mut text_offset = 0;
+        let mut baseline = self.line_height - self.descender as i32;
         for (line, line_width) in &lines {
-            let mut pos_x = align.start_x(0, width, *line_width);
-            let orig_x = pos_x;
-            text_offset = 0;
-            for ch in line.chars() {
-                if let Some(glyph) = self.glyph(ch) {
-                    text_offset = text_offset.max(glyph.bearing_y());
-                }
+            if baseline - self.line_height > text_height {
+                break;
             }
-            // Right-to-left text lays the line's glyphs out from the last
-            // to the first: the reading order GDI gives the original
-            // engine with `ETO_RTLREADING`, without a bidirectional
-            // algorithm.
-            let visual: Vec<char> = if self.rtl {
-                line.chars().rev().collect()
-            } else {
-                line.chars().collect()
-            };
+            let orig_x = align.start_x(0, width, *line_width);
+            let mut pos_x = orig_x;
+            // The order the line is drawn in: runs of right-to-left
+            // characters reversed, and with `Game.TextRTL` the line read
+            // from the right (what GDI does of a line, with
+            // `ETO_RTLREADING` then).
+            let visual = visual_order(line, self.rtl);
             let mut prev: Option<char> = None;
-            for ch in visual {
+            for ch in visual.chars() {
                 let (metrics, bearing_y, coverage) = match self.glyph(ch) {
                     Some(glyph) => (glyph.metrics, glyph.bearing_y(), glyph.coverage.clone()),
                     None => continue,
@@ -919,29 +1278,41 @@ impl TrueTypeFont {
                 let kerning = prev.map_or(0.0, |p| self.kerning(p, ch)) as i32;
                 pos_x += kerning;
                 let gx = pos_x + metrics.xmin;
-                let gy = pos_y - bearing_y + text_offset;
+                let gy = baseline - bearing_y;
                 blit(&mut image, &coverage, metrics.width, metrics.height, gx, gy);
                 prev = Some(ch);
                 pos_x += metrics.advance_width as i32;
             }
-            if self.def.underline {
-                let y = (-self.font_underline() + self.ascender) as i32;
-                for x in orig_x..orig_x + line_width {
-                    set_pixel(&mut image, x, y);
+            let rules = [
+                (self.def.underline, self.underline),
+                (self.def.strike, self.strike),
+            ];
+            for (_, rule) in rules.iter().filter(|(drawn, _)| *drawn) {
+                let top = baseline - rule.top;
+                for y in top..top + rule.thickness {
+                    for x in orig_x..orig_x.saturating_add(*line_width) {
+                        set_pixel(&mut image, x, y);
+                    }
                 }
             }
-            pos_y += self.line_height;
+            baseline += self.line_height;
         }
-        (image, text_offset)
+        image
     }
 
-    fn font_underline(&self) -> f32 {
-        // fontdue exposes no underline position; a line just below the
-        // baseline, as most fonts place it.
-        -(self.descender / 2.0)
-    }
-
-    /// Renders a game text into the cache if it is not there.
+    /// Renders a game text into the cache if it is not there
+    /// (`CBFontTT::DrawTextD3D`, the half that finds or makes the
+    /// image). A text found is used once more (its priority goes up by
+    /// one); a new one takes the place of the least used when the cache
+    /// is full.
+    ///
+    /// The original renders a missing text when it draws it, so a frame
+    /// with more texts than the cache holds still shows them all, each
+    /// rendered again every frame. Here the texts are rendered before
+    /// the frame is drawn: one the frame asked for is never given up to
+    /// make room, the cache grows for that frame instead, and
+    /// [`upload`](Self::upload) brings it back to its size once the
+    /// frame no longer needs them.
     pub fn prepare(&mut self, text: &str, width: i32, align: TextAlign, max_height: i32) {
         if text.is_empty() {
             return;
@@ -949,30 +1320,43 @@ impl TrueTypeFont {
         let found = self.texts.iter().position(|t| {
             t.text == text && t.width == width && t.align == align && t.max_height == max_height
         });
-        let next_priority = self.texts.iter().map(|t| t.priority).max().unwrap_or(0) + 1;
         if let Some(i) = found {
-            self.texts[i].priority = next_priority;
+            self.texts[i].priority = self.texts[i].priority.saturating_add(1);
+            self.texts[i].wanted = true;
             return;
         }
+        let next_priority = self
+            .texts
+            .iter()
+            .map(|t| t.priority)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
         let characters = self.characters(text);
-        let (image, offset) = self.render(&characters, width, align, max_height);
+        let image = self.render(&characters, width, align, max_height);
         let cached = CachedText {
             text: text.to_string(),
             width,
             align,
             max_height,
             image,
-            offset,
             texture: None,
             priority: next_priority,
+            wanted: true,
         };
-        if self.texts.len() >= CACHED_TEXTS {
-            let oldest = (0..self.texts.len())
-                .min_by_key(|&i| self.texts[i].priority)
-                .unwrap_or(0);
-            self.texts[oldest] = cached;
-        } else {
+        if self.texts.len() < CACHED_TEXTS {
             self.texts.push(cached);
+            return;
+        }
+        // The least used text the frame does not draw goes; when the
+        // frame draws them all, the cache grows.
+        let all = self.texts.len() >= MAX_FRAME_TEXTS;
+        let least = (0..self.texts.len())
+            .filter(|&i| all || !self.texts[i].wanted)
+            .min_by_key(|&i| self.texts[i].priority);
+        match least {
+            Some(i) => self.texts[i] = cached,
+            None => self.texts.push(cached),
         }
     }
 
@@ -999,6 +1383,27 @@ impl TrueTypeFont {
                 text.texture = Some(renderer.texture("text", &text.image));
             }
         }
+        self.end_frame();
+    }
+
+    /// The frame's texts are ready: those it did not ask for go, the
+    /// least used first, until the cache is back to its size, and the
+    /// next frame starts asking.
+    fn end_frame(&mut self) {
+        while self.texts.len() > CACHED_TEXTS {
+            let least = (0..self.texts.len())
+                .filter(|&i| !self.texts[i].wanted)
+                .min_by_key(|&i| self.texts[i].priority);
+            match least {
+                Some(i) => {
+                    self.texts.swap_remove(i);
+                }
+                None => break,
+            }
+        }
+        for text in &mut self.texts {
+            text.wanted = false;
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1011,6 +1416,7 @@ impl TrueTypeFont {
         width: i32,
         align: TextAlign,
         max_height: i32,
+        force: Option<Rgba>,
     ) {
         let Some(cached) = self.texts.iter().find(|t| {
             t.text == text && t.width == width && t.align == align && t.max_height == max_height
@@ -1025,12 +1431,15 @@ impl TrueTypeFont {
                 texture,
                 dst: Rect::new(
                     (x + layer.offset_x) as f32,
-                    (y - cached.offset + layer.offset_y) as f32,
+                    (y + layer.offset_y) as f32,
                     cached.image.width as f32,
                     cached.image.height as f32,
                 ),
                 src: None,
-                tint: layer.color,
+                tint: Rgba {
+                    a: force.map_or(layer.color.a, |forced| forced.a),
+                    ..layer.color
+                },
                 flip_x: false,
                 flip_y: false,
             });
@@ -1083,6 +1492,12 @@ pub struct FontBank {
     rtl: bool,
     /// Whether text is UTF-8 (`Game.TextEncoding`).
     utf8: bool,
+    /// The game's TrueType files registered so far.
+    files: FontFiles,
+    /// The ANSI code page set for the game, when one was.
+    page: Option<CodePage>,
+    /// The ANSI code page the fonts loaded tell of.
+    told_page: Option<CodePage>,
 }
 
 impl FontBank {
@@ -1101,20 +1516,75 @@ impl FontBank {
         if self.missing.iter().any(|(p, _)| key(p) == k) {
             return false;
         }
-        match Font::load(vfs, path) {
+        let registered = self.files.len();
+        match Font::load_among(vfs, path, &mut self.files) {
             Ok(mut font) => {
                 font.set_rtl(self.rtl);
                 font.set_utf8(self.utf8);
                 if let Font::TrueType(f) = &font {
                     self.chosen.push((path.to_string(), f.face_note()));
+                    // The first font of a language tells which system
+                    // the game was made for.
+                    if self.told_page.is_none() {
+                        self.told_page = CodePage::system_of_charset(f.def.charset);
+                        if self.page.is_none() && self.told_page.is_some() {
+                            self.apply_code_page();
+                        }
+                    }
                 }
+                font.set_code_page(self.ansi_code_page());
                 self.fonts.insert(k, font);
+                if self.files.len() > registered {
+                    self.share_new_files(vfs, registered);
+                }
                 true
             }
             Err(reason) => {
                 self.missing.push((path.to_string(), reason));
                 false
             }
+        }
+    }
+
+    /// The fonts loaded before a file was registered get what the
+    /// original gives them at their next use, the file being registered
+    /// with Windows for every font: its faces for the characters theirs
+    /// lack, and for the fonts whose `FACE` no file of the game had so
+    /// far, the typeface itself when the new file is of it.
+    fn share_new_files(&mut self, vfs: &Vfs, from: usize) {
+        let new: Vec<Arc<FaceSet>> = self.files.files[from..]
+            .iter()
+            .filter_map(|f| f.faces.clone())
+            .collect();
+        let mut again: Vec<String> = Vec::new();
+        for (k, font) in &mut self.fonts {
+            let Font::TrueType(f) = font else { continue };
+            let named = |set: &Arc<FaceSet>| {
+                choose_face(set.faces(), Some(&f.def.face), false, false).is_some()
+            };
+            if !f.family_found && new.iter().any(named) {
+                again.push(k.clone());
+                continue;
+            }
+            for set in &new {
+                f.add_fallback_file(set.clone());
+            }
+        }
+        for k in again {
+            let Some(Font::TrueType(old)) = self.fonts.get(&k) else {
+                continue;
+            };
+            let Ok(font) = TrueTypeFont::load_among(vfs, old.def.clone(), &mut self.files) else {
+                continue;
+            };
+            let mut font = Font::TrueType(Box::new(font));
+            font.set_rtl(self.rtl);
+            font.set_utf8(self.utf8);
+            font.set_code_page(self.ansi_code_page());
+            if let Font::TrueType(f) = &font {
+                self.chosen.push((k.clone(), f.face_note()));
+            }
+            self.fonts.insert(k, font);
         }
     }
 
@@ -1157,6 +1627,30 @@ impl FontBank {
         self.utf8
     }
 
+    /// The ANSI code page of the system the game was made for, which
+    /// the original engine takes from Windows (`CP_ACP`): the one set
+    /// with [`set_ansi_code_page`](Self::set_ansi_code_page); else the
+    /// one the first TrueType font loaded with a `CHARSET` of a language
+    /// names (a game with Russian fonts was made for a Cyrillic system);
+    /// else Windows-1252.
+    pub fn ansi_code_page(&self) -> CodePage {
+        self.page.or(self.told_page).unwrap_or(CodePage::WESTERN)
+    }
+
+    /// Sets the ANSI code page of the game, or with `None` leaves it to
+    /// the fonts; the fonts loaded and those loaded later follow.
+    pub fn set_ansi_code_page(&mut self, page: Option<CodePage>) {
+        self.page = page;
+        self.apply_code_page();
+    }
+
+    fn apply_code_page(&mut self) {
+        let page = self.ansi_code_page();
+        for font in self.fonts.values_mut() {
+            font.set_code_page(page);
+        }
+    }
+
     /// Fonts that could not be loaded, with the reason.
     pub fn missing(&self) -> &[(String, String)] {
         &self.missing
@@ -1175,6 +1669,14 @@ impl FontBank {
         std::mem::take(&mut self.chosen)
     }
 
+    /// Tells the fonts the time on the clock that never stops (see
+    /// [`Font::set_time`]).
+    pub fn set_time(&mut self, now: u64) {
+        for font in self.fonts.values_mut() {
+            font.set_time(now);
+        }
+    }
+
     /// Uploads what every font needs.
     pub fn upload(&mut self, renderer: &Renderer) {
         for font in self.fonts.values_mut() {
@@ -1191,6 +1693,372 @@ pub fn default_color_key() -> Rgb {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_font::TestFont;
+
+    /// A TrueType font drawn with the test face: 20 pixels to the em
+    /// (`SIZE=15`), so every character advances by 10 pixels and a line
+    /// is 22 pixels high.
+    fn test_ttf(keys: &str, chars: &str) -> TrueTypeFont {
+        let file = format!("TTFONT {{ SIZE=15 COLOR {{255,255,255}} ALPHA=255 {keys} }}");
+        let FontFile::TrueType(def) = FontFile::parse(file.as_bytes()).unwrap() else {
+            panic!()
+        };
+        let bytes = TestFont::regular("Test", chars).build();
+        TrueTypeFont::from_bytes(def, "test.ttf", &bytes).unwrap()
+    }
+
+    const LETTERS: &str = " abcdefghijklmnopqrstuvwxyz0123456789";
+
+    #[test]
+    fn the_test_face_has_known_metrics() {
+        let mut font = test_ttf("", LETTERS);
+        assert_eq!(font.line_height, 22);
+        assert_eq!(font.measure("abc", -1), (30, 22));
+        assert_eq!(font.measure("a b", -1), (30, 22));
+        // A character the face lacks takes no room.
+        assert_eq!(font.measure("a!b", -1), (20, 22));
+    }
+
+    /// `CBFontTT::DrawTextD3D`: 50 texts are kept, and a frame that
+    /// draws more than the cache holds still gets every one of them.
+    #[test]
+    fn a_frame_with_more_texts_than_the_cache_holds_keeps_them_all() {
+        let mut font = test_ttf("", LETTERS);
+        let prepared = |font: &TrueTypeFont, text: &str| {
+            font.prepared_size(text, 100, TextAlign::Left, -1).is_some()
+        };
+        let frame = |font: &mut TrueTypeFont, texts: std::ops::Range<usize>| {
+            for i in texts {
+                font.prepare(&format!("t{i}"), 100, TextAlign::Left, -1);
+            }
+        };
+        frame(&mut font, 0..70);
+        assert!((0..70).all(|i| prepared(&font, &format!("t{i}"))));
+        font.end_frame();
+        assert_eq!(font.texts.len(), 70, "all were asked for");
+        // The same frame again renders nothing new.
+        frame(&mut font, 0..70);
+        assert_eq!(font.texts.len(), 70);
+        font.end_frame();
+        // A frame with other texts: the old ones make room, the least
+        // used first, and the cache is back to its size.
+        frame(&mut font, 0..5);
+        frame(&mut font, 100..130);
+        assert!((100..130).all(|i| prepared(&font, &format!("t{i}"))));
+        font.end_frame();
+        assert_eq!(font.texts.len(), CACHED_TEXTS);
+        assert!((0..5).all(|i| prepared(&font, &format!("t{i}"))));
+        assert!((100..130).all(|i| prepared(&font, &format!("t{i}"))));
+        // Without a frame ever ending (no renderer) the cache is bounded.
+        frame(&mut font, 1000..1000 + 2 * MAX_FRAME_TEXTS);
+        assert_eq!(font.texts.len(), MAX_FRAME_TEXTS);
+    }
+
+    fn tiles(width: u32, height: u32) -> Image {
+        Image {
+            width,
+            height,
+            pixels: vec![0; (width * height * 4) as usize],
+            has_alpha_channel: true,
+        }
+    }
+
+    fn sprite_font(delays: &[u64], looping: bool) -> BitmapFont {
+        let def = BitmapFontDef {
+            sprite: Some("f.sprite".into()),
+            columns: 16,
+            tile_width: 8,
+            tile_height: 10,
+            default_width: 4,
+            ..BitmapFontDef::default()
+        };
+        let images = delays
+            .iter()
+            .enumerate()
+            .map(|(i, delay)| (format!("f{i}.png"), tiles(128, 160), *delay))
+            .collect();
+        BitmapFont::from_images(def, images, looping)
+    }
+
+    /// `CBFontBitmap::DrawChar`: the characters come from the current
+    /// frame of the font's sprite, which moves on as any sprite does
+    /// (`CBSprite::GetCurrentFrame`), on the clock that never stops.
+    #[test]
+    fn a_bitmap_font_made_of_a_sprite_is_animated() {
+        let mut font = Font::Bitmap(Box::new(sprite_font(&[100, 100, 50], true)));
+        let frame_at = |font: &mut Font, now: u64, text: &str| {
+            font.set_time(now);
+            let mut list = DrawList::new(64.0, 48.0);
+            font.draw(&mut list, text, 0, 0, 100, TextAlign::Left, -1);
+            let Font::Bitmap(f) = &*font else { panic!() };
+            f.current_frame()
+        };
+        // The first character drawn starts the first frame's time.
+        assert_eq!(frame_at(&mut font, 5000, "ab"), 0);
+        assert_eq!(frame_at(&mut font, 5099, "ab"), 0);
+        assert_eq!(frame_at(&mut font, 5100, "ab"), 1);
+        assert_eq!(frame_at(&mut font, 5199, "ab"), 1);
+        assert_eq!(frame_at(&mut font, 5200, "ab"), 2);
+        assert_eq!(frame_at(&mut font, 5250, "ab"), 0, "it loops");
+        // The sprite only moves while the font draws: a long pause is
+        // one frame.
+        assert_eq!(frame_at(&mut font, 9000, ""), 0);
+        assert_eq!(frame_at(&mut font, 9000, "a"), 1);
+        // A sprite that does not loop stays on its last frame.
+        let mut once = Font::Bitmap(Box::new(sprite_font(&[10, 10], false)));
+        assert_eq!(frame_at(&mut once, 100, "a"), 0);
+        assert_eq!(frame_at(&mut once, 110, "a"), 1);
+        assert_eq!(frame_at(&mut once, 500, "a"), 1);
+        // A frame without a delay lasts one character.
+        let mut fast = Font::Bitmap(Box::new(sprite_font(&[0, 0, 0, 0], true)));
+        assert_eq!(frame_at(&mut fast, 100, "abc"), 2);
+        // An image is one frame for ever.
+        let def = BitmapFontDef {
+            image: Some("f.png".into()),
+            columns: 16,
+            tile_width: 8,
+            tile_height: 10,
+            ..BitmapFontDef::default()
+        };
+        let mut still = Font::Bitmap(Box::new(BitmapFont::from_image(
+            def,
+            "f.png",
+            tiles(128, 160),
+        )));
+        assert_eq!(frame_at(&mut still, 100, "abc"), 0);
+        assert_eq!(frame_at(&mut still, 900, "abc"), 0);
+    }
+
+    /// `CBFontBitmap::GetWidths`: `AUTO_WIDTH` measures the frame
+    /// `WIDTHS_FRAME` names.
+    #[test]
+    fn auto_width_measures_the_frame_widths_frame_names() {
+        let def = |widths_frame| BitmapFontDef {
+            sprite: Some("f.sprite".into()),
+            columns: 16,
+            tile_width: 8,
+            tile_height: 10,
+            auto_width: true,
+            widths_frame,
+            ..BitmapFontDef::default()
+        };
+        // Frame 0 is empty; in frame 1 the tile of `a` has ink up to its
+        // column 5 and the tile of `m` up to its column 3.
+        let ink = |image: &mut Image, c: u8, column: u32| {
+            let (x, y) = (u32::from(c % 16) * 8 + column, u32::from(c / 16) * 10);
+            image.pixels[((y * 128 + x) * 4 + 3) as usize] = 255;
+        };
+        let frames = || {
+            let mut second = tiles(128, 160);
+            ink(&mut second, b'a', 5);
+            ink(&mut second, b'm', 3);
+            vec![
+                ("f0.png".to_string(), tiles(128, 160), 100),
+                ("f1.png".to_string(), second, 100),
+            ]
+        };
+        let first = BitmapFont::from_images(def(0), frames(), true);
+        assert_eq!(first.widths[usize::from(b'a')], 0);
+        let second = BitmapFont::from_images(def(1), frames(), true);
+        assert_eq!(second.widths[usize::from(b'a')], 6);
+        assert_eq!(second.widths[usize::from(b' ')], 2, "half of m and i");
+        assert_eq!(second.image_path, "f0.png");
+        // A frame the sprite does not have: nothing is measured.
+        for missing in [2, -1] {
+            let none = BitmapFont::from_images(def(missing), frames(), true);
+            assert!(none.widths.iter().all(|w| *w == 0));
+        }
+    }
+
+    /// A character the face lacks comes from another face of the game's
+    /// font files; one no face has is skipped.
+    #[test]
+    fn a_character_the_face_lacks_is_drawn_with_another_face() {
+        let mut font = test_ttf("", " ab");
+        assert_eq!(font.line_width("aéb"), 20, "skipped");
+        let before = font.render("aéb", 100, TextAlign::Left, -1);
+        assert_eq!(alpha(&before, 25, 10), 0, "two boxes");
+        font.prepare("a\u{e9}b", 100, TextAlign::Left, -1);
+        let other = FaceSet::from_bytes(TestFont::regular("Other", "éж").build());
+        let other = Arc::new(other);
+        font.add_fallback_file(other.clone());
+        assert!(font.texts.is_empty(), "rendered again with the glyph");
+        assert_eq!(font.line_width("aéb"), 30);
+        assert_eq!(font.line_width("aжb aΩb"), 60);
+        // A control character is not looked for in other faces.
+        font.add_fallback_file(Arc::new(FaceSet::from_bytes(
+            TestFont::regular("Odd", "\r\t").build(),
+        )));
+        assert_eq!(font.line_width("a\r\tb"), 20);
+        let after = font.render("aéb", 100, TextAlign::Left, -1);
+        assert_eq!(alpha(&after, 25, 10), 255, "three, one of the other face");
+        // The face is loaded once, and the file is taken once.
+        assert_eq!(font.fallbacks.len(), 1);
+        font.add_fallback_file(other);
+        assert_eq!(font.files.len(), 2);
+        // A bold asked of the font is imitated on the other face too.
+        let mut bold = test_ttf("BOLD=TRUE", " ab");
+        bold.add_fallback_file(Arc::new(FaceSet::from_bytes(
+            TestFont::regular("Other", "é").build(),
+        )));
+        assert_eq!(bold.line_width("é"), 11);
+    }
+
+    /// `CBFontStorage::RegisterTTFont`: a font file of the game serves
+    /// every font, whichever `.font` file brought it.
+    #[test]
+    fn the_face_of_a_font_can_come_from_another_fonts_file() {
+        let dir = std::env::temp_dir().join(format!("luma-fonts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, bytes: &[u8]| std::fs::write(dir.join(name), bytes).unwrap();
+        // No system has these two families.
+        let (first, second) = ("Luma Test Primus", "Luma Test Secundus");
+        write("first.ttf", &TestFont::regular(first, " ab").build());
+        write("second.ttf", &TestFont::regular(second, " abc").build());
+        let font = |face: &str, file: &str| {
+            format!("TTFONT {{ SIZE=15 FACE=\"{face}\" FILENAME=\"{file}\" ALPHA=255 }}")
+        };
+        write("first.font", font(first, "first.ttf").as_bytes());
+        // Asks for the first family and ships the second.
+        write("borrowed.font", font(first, "second.ttf").as_bytes());
+        write("second.font", font(second, "SECOND.TTF").as_bytes());
+        let mut vfs = Vfs::new();
+        vfs.add_directory(&dir);
+        let source = |bank: &FontBank, path: &str| match bank.get(path) {
+            Some(Font::TrueType(f)) => f.source.clone(),
+            _ => panic!("{path} is not loaded"),
+        };
+
+        let mut bank = FontBank::new();
+        // Alone, the font is drawn with the file it ships: no font has
+        // its typeface.
+        assert!(bank.load(&vfs, "borrowed.font"), "{:?}", bank.missing());
+        assert_eq!(source(&bank, "borrowed.font"), "second.ttf");
+        // The first font registers its file: the typeface is there now.
+        assert!(bank.load(&vfs, "first.font"));
+        assert_eq!(source(&bank, "first.font"), "first.ttf");
+        assert_eq!(source(&bank, "borrowed.font"), "first.ttf");
+        assert_eq!(bank.take_chosen().len(), 3, "the new choice is logged");
+        // A file is registered once, whatever the spelling of its path.
+        assert!(bank.load(&vfs, "second.font"));
+        assert_eq!(bank.files.len(), 2);
+        // Loaded after, the typeface is found at once.
+        let mut later = FontBank::new();
+        assert!(later.load(&vfs, "first.font"));
+        assert!(later.load(&vfs, "borrowed.font"));
+        assert_eq!(source(&later, "borrowed.font"), "first.ttf");
+        // The files serve each other's missing characters: `c` is only
+        // in the second.
+        assert_eq!(later.get_mut("first.font").unwrap().text_width("abc"), 30);
+        assert_eq!(bank.get_mut("first.font").unwrap().text_width("abc"), 30);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn lines(font: &mut TrueTypeFont, text: &str, width: i32, height: i32) -> Vec<String> {
+        font.wrap(text, width, height)
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect()
+    }
+
+    /// `CBFontTT::FormatText`: where the lines of a text end.
+    #[test]
+    fn truetype_text_breaks_where_the_original_breaks_it() {
+        let mut font = test_ttf("", LETTERS);
+        // The last space that fitted, and the space is dropped.
+        assert_eq!(
+            font.wrap("aaa bbb ccc", 100, -1),
+            [("aaa bbb".to_string(), 70), ("ccc".to_string(), 30)]
+        );
+        // No space: before the character that does not fit.
+        assert_eq!(lines(&mut font, "abcdefgh", 35, -1), ["abc", "def", "gh"]);
+        // The character that does not fit is a space: the line still
+        // ends at the last space that fitted, not at this one.
+        assert_eq!(lines(&mut font, "aaa bbb ccc", 75, -1), ["aaa", "bbb ccc"]);
+        // ... and without an earlier space the line ends before it; the
+        // space then starts the next line, which ends before it at once.
+        assert_eq!(lines(&mut font, "aaa bbb", 35, -1), ["aaa", "", "bbb"]);
+        // Line breaks; one at the end adds no line.
+        assert_eq!(lines(&mut font, "ab\ncd", 100, -1), ["ab", "cd"]);
+        assert_eq!(lines(&mut font, "ab\n", 100, -1), ["ab"]);
+        assert_eq!(lines(&mut font, "\nab", 100, -1), ["", "ab"]);
+        // Two line breaks leave an empty line after a line without a
+        // space; after a line that held one, the second is skipped too.
+        assert_eq!(lines(&mut font, "ab\n\ncd", 100, -1), ["ab", "", "cd"]);
+        assert_eq!(lines(&mut font, "a b\n\ncd", 100, -1), ["a b", "cd"]);
+        assert_eq!(lines(&mut font, "a b\ncd", 100, -1), ["a b", "cd"]);
+        assert_eq!(lines(&mut font, "a b\n\n\ncd", 100, -1), ["a b", "", "cd"]);
+        // A first character that does not fit ends the text.
+        assert!(lines(&mut font, "abc", 5, -1).is_empty());
+        assert_eq!(
+            lines(&mut font, "ab cdefgh", 25, -1),
+            ["ab", "", "cd", "ef", "gh"]
+        );
+        // Lines that would pass the height are dropped, with the rest.
+        assert_eq!(lines(&mut font, "a\nb\nc", 100, 44), ["a", "b"]);
+        assert_eq!(lines(&mut font, "a\nb\nc", 100, 43), ["a"]);
+        assert!(lines(&mut font, "a", 100, 21).is_empty());
+        assert!(lines(&mut font, "", 100, -1).is_empty());
+        // Without a box only the text breaks lines.
+        assert_eq!(
+            lines(&mut font, "aaa bbb ccc\nd", -1, -1),
+            ["aaa bbb ccc", "d"]
+        );
+    }
+
+    /// `CBFontTT::GetTextWidth` and `GetTextHeight`.
+    #[test]
+    fn truetype_text_is_measured_on_one_line_and_by_its_lines() {
+        let mut font = Font::TrueType(Box::new(test_ttf("", LETTERS)));
+        assert_eq!(font.text_width("aaa bbb"), 70);
+        assert_eq!(font.text_width("aaa\nbbb"), 60, "the whole text");
+        assert_eq!(font.text_width(""), 0);
+        assert_eq!(font.text_height("aaa bbb ccc", 75), 44);
+        assert_eq!(font.text_height("a b\n\ncd", 100), 44);
+        assert_eq!(font.text_height("", 100), 0);
+        assert_eq!(font.line_height(), 22);
+    }
+
+    fn alpha(image: &Image, x: u32, y: u32) -> u8 {
+        image.pixels[((y * image.width + x) * 4 + 3) as usize]
+    }
+
+    /// Every line stands on its own baseline, with the font's underline
+    /// and strike-through across it (`CreateFont`'s flags).
+    #[test]
+    fn truetype_lines_are_underlined_and_struck_one_by_one() {
+        // The test face: boxes from 2 to 8 of each 10 pixels, 14 high on
+        // the baseline, 18 under the top of the line.
+        let plain = test_ttf("", LETTERS).render("ab\ncd", 100, TextAlign::Left, -1);
+        assert_eq!(plain.width, 100);
+        assert!(plain.height >= 44);
+        for top in [4, 26] {
+            assert_eq!(alpha(&plain, 5, top - 1), 0);
+            assert_eq!(alpha(&plain, 5, top), 255);
+            assert_eq!(alpha(&plain, 5, top + 13), 255);
+            assert_eq!(alpha(&plain, 5, top + 14), 0);
+        }
+        assert!((0..44).all(|y| alpha(&plain, 0, y) == 0), "no line drawn");
+        // The underline: 2 pixels under the baseline, 1 thick, as wide
+        // as the line.
+        let under = test_ttf("UNDERLINE=TRUE", LETTERS).render("ab\ncd", 100, TextAlign::Left, -1);
+        for row in [20, 42] {
+            assert_eq!(alpha(&under, 0, row), 255, "row {row}");
+            assert_eq!(alpha(&under, 19, row), 255);
+            assert_eq!(alpha(&under, 20, row), 0);
+            assert_eq!(alpha(&under, 0, row - 1), 0);
+            assert_eq!(alpha(&under, 0, row + 1), 0);
+        }
+        // The strike-through: 6 pixels above the baseline.
+        let struck = test_ttf("STRIKE=TRUE", LETTERS).render("ab\ncd", 100, TextAlign::Right, -1);
+        for row in [12, 34] {
+            assert_eq!(alpha(&struck, 80, row), 255, "row {row}");
+            assert_eq!(alpha(&struck, 99, row), 255);
+            assert_eq!(alpha(&struck, 79, row), 0);
+            assert_eq!(alpha(&struck, 80, row + 1), 0);
+        }
+        assert_eq!(alpha(&struck, 80, 20), 0, "no underline");
+    }
 
     fn system_font() -> Option<(String, Vec<u8>)> {
         SYSTEM_FONTS
@@ -1311,7 +2179,7 @@ mod tests {
         );
         let (w, h) = font.measure("Hello", -1);
         assert!(w > 10 && h == font.line_height);
-        let lines = font.wrap("Hello wide world", w + 2, -1);
+        let lines = font.wrap("Hello wide world", w * 3 / 2, -1);
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert_eq!(lines[0].0, "Hello");
         assert_eq!(lines[1].0, "wide");
@@ -1319,30 +2187,67 @@ mod tests {
         let lines = font.wrap("a\nb", 1000, -1);
         assert_eq!(lines.len(), 2);
         assert_eq!(font.wrap("a\nb\nc", 1000, font.line_height).len(), 1);
-        let (image, offset) = font.render("Hi", 100, TextAlign::Center, -1);
+        let image = font.render("Hi", 100, TextAlign::Center, -1);
         assert_eq!(image.width, 100);
-        assert!(offset > 0);
         assert!(image.pixels.chunks(4).any(|p| p[3] > 128), "some ink");
         font.prepare("Hi", 100, TextAlign::Center, -1);
         font.prepare("Hi", 100, TextAlign::Center, -1);
         assert_eq!(font.texts.len(), 1);
-        for i in 0..40 {
-            font.prepare(&format!("t{i}"), 50, TextAlign::Left, -1);
-        }
-        assert_eq!(font.texts.len(), CACHED_TEXTS);
 
-        // Right-to-left lays the glyphs out from the last: "ab" comes out
-        // as "ba" does left to right; the cache goes with the direction.
-        let (ltr, _) = font.render("ba", 100, TextAlign::Left, -1);
+        // The cache goes with the direction; Latin letters keep their
+        // order when the line is read from the right.
+        let ltr = font.render("ab", 100, TextAlign::Left, -1);
         font.set_rtl(true);
         assert!(font.texts.is_empty());
-        let (rtl, _) = font.render("ab", 100, TextAlign::Left, -1);
+        let rtl = font.render("ab", 100, TextAlign::Left, -1);
         assert_eq!(rtl.pixels, ltr.pixels);
-        let (same, _) = font.render("ab", 100, TextAlign::Left, -1);
-        font.set_rtl(false);
-        let (back, _) = font.render("ab", 100, TextAlign::Left, -1);
-        assert_eq!(same.pixels, rtl.pixels);
-        assert_ne!(back.pixels, rtl.pixels);
+    }
+
+    /// What GDI does of a line: right-to-left letters are drawn from
+    /// the right, and `Game.TextRTL` has the whole line read from the
+    /// right.
+    #[test]
+    fn right_to_left_letters_are_drawn_from_the_right() {
+        // A Hebrew letter and a space: a box and a gap of 10 pixels.
+        let mut font = test_ttf("", " abאב");
+        let boxes = |image: &Image| -> Vec<bool> {
+            (0..4)
+                .map(|slot| alpha(image, slot * 10 + 5, 10) > 0)
+                .collect()
+        };
+        // Read from the left, the space that ends the line stays at its
+        // right end.
+        let ltr = font.render("א ", 100, TextAlign::Left, -1);
+        assert_eq!(boxes(&ltr), [true, false, false, false]);
+        assert_eq!(font.wrap("אב ab", 100, -1)[0].1, 50);
+        // Read from the right, it goes to the left end.
+        font.set_rtl(true);
+        let rtl = font.render("א ", 100, TextAlign::Left, -1);
+        assert_eq!(boxes(&rtl), [false, true, false, false]);
+        // The lines break where they break left to right: the widths
+        // are those of the characters.
+        assert_eq!(lines(&mut font, "אב אב", 35, -1), ["אב", "אב"]);
+    }
+
+    /// Arabic letters are measured and drawn in their joined forms when
+    /// the face has them.
+    #[test]
+    fn arabic_letters_are_joined_before_they_are_measured() {
+        // Lam, alef: one sign when the face has it.
+        let with_forms = test_ttf("", " لا\u{fefb}");
+        assert_eq!(with_forms.characters("لا"), "\u{fefb}");
+        let mut with_forms = with_forms;
+        let joined = with_forms.characters("لا");
+        assert_eq!(with_forms.line_width(&joined), 10);
+        // A face with the letters only keeps them.
+        let mut plain = test_ttf("", " لا");
+        assert_eq!(plain.characters("لا"), "لا");
+        let kept = plain.characters("لا");
+        assert_eq!(plain.line_width(&kept), 20);
+        // A face with neither leaves the forms to the faces that stand
+        // in for it.
+        let latin = test_ttf("", " ab");
+        assert_eq!(latin.characters("لا"), "\u{fefb}");
     }
 
     /// A negative width is a single line of any length, as for the
@@ -1362,7 +2267,7 @@ mod tests {
         let text = "Lab with axe, a long name no box holds";
         let (line_width, height) = font.measure(text, -1);
         assert_eq!(height, font.line_height, "one line");
-        let (image, _) = font.render(text, -1, TextAlign::Center, -1);
+        let image = font.render(text, -1, TextAlign::Center, -1);
         assert!(
             image.width as i32 >= line_width,
             "{} < {line_width}",
@@ -1386,7 +2291,7 @@ mod tests {
             "{last_ink}"
         );
         assert!((first_ink as i32) < font.line_height, "{first_ink}");
-        let (left, _) = font.render(text, -1, TextAlign::Left, -1);
+        let left = font.render(text, -1, TextAlign::Left, -1);
         assert_eq!(left.pixels, image.pixels);
 
         // What is prepared is what is drawn: same arguments, same image.
@@ -1400,7 +2305,7 @@ mod tests {
         // A line breaks only where the text says so, and an absurd
         // length does not make an absurd image.
         assert_eq!(
-            font.render("a\nb", -1, TextAlign::Left, -1).0.height as i32,
+            font.render("a\nb", -1, TextAlign::Left, -1).height as i32,
             {
                 let lines = 2;
                 (lines * font.line_height)
@@ -1408,10 +2313,10 @@ mod tests {
             }
         );
         let endless = "wide ".repeat(4000);
-        let (image, _) = font.render(&endless, -1, TextAlign::Left, -1);
+        let image = font.render(&endless, -1, TextAlign::Left, -1);
         assert_eq!(image.width as i32, MAX_UNBOUNDED_WIDTH);
         // A box still wraps and keeps its width.
-        let (image, _) = font.render(text, 60, TextAlign::Left, -1);
+        let image = font.render(text, 60, TextAlign::Left, -1);
         assert_eq!(image.width, 60);
         assert!(image.height as i32 >= 2 * font.line_height);
     }
@@ -1454,43 +2359,57 @@ mod tests {
         assert_eq!(bitmap.codes(&raw("é’€œЖ")), b"\xe9\x92\x80\x9c?");
         // Bytes that are not UTF-8 are replaced, not a panic.
         assert_eq!(bitmap.codes("caf\u{e9}"), b"caf?");
-        assert_eq!(text_to_ansi("\u{fffd}"), b"?");
+        // The tiles are those of the system's code page
+        // (`Utf8ToAnsi` converts to `CP_ACP`): a font laid out for
+        // Cyrillic shows Cyrillic.
+        font.set_code_page(CodePage::new(1251).unwrap());
+        let Font::Bitmap(bitmap) = &font else {
+            panic!()
+        };
+        assert_eq!(bitmap.codes(&raw("Жук é")), b"\xc6\xf3\xea ?");
+        assert_eq!(font.text_width(&raw("Жук")), 12);
     }
 
-    /// `CBFontTT::LoadBuffer CHARSET`: the character set of the font
-    /// decides the code page ANSI text is read in.
+    /// `CBFontTT::GetWindowsCharset`: GDI reads an ANSI game's bytes in
+    /// the code page of the font's character set.
     #[test]
-    fn the_charset_of_a_font_picks_the_code_page_of_ansi_text() {
-        // The bytes E8 F8 9A: `čřš` in Central Europe, `иш` and a
-        // Serbian letter in Cyrillic, `θψ` in Greek, Latin-1 elsewhere.
-        let raw = "\u{e8}\u{f8}\u{9a}";
-        assert_eq!(ansi_to_text_in(raw, 5), "čřš");
-        assert_eq!(ansi_to_text_in(raw, 10), "ишљ");
-        assert_eq!(ansi_to_text_in("\u{e8}\u{f8}", 7), "θψ");
-        assert_eq!(ansi_to_text_in("\u{c0}\u{e0}\u{d0}\u{fe}", 3), "ĄąŠž");
-        assert_eq!(ansi_to_text_in("\u{d0}\u{fd}\u{e9}", 13), "Ğıé");
-        // 0 and 1 are the system's: Windows-1252, as before.
-        for charset in [0, 1, 99] {
-            assert_eq!(ansi_to_text_in("caf\u{e9} \u{80}", charset), "café €");
-        }
-        // The tables are whole: 128 or 64 characters.
-        assert_eq!(WINDOWS_1250.chars().count(), 128);
-        assert_eq!(WINDOWS_1257.chars().count(), 128);
-        assert_eq!(WINDOWS_1251.chars().count(), 64);
-        assert_eq!(WINDOWS_1253.chars().count(), 64);
-        // The ends of the ranges.
-        assert_eq!(ansi_to_text_in("\u{c0}\u{ff}", 10), "Ая");
-        assert_eq!(ansi_to_text_in("\u{c1}\u{fe}\u{d3}", 7), "ΑώΣ");
-        assert_eq!(ansi_to_text_in("ascii", 10), "ascii");
-    }
-
-    #[test]
-    fn ansi_text_is_windows_1252_for_truetype_fonts() {
+    fn truetype_fonts_read_ansi_text_in_the_code_page_of_their_charset() {
+        let mut font = test_ttf("", " abжćé");
+        assert_eq!(font.code_page(), CodePage::WESTERN);
         assert_eq!(
-            ansi_to_text("caf\u{e9} \u{84}x\u{93} \u{80}\u{81}"),
+            font.characters("caf\u{e9} \u{84}x\u{93} \u{80}\u{81}"),
             "café „x“ €\u{81}"
         );
-        assert_eq!(text_to_ansi("café „x“ €"), b"caf\xe9 \x84x\x93 \x80");
+        // 0xE6 is `æ` in Windows-1252, which the face lacks.
+        assert_eq!(font.line_width(&font.characters("a\u{e6}b")), 20);
+        // `CHARSET=10` is Russian: the same byte is `ж`.
+        font.def.charset = 10;
+        assert_eq!(font.code_page().number(), 1251);
+        assert_eq!(font.characters("a\u{e6}b"), "aжb");
+        assert_eq!(font.line_width(&font.characters("a\u{e6}b")), 30);
+        font.def.charset = 5;
+        assert_eq!(font.characters("a\u{e6}b"), "aćb");
+        // `DEFAULT_CHARSET` is the system's code page; the texts
+        // rendered in the old one go.
+        font.def.charset = 1;
+        assert_eq!(font.characters("\u{e9}"), "é");
+        font.prepare("a\u{e6}b", 100, TextAlign::Left, -1);
+        font.set_system_code_page(CodePage::new(1251).unwrap());
+        assert!(font.texts.is_empty());
+        assert_eq!(font.characters("\u{e6}"), "ж");
+        // A UTF-8 game's text is not read through a code page.
+        font.set_utf8(true);
+        assert_eq!(font.characters(&raw("ж")), "ж");
+    }
+
+    #[test]
+    fn the_fonts_tell_which_code_page_the_game_was_made_for() {
+        let mut bank = FontBank::new();
+        assert_eq!(bank.ansi_code_page(), CodePage::WESTERN);
+        bank.set_ansi_code_page(CodePage::new(1253));
+        assert_eq!(bank.ansi_code_page().number(), 1253);
+        bank.set_ansi_code_page(None);
+        assert_eq!(bank.ansi_code_page(), CodePage::WESTERN);
     }
 
     #[test]
@@ -1639,8 +2558,8 @@ mod tests {
         );
         assert_eq!(imitated.line_height, regular.line_height);
         let ink = |image: &Image| -> u64 { image.pixels.chunks(4).map(|p| u64::from(p[3])).sum() };
-        let (thin, _) = regular.render(text, -1, TextAlign::Left, -1);
-        let (thick, _) = imitated.render(text, -1, TextAlign::Left, -1);
+        let thin = regular.render(text, -1, TextAlign::Left, -1);
+        let thick = imitated.render(text, -1, TextAlign::Left, -1);
         assert!(ink(&thick) > ink(&thin) * 11 / 10, "more ink when bold");
     }
 
