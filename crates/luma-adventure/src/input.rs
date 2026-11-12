@@ -33,28 +33,39 @@ pub struct Mouse {
 }
 
 /// The keyboard as scripts see it (`Game.Keyboard`).
+///
+/// A key press reaches the engine as two messages, as on the engine's
+/// home platform: the key going down, with its virtual key code and not
+/// printable, then the character it types, if any, printable, with the
+/// character's code. Each overwrites the state the last one left, and a
+/// `Keypress` handler runs after both: it sees the character of a key
+/// that types one (`KeyCode` 97 and `Key` "a" for the A key), the key
+/// code of one that does not (112 for F1).
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Keyboard {
-    /// The code of the last key pressed (`KeyCode`): the Windows virtual
-    /// key code, or the ASCII code of a printable key.
+    /// The code of the last message (`KeyCode`): the Windows virtual
+    /// key code of a key going down, or the code of the character
+    /// typed (see [`char_code`]).
     pub key_code: i32,
-    /// The character of the last key when it is printable (`Key`).
+    /// The character of the last message when it was a character
+    /// (`Key`), else empty.
     pub key: String,
-    /// Whether the last key was printable (`Printable`).
+    /// Whether the last message was a character (`Printable`).
     pub printable: bool,
-    /// Modifier state at the last key.
+    /// Modifier state at the last message.
     pub shift: bool,
     /// See `shift`.
     pub alt: bool,
     /// See `shift`.
     pub control: bool,
-    /// The keys held, by code.
+    /// The keys and mouse buttons held, by virtual key code (the mouse
+    /// buttons are 1, 2 and 4: `VK_LBUTTON`, `VK_RBUTTON`, `VK_MBUTTON`).
     pub down: HashSet<i32>,
 }
 
 impl Keyboard {
-    /// Whether a key is held (`IsKeyDown`), by code; a letter's code may
-    /// be given in either case.
+    /// Whether a key or a mouse button is held (`IsKeyDown`), by code; a
+    /// letter's code may be given in either case.
     pub fn is_key_down(&self, code: i32) -> bool {
         let code = match u8::try_from(code) {
             Ok(c) if c.is_ascii_lowercase() => i32::from(c.to_ascii_uppercase()),
@@ -62,6 +73,140 @@ impl Keyboard {
         };
         self.down.contains(&code)
     }
+}
+
+/// Where the editors copy to and paste from (Ctrl+C, Ctrl+X, Ctrl+V in
+/// `CUIEdit::HandleKeypress`). The engine has no platform code: a
+/// front-end hands the system's clipboard to
+/// [`World::set_clipboard`]; until then the world keeps the text
+/// itself ([`MemoryClipboard`]).
+pub trait Clipboard {
+    /// The text on the clipboard, `None` when it holds none or cannot
+    /// be read.
+    fn get_text(&mut self) -> Option<String>;
+    /// Puts a text on the clipboard; whether it could.
+    fn set_text(&mut self, text: &str) -> bool;
+}
+
+/// A clipboard of the game's own: what one editor copies, another
+/// pastes, and nothing leaves the game.
+#[derive(Debug, Default)]
+pub struct MemoryClipboard(Option<String>);
+
+impl Clipboard for MemoryClipboard {
+    fn get_text(&mut self) -> Option<String> {
+        self.0.clone()
+    }
+
+    fn set_text(&mut self, text: &str) -> bool {
+        self.0 = Some(text.to_string());
+        true
+    }
+}
+
+/// `VK_LBUTTON`: the left mouse button among the held keys.
+pub const VK_LBUTTON: i32 = 1;
+/// `VK_RBUTTON`: the right mouse button among the held keys.
+pub const VK_RBUTTON: i32 = 2;
+/// `VK_MBUTTON`: the middle mouse button among the held keys.
+pub const VK_MBUTTON: i32 = 4;
+
+/// The code of a typed character as `Keyboard.KeyCode` gives it: the
+/// character's byte in Windows-1252, the code page the original engine
+/// receives characters in on a western system (`a` is 97, `é` 233, `€`
+/// 128); the Unicode code point of a character the code page lacks.
+pub fn char_code(ch: char) -> i32 {
+    match crate::text::ansi_byte(ch) {
+        Some(byte) => i32::from(byte),
+        None => u32::from(ch) as i32,
+    }
+}
+
+/// The character Windows sends after a key going down when the key
+/// types none of its own (what `TranslateMessage` adds on a US layout):
+/// Backspace, Tab, Enter, Escape and the space bar give their control
+/// character or a space; with Ctrl, Backspace gives 127, Enter a line
+/// feed, Tab nothing, and a letter the control character of that
+/// letter (Ctrl+C is 3) unless Alt is held too.
+pub fn translated_char(code: i32, alt: bool, control: bool) -> Option<char> {
+    match code {
+        8 if control => Some('\u{7f}'),
+        8 => Some('\u{8}'),
+        9 if control => None,
+        9 => Some('\t'),
+        13 if control => Some('\n'),
+        13 => Some('\r'),
+        27 => Some('\u{1b}'),
+        32 => Some(' '),
+        65..=90 if control && !alt => char::from_u32((code - 64) as u32),
+        _ => None,
+    }
+}
+
+/// The keys of a US keyboard that type a character besides the letters
+/// and the digits: the character alone, the character with Shift, the
+/// virtual key code.
+const US_KEYS: &[(char, char, i32)] = &[
+    (' ', ' ', 32),
+    ('0', ')', 48),
+    ('1', '!', 49),
+    ('2', '@', 50),
+    ('3', '#', 51),
+    ('4', '$', 52),
+    ('5', '%', 53),
+    ('6', '^', 54),
+    ('7', '&', 55),
+    ('8', '*', 56),
+    ('9', '(', 57),
+    (';', ':', 186),
+    ('=', '+', 187),
+    (',', '<', 188),
+    ('-', '_', 189),
+    ('.', '>', 190),
+    ('/', '?', 191),
+    ('`', '~', 192),
+    ('[', '{', 219),
+    ('\\', '|', 220),
+    (']', '}', 221),
+    ('\'', '"', 222),
+];
+
+/// The key that types a character on a US keyboard: its virtual key
+/// code and whether Shift is held; `None` for a character the layout
+/// lacks. For tooling that types a text key by key.
+pub fn key_for_char(ch: char) -> Option<(i32, bool)> {
+    if ch.is_ascii_lowercase() {
+        return Some((i32::from(ch.to_ascii_uppercase() as u8), false));
+    }
+    if ch.is_ascii_uppercase() {
+        return Some((i32::from(ch as u8), true));
+    }
+    US_KEYS.iter().find_map(|&(plain, shifted, code)| {
+        if ch == plain {
+            Some((code, false))
+        } else if ch == shifted {
+            Some((code, true))
+        } else {
+            None
+        }
+    })
+}
+
+/// The character a key types on a US keyboard, with or without Shift;
+/// `None` for a key that types none. The reverse of [`key_for_char`].
+pub fn char_for_key(code: i32, shift: bool) -> Option<char> {
+    if (65..=90).contains(&code) {
+        let letter = char::from(code as u8);
+        return Some(if shift {
+            letter
+        } else {
+            letter.to_ascii_lowercase()
+        });
+    }
+    US_KEYS
+        .iter()
+        .find(|k| k.2 == code)
+        .map(|&(plain, shifted, _)| if shift { shifted } else { plain })
 }
 
 /// Which bank holds the image of a hit area.
@@ -346,15 +491,53 @@ impl World {
         &self.mouse
     }
 
-    /// Moves the mouse to a point in game pixels, kept inside the lock
-    /// rectangle when one applies (`CBGame::GetMousePos`).
+    /// The pointer is at a point in game pixels, as the front-end
+    /// reports it (`CBGame::GetMousePos`). The game sees it kept inside
+    /// the lock rectangle when one applies; a pointer outside is put
+    /// back on the rectangle's edge, which the front-end learns from
+    /// [`World::take_cursor_warp`].
     pub fn set_mouse(&mut self, x: i32, y: i32) {
-        let (x, y) = match self.mouse_lock() {
-            Some((left, top, right, bottom)) => (x.clamp(left, right), y.clamp(top, bottom)),
-            None => (x, y),
-        };
+        self.pointer = (x, y);
         self.mouse.x = x;
         self.mouse.y = y;
+        self.apply_mouse_lock();
+    }
+
+    /// Keeps the mouse inside the lock rectangle (`CBGame::
+    /// GetMousePos`, which every frame reads the pointer, clamps it and
+    /// moves the system cursor back when it was outside).
+    pub(crate) fn apply_mouse_lock(&mut self) {
+        let Some((left, top, right, bottom)) = self.mouse_lock() else {
+            return;
+        };
+        let (x, y) = (
+            self.mouse.x.clamp(left, right),
+            self.mouse.y.clamp(top, bottom),
+        );
+        if (x, y) != (self.mouse.x, self.mouse.y) {
+            self.warp_mouse(x, y);
+        }
+    }
+
+    /// The game moves the mouse (`CBPlatform::SetCursorPos`, from
+    /// `Game.SetMousePos`, `Game.MouseX` and `MouseY`, the mouse lock
+    /// and the accessibility cursor skip): the position the game sees
+    /// changes at once, and the front-end is asked to move the system
+    /// cursor there ([`World::take_cursor_warp`]), without which the
+    /// next mouse movement would undo the change.
+    pub fn warp_mouse(&mut self, x: i32, y: i32) {
+        self.pointer = (x, y);
+        self.mouse.x = x;
+        self.mouse.y = y;
+        self.cursor_warp = Some((x, y));
+        self.apply_mouse_lock();
+    }
+
+    /// Where the game last moved the mouse, in game pixels, when it did
+    /// since the last call: the front-end moves the system cursor
+    /// there.
+    pub fn take_cursor_warp(&mut self) -> Option<(i32, i32)> {
+        self.cursor_warp.take()
     }
 
     /// The keyboard state.
@@ -362,10 +545,13 @@ impl World {
         &self.keyboard
     }
 
-    /// Records a key going down (`CBKeyboardState::ReadKey`): its code,
-    /// its character when printable, and the modifiers.
-    pub fn key_down(
+    /// Records a keyboard message (`CBKeyboardState::ReadKey`): a key
+    /// going down (`printable` false, `code` its virtual key code) or a
+    /// character typed (`printable` true, `code` from [`char_code`],
+    /// `text` the character), with the modifiers held.
+    pub fn read_key(
         &mut self,
+        printable: bool,
         code: i32,
         text: Option<char>,
         shift: bool,
@@ -373,11 +559,32 @@ impl World {
         control: bool,
     ) {
         self.keyboard.key_code = code;
-        self.keyboard.printable = text.is_some();
-        self.keyboard.key = text.map(String::from).unwrap_or_default();
+        self.keyboard.printable = printable;
+        self.keyboard.key = text
+            .filter(|_| printable)
+            .map(String::from)
+            .unwrap_or_default();
         self.keyboard.shift = shift;
         self.keyboard.alt = alt;
         self.keyboard.control = control;
+    }
+
+    /// Gives the editors a clipboard, usually the system's.
+    pub fn set_clipboard(&mut self, clipboard: Box<dyn Clipboard>) {
+        self.clipboard = clipboard;
+    }
+
+    /// Forgets the last clicks, so that the next press is a click and
+    /// not the second press of a double click, however soon it comes.
+    /// For tooling whose steps are separate clicks.
+    pub fn forget_clicks(&mut self) {
+        self.mouse.last_left_click = None;
+        self.mouse.last_right_click = None;
+    }
+
+    /// Notes a key or a mouse button as held, by virtual key code, for
+    /// `Keyboard.IsKeyDown`; nothing else happens.
+    pub fn key_held(&mut self, code: i32) {
         self.keyboard.down.insert(code);
     }
 
@@ -1048,6 +1255,39 @@ pub(crate) fn pixel_area(
 mod tests {
     use super::*;
     use luma_formats::{Image, SubFrame};
+
+    #[test]
+    fn keys_and_characters_of_a_us_keyboard() {
+        assert_eq!(key_for_char('a'), Some((65, false)));
+        assert_eq!(key_for_char('A'), Some((65, true)));
+        assert_eq!(key_for_char('7'), Some((55, false)));
+        assert_eq!(key_for_char('&'), Some((55, true)));
+        assert_eq!(key_for_char('.'), Some((190, false)));
+        assert_eq!(key_for_char('"'), Some((222, true)));
+        assert_eq!(key_for_char('é'), None);
+        for ch in (' '..='~').filter(|c| !c.is_control()) {
+            let (code, shift) = key_for_char(ch).unwrap();
+            assert_eq!(char_for_key(code, shift), Some(ch), "{ch}");
+        }
+        assert_eq!(char_for_key(46, false), None, "Delete types nothing");
+        assert_eq!(char_for_key(112, false), None);
+        // What Windows adds for the keys that type no character of
+        // their own.
+        assert_eq!(translated_char(8, false, false), Some('\u{8}'));
+        assert_eq!(translated_char(8, false, true), Some('\u{7f}'));
+        assert_eq!(translated_char(9, false, false), Some('\t'));
+        assert_eq!(translated_char(9, false, true), None);
+        assert_eq!(translated_char(13, false, false), Some('\r'));
+        assert_eq!(translated_char(13, false, true), Some('\n'));
+        assert_eq!(translated_char(27, false, false), Some('\u{1b}'));
+        assert_eq!(translated_char(67, false, true), Some('\u{3}'));
+        assert_eq!(translated_char(67, true, true), None, "AltGr");
+        assert_eq!(translated_char(67, false, false), None);
+        assert_eq!(char_code('a'), 97);
+        assert_eq!(char_code('é'), 233);
+        assert_eq!(char_code('€'), 128);
+        assert_eq!(char_code('ж'), 0x436);
+    }
 
     /// A 4x2 image whose left half is opaque and right half clear.
     fn half_mask() -> Mask {

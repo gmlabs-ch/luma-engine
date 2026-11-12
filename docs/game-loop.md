@@ -10,11 +10,14 @@ Lite's `BGame`, `AdGame`, `BRenderer`, `BKeyboardState`, `BFader`,
 `luma-player <game>` opens a window at a whole multiple of the game's
 resolution (the largest that keeps the window at most 1280 points wide,
 or `--scale <n>`; the frame is letterboxed when the window has another
-shape, see [rendering.md](rendering.md#coordinates)), loads `default.game` and attaches the
-game's scripts. No scene is loaded by the engine: the game's script opens
-the first one (`Game.ChangeScene(Game.StartupScene)`), `STARTUP_SCENE`
-being only the name kept for it. Every frame then runs,
-in this order (`Runtime::tick`):
+shape, see [rendering.md](rendering.md#coordinates)), or runs full
+screen (see [Window or full screen](#window-or-full-screen)), loads
+`default.game` and attaches the game's scripts. No scene is loaded by
+the engine: the game's script opens the first one
+(`Game.ChangeScene(Game.StartupScene)`), `STARTUP_SCENE` being only the
+name kept for it. `--load <slot>` or `--savegame <file>` then loads a
+saved game before the first frame, as the original's `-savegame` does.
+Every frame then runs, in this order (`Runtime::tick`):
 
 1. a game load asked last frame (`Game.LoadGame`) happens, replacing
    everything below with the saved state (see [saving.md](saving.md));
@@ -56,6 +59,64 @@ mouse again before it is dispatched, and a release that arrives before
 any frame saw the press waits for the end of the next frame: the
 `LeftRelease` event is raised then, and the button fires on the frame
 after. This is Luma's own; the original engine lost such clicks.
+
+### Window or full screen
+
+The original lets the player choose between full screen and a window in
+its settings dialog (`CDlgPageDisplay::OnWindowed`), keeps the choice in
+`Video/Windowed` (`CHWManager::SaveSettings`, `LoadSettings`) and only
+offers the window when the game's `startup.settings` allows it
+(`ALLOW_WINDOWED_MODE`, true by default; the `Debug/AllowWindowed`
+setting overrides it). Luma has no settings dialog; `luma-player`
+decides in this order (`view::windowed_mode`):
+
+1. a game that forbids the window runs **full screen**, whatever is
+   asked (`ALLOW_WINDOWED_MODE = FALSE`, unless `[Debug] AllowWindowed=1`
+   in `settings.ini`);
+2. `--fullscreen` or `--windowed` on the command line;
+3. `[Video] Windowed` in `settings.ini` (`0` full screen, another
+   number a window), written by hand: nothing in Luma writes it;
+4. a window. This differs from the original on purpose: its dialog
+   proposes full screen until the player ticks the window box.
+
+Full screen is a borderless window covering the desktop at the
+desktop's resolution, with the game's frame scaled and letterboxed in
+it; the original changes the display mode to the game's resolution, or
+keeps the desktop's with the aspect ratio maintained when the player
+asks (`DesktopRes`, `MaintainAspect`), which is what Luma always does.
+The mouse stays on the game's frame, as the original confines the
+cursor to the visible area (`CBRenderer::ClipCursor`).
+`Game.WindowedMode` tells the scripts which of the two the game runs in.
+
+In a window, the window opens where it was when the game last ended:
+its position is written to `[Video] WindowPosX` and `WindowPosY` of
+`settings.ini` on exit and read at start (`CBPlatform::MessageLoop`,
+`Initialize`); a position that is on no screen any more is ignored. The
+original keeps it relative to the monitor it chose; Luma keeps the
+desktop position the window system reports.
+
+### When the window is not active
+
+The game runs only while its window is active: focused and neither
+minimised nor wholly hidden. When the window loses that
+(`CBGame::OnActivate`, called by `WM_ACTIVATE`, `WM_SIZE` and the menu
+loop of the original), `Runtime::activate(false, ..)` pauses every
+playing sound, music included, and the front-end stops calling
+`Runtime::tick`: no frame runs, the game's time stands still, as the
+original's message loop sleeps in `WaitMessage`. `luma-player` then
+asks for no redraw and its event loop waits for the next event
+(`App::active` in `luma-render`); a repaint the system asks for shows
+the frame as it is, without running the game (`OnPaint`). When the
+window is active again the sounds resume, and the first frame advances
+the timer by the time elapsed, at most a second, like any frame.
+
+One quirk of the original is kept: the pause shares its mark with the
+freeze of a system-exclusive window (`m_FreezePaused`), so coming back
+to the window resumes the sounds such a window had frozen.
+
+In `luma-player` the focus comes from the window system's focus events
+and "hidden" from its occlusion events (inferred: winit has no event
+for the minimised state itself). Headless runs are always active.
 
 The frame is then drawn: the scene with the actors (each object's
 particles right after it; a 3D actor takes its place in the order at
@@ -103,8 +164,8 @@ system's `timeGetTime`; both only make sense as differences), `FPS` the
 number of frames of the last whole second, counted as the original
 engine does (`m_FramesRendered` moved to `m_Fps` when `m_FpsTime`
 passes 1000 ms, so the value is `0` during the first second).
-`WindowedMode` is whether a front-end opened a window (the player says
-so; headless runs read `false`), `SoundAvailable` whether an audio
+`WindowedMode` is whether the game runs in a window rather than full
+screen (the player says so; headless runs read `false`), `SoundAvailable` whether an audio
 device was opened, `AcceleratedMode` (and `Accelerated`) always true
 with wgpu. `TextEncoding` is `0` (ANSI) or `1` (UTF-8): set by every
 string table loaded (a byte order mark means UTF-8, as in the original
@@ -120,6 +181,28 @@ missing file. `Game.OpenDocument(target)` opens a file or an address
 with the system (`open` on macOS, `xdg-open` elsewhere, `start` on
 Windows); the original engine also minimizes a fullscreen window
 first, which Luma does not do.
+
+## Random numbers
+
+The scripts' `Random(from, to)`, the particle emitters and the pick of
+a talk animation draw from one generator (`Rng` in `luma-adventure`).
+It is **seeded from the clock** when the game is opened, as the original
+does (`srand(time(NULL))` in `CBGame::CBGame`): two launches draw
+different numbers. The generator itself is Luma's own (xorshift64*), so
+a sequence is never the original's. `Random(from, to)` covers the whole
+span, the bounds in either order. The original draws from the C
+library's `rand()`, 15 bits wide, so its `Random` never exceeds `from +
+32767` and its random fractions take one of 32768 values; Luma keeps
+neither limit, which no game could rely on.
+
+A saved game does not bring its random state back: after a load the
+draws go on from the running game's, as the original's do.
+
+For runs that must repeat, `World::seed_random(seed)` fixes the seed
+(tests, tooling). The headless player does it by default, so that two
+headless runs of the same steps give the same result; `--seed <n>` picks
+another fixed seed, `--seed clock` the clock. In a window the player
+seeds from the clock unless `--seed <n>` is given.
 
 ## The active object
 
@@ -153,26 +236,75 @@ while the actors talk; any object may have it set by a script.
 ## Mouse events
 
 A button raises its event (`LeftClick`, `LeftRelease`, `RightClick`,
-`RightRelease`, `LeftDoubleClick`, a double click being a second click
-within 400 ms and 4 pixels) **on the game first**. When no game script
-handles it, it goes to the active object, else to the scene when the
-mouse is over it. A game script that handles `LeftClick` is therefore in
-charge of forwarding it (The White Chamber's dispatches to the active
-object or the scene itself, and its scenes walk the actor to
-`Scene.MouseX`, `Scene.MouseY`).
+`RightRelease`) **on the game first**. When no game script handles it,
+it goes to the active object, else to the scene when the mouse is over
+it. A game script that handles `LeftClick` is therefore in charge of
+forwarding it (The White Chamber's dispatches to the active object or
+the scene itself, and its scenes walk the actor to `Scene.MouseX`,
+`Scene.MouseY`).
 
-`RightDoubleClick`, `MiddleClick` and `MiddleRelease` follow the same
-path but stop at the active object: the engine's adventure layer only
-forwards the left-button events and the right click to the scene
-(`CAdGame` against `CBGame`). A right double click replaces the second
-`RightClick`, as the system's double-click message did; a middle click
-or a right double click does nothing while the game is not interactive
-(a right click then skips the sentence, as before).
+The game and the scene only get the event **while the game runs**
+(`GAME_RUNNING`): not while it is frozen by a system-exclusive window or
+a video, nor while the response box waits for a pick. The active object
+then gets it alone: a control of the window, a response.
+
+A left or right press follows these rules, in this order
+(`CAdGame::OnMouseLeftDown`, `OnMouseRightDown`):
+
+1. a press with the pointer outside the game's frame (in the bars
+   around a letterboxed frame) is ignored (`ValidMouse`);
+2. while the game runs and is not interactive, the press only skips the
+   sentences, when `TALK_SKIP_BUTTON` names that button;
+3. a playing video is stopped when `VIDEO_SKIP_BUTTON` names that
+   button;
+4. a right press does nothing while the response box waits;
+5. for the left button, the active object is told (`HandleMouse`): a
+   **control takes the focus**, so that clicking an editor lets the
+   player type in it and clicking a window brings it to the front (see
+   [the focused window](#the-focused-window)); a window starts dragging
+   when the press is in its `DRAG_RECT`;
+6. the event is raised as above;
+7. for the left button, the active object is captured and the button
+   counts as held, which is what presses a window's button.
+
+A release (`OnMouseLeftUp`, `OnMouseRightUp`) does nothing while a video
+plays; else the drag and the capture end and the event is raised.
+
+The headless player's `--click-at` and `--click-on` steps are always
+clicks of their own, however close in time and place (the player
+forgets the last click before each step, `World::forget_clicks`);
+`--double-click-at <x>,<y>` makes a click followed by the second press
+of a double click.
+
+**Double clicks.** A second press within 400 ms and 4 pixels of the
+last one is a double click (the original takes the system's settings,
+500 ms by default), and, as the system's message does, it **replaces**
+the click: `LeftDoubleClick` (game, active object, scene) or
+`RightDoubleClick` (game, active object) is raised and nothing else
+happens. A left double click is not a click: no `LeftClick`, the button
+does not count as held, nothing is captured or focused, so a window's
+button under the mouse does not fire on the second press of two quick
+ones. A double click does nothing during a video or while the game runs
+and is not interactive; a third press starts over as a click.
+
+`MiddleClick` and `MiddleRelease` go to the game, then to the active
+object (`CBGame::OnMouseMiddleDown`, not to the scene); a middle press
+does nothing during a video or while the game runs and is not
+interactive.
+
+A click can be shorter than a frame (a tap on a trackpad, a slow
+frame). The windows' buttons work frame by frame, so `Runtime` keeps a
+release that no frame has seen held until the end of the next frame:
+the button still presses and fires (Luma's own addition; the original
+loses such a click).
 
 The wheel raises `MouseWheelUp` or `MouseWheelDown` on the **focused
 window** when its scripts handle that event, else on the game
 (`CBGame::HandleMouseWheel`); a notch of the wheel is one event, in
-either direction. The headless player turns it with `--wheel up` or
+either direction. (In the original a focused window that handles
+`MouseWheelUp` but not `MouseWheelDown` gets `MouseWheelUp` when the
+wheel turns down, a slip of its `else if`; Luma raises `MouseWheelDown`
+on the game then.) The headless player turns it with `--wheel up` or
 `--wheel down`.
 
 Closing the game's window raises `QuitGame` on the game when a game
@@ -181,17 +313,42 @@ calls `Game.QuitGame()` itself (nothing is raised while the game is
 frozen). Without a handler, the window closes and the game ends
 (`CBGame::OnWindowClose`).
 
-While the game is frozen by a system-exclusive window, the game and the
-scene get no mouse event: only the active object does, a control of the
-window or its shield.
+### The focused window
 
-`Game.MouseX` and `Game.MouseY` are the mouse in game pixels
-(writable, as is `Game.SetMousePos`). `Game.LockMouseRect(left, top,
-right, bottom)` keeps the position the game sees inside a rectangle
-(the edges are put in order; a rectangle with a zero edge unlocks,
-since the original engine applies the lock only while all four edges
-are non-zero); the original engine also moves the system cursor back
-into the rectangle, which Luma does not. `Scene.MouseX` and `Scene.MouseY`
+The focused window is the one the keys and the wheel go to. At the
+start of every frame it is the **topmost visible window**, the last of
+the game's window list (`CBGame::InitLoop`); when that one is disabled,
+the topmost visible and enabled one (`CBGame::DisplayWindows`). So a
+window loaded or shown above the others takes the keys from the next
+frame, without a click.
+
+What changes for good is the order of the list: `Focus()` on a control
+or a window, `GoExclusive`, `GoSystemExclusive` and a left click on a
+control bring the control's top window to the end of the list
+(`CBGame::FocusWindow`) and make the control the focused one of its
+window, unless a window above it is disabled. A normal window focused
+while an exclusive one had the focus gives it back. A window that is
+already the last of the list is left alone: it has the focus from the
+next frame.
+
+`Game.MouseX` and `Game.MouseY` are the mouse in game pixels. They are
+writable, and `Game.SetMousePos(x, y)` moves the mouse to a point kept
+on the screen (0 to the width, 0 to the height). `Game.LockMouseRect(
+left, top, right, bottom)` keeps the mouse inside a rectangle (the
+edges are put in order; a rectangle with a zero edge unlocks, since the
+original engine applies the lock only while all four edges are
+non-zero): at every frame and every movement, a mouse outside is put
+back on the rectangle's edge (`CBGame::GetMousePos`).
+
+In all these cases, and for the accessibility cursor skip, the original
+moves the system cursor (`CBPlatform::SetCursorPos`). In Luma the game
+sees the new position at once and the front-end is told once
+(`World::take_cursor_warp`, in game pixels): `luma-player` moves the
+system cursor to that pixel of the letterboxed frame after the frame's
+update, so that the next mouse movement starts from there. Where the
+window system refuses to move the cursor (Wayland without a pointer
+lock), the position holds until the mouse moves again; this is said
+once on the error output. `Scene.MouseX` and `Scene.MouseY`
 add the scene's scroll offset and take off the scene viewport's origin
 (`SCENE_VIEWPORT` in the game file, `Game.SetSceneViewport`, see
 [formats/game.md](formats/game.md); a scene's own `VIEWPORT` or
@@ -240,25 +397,136 @@ the mouse, with the animation it plays there.
 
 ## Keyboard
 
-A key going down updates `Game.Keyboard`, is offered to the
-[accessibility](#accessibility) shortcuts (Ctrl+Tab, Ctrl+Space, when
-their switches are on), then goes to the **focused window** when there
-is one: `Tab` moves its focus between its focusable controls, an editor
-with the focus edits its text (mirrored for right-to-left text, see
-[formats/window.md](formats/window.md#edit)); a key the window did not
-use raises
-`Keypress` on the window when its scripts handle that event, else on
-the game. Without a focused window, `Keypress` goes to the game.
+A key press reaches the game as **two messages**, as Windows delivers
+it to the original engine (`CBPlatform::WindowProc`, `CBGame::
+HandleKeypress`):
+
+1. the **key** going down (`WM_KEYDOWN`), named by its Windows virtual
+   key code: letters as upper-case ASCII (`A` is 65), digits as
+   themselves, the other keys by their `VK_` value (`VK_ESCAPE` 27,
+   `VK_RETURN` 13, `VK_SPACE` 32, arrows 37 to 40, `VK_DELETE` 46,
+   `VK_F1` 112, the period key 190...), as the games' `keys.inc` define
+   them. A key code says which key, never what it types: the period key
+   is 190, not the 46 of its character, which is `VK_DELETE`;
+2. the **character** the key types, if any (`WM_CHAR`): `a` or `A`,
+   `.`, `é`. Backspace, Tab, Enter and Escape send the control
+   characters 8, 9, 13 and 27, Ctrl with a letter the control character
+   of that letter (Ctrl+C is 3, Ctrl+V 22), Ctrl+Enter 10, Ctrl+Backspace
+   127; Ctrl+Tab sends none.
+
+Each message, in this order (`Runtime::key_down` sends both,
+`Runtime::key_message` and `Runtime::key_char` one):
+
+- while a video plays, Escape stops it and nothing else happens;
+- the [accessibility](#accessibility) shortcuts take it when their
+  switches are on (Ctrl+Tab on the key, Ctrl+Space on the character);
+- it becomes the state of `Game.Keyboard` (`CBKeyboardState::ReadKey`);
+- the **focused window** gets it when there is one: the `Tab` key moves
+  its focus between its focusable controls, an editor with the focus
+  edits its text (see below);
+- a **key** the window did not use raises `Keypress` on the window when
+  its scripts handle that event, else on the game; without a focused
+  window, on the game. A **character** never raises `Keypress`.
+
+A held key repeats: the front-end sends the key and its character again
+for each repeat, so `Keypress` is raised again and an editor keeps
+deleting or typing, as on Windows.
 
 | Property | Value |
 |----------|-------|
-| `KeyCode` | The key's code: letters as upper-case ASCII, digits and punctuation as themselves, named keys by their Windows virtual key code (`VK_ESCAPE` 27, `VK_RETURN` 13, `VK_SPACE` 32, arrows 37 to 40, `VK_F1` 112...), as the games' `keys.inc` define them. |
-| `Key` | The character typed when the key is printable, else empty. |
-| `Printable` | Whether the key produced a character. |
-| `IsShift`, `IsAlt`, `IsControl` | The modifiers held. |
+| `KeyCode` | The code of the last message: a key's virtual key code, or a character's code (its Windows-1252 byte: `a` is 97, `é` 233; the Unicode code point for a character the code page lacks). |
+| `Key` | The character of the last message when it was a character, else empty. |
+| `Printable` | Whether the last message was a character. |
+| `IsShift`, `IsAlt`, `IsControl` | The modifiers held at the last message. |
+
+A `Keypress` handler runs with the next frame's scripts, after both
+messages, so it sees the **character** of a key that types one and the
+**key code** of a key that does not: `KeyCode` is 112 for F1 and 27 for
+Escape (whose character is 27 too), but 97 for the A key, with `Key`
+`"a"` and `Printable` true. This is the original's behaviour, read from
+its sources (the handler is a script thread started at the next frame,
+the character message is handled before that frame): a script that
+compares `KeyCode` with a letter's virtual key code never matches, and
+a character whose code is a key's (`p` is 112, `VK_F1`; `.` is 46,
+`VK_DELETE`; `$` is 36, `VK_HOME`) is taken for that key by a script
+that does not test `Printable`.
 
 `Keyboard.IsKeyDown(code)` says whether a key is held; a string gives
-its first character, in either case.
+its first character, in either case. It also answers for the mouse
+buttons (1 left, 2 right, 4 middle: `VK_LBUTTON`, `VK_RBUTTON`,
+`VK_MBUTTON`) and for the left and right Shift, Control and Alt (160 to
+165), as the system call the original asks does. Luma answers from the
+keys and buttons its front-end reported. `ToString(Game.Keyboard)` is
+`[keyboard state]`.
+
+### The editor's keys
+
+An editor with the focus (`CUIEdit::HandleKeypress`) takes:
+
+- the **keys** Left and Up, Right and Down (the caret moves a
+  character), Home and End, each extending the selection while Shift is
+  held, and Delete; any other key is left to `Keypress`;
+- the **characters**: Backspace (8) deletes, a printable character is
+  typed over the selection, and with Ctrl held and Alt up, the control
+  characters of A (select all), C (copy the selection), X (cut it) and
+  V (paste over the selection, up to `MAX_LENGTH`). Escape, Tab and
+  Enter are never taken, as key or as character.
+
+So Backspace both raises `Keypress` (its key) and deletes (its
+character), while Delete and the arrows are eaten by the editor.
+
+Every deletion and every insertion raises the editor's event on its
+parent when `PARENT_NOTIFY` is on: typing over a selection raises it
+twice (`DeleteChars`, then `InsertChars`), and Backspace at the start of
+the text still raises it once.
+
+Copy and paste go through a clipboard the front-end provides
+(`World::set_clipboard`; `luma-adventure` has no platform code).
+`luma-player` gives the system's in a window (the `arboard` crate);
+without one (the headless player, tests) the game keeps a clipboard of
+its own, so that what one editor copies another pastes.
+
+Luma differs from the original on purpose in three places, all defects
+of the original that no game could rely on:
+
+- typing or pasting over a selection made from left to right inserts
+  where the selection was; the original inserts further right, after as
+  many characters as the selection had;
+- a control character that is no command (Ctrl+B, Ctrl+Backspace) or
+  that comes with a pasted text (a line break) is dropped; the original
+  inserts it in the text;
+- Ctrl+C when the clipboard cannot be written types nothing; the
+  original inserts the control character.
+
+Mirrored keys for right-to-left text are described in
+[formats/window.md](formats/window.md#edit).
+
+### In `luma-player`
+
+The window's key events are translated in `crates/luma-player/src/
+keys.rs`: letters by the character they type (so a French keyboard's A
+is `A`), the other keys by their place on a US keyboard (the key right
+of M is 188 whatever it types), the numeric keypad by its own codes
+with Num Lock on (`VK_NUMPAD0` 96 to `VK_DIVIDE` 111) and as the arrows
+it stands for with Num Lock off; F13 to F24, Print Screen, Num Lock,
+Scroll Lock and the menu key have their codes. A character of any
+alphabet is delivered, with or without a key code. This table is
+inferred from the public list of virtual key codes: the original gets
+them from Windows.
+
+With Alt held and Control up, only F10 reaches the game, as on Windows,
+where the other keys are system keys the engine leaves to the system
+(AltGr, which Windows reports as Control and Alt, types). On macOS the
+rule is lifted, since Option is the key that types the third character
+of a key (`@`, `#`, `{` on many layouts), and Command stands for
+Control, so that Cmd+C, Cmd+X, Cmd+V and Cmd+A edit.
+
+The headless player presses keys with `--key [ctrl+][shift+][alt+]
+<code>` (the key, then the character it types on a US keyboard),
+`--repeat-key <code>:<n>` (a held key repeating n times), `--hold-key`
+(held without repeating, for `IsKeyDown`) and `--type <text>` (each
+character's key, then the character; a character no US key types comes
+alone).
 
 ## Fades
 

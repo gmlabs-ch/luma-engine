@@ -96,10 +96,20 @@ impl ArrayObject {
         self.values.insert(index, value);
     }
 
+    /// Turns the elements that are handles to destroyed native objects
+    /// into `null` ([`Value::invalidate_natives`]).
+    pub fn invalidate_natives(&mut self, gone: &dyn Fn(crate::NativeId) -> bool) {
+        for value in self.values.values_mut() {
+            value.invalidate_natives(gone);
+        }
+    }
+
     /// An index written as a property name: all digits (`ValidNumber`),
-    /// so `"007"` is 7 and `"1.000000"` or `"-1"` is no index.
+    /// so `"007"` is 7 and `"1.000000"` or `"-1"` is no index. An empty
+    /// name has no character that is not a digit: it is index 0, as in
+    /// the original (`atoi("")`).
     fn index(name: &str) -> Option<i32> {
-        if !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()) {
+        if name.bytes().all(|b| b.is_ascii_digit()) {
             Some(atoi(name))
         } else {
             None

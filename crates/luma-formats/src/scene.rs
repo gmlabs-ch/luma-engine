@@ -217,7 +217,7 @@ pub struct Layer {
 impl Default for Layer {
     fn default() -> Self {
         Layer {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             caption: String::new(),
             template: None,
             main: false,
@@ -337,15 +337,12 @@ pub struct Entity {
     pub sound_volume: i32,
     /// Pan the sound with the position on screen.
     pub sound_panning: bool,
-    /// The `.entity` file the entity was loaded from (`Filename`); none
-    /// for an entity written in a scene.
-    pub filename: Option<String>,
 }
 
 impl Default for Entity {
     fn default() -> Self {
         Entity {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             caption: String::new(),
             template: None,
             kind: EntityKind::Normal,
@@ -384,7 +381,6 @@ impl Default for Entity {
             sound_start_ms: 0,
             sound_volume: 100,
             sound_panning: true,
-            filename: None,
         }
     }
 }
@@ -420,7 +416,7 @@ pub struct Region {
 impl Default for Region {
     fn default() -> Self {
         Region {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             caption: String::new(),
             template: None,
             active: true,
@@ -507,7 +503,7 @@ pub struct WaypointGroup {
 impl Default for WaypointGroup {
     fn default() -> Self {
         WaypointGroup {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             template: None,
             points: Vec::new(),
             properties: Vec::new(),

@@ -1119,6 +1119,24 @@ longer than 4096 characters; the right-recursive lists (top-level items,
 Bison parse stack, which is capped at 10000 entries ("parser stack
 overflow"), i.e. a script with several thousand top-level items fails.
 
+### Bounds on nesting (Luma's own)
+
+The original compiler is a generated parser with its own stack; Luma's
+recurses on the nesting of the source, and since a game may ship a
+script as source text that the engine compiles as the game runs, a
+hostile file must end in an error and not in a stack overflow. Luma
+refuses, with `... nested too deeply`:
+
+- more than 100 statements inside one another (blocks, and the `else
+  if` of a chain, each `else` holding the next `if`);
+- more than 64 expressions and unary operators inside one another
+  (parentheses, call arguments, `!` and `-`);
+- more than 1000 binary operators in one statement.
+
+Every script of the reference game is far inside these bounds. The
+engine also refuses a source script larger than 4 MB, and compiles a
+script that failed only once per run.
+
 ## WME Lite and WME 1.x
 
 - The WME Lite repository (MIT, `src/ScEngine.cpp`, `src/dcscript.h`,

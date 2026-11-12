@@ -23,9 +23,9 @@ use crate::scene_view::{
     AnimState, SpriteBank, Transform, drawn_subframes, key, place_transformed,
 };
 
-/// The random generator the emitters draw from: xorshift64*, the same
-/// algorithm as the world's, so that a run is deterministic under a
-/// seed.
+/// The game's random generator, for the scripts' `Random` and the
+/// particle emitters: xorshift64*. A run is deterministic under a seed
+/// ([`World::seed_random`](crate::World::seed_random)).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rng(u64);
 
@@ -53,17 +53,24 @@ impl Rng {
         (self.0.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as u32
     }
 
-    /// An integer in `[from, to]`, in either order (`CBUtils::RandomInt`).
+    /// An integer in `[from, to]`, in either order (`CBUtils::
+    /// RandomInt`), over the whole span however wide. (The original
+    /// draws from the C library's `rand()`, 15 bits wide, so it never
+    /// goes beyond `from + 32767`; Luma does not keep that limit.)
     pub fn int(&mut self, from: i32, to: i32) -> i32 {
         let (from, to) = if to < from { (to, from) } else { (from, to) };
-        let span = i64::from(to) - i64::from(from) + 1;
-        (i64::from(from) + i64::from(self.next_u32()) % span) as i32
+        let span = (i64::from(to) - i64::from(from) + 1) as u64;
+        // Two draws of 31 bits: enough for any span of integers.
+        let draw = (u64::from(self.next_u32()) << 31) | u64::from(self.next_u32());
+        (i64::from(from) + (draw % span) as i64) as i32
     }
 
     /// A float in `[from, to]` (`CBUtils::RandomFloat`): `from` plus a
-    /// fraction of the distance to `to`, so `to < from` works too.
+    /// fraction of the distance to `to`, so `to < from` works too; both
+    /// ends can be drawn.
     pub fn float(&mut self, from: f32, to: f32) -> f32 {
-        let unit = self.next_u32() as f32 / u32::MAX as f32;
+        // `next_u32` gives 31 bits.
+        let unit = (f64::from(self.next_u32()) / f64::from(0x7FFF_FFFFu32)) as f32;
         from + (to - from) * unit
     }
 
@@ -925,6 +932,35 @@ impl Emitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn draws_cover_their_whole_span() {
+        let mut rng = Rng::new(1);
+        let (mut low, mut high) = (i32::MAX, i32::MIN);
+        let (mut least, mut most) = (f32::MAX, f32::MIN);
+        let (mut negative, mut positive) = (false, false);
+        for _ in 0..20_000 {
+            let value = rng.int(-3, 3);
+            assert!((-3..=3).contains(&value));
+            // A span wider than 32768 values is covered whole.
+            let value = rng.int(0, 1_000_000);
+            assert!((0..=1_000_000).contains(&value));
+            low = low.min(value);
+            high = high.max(value);
+            let value = rng.float(2.0, -2.0);
+            assert!((-2.0..=2.0).contains(&value));
+            least = least.min(value);
+            most = most.max(value);
+            // The widest span there is does not overflow.
+            let value = rng.int(i32::MAX, i32::MIN);
+            negative |= value < 0;
+            positive |= value > 0;
+        }
+        assert!(low < 1000 && high > 999_000, "{low}..{high}");
+        assert!(least < -1.99 && most > 1.99, "{least}..{most}");
+        assert!(negative && positive);
+        assert_eq!(rng.int(5, 5), 5);
+    }
     use luma_formats::Sprite;
 
     const OWNER: NativeId = NativeId(1);

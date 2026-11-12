@@ -76,8 +76,12 @@ A saved game holds:
 - the windows and their controls, the focused window, what the mouse
   captured, whether the game is frozen and by how many windows;
 - the sounds: each object's sound and the music channels, by file,
-  position, looping, volume and whether they play or are paused; the
-  crossfade in progress; the speech directories;
+  position, looping, volume, start position and whether they play or
+  are paused, with each object's pending sound event; a sound held by a
+  frozen game is saved as playing, with its position (the original
+  engine saves it as stopped and it starts over after the load; see
+  [audio.md](audio.md)); the crossfade in progress; the speech
+  directories;
 - the game's fader and the scene's, the cursors chosen, the mouse and
   the keyboard state;
 - the game's own settings a script may change: name, caption,
@@ -227,9 +231,10 @@ is not part of a saved game.
 `Game.RegWriteNumber(key, value)`, `RegWriteString(key, value)`,
 `RegReadNumber(key, default)` and `RegReadString(key, default)` keep
 values between runs of the game: its options, the language picked, a
-"seen the intro" flag. The original engine stores them in the
-`PrivateSettings` section of its `wme.ini`, or in the Windows registry
-under the game's key. Luma stores them in `settings.ini` in the save
+"seen the intro" flag. The original engine stores them in the Windows
+registry under the game's key, in a `PrivateSettings` key, and reads
+them from the `PrivateSettings` section of the `wme.ini` beside the
+game first. Luma stores them in `settings.ini` in the save
 directory (the one of `Game.SaveDirectory`), in a `[PrivateSettings]`
 section, one `key=value` per line:
 
@@ -244,8 +249,33 @@ written returns the default; `RegReadNumber` takes the leading integer
 of the stored text (`GetPrivateProfileInt`), `0` when there is none. A
 value is written to the file at once; a file that cannot be written is
 logged and the value is lost, as the original engine reports nothing
-to the script either. The section name is the original engine's, so a
-game's values can be copied from its `wme.ini` by hand.
+to the script either.
+
+A game may ship a `wme.ini` in its directory (a loose file beside the
+packages) to preset values, in the same sections. A read takes the
+player's `settings.ini` value when there is one, else the preset of
+`wme.ini`, else the default; writes never touch `wme.ini`. This differs
+from the original on purpose: it looks in `wme.ini` first
+(`CBRegistry::ReadString`, `ReadInt`) and writes to the registry, so a
+preset keeps hiding what the game writes afterwards (unless the script
+happens to read with a default equal to the preset). In Luma a value a
+script writes is read back as written. The file is read as the game's
+ANSI text; one larger than 1 MB is ignored.
+
+The same file holds the settings the engine keeps for itself, under the
+sections and keys of the original's registry (`World::
+read_engine_setting`, `read_engine_int`, `write_engine_setting`); a
+game's `wme.ini` presets these too:
+
+| Section | Key | Meaning |
+|---------|-----|---------|
+| `Video` | `Windowed` | `0` runs the game full screen, another number in a window (read by `luma-player`, written by hand; see [game-loop.md](game-loop.md#window-or-full-screen)). |
+| `Video` | `WindowPosX`, `WindowPosY` | Where the window was when the game last ended; written by `luma-player` on exit, read at start. |
+| `Debug` | `AllowWindowed` | Overrides the game's `ALLOW_WINDOWED_MODE`. |
+| `Accessibility` | | See [game-loop.md](game-loop.md#accessibility). |
+
+Numbers are read as `GetPrivateProfileInt` reads them: the leading
+integer of the value, `0` when there is none.
 
 ### Accessibility settings
 
@@ -267,6 +297,10 @@ KeyboardEnabled=1
 The `AccCaption` scripts set on objects is saved with the game, like
 the original's `m_AccessCaption`; the switches are not.
 
+The same file keeps the four sound volumes between runs, in an `[Audio]`
+section the engine itself reads when the game starts and writes when it
+ends (see [audio.md](audio.md#volumes)).
+
 ## File format
 
 The format is Luma's own: the original engine's `.dsv` files serialize
@@ -276,7 +310,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `13` today |
+| 4 | layout version, little-endian; `15` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -306,10 +340,12 @@ scene's 3D side and the game's shadow settings (the lists are empty and
 the side absent in a 2D game). Version 14, after 13, added the 3D
 actors' attachments, material overrides and bone emitters, and the
 shadow image and light position every object keeps (`SetShadowImage`,
-`SetLightPosition`). Version 15, after 14, follows the definitions the
-loaders now keep: the file an entity was loaded from, the items' tint
-always present, the fade flag of a window and the response box's window
-definition.
+`SetLightPosition`). Version 15, after 14, added the start position a
+sound keeps for its later plays and moved the sound event from the
+sound to its object. Version 17 follows the definitions the loaders
+now keep: the items' tint always present, the fade flag of a window and
+the response box's window definition (16 came with the other waves'
+state).
 
 ## Checking a game
 

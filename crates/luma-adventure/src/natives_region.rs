@@ -290,7 +290,7 @@ impl World {
             .get(index)?
             .properties
             .clone();
-        self.apply_file_properties(id, &properties);
+        self.apply_properties(id, &properties);
         Some(id)
     }
 

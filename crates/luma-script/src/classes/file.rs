@@ -9,7 +9,9 @@
 //! writable directory; the file is opened for each write, so the object
 //! holds no handle and copies and saves like any value. A saved game
 //! keeps a file open for reading (its content and position) and closes
-//! one open for writing, as the original does.
+//! one open for writing, as the original does. A file open as text is
+//! written as the original's text-mode stream writes it on Windows,
+//! each line feed as carriage return and line feed.
 
 use std::fmt;
 use std::fs::{self, OpenOptions};
@@ -326,7 +328,8 @@ impl FileObject {
     pub fn get_property(&self, name: &str) -> Option<Value> {
         Some(match name {
             "Type" => Value::from("file"),
-            "Filename" => Value::String(self.filename.clone().unwrap_or_default()),
+            // `SetString(m_Filename)`: null while the object has no name.
+            "Filename" => self.filename.clone().map_or(Value::Null, Value::String),
             "Position" => Value::Int(self.position() as i32),
             "Length" => Value::Int(self.length() as i32),
             "TextMode" => Value::Bool(self.text),
@@ -356,7 +359,7 @@ impl FileObject {
         let writing_text = matches!(self.mode, Mode::Write | Mode::Append) && self.text;
         let writing_binary = matches!(self.mode, Mode::Write | Mode::Append) && !self.text;
         let error = |host: &mut H, what: &str| {
-            host.log(&ctx.runtime_error(&format!("File.{name}: {what}")));
+            host.script_error(&ctx.runtime_error(&format!("File.{name}: {what}")));
         };
         Some(match name {
             "SetFilename" => {
@@ -411,7 +414,9 @@ impl FileObject {
                 };
                 self.close();
                 let copied = (|| {
-                    let source = host.read_file(self.filename.as_deref()?)?;
+                    // `CopyFile`: the source is a file on disk; one inside
+                    // a package cannot be copied.
+                    let source = host.read_disk_file(self.filename.as_deref()?)?;
                     let path = host.writable_path(&dest)?;
                     if !overwrite && path.exists() {
                         return None;
@@ -449,7 +454,18 @@ impl FileObject {
                     if name == "WriteLine" {
                         text.push('\n');
                     }
-                    Return::value(self.write_bytes(&text_to_bytes(&text)))
+                    // The original writes through a C stream open in
+                    // text mode (`w+`, `a+`), which on Windows puts a
+                    // carriage return before every line feed, those
+                    // inside the text included.
+                    let mut bytes = Vec::with_capacity(text.len() + 2);
+                    for byte in text_to_bytes(&text) {
+                        if byte == b'\n' {
+                            bytes.push(b'\r');
+                        }
+                        bytes.push(byte);
+                    }
+                    Return::value(self.write_bytes(&bytes))
                 }
             }
             "ReadBool" | "ReadByte" | "ReadShort" | "ReadInt" | "ReadLong" | "ReadFloat"

@@ -40,6 +40,9 @@ fn usage_errors() {
     let out = player(&["game", "--scale", "0"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--scale expects"));
+    let out = player(&["game", "--headless", "--savegame", "notes.txt"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--savegame expects"));
     let out = player(&["/nonexistent", "--scene", "x", "--screenshot", "x.png"]);
     assert_eq!(out.status.code(), Some(1));
 }
@@ -104,5 +107,151 @@ fn renders_a_screenshot() {
         shot.to_str().unwrap(),
     ]);
     assert_eq!(out.status.code(), Some(1));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The headless keyboard steps: a text typed key by key with its
+/// punctuation and an accented letter, a held key repeating, the
+/// editing keys and the clipboard shortcuts.
+#[test]
+fn headless_steps_type_into_the_focused_editor() {
+    const SCRIPT: &str = r#"
+global clicks = 0;
+global doubles = 0;
+global r1 = Random(0, 30000);
+global r2 = Random(0, 30000);
+global r3 = Random(0, 30000);
+var win = Game.LoadWindow("w.window");
+win.Visible = true;
+var name = win.GetWidget("name");
+name.Focus();
+Game.ChangeScene("room.scene");
+
+on "LeftClick"
+{
+  clicks = clicks + 1;
+}
+
+on "LeftDoubleClick"
+{
+  doubles = doubles + 1;
+}
+"#;
+    let dir = temp_dir();
+    let mut pkg = PackageBuilder::new("data");
+    pkg.add_file(
+        "startup.settings",
+        b"SETTINGS { GAME=\"default.game\" RESOLUTION { 64,32 } }".to_vec(),
+    );
+    pkg.add_file(
+        "default.game",
+        b"GAME { NAME=\"Typing\" SCRIPT=\"game.script\" }".to_vec(),
+    );
+    pkg.add_file(
+        "game.script",
+        luma_compiler::Compiler::new(luma_compiler::Natives::wme())
+            .compile(SCRIPT.as_bytes(), "game.script", &mut |_: &[u8]| None)
+            .unwrap(),
+    );
+    pkg.add_file(
+        "w.window",
+        b"WINDOW { NAME=\"w\" X=0 Y=0 WIDTH=60 HEIGHT=30 EDIT { NAME=\"name\" X=1 Y=1 WIDTH=50 HEIGHT=10 } }"
+            .to_vec(),
+    );
+    pkg.add_file(
+        "room.scene",
+        b"SCENE { NAME=\"Room\" LAYER { NAME=\"main\" MAIN=TRUE WIDTH=64 HEIGHT=32 } }".to_vec(),
+    );
+    std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
+    let run = |steps: &[&str]| -> String {
+        let mut args = vec![
+            dir.to_str().unwrap(),
+            "--headless",
+            "--mute",
+            "--after",
+            "1",
+        ];
+        args.extend_from_slice(steps);
+        let out = player(&args);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    // Punctuation whose ASCII codes are those of Delete and the arrows,
+    // and a letter no key of a US keyboard types.
+    let out = run(&["--type", "a.b'(é"]);
+    assert!(out.contains("text \"a.b'(é\""), "{out}");
+    // A held key repeats; Backspace, Home and Delete edit.
+    let out = run(&[
+        "--type",
+        "xy",
+        "--repeat-key",
+        "65:2",
+        "--key",
+        "8",
+        "--key",
+        "36",
+        "--key",
+        "46",
+    ]);
+    assert!(out.contains("text \"yaa\""), "{out}");
+    // Select all, copy, go to the end, paste.
+    let out = run(&[
+        "--type", "ab", "--key", "ctrl+65", "--key", "ctrl+67", "--key", "35", "--key", "ctrl+86",
+    ]);
+    assert!(out.contains("text \"abab\""), "{out}");
+    // Two `--click-at` on the same point a frame apart are two clicks;
+    // `--double-click-at` is a click and a double click.
+    let out = run(&[
+        "--click-at",
+        "50,25",
+        "--click-at",
+        "50,25",
+        "--click-at",
+        "50,25",
+        "--global",
+        "clicks",
+        "--global",
+        "doubles",
+    ]);
+    assert!(out.contains("global clicks: Int(3)"), "{out}");
+    assert!(out.contains("global doubles: Int(0)"), "{out}");
+    let out = run(&[
+        "--click-at",
+        "50,25",
+        "--double-click-at",
+        "50,25",
+        "--global",
+        "clicks",
+        "--global",
+        "doubles",
+    ]);
+    assert!(out.contains("global clicks: Int(2)"), "{out}");
+    assert!(out.contains("global doubles: Int(1)"), "{out}");
+    // Headless runs draw the same random numbers every time, a seed
+    // gives others, and the clock others again.
+    let draws = |steps: &[&str]| -> Vec<String> {
+        let mut args = vec!["--global", "r1", "--global", "r2", "--global", "r3"];
+        args.extend_from_slice(steps);
+        run(&args)
+            .lines()
+            .filter(|l| l.starts_with("global r"))
+            .map(str::to_string)
+            .collect()
+    };
+    let default = draws(&[]);
+    assert_eq!(default.len(), 3, "{default:?}");
+    assert_eq!(default, draws(&[]));
+    let seeded = draws(&["--seed", "7"]);
+    assert_eq!(seeded, draws(&["--seed", "7"]));
+    assert_ne!(seeded, default);
+    assert_ne!(draws(&["--seed", "clock"]), default);
+    let out = player(&["game", "--headless", "--key", "meta+65"]);
+    assert_eq!(out.status.code(), Some(2));
+    let out = player(&["game", "--headless", "--repeat-key", "65"]);
+    assert_eq!(out.status.code(), Some(2));
     std::fs::remove_dir_all(&dir).unwrap();
 }

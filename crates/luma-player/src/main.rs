@@ -4,6 +4,9 @@
 //! keyboard; shows one scene without scripts (`--scene`); or runs the
 //! scripts without a window (`--headless`).
 
+mod keys;
+mod view;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
@@ -12,12 +15,12 @@ use luma::adventure::{Audio, Camera, GameSettings, Runtime, SceneView};
 use luma::archive::Vfs;
 use luma::formats::Rgba;
 use luma::formats::font::TextAlign;
-use luma::render::winit::dpi::PhysicalSize;
+use luma::render::winit::dpi::{PhysicalPosition, PhysicalSize};
 use luma::render::winit::event::{
     ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
 use luma::render::winit::keyboard::{Key, ModifiersState, NamedKey};
-use luma::render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig, letterbox};
+use luma::render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig};
 
 const USAGE: &str = "\
 luma-player - desktop player for Luma Engine
@@ -44,11 +47,23 @@ OPTIONS:
     --say <text>          In headless mode, make the main actor say a sentence once the scene is up
     --font <file>         With --say, the font the actor talks with
     --mute                Play no sound (the sounds still run, silently, on the game clock)
+    --seed <n|clock>      Seed of the random numbers (Random, particles): a number for a run
+                          that draws the same numbers every time, or `clock` for the clock,
+                          as the original engine does. By default the clock in a window, a
+                          fixed seed in headless mode, so that headless runs can be compared
     --scale <n>           Open the window at n times the game's resolution (by default the
                           largest whole number that keeps it within 1280 points wide)
+    --fullscreen          Run the game full screen (the frame fills the desktop, letterboxed)
+    --windowed            Run the game in a window (the default, unless the settings say
+                          otherwise or the game forbids it with ALLOW_WINDOWED_MODE=FALSE)
     --click <node>[:ev]   In headless mode, raise an event (LeftClick by default) on a scene
                           node, e.g. --click Door or --click Freezer:LookAt
-    --click-at <x>,<y>    In headless mode, move the mouse there and click
+    --click-at <x>,<y>    In headless mode, move the mouse there and click; always a click of
+                          its own, never the second of a double click, however close the
+                          step before
+    --double-click-at <x>,<y>
+                          In headless mode, move the mouse there and double-click: a click,
+                          then a second press that is the double click (LeftDoubleClick)
     --click-on <node>     In headless mode, move the mouse over a scene node where it is
                           now (the centre of its hit area) and click, e.g. a wandering
                           character
@@ -57,13 +72,20 @@ OPTIONS:
                           centred on the mouse is then clicked with --click-at at the same point)
     --wheel <up|down>     In headless mode, turn the mouse wheel a notch (MouseWheelUp or
                           MouseWheelDown on the focused window, else on the game)
-    --key <code>          In headless mode, press a key (a Windows virtual key code, e.g. 27 for
-                          Escape)
+    --key [ctrl+][shift+][alt+]<code>
+                          In headless mode, press a key (a Windows virtual key code, e.g. 27 for
+                          Escape, 46 for Delete, ctrl+86 to paste), then the character the key
+                          types on a US keyboard, if any
+    --repeat-key <code>:<n>
+                          In headless mode, hold a key until it has repeated n times, as a held
+                          key does: n+1 presses, then one release
     --hold-key <code>[:<frames>]
                           In headless mode, hold a key down for that many frames (--after by
                           default), for scripts that poll Keyboard.IsKeyDown
     --type <text>         In headless mode, type the text, a key per character (into the
-                          focused editor)
+                          focused editor): each key as a US keyboard has it, then its
+                          character; a character the layout lacks (an accented letter) comes
+                          without a key
     --drag <x>,<y>:<x>,<y>
                           In headless mode, press the left button at the first point, move to
                           the second over --after frames and release there (a puzzle piece)
@@ -79,13 +101,14 @@ OPTIONS:
                           (repeatable)
     --save <slot>         In headless mode, save the game to that slot after the clicks and
                           the scene changes (as Game.SaveGame does)
-    --load <slot>         In headless mode, load that slot before the first frame (as
-                          Game.LoadGame does); the game's own scripts are replaced by the
-                          saved ones
+    --load <slot>         Load that slot before the first frame (as Game.LoadGame does);
+                          the game's own scripts are replaced by the saved ones
+    --savegame <file>     Load that saved game before the first frame, by its file name
+                          in the save directory (save001.dsv) or its path
     --help                Show this message
 
---click, --click-at, --click-on, --right-click-at, --drag, --wheel, --key, --hold-key,
---type and --wait are steps: they run in the order given, --after frames apart, starting one
+--click, --click-at, --double-click-at, --click-on, --right-click-at, --drag, --wheel, --key, --hold-key,
+--repeat-key, --type and --wait are steps: they run in the order given, --after frames apart, starting one
 frame after the scene is up, once its scripts have placed the actor, as
 for a player who acts when the scene shows.
 
@@ -106,16 +129,34 @@ const BLACK: Rgba = Rgba {
     a: 255,
 };
 
+/// What `--seed` asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Seed {
+    /// The clock, as the original engine seeds.
+    Clock,
+    /// A number: the same draws at every run.
+    Fixed(u64),
+}
+
 /// A step of the headless run, in command-line order.
 enum Step {
     /// Raise an event on a scene node by name (`node` or `node:event`).
     Node(String),
     ClickAt(i32, i32),
+    /// A click, then the second press of a double click.
+    DoubleClickAt(i32, i32),
     /// Click a scene node where it is at that moment.
     ClickOn(String),
     RightClickAt(i32, i32),
-    /// Press and release a key.
-    Key(i32),
+    /// Press and release a key, with modifiers held.
+    Key {
+        code: i32,
+        shift: bool,
+        alt: bool,
+        control: bool,
+    },
+    /// Press a key, let it repeat that many times, release it.
+    RepeatKey(i32, u32),
     /// Turn the wheel a notch: `1` up, `-1` down.
     Wheel(i32),
     /// Hold a key down for that many frames (`--after` when `None`).
@@ -143,6 +184,10 @@ struct Options {
     mute: bool,
     /// Window size as a multiple of the game's resolution (`--scale`).
     scale: Option<u32>,
+    /// `--windowed` (true) or `--fullscreen` (false).
+    windowed: Option<bool>,
+    /// `--seed`: a number, or `Seed::Clock`.
+    seed: Option<Seed>,
     steps: Vec<Step>,
     hover_at: Option<(i32, i32)>,
     after: u64,
@@ -168,6 +213,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut font = None;
     let mut mute = false;
     let mut scale = None;
+    let mut windowed = None;
+    let mut seed = None;
     let mut steps = Vec::new();
     let mut hover_at = None;
     let mut after = 3;
@@ -214,6 +261,25 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--say" => say = Some(value(&mut i)?.clone()),
             "--font" => font = Some(value(&mut i)?.clone()),
             "--mute" => mute = true,
+            "--seed" => {
+                let v = value(&mut i)?;
+                seed =
+                    Some(if v.eq_ignore_ascii_case("clock") {
+                        Seed::Clock
+                    } else {
+                        Seed::Fixed(v.parse().map_err(|_| {
+                            format!("--seed expects a number or `clock`, got `{v}`")
+                        })?)
+                    });
+            }
+            "--fullscreen" => windowed = Some(false),
+            "--windowed" => windowed = Some(true),
+            "--savegame" => {
+                let v = value(&mut i)?;
+                load = Some(save_slot_of(v).ok_or_else(|| {
+                    format!("--savegame expects a saved game named save<slot>.dsv, got `{v}`")
+                })?);
+            }
             "--scale" => {
                 let v = value(&mut i)?;
                 scale = Some(
@@ -232,6 +298,14 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                     .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
                     .ok_or_else(|| format!("--click-at expects <x>,<y>, got `{v}`"))?;
                 steps.push(Step::ClickAt(x, y));
+            }
+            "--double-click-at" => {
+                let v = value(&mut i)?;
+                let (x, y) = v
+                    .split_once(',')
+                    .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
+                    .ok_or_else(|| format!("--double-click-at expects <x>,<y>, got `{v}`"))?;
+                steps.push(Step::DoubleClickAt(x, y));
             }
             "--click-on" => steps.push(Step::ClickOn(value(&mut i)?.clone())),
             "--type" => steps.push(Step::Type(value(&mut i)?.clone())),
@@ -278,10 +352,41 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--key" => {
                 let v = value(&mut i)?;
-                let code = v
-                    .parse()
-                    .map_err(|_| format!("--key expects a key code, got `{v}`"))?;
-                steps.push(Step::Key(code));
+                let (mut shift, mut alt, mut control) = (false, false, false);
+                let mut parts: Vec<&str> = v.split('+').collect();
+                let code = parts
+                    .pop()
+                    .and_then(|code| code.trim().parse().ok())
+                    .ok_or_else(|| format!("--key expects a key code, got `{v}`"))?;
+                for modifier in parts {
+                    match modifier.trim().to_ascii_lowercase().as_str() {
+                        "shift" => shift = true,
+                        "alt" => alt = true,
+                        "ctrl" | "control" => control = true,
+                        _ => {
+                            return Err(format!(
+                                "--key expects [ctrl+][shift+][alt+]<code>, got `{v}`"
+                            ));
+                        }
+                    }
+                }
+                steps.push(Step::Key {
+                    code,
+                    shift,
+                    alt,
+                    control,
+                });
+            }
+            "--repeat-key" => {
+                let v = value(&mut i)?;
+                let (code, count) = v
+                    .split_once(':')
+                    .and_then(|(code, count)| {
+                        Some((code.trim().parse().ok()?, count.trim().parse::<u32>().ok()?))
+                    })
+                    .filter(|(_, count)| *count <= 10_000)
+                    .ok_or_else(|| format!("--repeat-key expects <code>:<n>, got `{v}`"))?;
+                steps.push(Step::RepeatKey(code, count));
             }
             "--wheel" => {
                 let v = value(&mut i)?;
@@ -352,6 +457,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         font,
         mute,
         scale,
+        windowed,
+        seed,
         steps,
         hover_at,
         after,
@@ -361,6 +468,20 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         save,
         load,
     })
+}
+
+/// The slot of a saved game's file (`save007.dsv`, with or without a
+/// directory): the original's `-savegame <file>` names the file, Luma's
+/// saved games are found by slot in the game's save directory.
+fn save_slot_of(file: &str) -> Option<i32> {
+    let name = Path::new(file).file_name()?.to_str()?.to_ascii_lowercase();
+    let digits = name
+        .strip_prefix("save")?
+        .strip_suffix(&format!(".{}", luma::adventure::SAVE_EXTENSION))?;
+    if digits.is_empty() || digits.len() > 6 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 fn main() -> ExitCode {
@@ -420,6 +541,13 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         Audio::new()
     };
     let mut runtime = Runtime::with_audio(vfs, audio).map_err(|e| e.to_string())?;
+    // Headless runs are compared with one another: the same random
+    // numbers at every run unless the clock is asked for.
+    match options.seed {
+        Some(Seed::Clock) => {}
+        Some(Seed::Fixed(seed)) => runtime.world.seed_random(seed),
+        None => runtime.world.seed_random(luma::adventure::FIXED_SEED),
+    }
     let game = runtime.world.game_file();
     println!(
         "game {:?}: {} script(s), {} strings, audio {}",
@@ -498,8 +626,12 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                         }
                     }
                 }
+                // Each step is a click of its own: two steps on the same
+                // point a few frames apart are not a double click.
+                runtime.world.forget_clicks();
+                let double = matches!(step, Step::DoubleClickAt(..));
                 let (x, y, right) = match step {
-                    Step::ClickAt(x, y) => (*x, *y, false),
+                    Step::ClickAt(x, y) | Step::DoubleClickAt(x, y) => (*x, *y, false),
                     Step::ClickOn(node) => {
                         let point = runtime
                             .world
@@ -533,9 +665,24 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                         }
                         continue;
                     }
-                    Step::Key(code) => {
+                    Step::Key {
+                        code,
+                        shift,
+                        alt,
+                        control,
+                    } => {
                         println!("[{tick}] key {code} pressed");
-                        runtime.key_down(*code, None, false, false, false);
+                        let text = luma::adventure::input::char_for_key(*code, *shift);
+                        runtime.key_down(*code, text, *shift, *alt, *control);
+                        runtime.key_up(*code);
+                        continue;
+                    }
+                    Step::RepeatKey(code, count) => {
+                        println!("[{tick}] key {code} held, repeated {count} time(s)");
+                        let text = luma::adventure::input::char_for_key(*code, false);
+                        for _ in 0..=*count {
+                            runtime.key_down(*code, text, false, false, false);
+                        }
                         runtime.key_up(*code);
                         continue;
                     }
@@ -601,9 +748,15 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                     Step::Type(text) => {
                         println!("[{tick}] typing {text:?}");
                         for ch in text.chars() {
-                            let code = i32::from(ch.to_ascii_uppercase() as u8);
-                            runtime.key_down(code, Some(ch), false, false, false);
-                            runtime.key_up(code);
+                            match luma::adventure::input::key_for_char(ch) {
+                                Some((code, shift)) => {
+                                    runtime.key_down(code, Some(ch), shift, false, false);
+                                    runtime.key_up(code);
+                                }
+                                // No key of the layout types it: the
+                                // character alone, as a composed one.
+                                None => runtime.key_char(ch, false, false, false),
+                            }
                         }
                         continue;
                     }
@@ -633,6 +786,18 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
                 if right {
                     runtime.mouse_right_up();
                 } else {
+                    runtime.mouse_left_up();
+                }
+                if double {
+                    // The second press, a frame later: the double click.
+                    for line in runtime.tick(options.dt) {
+                        println!("[{tick}] {line}");
+                    }
+                    println!("[{tick}] second press: double click");
+                    runtime.mouse_left_down();
+                    for line in runtime.tick(options.dt) {
+                        println!("[{tick}] {line}");
+                    }
                     runtime.mouse_left_up();
                 }
             }
@@ -669,6 +834,9 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
             println!("[{tick}] quit requested");
             break;
         }
+    }
+    for line in runtime.shutdown() {
+        println!("[{}] {line}", options.ticks);
     }
     let counts = runtime.engine.counts();
     println!(
@@ -1009,7 +1177,44 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         .ok()
         .and_then(|v| v.parse().ok());
     let mut runtime = runtime;
-    runtime.world.set_windowed(true);
+    // The world is seeded from the clock, as the original; a number
+    // makes the run repeatable.
+    if let Some(Seed::Fixed(seed)) = options.seed {
+        runtime.world.seed_random(seed);
+    }
+    // Window or full screen (`CHWManager`): what the command line asks,
+    // else the choice kept in the settings (`Video/Windowed`), else a
+    // window; full screen only when the game forbids the window
+    // (`ALLOW_WINDOWED_MODE`, which `Debug/AllowWindowed` overrides).
+    let allow_windowed = runtime
+        .world
+        .read_engine_int("Debug", "AllowWindowed")
+        .map_or(settings.allow_windowed, |v| v != 0);
+    let saved = runtime
+        .world
+        .read_engine_int("Video", "Windowed")
+        .map(|v| v != 0);
+    let windowed = view::windowed_mode(allow_windowed, options.windowed, saved);
+    if options.windowed == Some(true) && !windowed {
+        eprintln!("this game runs full screen only (ALLOW_WINDOWED_MODE=FALSE)");
+    }
+    runtime.world.set_windowed(windowed);
+    // The window opens where it was left (`Video/WindowPosX`, `WindowPosY`).
+    let position = match (
+        runtime.world.read_engine_int("Video", "WindowPosX"),
+        runtime.world.read_engine_int("Video", "WindowPosY"),
+    ) {
+        (Some(x), Some(y)) => Some((x, y)),
+        _ => None,
+    };
+    // The editors copy to and paste from the system's clipboard; when
+    // it cannot be reached, they keep the game's own.
+    match arboard::Clipboard::new() {
+        Ok(clipboard) => runtime
+            .world
+            .set_clipboard(Box::new(SystemClipboard(clipboard))),
+        Err(err) => eprintln!("no system clipboard: {err}"),
+    }
     // Games of the time are 320 to 1024 pixels wide: open the window at a
     // whole multiple of that, so that a small game is not a stamp on a
     // modern screen. The frame is letterboxed into whatever the window is.
@@ -1022,6 +1227,12 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         size: PhysicalSize::new(settings.width, settings.height),
         modifiers: ModifiersState::empty(),
         started: false,
+        load: options.load,
+        windowed,
+        window_position: None,
+        warp_failed: false,
+        focused: true,
+        occluded: false,
     };
     luma::render::window::run(
         WindowConfig {
@@ -1029,11 +1240,27 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
             width: settings.width.saturating_mul(scale).clamp(1, 16384),
             height: settings.height.saturating_mul(scale).clamp(1, 16384),
             cursor_visible: false,
+            fullscreen: !windowed,
+            position,
             ..WindowConfig::default()
         },
         player,
     )
     .map_err(|e| e.to_string())
+}
+
+/// The system's clipboard, for the game's editors (Ctrl+C, Ctrl+X,
+/// Ctrl+V).
+struct SystemClipboard(arboard::Clipboard);
+
+impl luma::adventure::Clipboard for SystemClipboard {
+    fn get_text(&mut self) -> Option<String> {
+        self.0.get_text().ok()
+    }
+
+    fn set_text(&mut self, text: &str) -> bool {
+        self.0.set_text(text).is_ok()
+    }
 }
 
 /// The game running in a window.
@@ -1044,76 +1271,64 @@ struct GamePlayer {
     size: PhysicalSize<u32>,
     modifiers: ModifiersState,
     started: bool,
+    /// A saved game to load before the first frame (`--load`,
+    /// `--savegame`).
+    load: Option<i32>,
+    /// Whether the game runs in a window, else full screen.
+    windowed: bool,
+    /// Where the window's top-left corner is on the desktop, once
+    /// known, to open it there next time.
+    window_position: Option<(i32, i32)>,
+    /// The system refused to move its cursor (said once).
+    warp_failed: bool,
+    /// Whether the window has the keyboard focus.
+    focused: bool,
+    /// Whether the window is minimised or wholly hidden.
+    occluded: bool,
 }
 
 impl GamePlayer {
+    /// The window got or lost the focus, was hidden or shown again:
+    /// the game is active while its window is focused and visible
+    /// (`WM_ACTIVATE`, `WM_SIZE` in `CBPlatform::WindowProc`).
+    fn set_window_state(&mut self, focused: bool, occluded: bool) {
+        self.focused = focused;
+        self.occluded = occluded;
+        let active = focused && !occluded;
+        if active != self.runtime.is_active() {
+            self.runtime.activate(active, false);
+        }
+    }
+
     /// A window position in game pixels, through the letterbox.
     fn to_game(&self, x: f64, y: f64) -> (i32, i32) {
         let settings = self.runtime.world.settings();
-        let (w, h) = (settings.width as f64, settings.height as f64);
-        let (vx, vy, vw, vh) = letterbox(w as f32, h as f32, self.size.width, self.size.height);
-        if vw <= 0.0 || vh <= 0.0 {
-            return (0, 0);
-        }
-        (
-            ((x - f64::from(vx)) * w / f64::from(vw)).floor() as i32,
-            ((y - f64::from(vy)) * h / f64::from(vh)).floor() as i32,
+        view::to_game(
+            (settings.width, settings.height),
+            (self.size.width, self.size.height),
+            (x, y),
         )
     }
+}
 
-    /// The Windows virtual key code of a key, as scripts compare
-    /// `Keyboard.KeyCode` (the engine's codes on its home platform):
-    /// letters as upper-case ASCII, digits and punctuation as themselves,
-    /// named keys by their `VK_` value.
-    fn key_code(key: &Key) -> Option<i32> {
-        Some(match key {
-            Key::Character(text) => {
-                let c = text.chars().next()?;
-                if c.is_ascii_alphabetic() {
-                    i32::from(c.to_ascii_uppercase() as u8)
-                } else if c.is_ascii() {
-                    i32::from(c as u8)
-                } else {
-                    return None;
-                }
-            }
-            Key::Named(named) => match named {
-                NamedKey::Backspace => 8,
-                NamedKey::Tab => 9,
-                NamedKey::Enter => 13,
-                NamedKey::Shift => 16,
-                NamedKey::Control => 17,
-                NamedKey::Alt => 18,
-                NamedKey::Pause => 19,
-                NamedKey::CapsLock => 20,
-                NamedKey::Escape => 27,
-                NamedKey::Space => 32,
-                NamedKey::PageUp => 33,
-                NamedKey::PageDown => 34,
-                NamedKey::End => 35,
-                NamedKey::Home => 36,
-                NamedKey::ArrowLeft => 37,
-                NamedKey::ArrowUp => 38,
-                NamedKey::ArrowRight => 39,
-                NamedKey::ArrowDown => 40,
-                NamedKey::Insert => 45,
-                NamedKey::Delete => 46,
-                NamedKey::F1 => 112,
-                NamedKey::F2 => 113,
-                NamedKey::F3 => 114,
-                NamedKey::F4 => 115,
-                NamedKey::F5 => 116,
-                NamedKey::F6 => 117,
-                NamedKey::F7 => 118,
-                NamedKey::F8 => 119,
-                NamedKey::F9 => 120,
-                NamedKey::F10 => 121,
-                NamedKey::F11 => 122,
-                NamedKey::F12 => 123,
-                _ => return None,
-            },
-            _ => return None,
-        })
+impl Drop for GamePlayer {
+    /// The game ends: the four volumes go to the settings file for the
+    /// next run (`CBSoundMgr::~CBSoundMgr`), the window's position too
+    /// (`CBPlatform::MessageLoop` on exit) unless the game ran full
+    /// screen, and a script profiler still on writes its table, as the
+    /// original engine does when it shuts down.
+    fn drop(&mut self) {
+        if let (true, Some((x, y))) = (self.windowed, self.window_position) {
+            let world = &mut self.runtime.world;
+            world.write_engine_setting("Video", "WindowPosX", &x.to_string());
+            world.write_engine_setting("Video", "WindowPosY", &y.to_string());
+        }
+        if self.started {
+            self.runtime.world.save_volume_settings();
+        }
+        for line in self.runtime.shutdown() {
+            eprintln!("{line}");
+        }
     }
 }
 
@@ -1126,8 +1341,22 @@ impl App for GamePlayer {
     fn event(&mut self, event: &WindowEvent) -> Flow {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
-                let (x, y) = self.to_game(position.x, position.y);
+                let (mut x, mut y) = self.to_game(position.x, position.y);
+                if !self.windowed {
+                    // Full screen keeps the cursor on the game's frame
+                    // (`CBRenderer::ClipCursor`).
+                    let settings = self.runtime.world.settings();
+                    x = x.clamp(0, settings.width as i32 - 1);
+                    y = y.clamp(0, settings.height as i32 - 1);
+                }
                 self.runtime.mouse_move(x, y);
+            }
+            WindowEvent::Moved(position) => {
+                // A minimised window reports a place far off the desktop
+                // on some systems: not one to come back to.
+                if self.windowed && !self.occluded && position.x > -30000 && position.y > -30000 {
+                    self.window_position = Some((position.x, position.y));
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => match (button, state) {
                 (MouseButton::Left, ElementState::Pressed) => self.runtime.mouse_left_down(),
@@ -1148,41 +1377,65 @@ impl App for GamePlayer {
                 }
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+            WindowEvent::Focused(focused) => self.set_window_state(*focused, self.occluded),
+            WindowEvent::Occluded(occluded) => self.set_window_state(self.focused, *occluded),
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
                         logical_key,
+                        physical_key,
+                        location,
                         state,
                         text,
-                        repeat,
                         ..
                     },
                 ..
             } => {
-                let Some(code) = GamePlayer::key_code(logical_key) else {
-                    return Flow::Continue;
-                };
-                match state {
-                    ElementState::Pressed if !repeat => {
-                        let printable = text
-                            .as_ref()
-                            .and_then(|t| t.chars().next())
-                            .filter(|c| !c.is_control());
-                        self.runtime.key_down(
-                            code,
-                            printable,
-                            self.modifiers.shift_key(),
-                            self.modifiers.alt_key(),
-                            self.modifiers.control_key(),
-                        );
+                // A held key repeats: the game gets the key and its
+                // character again each time, as Windows sends them.
+                let code = keys::virtual_key(logical_key, *physical_key);
+                let sided = code.and_then(|code| keys::sided_key(code, *location));
+                if *state == ElementState::Released {
+                    for code in code.into_iter().chain(sided) {
+                        self.runtime.key_up(code);
                     }
-                    ElementState::Released => self.runtime.key_up(code),
-                    _ => {}
+                    return Flow::Continue;
+                }
+                let shift = self.modifiers.shift_key();
+                let alt = self.modifiers.alt_key();
+                // The Command key of a Mac stands for Control, so that
+                // Cmd+C, Cmd+X, Cmd+V and Cmd+A edit as Ctrl does.
+                let control = self.modifiers.control_key()
+                    || (cfg!(target_os = "macos") && self.modifiers.super_key());
+                // The key is held whether or not the game is told.
+                for code in code.into_iter().chain(sided) {
+                    self.runtime.world.key_held(code);
+                }
+                // On a Mac, Option types the third character of a key.
+                if !keys::reaches_game(code, alt, control, cfg!(target_os = "macos")) {
+                    return Flow::Continue;
+                }
+                let mut chars = text
+                    .iter()
+                    .flat_map(|t| t.chars())
+                    .filter(|c| !c.is_control());
+                if let Some(code) = code {
+                    self.runtime
+                        .key_down(code, chars.next(), shift, alt, control);
+                }
+                // A key without a code, or a second character (a dead
+                // key that did not combine): the characters alone.
+                for ch in chars {
+                    self.runtime.key_char(ch, shift, alt, control);
                 }
             }
             _ => {}
         }
         Flow::Continue
+    }
+
+    fn active(&self) -> bool {
+        self.runtime.is_active()
     }
 
     fn close_requested(&mut self) -> Flow {
@@ -1200,14 +1453,57 @@ impl App for GamePlayer {
         if !self.started {
             self.started = true;
             self.runtime.start();
+            if let Some(slot) = self.load {
+                // As the original's `-savegame`: the saved game loads
+                // right after the start-up.
+                self.runtime.world.schedule_load(slot);
+            }
+            if self.windowed && self.window_position.is_none() {
+                self.window_position = frame
+                    .window
+                    .outer_position()
+                    .ok()
+                    .map(|position| (position.x, position.y));
+            }
         }
-        // The engine advances its timer by at most a second per frame.
+        if !self.runtime.is_active() {
+            // The system asked for a repaint while the game sleeps: the
+            // frame as it is, without running the game (`OnPaint`).
+            let settings = self.runtime.world.settings();
+            list.width = settings.width as f32;
+            list.height = settings.height as f32;
+            list.letterbox = true;
+            self.runtime.draw(list, Some(frame.renderer.white()));
+            return Flow::Continue;
+        }
+        // The engine advances its timer by at most a second per frame
+        // (also for the first frame after the window was inactive).
         let dt = (frame.dt.as_millis() as u64).clamp(1, 1000);
         for line in self.runtime.tick(dt) {
             eprintln!("{line}");
         }
         if self.runtime.world.quit_requested() {
             return Flow::Exit;
+        }
+        if let Some(point) = self.runtime.world.take_cursor_warp() {
+            // The game moved the mouse (`Game.SetMousePos`, the mouse
+            // lock...): the system cursor follows, where the window
+            // system allows it.
+            let settings = self.runtime.world.settings();
+            let (x, y) = view::to_window(
+                (settings.width, settings.height),
+                (frame.size.width, frame.size.height),
+                point,
+            );
+            if let Err(err) = frame
+                .window
+                .set_cursor_position(PhysicalPosition::new(x, y))
+            {
+                if !self.warp_failed {
+                    self.warp_failed = true;
+                    eprintln!("cannot move the system cursor: {err}");
+                }
+            }
         }
         self.runtime.world.upload(frame.renderer);
         if self.runtime.world.wants_frame() {
@@ -1327,5 +1623,46 @@ impl App for Player {
             Some(limit) if frame.frame_index + 1 >= limit => Flow::Exit,
             _ => Flow::Continue,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_saved_game_file_names_its_slot() {
+        assert_eq!(save_slot_of("save007.dsv"), Some(7));
+        assert_eq!(save_slot_of("SAVE120.DSV"), Some(120));
+        assert_eq!(save_slot_of("/games/saves/save001.dsv"), Some(1));
+        assert_eq!(save_slot_of("save.dsv"), None);
+        assert_eq!(save_slot_of("save-1.dsv"), None);
+        assert_eq!(save_slot_of("save1234567.dsv"), None);
+        assert_eq!(save_slot_of("notes.txt"), None);
+        assert_eq!(save_slot_of(""), None);
+    }
+
+    #[test]
+    fn window_options_are_parsed() {
+        let args = |list: &[&str]| -> Vec<String> { list.iter().map(|a| a.to_string()).collect() };
+        let options = parse_args(&args(&["game"])).unwrap();
+        assert_eq!((options.windowed, options.load), (None, None));
+        let options = parse_args(&args(&[
+            "game",
+            "--fullscreen",
+            "--savegame",
+            "save003.dsv",
+        ]))
+        .unwrap();
+        assert_eq!((options.windowed, options.load), (Some(false), Some(3)));
+        let options = parse_args(&args(&["game", "--windowed", "--load", "2"])).unwrap();
+        assert_eq!((options.windowed, options.load), (Some(true), Some(2)));
+        assert!(parse_args(&args(&["game", "--savegame", "x.txt"])).is_err());
+        assert_eq!(options.seed, None);
+        let options = parse_args(&args(&["game", "--seed", "42"])).unwrap();
+        assert_eq!(options.seed, Some(Seed::Fixed(42)));
+        let options = parse_args(&args(&["game", "--seed", "Clock"])).unwrap();
+        assert_eq!(options.seed, Some(Seed::Clock));
+        assert!(parse_args(&args(&["game", "--seed", "dice"])).is_err());
     }
 }

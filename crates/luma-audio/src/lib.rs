@@ -25,6 +25,8 @@ mod audio;
 mod clip;
 mod error;
 
-pub use audio::{Audio, SoundEffect, SoundId, SoundType, gain};
+pub use audio::{
+    Audio, PAN_LEFT, PAN_RIGHT, SoundEffect, SoundId, SoundType, attenuation, gain, is_streamed,
+};
 pub use clip::{Clip, decode, silent_wav};
 pub use error::{Error, Result};

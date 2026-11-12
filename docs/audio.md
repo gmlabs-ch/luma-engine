@@ -2,10 +2,13 @@
 
 How Luma Engine plays the sounds, music and speech of a game: the
 `luma-audio` crate decodes and mixes, the adventure layer applies the
-original engine's rules for who owns a sound and how loud it plays. The
-rules follow WME Lite (`BSoundMgr`, `BSoundBuffer`, `BSound`,
-`BObject`, `BGame`, `AdGame`, MIT) so that games sound as their authors
-mixed them.
+original engine's rules for who owns a sound, when it plays and how loud.
+The rules follow Wintermute Engine 1.x (`BSoundMgr`, `BSoundBuffer`,
+`BSoundOGG`, `BSound`, `BObject`, `BGame`, `AdGame`, `AdObject`, MIT) so
+that games sound and behave as their authors tested them. Where 1.x and
+WME Lite differ (what a paused sound is, where a sound pans), 1.x wins.
+Bugs of the original are fixed, not reproduced, unless a game's scripts
+can depend on them; each one is named where it applies.
 
 ## Files
 
@@ -15,7 +18,8 @@ named by a script or a file is replaced by the `.ogg` of the same name
 when the game has one, as the engine does (games shipped WAV during
 development and Ogg in release). A file is decoded once, in full, and
 kept; the original engine streams large files, which Luma Engine does
-not do yet.
+not do. It still knows which sounds the original streams, because only
+those loop from a loop start (see [Looping](#looping)).
 
 ## Output
 
@@ -40,36 +44,161 @@ also has its own volume (`SetSoundVolume` on its object,
 `SetMusicChannelVolume`, the `PrivVolume` argument of `PlayMusic`, the
 `SOUND_VOLUME` of a sound entity).
 
-The gain of a sound is the engine's: the global volume of its kind is
-weighted by the sound's own volume (`global / 100 * own`, in percent);
-the remaining fraction is cubed and turned into an attenuation of up to
-100 dB; that attenuation becomes the factor applied to the samples
-(floored at Kira's silence of -60 dB). At 50 % a sound plays at about
-24 % of its amplitude, at 75 % about 67 %. The master volume then
-multiplies the result linearly, on the main mixer track.
+The gain of a sound is the engine's (`CBSoundBuffer::SetVolume`): the
+global volume of its kind (kept as 0 to 200 for 0 to 100 %) times the
+sound's own volume in percent, divided by 100 and truncated to a whole
+number; the fraction that remains to 200 is cubed and multiplied by
+-100 dB, truncated to a hundredth of a decibel. At 50 % a sound plays
+12.5 dB down (about 24 % of its amplitude), at 75 % about 1.6 dB down.
+Kira is silent from -60 dB, where DirectSound went on to -100 dB.
+
+The values are clamped to their range: a global or master volume to
+0..100, and a sound's own volume, kept and read back as given, is heard
+as full volume above 100 and as silence below 0. The master volume is
+655 times the percentage out of 65535 (100 is 65500), multiplying the
+mix linearly on the main mixer track (the original set the system's
+wave volume and put it back at exit).
+
+The original did not clamp, which were defects, not reproduced: a
+global volume was a byte (150 was kept and read back, -1 became 255);
+a value out of range made DirectSound refuse the call, so the sound
+kept whatever loudness it had before; and the master volume kept the
+low 16 bits of 655 times the byte, so 150 wrapped to half volume and
+read back as 49.
+
+The four volumes are the player's settings: they are written to the
+game's settings file when the game ends and read back when it starts
+(`CBSoundMgr::~CBSoundMgr`, `Initialize`), in the `[Audio]` section of
+`settings.ini` (see [saving.md](saving.md#private-settings)), with the
+original's key names and units: `SFXVolume`, `SpeechVolume`,
+`MusicVolume` (200 is 100 %) and `MasterVolume` (a wave device volume:
+the same 16-bit value in both halves of a 32-bit number, written signed,
+so full volume is -1). A key that is absent keeps the default. The
+player writes them when its window closes; a headless run does not. The
+original only reads and writes them when it has a sound device; Luma
+does it with or without one, as its silent backend stands for a device
+(see [Output](#output)).
 
 ## Panning
 
 An object's sound follows the object across the screen when its
-`SoundPanning` is on (the default, `SOUND_PANNING` in scene files): the
-pan goes from full left half a screen left of the view to full right
-half a screen right of it, with the centre of the screen in the middle.
-The game's own sound (`Game.PlaySound`) is not panned.
+`SoundPanning` is on (the default, `SOUND_PANNING` in scene files). The
+pan is the original's (`CBSoundMgr::PosToPan`), in DirectSound's unit,
+hundredths of a decibel taken off the far channel while the near one is
+left as it is: a margin of five screen widths on each side of the
+screen, linear across the eleven widths from -10000 to +10000. The
+centre of the screen is 0; an object at an edge of the screen has the
+far channel 9 dB down; the far channel only falls silent five screens
+away. Farther than that DirectSound refused the value, and the sound
+keeps the pan it had. Kira pans with an equal-power law; Luma gives it
+the panning that yields the same ratio between the channels and lowers
+the sound by what that law adds to the near channel, so the two
+channels come out as DirectSound's.
+
+The position is the object's `X` less the scroll offset. The engine
+runs this every frame for the game, the active actors and the active
+entities (`UpdateSounds`): their own sound and the speech of the
+sentence they are saying (`CAdObject::UpdateSounds`). The game's own
+sound (`Game.PlaySound`) is not panned. (In the original the game
+object went through the same update with a position at the centre of
+the screen, so its sound slid to one side as the scene scrolled: an
+accident, not reproduced.) A sprite frame's sound takes its object's pan when it starts. Setting
+`SoundPanning` to false centres the object's sound and its speech
+(`ResetSoundPan`). The sounds of other objects (windows, items,
+regions...) are never panned.
+
+## Playing, pausing, resuming
+
+These are the rules of `CBSound` and `CBSoundBuffer` in 1.x; several are
+not what one would guess, and scripts were written against them.
+
+- **Play always starts over.** `PlaySound()` on a sound that is playing
+  or paused stops it and starts it again at its start position.
+- **The start position stays.** `SetSoundPosition(ms)` on a sound that
+  is playing moves it at once. On a sound that is not playing, the time
+  becomes the sound's start position, used by the next play *and by
+  every play after it*: the engine never clears it. Only a later
+  `SetSoundPosition` given while the sound plays clears it (the engine
+  applies an object's pending position at the next `PlaySound()`
+  without a file, so that is when it happens). `StopSound` does not
+  clear it either. `SetMusicPosition` before `PlayMusic` works the same
+  way for the music loaded next.
+- **Pause marks the sound** even when it is not playing: `PauseSound()`
+  on a stopped or finished sound, then `ResumeSound()`, starts it from
+  its beginning. `ResumeSound()` answers false and does nothing on a
+  sound that `PauseSound()` did not pause.
+- **A frozen game holds the playing sounds** (a system window, a
+  video): `CBSoundMgr::PauseAll`, music included or not. A held sound is
+  **not playing** for a script, as in the engine, which reads the
+  device's status (`CBSoundBuffer::IsPlaying`), and it is not paused
+  either (that is the script's flag). So, while the game is frozen:
+  - `IsSoundPlaying()` and `IsMusicPlaying()` answer false for held
+    sounds;
+  - `ResumeSound()` does not resume a held sound;
+  - a sound played during the freeze plays.
+
+  But a held sound **has not ended**: the event waiting for a sound to
+  end (`PlaySoundEvent`) does not fire, and a sentence keeps its speech
+  (see [Speech](#speech)). The unfreeze resumes what the freeze held
+  (`ResumeAll`); a sound stopped in between stays stopped.
+
+  The original had three defects here, not reproduced: it only asked
+  whether the sound was playing, so the sound event fired when the game
+  froze and a sentence with a speech sound ended when a menu opened
+  during a line; and a sound stopped while held kept its mark and
+  started again from its beginning at the unfreeze (the cut speech
+  included).
+- **Saved games.** In the original a game saved while frozen (a save
+  menu) records its held sounds as not playing and without their
+  position, so after loading, the music the freeze held starts again
+  from its beginning at the unfreeze. Luma does not reproduce this: a
+  held sound is saved as playing, with its position, and goes on where
+  it was.
+
+## Looping
+
+`PlaySound(file, looping, loopStart)` and `PlayMusic(file, looping,
+loopStart)` give where a loop restarts, in milliseconds. In the original
+only a **streamed** sound uses it (`LoadSegment` refills the stream from
+the loop start); a sound held whole in a buffer loops whole, from 0. A
+sound is streamed when both hold (`CBSoundBuffer::LoadFromFile`,
+`CreateSoundBuffer`):
+
+- the engine asks for it (an object's `PlaySound` or `LoadSound`
+  sound, music, speech) or the file is larger than 1 MB (a sprite
+  frame's sound);
+- the sound is at least one streaming block long: 3 seconds / 16, that
+  is 187.5 ms (`Game.SoundBufferSize` seconds in the original, which
+  Luma does not read: always 3).
+
+So a short effect played with a loop start loops whole. A loop start
+past the end of the sound is taken as 0.
 
 ## Objects' sounds
 
-Every object (the game, actors, entities) owns at most one sound effect:
+Every object of the engine owns at most one sound effect
+(`CBObject::m_SFX`): the game, the scene and its layers, regions and
+waypoint groups, actors, entities, items, windows and their controls,
+particle emitters, `new Object`s.
 
 | Method | Effect |
 |--------|--------|
 | `LoadSound(file)` | Loads the sound without playing it. |
-| `PlaySound(file, looping, loopStart)`, `PlaySound(looping, loopStart)` | Loads and plays, or plays the loaded sound again; `loopStart` is where a loop restarts, in milliseconds. |
-| `PlaySoundEvent(file, event)`, `PlaySoundEvent(event)` | Plays and raises `event` on the object when the sound ends. |
-| `StopSound()`, `PauseSound()`, `ResumeSound()` | What they say; a stopped sound stays loaded. |
-| `IsSoundPlaying()` | Whether it plays (a sound paused by a system window counts as playing). |
-| `SetSoundPosition(ms)`, `GetSoundPosition()` | Where it plays from: at once when playing, else when it next starts. |
+| `PlaySound(file, looping, loopStart)`, `PlaySound(looping, loopStart)` | Loads and plays, or plays the loaded sound again from its start position; `loopStart` is where a loop restarts, in milliseconds (see [Looping](#looping)). |
+| `PlaySoundEvent(file, event)`, `PlaySoundEvent(event)` | Plays and raises `event` on the object when the sound has ended (not while a frozen game holds it). |
+| `StopSound()` | Stops the sound and unloads it: `PlaySound()` without a file then fails, `GetSoundVolume` reads the object's volume. Only a sound entity (`SUBTYPE="sound"`) keeps its sound loaded. False when the object has no sound. |
+| `PauseSound()`, `ResumeSound()` | See [Playing, pausing, resuming](#playing-pausing-resuming). |
+| `IsSoundPlaying()` | Whether it plays; false for a sound a frozen game holds. |
+| `SetSoundPosition(ms)`, `GetSoundPosition()` | Where it plays from: at once when playing, else when it next starts; the position read is 0 when it is not playing. |
 | `SetSoundVolume(percent)`, `GetSoundVolume()` | The sound's own volume. |
 | `SoundFXEcho(wetDryMix, feedback, leftDelay, rightDelay)`, `SoundFXReverb(inGain, reverbMix, reverbTime, highFreqRTRatio)`, `SoundFXNone()` | The effect applied to the object's sounds, now and next (see [Sound effects](#sound-effects)). |
+
+The sound event belongs to the object, not to the sound: a `PlaySound`
+clears it, a `LoadSound` or a `StopSound` leaves it waiting. Only the
+objects the engine updates every frame raise it, follow their position
+and take a changed effect on the sound they have: the game, the active
+actors and the active entities. The other objects' sounds just play
+(their effect is applied when a sound is loaded).
 
 A sound entity (`SUBTYPE="sound"`) loads its `SOUND` when the scene
 loads, with `SOUND_START_TIME` and `SOUND_VOLUME`, and a script plays it
@@ -79,7 +208,8 @@ the game's and its actors' stay.
 A sprite frame's `SOUND` (see [formats/sprite.md](formats/sprite.md))
 plays when the frame becomes current, as a sound of its own beside the
 object's `PlaySound` one (`CBFrame::OneTimeDisplay`): at full volume,
-panned with the object's position when it pans its sounds, once. A
+with the object's pan when it pans its sounds and the object's sound
+effect, both as they are when it starts, once. A
 frame marked `KILL_SOUND` stops the sprite's earlier frame sounds when
 it becomes current, and `Reset` stops them too (`CBSprite::
 KillAllSounds`). Frame sounds that ended are forgotten each frame; they
@@ -91,9 +221,10 @@ Every object keeps one effect for its sounds (`m_SFXType` and its four
 parameters), set by `SoundFXEcho`, `SoundFXReverb` or cleared by
 `SoundFXNone`: the engine applied it to the object's sound when the
 sound was loaded and again every frame (`CBObject::UpdateOneSound`), so
-a change takes effect on the sound playing. Luma applies it when a
-sound is loaded and when the effect changes; the effect is kept in
-saved games with the object's sound. The parameters are those of the
+a change takes effect on the sound playing, and on the speech of the
+sentence the object is saying. Luma applies it when a sound is loaded,
+when the effect changes and, for speech, every frame; the effect is
+kept in saved games with the object's sound. The parameters are those of the
 DirectSound effects the engine used (`DSFXEcho`, `DSFXWavesReverb`), with
 the engine's defaults for arguments left out; Kira's delay and reverb
 take them as follows:
@@ -128,9 +259,12 @@ and `GetMusicChannelPosition` report.
 
 `MusicCrossfade(channel1, channel2, length, swap)` fades the first
 channel out and the second in over `length` milliseconds on the wall
-clock, starting what does not play; at the end the first stops, both
-volumes go back to 100, and the channels swap places when `swap` is on
-(the default). A second crossfade while one runs is an error.
+clock, starting what does not play (from its start: a channel a script
+paused starts over); at the end the first stops, both volumes go back
+to 100, and the channels swap places when `swap` is on (the default). A
+second crossfade while one runs is an error. Nothing moves while the
+game is frozen (`CBGame::UpdateMusicCrossfade`); the clock goes on, so
+the fade jumps ahead at the unfreeze.
 
 ## Speech
 
@@ -138,12 +272,21 @@ volumes go back to 100, and the channels swap places when `swap` is on
 no sound given and a text of the form `/ID/fallback`, the engine looks
 for `ID.ogg` or `ID.wav` in the speech directories (`AddSpeechDir`,
 `RemoveSpeechDir`; `speech\` by default). The sound plays as speech,
-the sentence lasts the sound when no duration is given, and ends when
-the sound does; skipping the sentence stops the sound. See
-[formats/font.md](formats/font.md) for the rest of `Talk`.
+panned with the object and with the object's sound effect. A sentence
+with a sound ends when the sound has ended: neither playing, nor paused
+by a script, nor held by a frozen game, whatever duration was given
+(`TimeIsUp` in `CAdActor::Update` and `CAdEntity::Update`); skipping
+the sentence stops the sound. A freeze holds the speech with the
+sentence, and both go on at the unfreeze. (The original ended the
+sentence at the freeze, see
+[Playing, pausing, resuming](#playing-pausing-resuming).)
 
 ## Not yet
 
-- Streaming of long files (Kira can stream; the engine decodes in full
-  for now); the `.talk` files timing talk sprites to a sound.
-- Pausing every sound while a system window is open (no windows yet).
+- Streaming of long files (Kira can stream; the engine decodes in full);
+  the `.talk` files timing talk sprites to a sound.
+- `Game.SoundBufferSize` (the length of the streaming buffer) is not
+  read; `GetSoundPosition` reports the position heard, where the
+  original reports the read position of a streamed Ogg file, up to
+  three seconds ahead.
+- Pausing every sound while the game window is in the background.

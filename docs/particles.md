@@ -99,7 +99,10 @@ made; a particle gets, in order, a position in the rectangle, a depth,
 a speed, a scale, a lifetime, a direction, a sprite, a rotation, a
 spin, a growth, its border shrunk by depth, its opacity, and starts its
 fade-in. The random values come from the world's generator, the one
-scripts' `Random` uses, so a run is deterministic under a seed.
+scripts' `Random` uses (see
+[game-loop.md](game-loop.md#random-numbers)): seeded from the clock
+when the game starts, so the pattern differs at each launch, and
+deterministic under a fixed seed.
 
 ## Drawing
 

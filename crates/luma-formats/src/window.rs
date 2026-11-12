@@ -294,7 +294,7 @@ pub struct ControlDef {
 impl Default for ControlDef {
     fn default() -> Self {
         ControlDef {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             caption: String::new(),
             x: 0,
             y: 0,
@@ -1488,7 +1488,7 @@ impl Default for ItemDef {
     fn default() -> Self {
         ItemDef {
             template: None,
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             caption: String::new(),
             sprite: None,
             sprite_hover: None,

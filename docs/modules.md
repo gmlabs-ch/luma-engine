@@ -25,8 +25,15 @@ core crates under short names and the modules behind Cargo features:
 One more core crate is not re-exported: `luma-compiler`, the compiler
 from script sources to the bytecode `luma::script` runs (see
 [compiler.md](compiler.md)). It is a build tool, used by `luma compile`
-and by tests; games ship compiled scripts and never need it at run time,
-so a game does not pay for it.
+and by tests; games ship compiled scripts and do not need it at run time,
+so a game does not pay for it. The original engine also runs a script
+file that is still source text, compiling it when it is loaded: the
+feature `compiler` of `luma` (off by default, on in `luma-player`) turns
+on `luma-adventure/compiler`, which answers the script engine's
+`Host::compile_script` with `luma-compiler`. The script engine itself
+never depends on the compiler; without the feature such a file is
+refused with the original's message, `needs to be compiled but compiler
+is not available`.
 
 Two more features configure the core rather than add a module:
 `audio-device` plays the sounds on the default output device (without

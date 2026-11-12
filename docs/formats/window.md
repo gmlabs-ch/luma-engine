@@ -71,7 +71,7 @@ its placeholder for it.
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `TEMPLATE` | string | | Another file of the same kind (`.button`, `.static`, `.edit`, `.window`), loaded in place where the key stands: the keys that follow override it, the keys before it are overridden. A window's template (a root window's or a nested one's) brings its controls where the key stands, after the controls declared before it. Templates chain, up to 8 deep and 1024 files per load in Luma. **A template that cannot be loaded fails the control, and a control that fails makes its window fail.** The controls of the window inside a `.def` response box or inventory box file take their templates the same way. |
-| `NAME` | string | `""` | Name used by scripts (`GetWidget`, `PARENT_NOTIFY`). |
+| `NAME` | string | `<unnamed>` | Name used by scripts (`GetWidget`, `PARENT_NOTIFY`). |
 | `CAPTION` | string | `""` | Free caption. |
 | `X`, `Y` | int | `0` | Position, relative to the parent window. |
 | `WIDTH`, `HEIGHT` | int | `0` | Size; `0` is corrected after loading (see each control). |
@@ -164,8 +164,10 @@ text; `HeightToFit` only its height.
 An editor can take the focus (`Tab` moves it between the focusable
 controls of a window) and reads the keys: printable characters are
 inserted at the caret, `Backspace`, `Delete`, the arrows, `Home` and
-`End` edit and move. `Escape`, `Tab` and `Return` are left to the
-window. With right-to-left text (`Game.TextRTL`) the text sits against
+`End` edit and move, Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V select all,
+copy, cut and paste (see
+[game-loop.md](../game-loop.md#the-editors-keys)). `Escape`, `Tab` and
+`Return` are left to the window. With right-to-left text (`Game.TextRTL`) the text sits against
 the right edge, `Backspace` deletes the character after the caret and
 `Delete` the one before, `Home` and `End` swap, and a typed character
 leaves the caret before it, as the original engine's editor does.
@@ -226,9 +228,9 @@ object over its rectangle unless `PIXEL_PERFECT`. A click on a button
 holds it pressed while the mouse stays on it; releasing it there raises
 `Press` on the button, then the event named after the button on its
 parent when `PARENT_NOTIFY` is on; an editor with `PARENT_NOTIFY` raises
-the event named after it on its parent at each key that edits its text
-(a character, Backspace, Delete), as `CUIEdit::InsertChars` and
-`DeleteChars` do, which is how a save window enables its OK button once
+the event named after it on its parent for each deletion and each
+insertion (a character, Backspace, Delete; twice for a character typed
+over a selection), as `CUIEdit::InsertChars` and `DeleteChars` do, which is how a save window enables its OK button once
 a name is typed. A `MENU` window registers a button
 named `close` under the whole screen (and under the window) whose press
 closes the window.
@@ -260,7 +262,9 @@ window closes (`Close`, or the `close` button of a menu).
 Keys go to the focused window first: `Tab` moves the focus among its
 focusable controls, else the focused control takes the key (an editor),
 else the window's `Keypress` handler, else the game's. The mouse wheel
-goes to the focused window too.
+goes to the focused window too. The focused window is the topmost
+visible one; a left click on a control focuses it and raises its
+window (see [game-loop.md](../game-loop.md#the-focused-window)).
 
 A window can be dragged by its `DRAG_RECT` while the left button is held
 there.
@@ -313,7 +317,7 @@ with an error, after the items before it were added:
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | | Name used by `TakeItem`, `DropItem`, `HasItem` and as the event an item raises when used on an object. |
+| `NAME` | string | `<unnamed>` | Name used by `TakeItem`, `DropItem`, `HasItem` and as the event an item raises when used on an object. |
 | `CAPTION` | string | | Caption shown by the game's scripts. |
 | `IMAGE`, `SPRITE` | string | | The item's sprite in the box. |
 | `IMAGE_HOVER`, `SPRITE_HOVER` | string | | Shown instead while the mouse is over the item. |

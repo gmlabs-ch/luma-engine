@@ -30,7 +30,7 @@ use luma_3d::{
 use luma_archive::Vfs;
 use luma_formats::scene::{Entity, Point};
 use luma_formats::{BlendMode, Rgb, Rgba, Scene};
-use luma_script::{Engine, NativeId, Value};
+use luma_script::{Engine, NativeId};
 use serde::{Deserialize, Serialize};
 
 use crate::actor::ActorEvent;
@@ -616,7 +616,8 @@ impl Actor3d {
             font: def.font,
             cursor: def.cursor,
             ignore_items: false,
-            sound_panning: false,
+            // `CBObject::m_AutoSoundPanning` starts true.
+            sound_panning: true,
             tint: None,
             blend_mode: BlendMode::Normal,
             blocked_region: def.blocked_region,
@@ -1868,16 +1869,10 @@ impl World {
         }
         actor.caption = self.expand(&actor.caption);
         let id = self.objects.insert(Kind::Actor3D);
-        if let Some(native) = self.objects.get_mut(id) {
-            for property in &properties {
-                native
-                    .props
-                    .insert(property.name.clone(), Value::from(property.value.clone()));
-            }
-        }
         // As in the original, `X` and `Y` read 0 until the first update
         // projects the position.
         self.actors3d.push((id, actor));
+        self.apply_properties(id, &properties);
         for script in scripts {
             self.attach(engine, id, &script);
         }

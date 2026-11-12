@@ -128,7 +128,7 @@ A cursor or a sprite that cannot be loaded is left out the same way.
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. |
+| `NAME` | string | kept | Name used by scripts. The scene object is the same from scene to scene and starts with an empty name (every other object starts as `<unnamed>`): a file without `NAME` keeps the name of the scene left behind. |
 | `CAPTION` | string | `""` | Caption shown by the interface. |
 | `TEMPLATE` | string | | Another scene file, loaded [where the key stands](definition-files.md#template). Loading a scene file starts by emptying the scene (`Cleanup`), so everything read before the key is dropped except the name and the script properties; the keys that follow apply over the template. A template that cannot be loaded is skipped. Not written by the editor. |
 | `SCRIPT` | string, repeatable | | Scripts attached to the scene, run in order. |
@@ -161,7 +161,7 @@ A scene with no main layer loads, with a warning, and has a size of
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. |
+| `NAME` | string | `<unnamed>` | Name used by scripts. |
 | `CAPTION` | string | `""` | |
 | `MAIN` | bool | false | The main layer. The scene takes its `WIDTH` and `HEIGHT`, its regions define the floor, and actors are drawn inside it. The last layer with `MAIN=TRUE` wins. |
 | `WIDTH`, `HEIGHT` | int | 0 | Size of the layer in pixels. Layers larger than the main one scroll faster, smaller ones slower (parallax). |
@@ -190,7 +190,7 @@ scene and the root block of an `.entity` file.
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. |
+| `NAME` | string | `<unnamed>` | Name used by scripts. |
 | `CAPTION` | string | `""` | Caption shown by the interface when the mouse is over the entity. Often a string-table reference (`/STORER0002/Console`). |
 | `ACTIVE` | bool | true | An inactive entity is neither drawn, updated nor clickable. |
 | `X`, `Y` | int | 0 | Position: the sprite's hotspot is placed here, and the position is used for depth sorting, scale and tint lookups. |
@@ -241,7 +241,7 @@ joined to the first. A region in a layer carries the extra keys marked
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. `<unnamed>` is what the editor writes for a nameless one. |
+| `NAME` | string | `<unnamed>` | Name used by scripts. |
 | `CAPTION` | string | `""` | |
 | `ACTIVE` | bool | true | An inactive region does not block, scale, tint or contain anything. |
 | `POINT` | `x,y`, repeatable | | The vertices. A polygon needs at least three; fewer contain no point. |
@@ -280,7 +280,7 @@ counted consistently.
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `NAME` | string | `""` | Name used by scripts. |
+| `NAME` | string | `<unnamed>` | Name used by scripts. |
 | `POINT` | `x,y`, repeatable | | The waypoints. |
 | `PROPERTY` | block, repeatable | | Script properties. |
 | `TEMPLATE` | string | | Another file (a `WAYPOINTS` root block), loaded where the key stands; its points are added to those read so far. |
@@ -316,6 +316,8 @@ and the last of each counts. A block missing one, or holding any other
 key, sets nothing: the engine logs `Error loading PROPERTY definition`
 and the block that holds it goes on loading. Scripts read the property as
 `this.xSurface`.
+Luma sets the blocks once the object is loaded, after its other keys,
+where the original sets each one where it stands in the file.
 
 `EDITOR_PROPERTY` has the same shape and is ignored outside the editors.
 

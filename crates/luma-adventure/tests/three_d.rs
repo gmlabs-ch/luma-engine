@@ -643,6 +643,7 @@ fn a_3d_actor_walks_turns_animates_and_survives_a_save() {
     // position is the projection of its origin.
     let projection = runtime.world.projection_3d().expect("a camera");
     let actor = runtime.world.actor3d(bob).unwrap();
+    assert!(actor.sound_panning, "`m_AutoSoundPanning` starts true");
     assert_eq!(actor.position, Vec3::new(20.0, 0.0, 20.0));
     assert_eq!((actor.x, actor.y), projection.project(actor.position));
     assert!(

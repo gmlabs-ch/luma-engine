@@ -53,7 +53,7 @@ ACTOR {
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `TEMPLATE` | string | | Another `.actor` file, loaded [where the key stands](definition-files.md#template): the keys before it are overridden by the template, the keys after it override it. The template's `ALPHA_COLOR`/`ALPHA` stay unless this file names its own. A template that cannot be loaded is skipped. |
-| `NAME` | string | `""` | Name used by scripts. |
+| `NAME` | string | `<unnamed>` | Name used by scripts. |
 | `CAPTION` | string | `""` | Caption shown when the mouse is over the actor. |
 | `X`, `Y` | int | `0` | Position: where the hotspot of the current sprite is placed. |
 | `ACTIVE` | bool | `TRUE` | Drawn, updated and clickable. |

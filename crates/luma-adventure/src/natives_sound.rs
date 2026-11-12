@@ -3,8 +3,8 @@
 //! directories.
 //!
 //! Written with reference to the `ScCallMethod` methods of `BObject.cpp`,
-//! `BGame.cpp` and `AdGame.cpp` of WME Lite (MIT License, Copyright (c)
-//! 2011 Jan Nedoma); see `NOTICE`.
+//! `BGame.cpp`, `AdEntity.cpp` and `AdGame.cpp` of Wintermute Engine 1.x
+//! (MIT License, Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`.
 
 use luma_audio::SoundType;
 use luma_script::{NativeId, Return, Value};
@@ -50,7 +50,18 @@ impl World {
                 };
                 Return::value(self.play_sfx(id, file.as_deref(), false, true, Some(event), 0))
             }
-            "StopSound" => Return::value(self.stop_sfx(id, false)),
+            "StopSound" => {
+                // `StopSFX()` deletes the sound; only a sound entity
+                // keeps it loaded (`CAdEntity::ScCallMethod`).
+                let keep = matches!(
+                    self.native(id).map(|n| n.kind.clone()),
+                    Some(crate::objects::Kind::Entity(r))
+                        if self.entity_def(r).is_some_and(|e| {
+                            e.kind == luma_formats::scene::EntityKind::Sound
+                        })
+                );
+                Return::value(self.stop_sfx(id, !keep))
+            }
             "PauseSound" => Return::value(self.pause_sfx(id)),
             "ResumeSound" => Return::value(self.resume_sfx(id)),
             "IsSoundPlaying" => Return::value(self.is_sfx_playing(id)),
@@ -173,9 +184,8 @@ impl World {
                 let length = u64::try_from(arg(2).get_int(self)).unwrap_or(0);
                 let swap = arg(3).is_null() || arg(3).get_bool(self);
                 if self.is_crossfading() {
-                    self.log(
-                        "Runtime error. Game.MusicCrossfade: Music crossfade is already in progress."
-                            .to_string(),
+                    self.report_script_error(
+                        "Runtime error. Game.MusicCrossfade: Music crossfade is already in progress.",
                     );
                     return Some(Return::value(false));
                 }

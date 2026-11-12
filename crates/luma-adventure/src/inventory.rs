@@ -299,7 +299,7 @@ impl World {
                 y: 0,
             },
         ));
-        self.apply_file_properties(id, &properties);
+        self.apply_properties(id, &properties);
         for script in scripts {
             self.attach(engine, id, &script);
         }

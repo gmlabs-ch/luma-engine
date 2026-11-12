@@ -32,6 +32,9 @@ lumen = ["dep:luma-lumen"]
 ## and the Direct3D conventions of Wintermute's 3D actors
 ## (`luma::three_d`).
 3d = ["dep:luma-3d", "luma-adventure?/3d"]
+## Script files shipped as source text are compiled when the adventure
+## module loads them (games normally ship compiled scripts).
+compiler = ["luma-adventure?/compiler"]
 ## Sound output on the default device (needs ALSA on Linux); without it
 ## the sounds run silently on the game clock.
 audio-device = ["luma-audio/device"]

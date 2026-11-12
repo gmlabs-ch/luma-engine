@@ -83,12 +83,12 @@ pub struct Context<'a> {
 impl Context<'_> {
     /// A runtime error in the calling script, worded as the engine logs
     /// its own (`Runtime error. Script '...', line N: message`), for the
-    /// host to log.
+    /// host to report ([`Host::script_error`]).
     pub fn runtime_error(&self, message: &str) -> String {
         let filename = self
             .engine
             .script(self.script)
-            .map(|s| s.filename().to_string())
+            .map(|s| s.source().to_string())
             .unwrap_or_default();
         format!(
             "Runtime error. Script '{filename}', line {}: {message}",
@@ -106,12 +106,44 @@ pub trait Host: Natives {
     /// A message for the game's log.
     fn log(&mut self, message: &str);
 
+    /// A script runtime error, already worded (`Runtime error. Script
+    /// '...', line N: message`). The original logs it and shows the
+    /// player a quick message, `Script runtime error. View log for
+    /// details.`, unless the game set `Game.SuppressScriptErrors`
+    /// (`CScScript::RuntimeError`). The default only logs it.
+    fn script_error(&mut self, message: &str) {
+        self.log(message);
+    }
+
     /// The game timer, in milliseconds. It stops while the game is frozen.
     fn timer(&self) -> u64;
 
     /// The wall clock, in milliseconds, used for sleeps started while the
     /// game is frozen.
     fn clock(&self) -> u64;
+
+    /// A millisecond clock that goes on while scripts run (the original's
+    /// `timeGetTime`): what a time slice (`SetScriptTimeSlice`) and the
+    /// script profiler measure with. The default is [`Host::clock`],
+    /// which a host may only advance between two ticks; such a host never
+    /// interrupts a time-sliced script.
+    fn ticks(&self) -> u64 {
+        self.clock()
+    }
+
+    /// Compiles a script file that is still source text
+    /// (`CScEngine::GetCompiledScript`): the engine calls it for a file
+    /// that does not start with the magic of a compiled script, and runs
+    /// what it returns. `None` means the file cannot be run; the host has
+    /// logged why and told the player (`Script compiler error. View log
+    /// for details.`). The default has no compiler, as the original
+    /// without its compiler library.
+    fn compile_script(&mut self, filename: &str, _source: &[u8]) -> Option<Vec<u8>> {
+        self.log(&format!(
+            "CScEngine::GetCompiledScript - script '{filename}' needs to be compiled but compiler is not available"
+        ));
+        None
+    }
 
     /// Whether the game is frozen (a system window is open).
     fn is_frozen(&self) -> bool {

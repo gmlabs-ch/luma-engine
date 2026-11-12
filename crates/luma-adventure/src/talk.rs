@@ -39,8 +39,15 @@ pub struct Sentence {
 }
 
 impl Sentence {
-    /// Whether the sentence's time is up at `timer`.
+    /// Whether the sentence's time is up at `timer` (`TimeIsUp` in
+    /// `CAdActor::Update` and `CAdEntity::Update`). With a speech sound
+    /// the duration does not count: the sentence lasts until the sound
+    /// stops playing, which `World::update_speech` sees (it then
+    /// finishes the sentence and takes the sound away).
     pub fn time_is_up(&self, timer: u64) -> bool {
+        if self.sound.is_some() && self.duration != 0 {
+            return false;
+        }
         self.duration <= timer.saturating_sub(self.start_time)
     }
 

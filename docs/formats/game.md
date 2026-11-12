@@ -1,6 +1,10 @@
 # Game definition and string tables
 
-`startup.settings` names the game definition file (`GAME="default.game"`)
+`startup.settings` says whether the game may run in a window
+(`ALLOW_WINDOWED_MODE`, true by default; when false `luma-player` runs
+it full screen only, see
+[../game-loop.md](../game-loop.md#window-or-full-screen)) and names the
+game definition file (`GAME="default.game"`)
 and the resolution; `default.game` describes the game object: its name,
 the scripts attached to it, the system font, the cursors, and the
 interface files of the adventure layer. Both are
@@ -27,7 +31,7 @@ key that is not in this table is a syntax error (`CBGame::LoadSettings`).
 | `ALLOW_ACCESSIBILITY_TAB` | `TRUE` | Whether the player may turn the accessibility features on; when false, text-to-speech, keyboard play and the pause stay off whatever the settings say (see [../game-loop.md](../game-loop.md#accessibility)). |
 | `SAVED_GAME_EXT` | `dsv` | The extension of the saved game files (`save001.dsv`). Luma only takes a plain extension (letters, digits, `_`, at most 16 characters). |
 | `REQUIRE_SOUND` | `FALSE` | The game refuses to start without a sound device. Read (`GameSettings::require_sound`); the player does not act on it yet. |
-| `ALLOW_WINDOWED_MODE` | `TRUE` | The player may run the game in a window. Read (`GameSettings::allow_windowed`); the player does not act on it yet. |
+| `ALLOW_WINDOWED_MODE` | `TRUE` | The player may run the game in a window; when false it runs full screen only. |
 | `ALLOW_DESKTOP_RES` | `FALSE` | The player may have the game stretched to the desktop's resolution. Read (`GameSettings::allow_desktop_res`); the player does not act on it yet. |
 | `REQUIRE_3D_ACCELERATION`, `HWTL_MODE`, `ALLOW_ABOUT_TAB`, `ALLOW_ADVANCED`, `REGISTRY_PATH`, `RICH_SAVED_GAMES`, `GUID` | | Direct3D, the Windows settings dialog, the registry and the Windows Games Explorer: accepted, no meaning in Luma. |
 
@@ -64,7 +68,7 @@ AD_GAME {
 
 | Block | Key | Meaning |
 |-------|-----|---------|
-| `GAME` | `NAME`, `CAPTION` | The game's name (`Game.Name`) and window title. |
+| `GAME` | `NAME`, `CAPTION` | The game's name (`Game.Name`, `<unnamed>` without the key) and window title. |
 | | `SCRIPT` | A script attached to the game object when it starts; repeatable. The game's logic starts there: the first script picks the first scene with `Game.ChangeScene`. |
 | | `TEMPLATE` | Another game file, read whole (its `GAME` and `AD_GAME` blocks) [where the key stands](definition-files.md#template). One that cannot be loaded is skipped. |
 | | `SYSTEM_FONT` | The font of engine messages. When the key is absent or the font cannot be loaded, the engine's built-in `system_font.fnt` is used. |
@@ -73,11 +77,11 @@ AD_GAME {
 | | `CURSOR`, `ACTIVE_CURSOR`, `NONINTERACTIVE_CURSOR` | The mouse cursor sprites: normal, over an interactive object, while the game is not interactive. |
 | | `SUBTITLES`, `SUBTITLES_SPEED`, `VIDEO_SUBTITLES` | Whether speech and videos are subtitled (both true by default), and how long a subtitle stays per character (default 70 ms). |
 | | `PERSONAL_SAVEGAMES`, `LOCAL_SAVE_DIR` | Where saved games go. |
+| | `COMPAT_KILL_METHOD_THREADS` | The script engine's behaviour before WME 1.9 (false by default): when a new order to an object (`GoTo`, `Talk`...) ends the scripts that waited for it, the scripts that were waiting for one of those to return from a method are no longer ended with it; they receive `null` for the call and go on (see [../scripting.md](../scripting.md#states-and-threads)). |
 | | `SAVE_IMAGE`, `SAVE_IMAGE_X`, `SAVE_IMAGE_Y`, `LOAD_IMAGE`, `LOAD_IMAGE_X`, `LOAD_IMAGE_Y` | The images shown while the game saves or loads, and where (see [../saving.md](../saving.md#loading-and-saving-screens-loading-icon)). |
 | | `THUMBNAIL_WIDTH`, `THUMBNAIL_HEIGHT` | The size of the picture `Game.StoreSaveThumbnail` keeps for the next saved game; none when absent (see [../saving.md](../saving.md#thumbnails)). |
 | | `PROPERTY { NAME VALUE }` | Script properties of the game object, set as a script's assignment would. |
 | | `INDICATOR_X`, `INDICATOR_Y`, `INDICATOR_WIDTH`, `INDICATOR_HEIGHT`, `INDICATOR_COLOR { r, g, b, a }` | The progress bar shown while the game saves or loads: by default along the bottom of the screen, 8 pixels high, translucent red. Read into `GameFile`; Luma does not draw the bar. |
-| | `COMPAT_KILL_METHOD_THREADS` | Scripts waiting for an object are not reset when the object's scripts are finished (the behaviour before version 1.9). Read into `GameFile`. |
 | | `EVENTS`, `EDITOR_PROPERTY` | Accepted and ignored. |
 | `AD_GAME` | `RESPONSE_BOX`, `INVENTORY_BOX`, `ITEMS` | The dialogue, inventory and item definition files. A file that is missing or does not parse fails the game file: the game does not start. |
 | | `SCENE_VIEWPORT { left, top, right, bottom }` | The part of the screen the scene is drawn in and scrolled for (`Game.SetSceneViewport` changes it); the whole screen when absent. A scene smaller than the viewport sits lower or further right by the difference, as the original engine's scroll clamp gives a negative offset (OpenQuest's 320x170 title in a 320x189 viewport starts 19 pixels down). |

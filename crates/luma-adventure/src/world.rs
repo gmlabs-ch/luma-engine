@@ -83,6 +83,23 @@ pub const QUICK_MSG_MS: u64 = 3000;
 /// How many quick messages show at once (`MAX_QUICK_MSG`).
 pub const MAX_QUICK_MSGS: usize = 5;
 
+/// A seed for runs that must draw the same random numbers every time
+/// ([`World::seed_random`]).
+pub const FIXED_SEED: u64 = 0x2545_F491_4F6C_DD1D;
+
+/// A seed from the clock (`srand(time(NULL))`), mixed so that two
+/// launches close in time draw unrelated numbers; never zero.
+fn clock_seed() -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let mut z = nanos.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    if z == 0 { FIXED_SEED } else { z }
+}
+
 /// The game as scripts see it. Implements the script engine's [`Host`].
 pub struct World {
     pub(crate) vfs: Vfs,
@@ -147,7 +164,17 @@ pub struct World {
     /// The fonts of talking objects that could not be loaded, so that
     /// each is tried and reported once.
     failed_fonts: std::collections::HashSet<String>,
+    /// The source scripts that did not compile, so that each is compiled
+    /// and reported once.
+    #[cfg(feature = "compiler")]
+    failed_scripts: std::collections::HashSet<String>,
     pub(crate) mouse: Mouse,
+    /// Where the front-end last reported the pointer, in game pixels,
+    /// before the mouse lock; it may lie outside the screen.
+    pub(crate) pointer: (i32, i32),
+    /// Where the game moved the mouse since the front-end last asked
+    /// (`World::take_cursor_warp`).
+    pub(crate) cursor_warp: Option<(i32, i32)>,
     pub(crate) keyboard: Keyboard,
     pub(crate) active_object: Option<NativeId>,
     pub(crate) selected_item: Option<NativeId>,
@@ -198,6 +225,9 @@ pub struct World {
     /// true the front-end keeps the last frame on screen instead of
     /// presenting new ones; the game runs on.
     pub(crate) suspended_rendering: bool,
+    /// `Game.SuppressScriptErrors`: script runtime errors only go to the
+    /// log, without the on-screen message.
+    pub(crate) suppress_script_errors: bool,
     /// Frames drawn in the last whole second (`Game.FPS`), and the
     /// counters behind it (`m_Fps`, `m_FpsTime`, `m_FramesRendered`).
     pub(crate) fps: i32,
@@ -241,6 +271,8 @@ pub struct World {
     pub(crate) save_dir_checked: bool,
     /// The accessibility switches and state (`CBAccessMgr`).
     pub(crate) access: Accessibility,
+    /// Where the editors copy to and paste from.
+    pub(crate) clipboard: Box<dyn crate::input::Clipboard>,
 }
 
 impl World {
@@ -363,7 +395,11 @@ impl World {
             talk_skip_button: TalkSkipButton::Left,
             sentences: Vec::new(),
             failed_fonts: std::collections::HashSet::new(),
+            #[cfg(feature = "compiler")]
+            failed_scripts: std::collections::HashSet::new(),
             mouse: Mouse::default(),
+            pointer: (0, 0),
+            cursor_warp: None,
             keyboard: Keyboard::default(),
             active_object: None,
             selected_item: None,
@@ -394,6 +430,7 @@ impl World {
             startup_scene,
             windowed: false,
             suspended_rendering: false,
+            suppress_script_errors: false,
             fps: 0,
             fps_time: 0,
             fps_frames: 0,
@@ -410,12 +447,13 @@ impl World {
             clock: 0,
             log: Vec::new(),
             stubs: HashSet::new(),
-            rng: 0x2545_F491_4F6C_DD1D,
+            rng: clock_seed(),
             scheduled_load: None,
             pending_save: None,
             personal_save: personal_savegames,
             save_dir_checked: false,
             access: Accessibility::new(),
+            clipboard: Box::new(crate::input::MemoryClipboard::default()),
         };
         // What the scan of the packages had to say (`RegisterPackages`).
         for line in world.vfs.warnings().to_vec() {
@@ -447,7 +485,7 @@ impl World {
         // `PROPERTY` blocks of the game file.
         let properties = world.game_file.properties.clone();
         let game_id = world.game_id;
-        world.apply_file_properties(game_id, &properties);
+        world.apply_properties(game_id, &properties);
         // `SHADOW_IMAGE`: the image of the simple shadows of 3D actors.
         // Without the key the engine's own shadow is drawn.
         world.shadow_image = world.game_file.shadow_image.clone();
@@ -561,6 +599,24 @@ impl World {
                 c.window()
                     .is_some_and(|w| w.mode != crate::ui::WindowMode::Normal)
             })
+    }
+
+    /// Whether the game runs (`m_State == GAME_RUNNING`): it is not
+    /// frozen by a system-exclusive window or a video (`GAME_FROZEN`)
+    /// and the response box does not wait for a pick
+    /// (`GAME_SEMI_FROZEN`).
+    pub fn is_running(&self) -> bool {
+        !self.is_frozen() && !self.responses_visible()
+    }
+
+    /// Whether the pointer is inside the game's frame
+    /// (`CAdGame::ValidMouse`, `CBRenderer::PointInViewport`): the
+    /// position the front-end last reported, before the mouse lock, is
+    /// within the screen, edges included. A button pressed outside (in
+    /// the bars around a letterboxed frame) is ignored.
+    pub fn valid_mouse(&self) -> bool {
+        let (x, y) = self.pointer;
+        x >= 0 && y >= 0 && x <= self.settings.width as i32 && y <= self.settings.height as i32
     }
 
     /// Whether an object takes mouse events while the game is not
@@ -876,8 +932,8 @@ impl World {
     /// Confines the mouse to a rectangle (`Game.LockMouseRect`): the
     /// edges are put in order, and a rectangle with a zero edge unlocks,
     /// since the original engine applies the lock only while all four
-    /// are non-zero. The lock clamps the position the game sees; the
-    /// system cursor is not moved.
+    /// are non-zero. The lock applies from the next frame or mouse
+    /// movement ([`World::apply_mouse_lock`]).
     pub fn lock_mouse_rect(&mut self, left: i32, top: i32, right: i32, bottom: i32) {
         let (left, right) = if right < left {
             (right, left)
@@ -980,6 +1036,57 @@ impl World {
         self.log.push(message.into());
     }
 
+    /// Sets every script value that holds an object destroyed since the
+    /// last call to `null` (`CBGame::InvalidateValues`, which the
+    /// original runs from `UnregisterObject` and from the destructor of
+    /// a window or a control): the variables and stacks of every script,
+    /// the engine's globals, the properties scripts set on the objects
+    /// and the elements of the `Array` objects. A script that unloaded
+    /// an object then finds `obj == null` true.
+    pub(crate) fn flush_removed_objects(&mut self, engine: &mut Engine) {
+        let removed = self.objects.take_removed();
+        if removed.is_empty() {
+            return;
+        }
+        let removed: std::collections::HashSet<NativeId> = removed.into_iter().collect();
+        let gone = |id: NativeId| removed.contains(&id);
+        engine.invalidate_natives(&gone);
+        for (_, native) in self.objects.iter_mut() {
+            for value in native.props.values_mut() {
+                value.invalidate_natives(&gone);
+            }
+            if let Kind::Class(object) = &mut native.kind {
+                object.invalidate_natives(&gone);
+            }
+        }
+    }
+
+    /// Sets the `PROPERTY { NAME VALUE }` blocks of a definition file on
+    /// an object (`CBScriptHolder::ParseProperty`): each value, a string,
+    /// goes through the same path as an assignment by a script
+    /// (`ScSetProperty`), so a block naming a built-in property (`Active`,
+    /// `X`...) sets it, and any other name becomes a script property.
+    pub(crate) fn apply_properties(
+        &mut self,
+        id: NativeId,
+        properties: &[luma_formats::scene::Property],
+    ) {
+        for property in properties {
+            let value = Value::from(property.value.clone());
+            Natives::set_property(self, id, &property.name, &value);
+        }
+    }
+
+    /// Reports a script runtime error, already worded
+    /// (`CScScript::RuntimeError`): to the log, and to the player as a
+    /// quick message unless the game set `Game.SuppressScriptErrors`.
+    pub(crate) fn report_script_error(&mut self, message: &str) {
+        self.log.push(message.to_string());
+        if !self.suppress_script_errors {
+            self.quick_message("Script runtime error. View log for details.");
+        }
+    }
+
     /// Logs once that a feature is not implemented yet.
     pub(crate) fn stub(&mut self, what: &str) {
         if self.stubs.insert(what.to_string()) {
@@ -1036,12 +1143,14 @@ impl World {
         self.scheduled_scene = Some((path.to_string(), fade_in));
     }
 
-    /// Attaches a script to an object (`AttachScript`, `SCRIPT=`): the
-    /// same file is not attached twice while it runs.
+    /// Attaches a script to an object (`AttachScript`, `SCRIPT=`,
+    /// `CBScriptHolder::AddScript`): the same file is not attached twice
+    /// while it runs. The file is the path as given, compared without
+    /// case with the paths the object's scripts were attached with.
     pub fn attach(&mut self, engine: &mut Engine, owner: NativeId, path: &str) -> bool {
         let running = engine.scripts_of(owner).into_iter().any(|id| {
             engine.script(id).is_some_and(|s| {
-                s.filename().eq_ignore_ascii_case(path) && s.state() != State::Finished
+                s.source().eq_ignore_ascii_case(path) && s.state() != State::Finished
             })
         });
         if running {
@@ -1054,15 +1163,12 @@ impl World {
         let Some(script) = engine.run_script(self, path, Some(owner)) else {
             return false;
         };
-        // A new script takes its owner's freezability (`AddScript`); only
-        // a container's entity can be non-freezable in Luma.
-        if let Some(Kind::Entity(crate::scene_view::EntityRef::Ui(index))) =
-            self.objects.get(owner).map(|n| &n.kind)
-        {
-            let freezable = self.ui_entities.get(*index).is_none_or(|e| e.freezable);
-            if let Some(script) = engine.script_mut(script) {
-                script.set_freezable(freezable);
-            }
+        // A new script takes its owner's freezable flag (`AddScript`):
+        // false for a window that went system-exclusive, its controls and
+        // a container's entity.
+        let freezable = self.objects.get(owner).is_none_or(|n| n.state.freezable);
+        if let Some(script) = engine.script_mut(script) {
+            script.set_freezable(freezable);
         }
         true
     }
@@ -1219,13 +1325,16 @@ impl World {
             self.log(format!("  missing: {file}: {reason}"));
         }
         let id = self.objects.insert(Kind::Actor);
-        let scripts = actor.def.scripts.clone();
         let properties = actor.def.properties.clone();
-        // `SOUND_VOLUME`: the volume the actor's sounds start at.
+        let scripts = actor.def.scripts.clone();
+        // `SOUND_VOLUME` is the volume of the actor's sounds
+        // (`m_SFXVolume`).
         let sound_volume = actor.def.sound_volume;
         self.actors.push((id, actor));
-        self.set_sfx_fields(id, sound_volume, 0);
-        self.apply_file_properties(id, &properties);
+        if sound_volume != 100 {
+            self.set_sfx_volume(id, sound_volume);
+        }
+        self.apply_properties(id, &properties);
         for script in scripts {
             self.attach(engine, id, &script);
         }
@@ -1854,6 +1963,7 @@ impl World {
                 &overlays,
                 |i| self.free_entity_stick(i),
             );
+            self.draw_entity_video_subtitles(list);
             // The scene's fader covers the scene viewport, under the
             // windows (`CAdScene::TraverseNodes` displays it last).
             if let Some(white) = white {
@@ -2024,6 +2134,12 @@ impl World {
         engine.remove_finished();
 
         let mut view = SceneView::load(&self.vfs, path)?;
+        // The scene object is the same across scenes and only `NAME`
+        // changes its name: a file without one keeps the name of the
+        // scene left behind (empty before the first scene).
+        if view.scene.name.is_empty() {
+            view.scene.name = self.prev_scene_name.clone();
+        }
         // Captions go through the string table when the objects load
         // (`CBObject::SetCaption`).
         for layer in &mut view.scene.layers {
@@ -2142,7 +2258,7 @@ impl World {
             .scene()
             .map(|s| s.scene.properties.clone())
             .unwrap_or_default();
-        self.apply_file_properties(self.scene_id, &scene_properties);
+        self.apply_properties(self.scene_id, &scene_properties);
         for script in scene_scripts {
             self.attach(engine, self.scene_id, &script);
         }
@@ -2157,7 +2273,7 @@ impl World {
                     layer.properties.clone(),
                 )
             };
-            self.apply_file_properties(layer_id, &layer_properties);
+            self.apply_properties(layer_id, &layer_properties);
             for script in layer_scripts {
                 self.attach(engine, layer_id, &script);
             }
@@ -2183,7 +2299,7 @@ impl World {
                     }
                 };
                 let id = self.objects.insert(kind);
-                self.apply_file_properties(id, &properties);
+                self.apply_properties(id, &properties);
                 self.load_entity_sound(id);
                 self.register_entity_region(id);
                 for script in scripts {
@@ -2202,7 +2318,7 @@ impl World {
             let properties = self.scene().unwrap().scene.free_entities[i]
                 .properties
                 .clone();
-            self.apply_file_properties(id, &properties);
+            self.apply_properties(id, &properties);
             self.load_entity_sound(id);
             self.register_entity_region(id);
             let scripts = self.scene().unwrap().scene.free_entities[i].scripts.clone();
@@ -2211,22 +2327,6 @@ impl World {
             }
         }
         Ok(())
-    }
-
-    /// Sets the `PROPERTY` blocks of a definition file on an object, the
-    /// way a script's assignment would (`CBScriptHolder::ParseProperty`
-    /// calls `ScSetProperty`): a name the object knows as one of its own
-    /// properties sets that property from the string, any other becomes a
-    /// script property. The blocks are applied in file order, after the
-    /// other keys of their block.
-    pub(crate) fn apply_file_properties(
-        &mut self,
-        id: NativeId,
-        properties: &[luma_formats::Property],
-    ) {
-        for property in properties {
-            self.set_property(id, &property.name, &Value::from(property.value.clone()));
-        }
     }
 
     /// Loads the `SOUND` of an entity without playing it
@@ -2309,10 +2409,21 @@ impl World {
 
     /// A random number, from the same generator as the scripts'.
     pub(crate) fn next_random(&mut self) -> u32 {
-        self.rng ^= self.rng >> 12;
-        self.rng ^= self.rng << 25;
-        self.rng ^= self.rng >> 27;
-        (self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as u32
+        let mut rng = crate::particles::Rng::new(self.rng);
+        let value = rng.next_u32();
+        self.rng = rng.state();
+        value
+    }
+
+    /// Seeds the random generator (`srand`), for a run that draws the
+    /// same numbers every time: the scripts' `Random`, the particles,
+    /// the talk animations picked. A new world is seeded from the
+    /// clock, as the original does when the game starts
+    /// (`srand(time(NULL))` in `CBGame::CBGame`); tests and tooling
+    /// that compare runs seed it themselves ([`FIXED_SEED`] is what the
+    /// headless player uses).
+    pub fn seed_random(&mut self, seed: u64) {
+        self.rng = crate::particles::Rng::new(seed).state();
     }
 
     /// The font an object's file gives it (`FONT`) or a script set.
@@ -2988,36 +3099,68 @@ impl Natives for World {
         }
     }
 
+    /// `ScToString` of the object's class: the text of the most derived
+    /// class that overrides it in the original.
     fn to_string(&self, id: NativeId) -> String {
-        match self.objects.get(id).map(|n| &n.kind) {
-            Some(Kind::Game) => "[game]".to_string(),
-            Some(Kind::Class(object)) => object.to_string(self),
-            Some(Kind::Entity(_) | Kind::Region { .. } | Kind::Layer(_) | Kind::Scene) => {
-                format!("[{}]", self.describe(id))
-            }
-            Some(Kind::Actor) => "[actor object]".to_string(),
-            Some(Kind::Actor3D) => "[actor3dx object]".to_string(),
-            Some(Kind::Attachment3D(_)) => "[attachment object]".to_string(),
-            Some(Kind::Control | Kind::Item) => format!("[{}]", self.describe(id)),
-            Some(Kind::Sprite(_) | Kind::HoverSprite(_) | Kind::ControlImage { .. }) => {
-                "[sprite]".to_string()
-            }
-            Some(Kind::Frame { .. }) => "[frame]".to_string(),
-            Some(Kind::SubFrame { .. }) => "[subframe]".to_string(),
-            Some(Kind::Object) => "[object]".to_string(),
-            Some(Kind::Emitter(_)) => "[particle emitter]".to_string(),
-            Some(_) => "[native object]".to_string(),
-            None => "[invalid object]".to_string(),
-        }
+        let text = match self.objects.get(id).map(|n| &n.kind) {
+            Some(Kind::Class(object)) => return object.to_string(self),
+            // `CBGame`.
+            Some(Kind::Game) => "[game object]",
+            // `CBKeyboardState`.
+            Some(Kind::Keyboard) => "[keyboard state]",
+            // `CAdScene`, `CAdLayer`.
+            Some(Kind::Scene) => "[scene object]",
+            Some(Kind::Layer(_)) => "[layer]",
+            // `CAdEntity`, also the entity inside an entity container.
+            Some(Kind::Entity(_)) => "[entity object]",
+            // A region of a layer is a `CAdRegion`, the clickable region
+            // of an entity a plain `CBRegion`.
+            Some(Kind::Region { .. }) => "[ad region]",
+            Some(Kind::EntityRegion(_)) => "[region]",
+            Some(Kind::Actor) => "[actor object]",
+            Some(Kind::Actor3D) => "[actor3dx object]",
+            Some(Kind::Attachment3D(_)) => "[attachment object]",
+            // `CUIWindow`, `CUIButton`, `CUIEdit`, `CUIText`, `CUIEntity`.
+            Some(Kind::Control) => match self.control(id).map(|c| &c.kind) {
+                Some(crate::ui::ControlKind::Window(_)) => "[window]",
+                Some(crate::ui::ControlKind::Button(_)) => "[button]",
+                Some(crate::ui::ControlKind::Edit(_)) => "[edit]",
+                Some(crate::ui::ControlKind::Static(_)) => "[static]",
+                Some(crate::ui::ControlKind::EntityContainer(_)) => "[entity container]",
+                None => "[ui_object]",
+            },
+            Some(Kind::Item) => "[item]",
+            Some(
+                Kind::Sprite(_)
+                | Kind::HoverSprite(_)
+                | Kind::CursorSprite { .. }
+                | Kind::ControlImage { .. },
+            ) => "[sprite]",
+            Some(Kind::Frame { .. }) => "[frame]",
+            Some(Kind::SubFrame { .. }) => "[subframe]",
+            Some(Kind::Emitter(_)) => "[particle emitter]",
+            // Classes that keep `CBObject`'s text: `new Object()`, the
+            // response box, the faders and the waypoint groups.
+            Some(
+                Kind::Object
+                | Kind::ResponseBox
+                | Kind::Fader
+                | Kind::SceneFader
+                | Kind::WaypointGroup(_),
+            ) => "[object]",
+            // `CSXMath` keeps the base class's text.
+            Some(Kind::Math | Kind::Inert(_)) => "[native object]",
+            None => "[invalid object]",
+        };
+        text.to_string()
     }
 
-    fn to_bool(&self, id: NativeId) -> bool {
-        match self.objects.get(id).map(|n| &n.kind) {
-            // The library classes keep the base class's `false`.
-            Some(Kind::Class(_)) => false,
-            Some(_) => true,
-            None => false,
-        }
+    /// `CBScriptable::ScToBool`, which no class of the original
+    /// overrides: every native object is false in a condition, so
+    /// `if(obj)` does not run and `!obj` is true for a live object
+    /// (scripts test `obj != null`).
+    fn to_bool(&self, _id: NativeId) -> bool {
+        false
     }
 
     fn compare(&self, a: NativeId, b: NativeId) -> Ordering {
@@ -3074,6 +3217,18 @@ impl ClassHost for World {
             }
         }
         self.vfs.read(name).ok()
+    }
+
+    /// A file a script wrote, else a loose file of the game; not a file
+    /// inside a package, which the system cannot copy.
+    fn read_disk_file(&mut self, name: &str) -> Option<Vec<u8>> {
+        if let Some(path) = self.writable_path(name) {
+            if path.is_file() {
+                return std::fs::read(path).ok();
+            }
+        }
+        let path = self.vfs.find_loose(name)?;
+        std::fs::read(path).ok()
     }
 
     /// Under the save directory (the game's, or the user's own when the
@@ -3150,6 +3305,10 @@ impl ClassHost for World {
     fn log(&mut self, message: &str) {
         self.log.push(message.to_string());
     }
+
+    fn script_error(&mut self, message: &str) {
+        self.report_script_error(message);
+    }
 }
 
 impl Host for World {
@@ -3159,6 +3318,63 @@ impl Host for World {
 
     fn log(&mut self, message: &str) {
         self.log.push(message.to_string());
+    }
+
+    fn script_error(&mut self, message: &str) {
+        self.report_script_error(message);
+    }
+
+    /// `Game->m_State == GAME_FROZEN`: a `Sleep` started now runs on the
+    /// wall clock (`CScScript::Sleep`).
+    fn is_frozen(&self) -> bool {
+        World::is_frozen(self)
+    }
+
+    /// The real time since the engine started, which goes on during a
+    /// tick: what time slices and the script profiler measure with.
+    fn ticks(&self) -> u64 {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_millis() as u64
+    }
+
+    /// A script file that is still source text is compiled when it is
+    /// loaded (`CScEngine::GetCompiledScript`), with the natives the
+    /// engine publishes and the game's files for its `#include`s. A
+    /// compiler error goes to the log as the original writes it and the
+    /// player is told. Without the `compiler` feature there is no
+    /// compiler, as the original without its compiler library.
+    #[cfg(feature = "compiler")]
+    fn compile_script(&mut self, filename: &str, source: &[u8]) -> Option<Vec<u8>> {
+        // A source script comes from the game's files: bound what the
+        // compiler is given, and try a file that failed only once.
+        const MAX_SOURCE: usize = 4 * 1024 * 1024;
+        let key = filename.to_ascii_lowercase();
+        if self.failed_scripts.contains(&key) {
+            return None;
+        }
+        if source.len() > MAX_SOURCE {
+            self.failed_scripts.insert(key);
+            self.log(format!("Compiling script '{filename}'..."));
+            self.log("  Error: the script is too large".to_string());
+            self.quick_message("Script compiler error. View log for details.");
+            return None;
+        }
+        let compiler = luma_compiler::Compiler::new(luma_compiler::Natives::wme());
+        let vfs = &self.vfs;
+        let mut includes = |name: &[u8]| vfs.read(&String::from_utf8_lossy(name)).ok();
+        match compiler.compile(source, filename, &mut includes) {
+            Ok(compiled) => Some(compiled),
+            Err(err) => {
+                self.failed_scripts.insert(key);
+                self.log(format!("Compiling script '{filename}'..."));
+                self.log(format!("  Error@line {}: {}", err.line, err.message));
+                self.quick_message("Script compiler error. View log for details.");
+                None
+            }
+        }
     }
 
     fn timer(&self) -> u64 {
@@ -3193,22 +3409,17 @@ impl Host for World {
     }
 
     fn random(&mut self, from: i32, to: i32) -> i32 {
-        // xorshift64*, seeded once: deterministic across runs.
-        self.rng ^= self.rng >> 12;
-        self.rng ^= self.rng << 25;
-        self.rng ^= self.rng >> 27;
-        let value = self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32;
-        let span = i64::from(to) - i64::from(from) + 1;
-        if span <= 0 {
-            return from;
-        }
-        (i64::from(from) + (value as i64).rem_euclid(span)) as i32
+        // `CBUtils::RandomInt`, on the world's generator.
+        let mut rng = crate::particles::Rng::new(self.rng);
+        let value = rng.int(from, to);
+        self.rng = rng.state();
+        value
     }
 
     fn call_function(&mut self, name: &str, args: &[Value], ctx: Context<'_>) -> Option<Return> {
         match name {
             // The script library classes.
-            "String" | "Array" | "Date" | "File" | "MemBuffer" => {
+            "String" | "Array" | "Date" | "File" | "MemBuffer" | "TcpClient" => {
                 let object = ClassObject::construct(name, args, self)?;
                 let id = self.objects.insert(Kind::Class(object));
                 Some(Return::constructed(Value::Native(id)))
@@ -3267,6 +3478,10 @@ impl Host for World {
     /// caller's stack, so that the script resumes after the call when the
     /// game loads; a failure turns the result into `false`.
     fn after_call(&mut self, engine: &mut Engine, script: luma_script::ScriptId) {
+        // A call that destroyed objects (`Game.UnloadObject`,
+        // `DeleteItem`, `window.Close`...): the values that held them
+        // are null from the next instruction on.
+        self.flush_removed_objects(engine);
         if let Some((slot, description, quick)) = self.pending_save.take() {
             if let Err(err) = crate::save::save_game(self, engine, slot, &description, quick) {
                 self.log(format!("Error saving game to slot {slot}: {err}"));
@@ -3284,6 +3499,8 @@ pub struct Runtime {
     pub world: World,
     /// What the mouse did since the last frame.
     input: FrameInput,
+    /// Whether the game's window is active (`CBRenderer::m_Active`).
+    active: bool,
 }
 
 /// What the mouse did since the last frame. The windows' buttons work
@@ -3312,6 +3529,7 @@ impl Runtime {
     pub fn with_audio(vfs: Vfs, audio: Audio) -> Result<Runtime> {
         let world = World::with_audio(vfs, audio)?;
         let mut engine = Engine::new();
+        engine.set_compat_kill_method_threads(world.game_file.compat_kill_method_threads);
         // The engine publishes the game object to every script.
         engine.set_global("Game", Value::Native(world.game_id));
         engine.set_global("Math", Value::Native(world.math_id));
@@ -3320,6 +3538,7 @@ impl Runtime {
             engine,
             world,
             input: FrameInput::default(),
+            active: true,
         })
     }
 
@@ -3329,6 +3548,7 @@ impl Runtime {
     /// open the first scene themselves, as in the original engine.
     pub fn start(&mut self) {
         self.world.init_accessibility();
+        self.world.init_volumes();
         self.world.load_items(&mut self.engine);
         self.world.load_inventory_box(&mut self.engine);
         self.world.load_response_box(&mut self.engine);
@@ -3342,6 +3562,15 @@ impl Runtime {
     pub fn change_scene(&mut self, path: &str) -> Result<()> {
         self.world.scheduled_scene = None;
         self.world.load_scene(&mut self.engine, path)
+    }
+
+    /// Ends the script engine as the original's destructor does
+    /// (`CScEngine::~CScEngine`): a script profiler still on writes its
+    /// table. Returns the log lines this produced, for the front-end to
+    /// show before it drops the runtime.
+    pub fn shutdown(&mut self) -> Vec<String> {
+        self.engine.disable_profiling(&mut self.world);
+        self.world.take_log()
     }
 
     /// Saves the game to a slot now (`Game.SaveGame` outside a script):
@@ -3377,6 +3606,8 @@ impl Runtime {
             }
         }
         self.world.advance_time(dt);
+        self.world.apply_mouse_lock();
+        self.world.reset_focused_window();
         if let Some((path, fade_in)) = self.world.scheduled_scene.take() {
             match self.world.load_scene(&mut self.engine, &path) {
                 Ok(()) => {
@@ -3415,7 +3646,11 @@ impl Runtime {
         let (timer, clock) = (self.world.timer, self.world.clock);
         self.world.fader.update(timer, clock);
         self.world.scene_fader.update(timer, clock);
+        // Objects destroyed outside a script call (a scene change, the
+        // end of an animation): the script values that held them go null.
+        self.world.flush_removed_objects(&mut self.engine);
         self.engine.tick(&mut self.world);
+        self.world.flush_removed_objects(&mut self.engine);
         self.world.update_scene();
         self.world.update_entity_videos();
         self.world.update_actors();
@@ -3473,13 +3708,14 @@ impl Runtime {
     }
 
     /// Raises a mouse event (`CAdGame::OnMouseLeftDown` and the like):
-    /// on the game first; when its scripts do not handle it, on the
-    /// active object, else, for the events the adventure game dispatches
-    /// itself (`scene_too`), on the scene when the mouse is over it.
-    /// While the game is frozen, only the active object gets it.
+    /// on the game first, while the game runs (`GAME_RUNNING`: not
+    /// frozen, no response box waiting); when its scripts do not handle
+    /// it, on the active object, else, for the events the adventure
+    /// game dispatches itself (`scene_too`) and while the game runs, on
+    /// the scene when the mouse is over it.
     fn mouse_event(&mut self, event: &str, scene_too: bool) {
         let game = self.world.game_id;
-        let running = !self.world.is_frozen();
+        let running = self.world.is_running();
         if running && self.engine.apply_event(&mut self.world, game, event, false) {
             return;
         }
@@ -3511,45 +3747,77 @@ impl Runtime {
         double
     }
 
-    /// The left button goes down: a click, or a double click when it
-    /// follows another within 400 ms and 4 pixels. While the game is not
-    /// interactive, the click only skips the sentences.
+    /// The mouse moved since the last frame: a click goes to what is
+    /// under it now, not to what was under it then.
+    fn refresh_active_object(&mut self) {
+        if std::mem::take(&mut self.input.moved) {
+            self.world.collect_hits();
+            self.world.update_active_object();
+        }
+    }
+
+    /// The left button goes down (`CAdGame::OnMouseLeftDown`), or, when
+    /// the press follows another within 400 ms and 4 pixels, is the
+    /// second of a double click ([`Runtime::mouse_left_double_click`],
+    /// which replaces the click as the system's message does).
+    ///
+    /// Nothing happens when the pointer is outside the game's frame
+    /// (`ValidMouse`). While the game runs and is not interactive, the
+    /// click only skips the sentences (`TALK_SKIP_BUTTON`). A playing
+    /// video the left button skips is stopped. Otherwise the active
+    /// object gets the click (`HandleMouse`: a control takes the focus,
+    /// a window starts dragging), `LeftClick` is raised, and the active
+    /// object is captured with the button held.
     pub fn mouse_left_down(&mut self) {
+        self.world.key_held(crate::input::VK_LBUTTON);
+        if self.note_click(false) {
+            // The first click's release may still wait for a frame to
+            // see the button held: it stays due.
+            self.mouse_left_double_click();
+            return;
+        }
         if std::mem::take(&mut self.input.left_release_due) {
             // A second press before the frame: the first click ends.
             self.release_left();
         }
-        let double = self.note_click(false);
-        self.world.mouse.left_down = true;
-        if self.world.is_video_playing() {
-            if matches!(
-                self.world.video_skip_button,
-                TalkSkipButton::Left | TalkSkipButton::Both
-            ) {
-                self.world.stop_video(&mut self.engine);
-            }
+        if !self.world.valid_mouse() {
             return;
         }
-        // A click while the game is not interactive only skips a
-        // sentence, unless a window or the response box holds the game
-        // (`GAME_SEMI_FROZEN`), where the windows still take clicks.
-        if !self.world.interactive && !self.world.semi_frozen() {
+        if self.world.is_running() && !self.world.interactive {
             self.world.click_while_busy(false);
             return;
         }
-        if std::mem::take(&mut self.input.moved) {
-            // The mouse moved since the last frame: the click goes to
-            // what is under it now, not to what was under it then.
-            self.world.collect_hits();
-            self.world.update_active_object();
+        if self.world.is_video_playing()
+            && matches!(
+                self.world.video_skip_button,
+                TalkSkipButton::Left | TalkSkipButton::Both
+            )
+        {
+            self.world.stop_video(&mut self.engine);
+            return;
         }
+        self.refresh_active_object();
         self.input.left_pressed = true;
         self.world.ui_mouse_down();
-        if double {
-            self.mouse_event("LeftDoubleClick", true);
-        } else {
-            self.mouse_event("LeftClick", true);
+        self.mouse_event("LeftClick", true);
+        self.world.mouse.left_down = true;
+    }
+
+    /// The second press of a left double click (`CAdGame::
+    /// OnMouseLeftDblClick`): `LeftDoubleClick` on the game, else the
+    /// active object, else the scene. It is not a click: the button is
+    /// not held for the windows' buttons, nothing is captured or
+    /// focused, no `LeftClick` is raised; a video goes on and, while
+    /// the game runs and is not interactive, nothing happens.
+    fn mouse_left_double_click(&mut self) {
+        if !self.world.valid_mouse()
+            || self.world.is_video_playing()
+            || (self.world.is_running() && !self.world.interactive)
+        {
+            return;
         }
+        self.refresh_active_object();
+        self.mouse_event("LeftDoubleClick", true);
     }
 
     /// The left button goes up (`LeftRelease`). When no frame has seen
@@ -3557,6 +3825,7 @@ impl Runtime {
     /// frame, so that a click shorter than a frame still presses the
     /// button under it.
     pub fn mouse_left_up(&mut self) {
+        self.world.key_up(crate::input::VK_LBUTTON);
         if self.input.left_pressed {
             self.input.left_release_due = true;
             return;
@@ -3564,59 +3833,89 @@ impl Runtime {
         self.release_left();
     }
 
+    /// `CAdGame::OnMouseLeftUp`: nothing while a video plays; else the
+    /// windows see the release, the capture is dropped and
+    /// `LeftRelease` is raised.
     fn release_left(&mut self) {
-        self.world.mouse.left_down = false;
+        if self.world.is_video_playing() {
+            return;
+        }
         self.world.ui_mouse_up();
+        self.world.mouse.left_down = false;
         self.mouse_event("LeftRelease", true);
     }
 
-    /// The right button goes down: `RightClick`, or `RightDoubleClick`
-    /// when it follows another right click within 400 ms and 4 pixels
-    /// (`CBGame::OnMouseRightDblClick`, which goes to the game then the
-    /// active object, not to the scene). While the game is not
-    /// interactive, a click only skips the sentences and a double click
-    /// does nothing.
+    /// The right button goes down (`CAdGame::OnMouseRightDown`):
+    /// `RightClick` on the game, else the active object, else the
+    /// scene; or `RightDoubleClick` when it follows another right click
+    /// within 400 ms and 4 pixels (`CBGame::OnMouseRightDblClick`,
+    /// which goes to the game then the active object, not to the scene,
+    /// and does nothing during a video or while the game runs and is
+    /// not interactive).
+    ///
+    /// A click does nothing when the pointer is outside the game's
+    /// frame; while the game runs and is not interactive it only skips
+    /// the sentences; a playing video the right button skips is
+    /// stopped; and nothing is raised while the response box waits.
     pub fn mouse_right_down(&mut self) {
-        let double = self.note_click(true);
-        if self.world.is_video_playing() {
-            if matches!(
+        self.world.key_held(crate::input::VK_RBUTTON);
+        let running_busy = self.world.is_running() && !self.world.interactive;
+        if self.note_click(true) {
+            if !self.world.is_video_playing() && !running_busy {
+                self.refresh_active_object();
+                self.mouse_event("RightDoubleClick", false);
+            }
+            return;
+        }
+        if !self.world.valid_mouse() {
+            return;
+        }
+        if running_busy {
+            self.world.click_while_busy(true);
+            return;
+        }
+        if self.world.is_video_playing()
+            && matches!(
                 self.world.video_skip_button,
                 TalkSkipButton::Right | TalkSkipButton::Both
-            ) {
-                self.world.stop_video(&mut self.engine);
-            }
+            )
+        {
+            self.world.stop_video(&mut self.engine);
             return;
         }
-        if !self.world.interactive {
-            if !double {
-                self.world.click_while_busy(true);
-            }
+        if self.world.responses_visible() {
             return;
         }
-        if double {
-            self.mouse_event("RightDoubleClick", false);
-        } else {
-            self.mouse_event("RightClick", true);
-        }
+        self.refresh_active_object();
+        self.mouse_event("RightClick", true);
     }
 
-    /// The right button goes up (`RightRelease`).
+    /// The right button goes up (`CAdGame::OnMouseRightUp`):
+    /// `RightRelease`, unless a video plays.
     pub fn mouse_right_up(&mut self) {
+        self.world.key_up(crate::input::VK_RBUTTON);
+        if self.world.is_video_playing() {
+            return;
+        }
         self.mouse_event("RightRelease", true);
     }
 
     /// The middle button goes down (`MiddleClick`, `CBGame::
     /// OnMouseMiddleDown`): to the game, else to the active object;
-    /// nothing while a video plays or the game is not interactive.
+    /// nothing while a video plays or while the game runs and is not
+    /// interactive.
     pub fn mouse_middle_down(&mut self) {
-        if self.world.is_video_playing() || !self.world.interactive {
+        self.world.key_held(crate::input::VK_MBUTTON);
+        if self.world.is_video_playing() || (self.world.is_running() && !self.world.interactive) {
             return;
         }
+        self.refresh_active_object();
         self.mouse_event("MiddleClick", false);
     }
 
     /// The middle button goes up (`MiddleRelease`).
     pub fn mouse_middle_up(&mut self) {
+        self.world.key_up(crate::input::VK_MBUTTON);
         if self.world.is_video_playing() {
             return;
         }
@@ -3626,7 +3925,9 @@ impl Runtime {
     /// The wheel turns (`CBGame::HandleMouseWheel`): `MouseWheelUp` for a
     /// positive `delta`, `MouseWheelDown` for a negative one, raised on
     /// the focused window when its scripts handle that event, else on
-    /// the game.
+    /// the game. (The original raises `MouseWheelUp` on a focused
+    /// window that handles it but not `MouseWheelDown` when the wheel
+    /// turns down, a slip of its `else if`; Luma does not.)
     pub fn mouse_wheel(&mut self, delta: i32) {
         if delta == 0 {
             return;
@@ -3637,6 +3938,8 @@ impl Runtime {
             "MouseWheelUp"
         };
         if let Some(window) = self.world.focused_window() {
+            // The window's focused control comes first in the original
+            // (`CUIWindow::HandleMouseWheel`); no control uses the wheel.
             if self.engine.can_handle_event(window, event) {
                 self.engine
                     .apply_event(&mut self.world, window, event, false);
@@ -3645,6 +3948,36 @@ impl Runtime {
         }
         let game = self.world.game_id;
         self.engine.apply_event(&mut self.world, game, event, false);
+    }
+
+    /// The game's window became active or inactive (`CBGame::
+    /// OnActivate`): it lost or got the focus, or was minimised or
+    /// restored. Going inactive pauses every playing sound, music
+    /// included; coming back resumes them. While inactive the front-end
+    /// runs no frame ([`Runtime::is_active`]): the game's time stands
+    /// still, as the original's message loop sleeps until the window is
+    /// active again. With `refresh_mouse` (the window was activated by
+    /// a click) the object under the mouse is found again.
+    ///
+    /// As in the original, coming back also resumes the sounds a
+    /// system-exclusive window froze: both pauses share one mark
+    /// (`m_FreezePaused`).
+    pub fn activate(&mut self, active: bool, refresh_mouse: bool) {
+        self.active = active;
+        if refresh_mouse {
+            self.world.update_active_object();
+        }
+        if active {
+            self.world.sounds.audio.resume_all();
+        } else {
+            self.world.sounds.audio.pause_all(true);
+        }
+    }
+
+    /// Whether the game's window is active (see [`Runtime::activate`]);
+    /// a front-end calls [`Runtime::tick`] only while it is.
+    pub fn is_active(&self) -> bool {
+        self.active
     }
 
     /// The player asked to close the game's window (`CBGame::
@@ -3664,10 +3997,15 @@ impl Runtime {
         true
     }
 
-    /// A key goes down (`CBGame::HandleKeypress`): the keyboard state is
-    /// updated; the focused window takes the key first (`Tab`, its
-    /// editor), else its `Keypress` handler when it has one, else the
-    /// game's.
+    /// A key goes down, as Windows delivers it to the original engine:
+    /// the key itself (`WM_KEYDOWN`, [`Runtime::key_message`]) and then
+    /// the character it types (`WM_CHAR`, [`Runtime::key_char`]). `code`
+    /// is the Windows virtual key code; `text` is the character the key
+    /// types with the modifiers held, if any. Without one, the keys
+    /// that always send a character still do (Backspace, Tab, Enter,
+    /// Escape, the space bar, Ctrl with a letter: see
+    /// [`crate::input::translated_char`]). A front-end calls this again
+    /// for every repeat of a held key.
     pub fn key_down(
         &mut self,
         code: i32,
@@ -3676,19 +4014,74 @@ impl Runtime {
         alt: bool,
         control: bool,
     ) {
-        self.world.key_down(code, text, shift, alt, control);
+        self.world.key_held(code);
+        self.key_message(code, shift, alt, control);
+        let translated = crate::input::translated_char(code, alt, control);
+        let ch = if control && !alt {
+            // Ctrl turns a letter into its control character and keeps
+            // the other keys from typing.
+            translated
+        } else {
+            translated.or(text.filter(|c| !c.is_control()))
+        };
+        if let Some(ch) = ch {
+            self.key_char(ch, shift, alt, control);
+        }
+    }
+
+    /// The key message alone (`WM_KEYDOWN`, `CBGame::HandleKeypress`
+    /// with `Printable` false): the key is not marked as held and no
+    /// character follows.
+    pub fn key_message(&mut self, code: i32, shift: bool, alt: bool, control: bool) {
+        self.handle_keypress(false, code, None, shift, alt, control);
+    }
+
+    /// A character is typed (`WM_CHAR`, `CBGame::HandleKeypress` with
+    /// `Printable` true): it reaches the focused window's editor and
+    /// becomes the keyboard state, but raises no `Keypress`. Nothing
+    /// while a video plays.
+    pub fn key_char(&mut self, ch: char, shift: bool, alt: bool, control: bool) {
+        if self.world.is_video_playing() {
+            return;
+        }
+        let code = crate::input::char_code(ch);
+        self.handle_keypress(true, code, Some(ch), shift, alt, control);
+    }
+
+    /// `CBGame::HandleKeypress`: Escape stops a video and a video
+    /// swallows every other key; then the accessibility keys; then the
+    /// keyboard state is recorded and the focused window takes the
+    /// message (`Tab`, its editor). A key the window leaves raises
+    /// `Keypress` on the window when its scripts handle it, else on the
+    /// game; a character raises nothing.
+    fn handle_keypress(
+        &mut self,
+        printable: bool,
+        code: i32,
+        text: Option<char>,
+        shift: bool,
+        alt: bool,
+        control: bool,
+    ) {
         if self.world.is_video_playing() {
             if code == 27 {
                 self.world.stop_video(&mut self.engine);
             }
             return;
         }
-        if self.world.access_key(&mut self.engine, code) {
+        // The modifiers stand for the system's own key state, which the
+        // original reads wherever it needs it.
+        self.world.keyboard.shift = shift;
+        self.world.keyboard.alt = alt;
+        self.world.keyboard.control = control;
+        if self.world.access_key(&mut self.engine, printable, code) {
             return;
         }
+        self.world
+            .read_key(printable, code, text, shift, alt, control);
         let game = self.world.game_id;
         if let Some(window) = self.world.focused_window() {
-            if self.world.window_key(window, code, text) {
+            if self.world.window_key(window, printable, code, text) || printable {
                 return;
             }
             if self.engine.can_handle_event(window, "Keypress") {
@@ -3696,6 +4089,8 @@ impl Runtime {
                     .apply_event(&mut self.world, window, "Keypress", false);
                 return;
             }
+        } else if printable {
+            return;
         }
         self.engine
             .apply_event(&mut self.world, game, "Keypress", false);

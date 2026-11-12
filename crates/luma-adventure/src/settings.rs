@@ -158,6 +158,9 @@ mod tests {
         assert_eq!(s.width, 1024);
         assert_eq!(s.height, 768);
         assert!(s.string_tables.is_empty());
+        assert!(s.allow_windowed, "allowed unless the game says otherwise");
+        let s = GameSettings::parse(b"SETTINGS { ALLOW_WINDOWED_MODE=FALSE }").unwrap();
+        assert!(!s.allow_windowed);
         let s = GameSettings::parse(
             b"SETTINGS {\n  GAME=\"default.game\"\n  STRING_TABLE=\"string.tab\"\n  STRING_TABLE=\"extra.tab\"\n  RESOLUTION { 320,200 }\n}\n",
         )

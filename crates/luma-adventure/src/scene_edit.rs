@@ -174,7 +174,7 @@ impl World {
                 entity.name
             ));
         }
-        self.apply_file_properties(id, &entity.properties);
+        self.apply_properties(id, &entity.properties);
         // An entity standing for an item that was taken starts hidden
         // (`IsItemTaken` at the end of `CAdEntity::LoadBuffer`).
         if entity
@@ -195,8 +195,7 @@ impl World {
 
     /// Reads an `.entity` file (`CAdEntity::LoadFile`), with the
     /// `TEMPLATE` files it names loaded where the keys stand; `None`,
-    /// logged, when it cannot be read or parsed. The entity keeps the
-    /// name of its file (`Filename`).
+    /// logged, when it cannot be read or parsed.
     pub(crate) fn read_entity_def(&mut self, path: &str) -> Option<Entity> {
         let bytes = match self.vfs.read(path) {
             Ok(bytes) => bytes,
@@ -210,10 +209,7 @@ impl World {
         let vfs = &self.vfs;
         let mut read = |file: &str| vfs.read(file).ok();
         match Entity::parse_with(&bytes, &mut luma_formats::Files::new(&mut read)) {
-            Ok(mut def) => {
-                def.filename = Some(path.to_string());
-                Some(def)
-            }
+            Ok(def) => Some(def),
             Err(err) => {
                 self.log(format!("Error parsing ENTITY file '{path}': {err}"));
                 None
@@ -250,7 +246,9 @@ impl World {
     /// when the file does not load.
     pub fn load_scene_entity(&mut self, engine: &mut Engine, path: &str) -> Option<NativeId> {
         let def = self.read_entity_def(path)?;
-        self.add_free_entity(engine, def)
+        let id = self.add_free_entity(engine, def)?;
+        self.set_holder_filename(id, path);
+        Some(id)
     }
 
     /// Removes a free entity from the scene (`UnloadObject` on one); the
@@ -299,7 +297,9 @@ impl World {
     /// `None` when the file does not load.
     pub fn load_game_entity(&mut self, engine: &mut Engine, path: &str) -> Option<NativeId> {
         let def = self.read_entity_def(path)?;
-        Some(self.add_game_entity(engine, def))
+        let id = self.add_game_entity(engine, def);
+        self.set_holder_filename(id, path);
+        Some(id)
     }
 
     /// Removes an entity of the game (`Game.UnloadObject` on one, the
@@ -340,7 +340,7 @@ impl World {
         y: i32,
     ) -> bool {
         let Some(mut def) = self.read_entity_def(path) else {
-            self.log(format!(
+            self.report_script_error(&format!(
                 "Runtime error: AddAttachment() failed loading entity '{path}'"
             ));
             return false;
@@ -349,6 +349,7 @@ impl World {
         def.y = y;
         def.active = true;
         let id = self.add_game_entity(engine, def);
+        self.set_holder_filename(id, path);
         if let Some(state) = self.object_state_mut(id) {
             state.attached_to = Some(owner);
         }
@@ -619,7 +620,9 @@ impl World {
             return false;
         };
         if layer.main {
-            self.log("Runtime error: Scene.DeleteLayer - cannot delete main scene layer");
+            self.report_script_error(
+                "Runtime error: Scene.DeleteLayer - cannot delete main scene layer",
+            );
             return false;
         }
         let nodes = layer.nodes.len();

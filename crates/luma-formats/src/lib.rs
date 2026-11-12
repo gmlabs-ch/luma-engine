@@ -60,3 +60,8 @@ pub use window::{
     ButtonDef, ControlDef, EditDef, InventoryBoxDef, ItemDef, ResponseBoxDef, StaticDef,
     TiledImage, VerticalAlign, WidgetDef, WindowDef,
 };
+
+/// The name of an object whose file gives none, and of one created
+/// empty: `CBScriptHolder`'s constructor names every script holder
+/// `<unnamed>`, and the `NAME` key replaces it.
+pub const UNNAMED: &str = "<unnamed>";

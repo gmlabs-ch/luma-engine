@@ -205,7 +205,7 @@ fn scripts_use_the_library_classes() {
         "a library object converts to false"
     );
     let written = runtime.world.save_directory().join("notes/out.txt");
-    assert_eq!(std::fs::read(&written).unwrap(), b"saved\n");
+    assert_eq!(std::fs::read(&written).unwrap(), b"saved\r\n");
     let classes = runtime
         .world
         .objects()

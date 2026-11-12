@@ -112,7 +112,7 @@ pub struct GameFile {
 impl Default for GameFile {
     fn default() -> Self {
         GameFile {
-            name: String::new(),
+            name: crate::UNNAMED.to_string(),
             caption: String::new(),
             scripts: Vec::new(),
             template: None,

@@ -57,7 +57,7 @@ impl MemBuffer {
     fn check<H: ClassHost>(&self, host: &mut H, ctx: &Context<'_>, start: i64, len: i64) -> bool {
         let size = self.data.len() as i64;
         if start < 0 || len <= 0 || start + len > size {
-            host.log(&ctx.runtime_error("Set/Get method call is out of bounds"));
+            host.script_error(&ctx.runtime_error("Set/Get method call is out of bounds"));
             false
         } else {
             true
@@ -146,7 +146,7 @@ impl MemBuffer {
                 }
             }
             "GetPointer" => {
-                host.log(
+                host.script_error(
                     &ctx.runtime_error("MemBuffer.GetPointer: memory pointers are not available"),
                 );
                 Return::null()
@@ -183,7 +183,7 @@ impl MemBuffer {
                 set!(bytes)
             }
             "SetPointer" => {
-                host.log(
+                host.script_error(
                     &ctx.runtime_error("MemBuffer.SetPointer: memory pointers are not available"),
                 );
                 Return::value(false)

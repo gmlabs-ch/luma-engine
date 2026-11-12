@@ -183,7 +183,7 @@ pub struct Actor3dDef {
 impl Default for Actor3dDef {
     fn default() -> Self {
         Actor3dDef {
-            name: String::new(),
+            name: luma_formats::UNNAMED.to_string(),
             caption: String::new(),
             template: None,
             font: None,

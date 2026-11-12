@@ -182,9 +182,9 @@ impl World {
                     }
                 });
                 let Some(entity) = entity else {
-                    self.log(format!(
-                        "Runtime error. Script '{}', line {}: actor.{name} method accepts an entity refrence only",
-                        self.script_name(&ctx),
+                    let script = self.script_name(&ctx);
+                    self.report_script_error(&format!(
+                        "Runtime error. Script '{script}', line {}: actor.{name} method accepts an entity refrence only",
                         ctx.line
                     ));
                     return Some(Return::null());
@@ -367,7 +367,7 @@ impl World {
     fn script_name(&self, ctx: &Context<'_>) -> String {
         ctx.engine
             .script(ctx.script)
-            .map(|s| s.filename().to_string())
+            .map(|s| s.source().to_string())
             .unwrap_or_default()
     }
 }

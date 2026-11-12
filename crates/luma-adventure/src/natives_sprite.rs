@@ -41,9 +41,9 @@ impl World {
         let script = ctx
             .engine
             .script(ctx.script)
-            .map(|s| s.filename().to_string())
+            .map(|s| s.source().to_string())
             .unwrap_or_default();
-        self.log(format!(
+        self.report_script_error(&format!(
             "Runtime error. Script '{script}', line {}: {message}",
             ctx.line
         ));
