@@ -12,6 +12,8 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use flate2::Compression;
@@ -22,6 +24,7 @@ use luma_script::{Engine, EngineSnapshot, NativeId};
 use serde::{Deserialize, Serialize};
 
 use crate::actor::Actor;
+use crate::capture::Capture;
 use crate::fader::Fader;
 use crate::input::{Cursors, Keyboard, Mouse};
 use crate::inventory::Inventory;
@@ -48,6 +51,88 @@ pub const DEFAULT_SAVE_DIR: &str = "saves";
 /// The file in the save directory naming the slot saved last
 /// (`MostRecentSaveSlot`, in the original engine's registry).
 const RECENT_FILE: &str = "recent.slot";
+
+/// The start of the name of a saved game's thumbnail read as an image
+/// file: `savegame:<slot>`, `savegame:<slot>,g` for a grey copy
+/// (`CBSaveThumbFile`).
+pub const THUMBNAIL_PREFIX: &str = "savegame:";
+
+/// Whether a file name is a saved game's thumbnail
+/// (`strnicmp(Filename, "savegame:", 9)`).
+pub fn is_thumbnail_path(path: &str) -> bool {
+    path.get(..THUMBNAIL_PREFIX.len())
+        .is_some_and(|start| start.eq_ignore_ascii_case(THUMBNAIL_PREFIX))
+}
+
+/// Where the slot files are, for what reads them without the world: the
+/// thumbnails served as image files (`CBSaveThumbFile::Open`).
+#[derive(Debug, Clone)]
+pub(crate) struct SlotFiles {
+    /// The game's own save directory.
+    local: PathBuf,
+    /// The user's own save directory for the game.
+    private: Option<PathBuf>,
+    /// Whether saved games go to the user's directory; shared with the
+    /// world, which switches it when the game's is not writable.
+    personal: Arc<AtomicBool>,
+    /// The extension of the slot files.
+    extension: String,
+    /// The game's `NAME`.
+    game: String,
+}
+
+impl SlotFiles {
+    /// The file of a slot (`GetSaveSlotFilename`, without the write
+    /// test of the save directory).
+    fn path(&self, slot: i32) -> PathBuf {
+        let dir = match (&self.private, self.personal.load(Ordering::Relaxed)) {
+            (Some(private), true) => private,
+            _ => &self.local,
+        };
+        dir.join(format!("save{slot:03}.{}", self.extension))
+    }
+
+    /// The image file of a `savegame:` name (`CBSaveThumbFile::Open`,
+    /// `CBImage::LoadFile`): the thumbnail of the slot's saved game, as
+    /// a PNG; grey when the name ends in `,g`. `None` when the slot is
+    /// free, holds another game's file or carries no thumbnail.
+    fn thumbnail(&self, name: &str) -> Option<Vec<u8>> {
+        let rest = name.get(THUMBNAIL_PREFIX.len()..)?;
+        // The digits after the colon, read as `atoi` reads them.
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        let slot = digits.bytes().fold(0i32, |n, b| {
+            n.wrapping_mul(10).wrapping_add(i32::from(b - b'0'))
+        });
+        let header = read_save_header(&self.path(slot)).ok()?;
+        if !header.game.eq_ignore_ascii_case(&self.game) {
+            return None;
+        }
+        let thumbnail = header.thumbnail?;
+        let bytes = rest.as_bytes();
+        let grey = bytes.len() >= 2
+            && bytes[bytes.len() - 2] == b','
+            && bytes[bytes.len() - 1].eq_ignore_ascii_case(&b'g');
+        if !grey {
+            return Some(thumbnail);
+        }
+        let mut image =
+            luma_formats::image::decode(&thumbnail, luma_formats::DEFAULT_COLOR_KEY).ok()?;
+        image.grayscale();
+        image.to_png().ok()
+    }
+}
+
+/// How the frame that follows a save is drawn (`CBGame::SaveGame`,
+/// `CBPersistMgr::InitSave`): the original engine draws the game
+/// without its normal windows, sentences, cursor and fader
+/// (`DisplayContent(false)`) while it saves, to take the thumbnail and
+/// to show the saving screen with the progress indicator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SaveDisplay {
+    /// Whether the saving screen and the indicator are shown (not for a
+    /// quick save).
+    pub indicator: bool,
+}
 
 /// What a saved game says about itself before its data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -344,7 +429,7 @@ pub fn save_game(
     engine: &mut Engine,
     slot: i32,
     description: &str,
-    _quick: bool,
+    quick: bool,
 ) -> Result<PathBuf, String> {
     let path = world.save_slot_path(slot);
     world.log(format!("Saving game '{}'...", path.display()));
@@ -358,6 +443,11 @@ pub fn save_game(
         timestamp: now(),
         thumbnail: world.save_thumbnail.take(),
     };
+    // Without one, the original takes it now, of the game drawn without
+    // its menus (`StoreThumbnail(true)`). The world does not draw by
+    // itself: the picture is the frame the front-end renders next, and
+    // goes into the file then (`World::deliver_frame`).
+    let late_thumbnail = header.thumbnail.is_none() && world.thumbnail_size().is_some();
     let snapshot = engine.snapshot();
     let sounds = world.sounds_state();
     let videos = world.videos_state();
@@ -368,8 +458,43 @@ pub fn save_game(
     })
     .map_err(|e| e.to_string())?;
     write_file(&path, &header, &body)?;
+    world.captures.retain(|c| {
+        !matches!(c, Capture::Thumbnail)
+            && !matches!(c, Capture::SaveThumbnail { path: other } if *other == path)
+    });
+    if late_thumbnail {
+        world
+            .captures
+            .push(Capture::SaveThumbnail { path: path.clone() });
+    }
+    // The frame of the save: the saving screen and the indicator unless
+    // the save is a quick one, the thumbnail's picture when one is due.
+    if !quick || late_thumbnail {
+        world.save_display = Some(SaveDisplay { indicator: !quick });
+        world.indicator_progress = 100;
+    }
+    world.refresh_thumbnails();
     world.set_most_recent_save_slot(slot);
     Ok(path)
+}
+
+/// Puts a thumbnail into the header of a saved game already written:
+/// the picture of a save that had none stored comes with the next frame
+/// rendered.
+pub(crate) fn patch_thumbnail(path: &Path, thumbnail: Vec<u8>) -> Result<(), String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (mut header, offset) = read_header_bytes(&bytes)?;
+    header.thumbnail = Some(thumbnail);
+    let header_bytes = postcard::to_allocvec(&header).map_err(|e| e.to_string())?;
+    let header_len =
+        u32::try_from(header_bytes.len()).map_err(|_| "header too large".to_string())?;
+    let mut out = Vec::with_capacity(16 + header_bytes.len() + bytes.len() - offset);
+    // The magic and the layout version stay the file's own.
+    out.extend_from_slice(&bytes[..12]);
+    out.extend_from_slice(&header_len.to_le_bytes());
+    out.extend_from_slice(&header_bytes);
+    out.extend_from_slice(&bytes[offset..]);
+    std::fs::write(path, out).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Loads the game of a slot (`CBGame::LoadGame`): everything the file
@@ -458,6 +583,7 @@ impl World {
             } else {
                 self.log("Save directory is not writable. Switching to personal savegames.");
                 self.personal_save = true;
+                self.save_personal.store(true, Ordering::Relaxed);
             }
         }
         self.save_directory()
@@ -492,7 +618,42 @@ impl World {
     /// one.
     pub fn empty_save_slot(&mut self, slot: i32) -> bool {
         let path = self.save_slot_path(slot);
-        std::fs::remove_file(path).is_ok()
+        let removed = std::fs::remove_file(path).is_ok();
+        self.refresh_thumbnails();
+        removed
+    }
+
+    /// Serves the thumbnails of the saved games as image files
+    /// (`savegame:<slot>`, `savegame:<slot>,g`), so that a sprite or a
+    /// window's image can show them (`CBFileManager::OpenFileRaw`,
+    /// `CBSaveThumbFile`).
+    pub(crate) fn register_thumbnail_files(&mut self) {
+        let slots = SlotFiles {
+            local: self.local_save_dir(),
+            private: self.private_save_dir(),
+            personal: Arc::clone(&self.save_personal),
+            extension: self.settings.save_extension().to_string(),
+            game: self.game_file.name.clone(),
+        };
+        self.vfs
+            .add_virtual_source(THUMBNAIL_PREFIX, move |name| slots.thumbnail(name));
+    }
+
+    /// Looks at the thumbnails again after a slot changed: the images
+    /// shown from `savegame:` names are decoded anew, and one whose slot
+    /// has no thumbnail any more becomes the placeholder.
+    pub(crate) fn refresh_thumbnails(&mut self) {
+        let mut stale = self.ui.bank.refresh_prefixed(&self.vfs, THUMBNAIL_PREFIX);
+        stale.extend(self.game_view.refresh_thumbnails(&self.vfs));
+        if let Some(view) = self.scene.as_mut() {
+            stale.extend(view.refresh_thumbnails(&self.vfs));
+        }
+        self.dropped_textures.extend(stale);
+    }
+
+    /// How the frame after a save is drawn, until the next frame starts.
+    pub fn save_display(&self) -> Option<SaveDisplay> {
+        self.save_display
     }
 
     /// The slot saved last (`Game.MostRecentSaveSlot`), `-1` when none.
@@ -659,6 +820,23 @@ impl World {
         self.quit = false;
         self.scheduled_load = None;
         self.pending_save = None;
+        self.save_display = None;
+        self.indicator_progress = 0;
+        // `CBGame::Persist` runs `Cleanup()` before it loads: the
+        // messages of `Game.Msg` and the loading icon of the game left
+        // go.
+        self.quick_messages.clear();
+        self.loading_icon = None;
+        // `AccessUnpause()`: the Ctrl+Space pause of the game left is
+        // over; its shield window went with that game's windows.
+        self.access.paused = false;
+        self.access.shield = None;
+        self.fader.after_load();
+        self.scene_fader.after_load();
+        // A picture due to a save of the game left is not taken of this
+        // one.
+        self.captures
+            .retain(|c| !matches!(c, Capture::SaveThumbnail { .. }));
         self.reload_assets();
         self.restore_sounds(sounds);
     }

@@ -1,8 +1,11 @@
 //! Snapshots of the engine for saved games (feature `serde`): every
 //! script with its stacks and state, the globals a script shares with
-//! its threads, the engine's globals. Programs are named by the file
-//! they were loaded from and read again when the snapshot is restored,
-//! as the original engine reloads a script's bytecode after a load.
+//! its threads, the engine's globals. A script in the middle of its
+//! code keeps its bytecode in the snapshot, so that it resumes the code
+//! it was running even if the game's file changed since; an idle one
+//! (waiting for events) is named by the file it was loaded from and
+//! read again when the snapshot is restored, as the original engine
+//! does (`CScScript::Persist`, `AfterLoad`).
 //!
 //! Written with reference to `ScScript.cpp` (`Persist`, `AfterLoad`) and
 //! `ScEngine.cpp` (`Persist`) of Wintermute Engine 1.x (MIT License,
@@ -17,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::{Engine, Global};
 use crate::host::Host;
+use crate::program::Program;
 use crate::script::{Script, ScriptId, State};
 use crate::stack::{Globals, Slot, Stack, VarRef};
 use crate::value::{NativeId, Value};
@@ -71,6 +75,10 @@ pub struct ScriptSnapshot {
     pub id: ScriptId,
     /// The path the program was loaded from.
     pub source: String,
+    /// The script's bytecode, by index in [`EngineSnapshot::programs`],
+    /// for a script that is neither idle nor finished; `None` reads the
+    /// file again.
+    pub program: Option<usize>,
     /// The instruction pointer.
     pub ip: usize,
     /// The source line.
@@ -130,6 +138,29 @@ pub struct EngineSnapshot {
     pub globals: BTreeMap<String, Global>,
     /// The next script identifier.
     pub next_id: u64,
+    /// The bytecode of the scripts saved in the middle of their code,
+    /// once per program (a script and its threads share one).
+    pub programs: Vec<Vec<u8>>,
+}
+
+/// Numbers the programs by identity as they are met.
+#[derive(Default)]
+struct Programs {
+    index: HashMap<*const Program, usize>,
+    programs: Vec<Vec<u8>>,
+}
+
+impl Programs {
+    fn index_of(&mut self, program: &Rc<Program>) -> usize {
+        let key = Rc::as_ptr(program);
+        if let Some(&index) = self.index.get(&key) {
+            return index;
+        }
+        let index = self.programs.len();
+        self.index.insert(key, index);
+        self.programs.push(program.bytes().to_vec());
+        index
+    }
 }
 
 /// Numbers the globals tables by identity as they are met.
@@ -225,14 +256,22 @@ impl Engine {
     /// are now, the globals they share and the engine's own.
     pub fn snapshot(&self) -> EngineSnapshot {
         let mut tables = Tables::default();
+        let mut programs = Programs::default();
         let scripts = self
             .scripts
             .iter()
             .map(|script| {
                 let globals = tables.index_of(&script.globals);
+                // "don't save idle/finished scripts": their code is
+                // read from the file again.
+                let idle = matches!(
+                    script.state,
+                    State::Persistent | State::Finished | State::ThreadFinished
+                );
                 ScriptSnapshot {
                     id: script.id,
                     source: script.source.clone(),
+                    program: (!idle).then(|| programs.index_of(&script.program)),
                     ip: script.ip,
                     line: script.line,
                     slots: script
@@ -273,13 +312,15 @@ impl Engine {
             tables: tables.tables,
             globals: self.globals.clone(),
             next_id: self.next_id,
+            programs: programs.programs,
         }
     }
 
-    /// Replaces every script and global with a snapshot's. The programs
-    /// are read again through the host; a script whose program cannot
-    /// be read is logged and dropped, as the original engine ends it
-    /// (`CScScript::AfterLoad`). A snapshot that names a globals table
+    /// Replaces every script and global with a snapshot's. A script
+    /// saved with its bytecode runs it; the programs of the others are
+    /// read again through the host. A script whose program cannot be
+    /// read (or whose saved bytecode is not a program) is logged and
+    /// dropped, as the original engine ends it (`CScScript::AfterLoad`). A snapshot that names a globals table
     /// it does not hold is refused and leaves the engine empty.
     pub fn restore(&mut self, snapshot: EngineSnapshot, host: &mut dyn Host) -> Result<(), String> {
         self.scripts.clear();
@@ -293,9 +334,20 @@ impl Engine {
                 .map(|table| Rc::new(RefCell::new(table)))
                 .collect(),
         };
+        // The saved programs, parsed once each; a script and its
+        // threads share one again.
+        let saved_programs: Vec<Option<Rc<Program>>> = snapshot
+            .programs
+            .into_iter()
+            .map(|bytes| Program::parse(bytes).ok().map(Rc::new))
+            .collect();
         let mut scripts = Vec::with_capacity(snapshot.scripts.len());
         for saved in snapshot.scripts {
-            let Some(program) = self.program(host, &saved.source) else {
+            let program = match saved.program {
+                Some(index) => saved_programs.get(index).cloned().flatten(),
+                None => self.program(host, &saved.source),
+            };
+            let Some(program) = program else {
                 host.log(&format!(
                     "Error reinitializing script '{}' after load. Script will be terminated.",
                     saved.source
@@ -465,6 +517,137 @@ mod tests {
         a.emit(Instruction::PopEmpty);
         a.emit(Instruction::RetEvent);
         a.build()
+    }
+
+    /// `CScScript::Persist`: a script saved in the middle of its code
+    /// carries its bytecode and resumes it although the file changed; an
+    /// idle one takes the new file.
+    #[test]
+    fn a_running_script_keeps_its_code_when_the_file_changed() {
+        let mut host = Files(vec![("a.script".to_string(), program())], Vec::new());
+        let mut engine = Engine::new();
+        let owner = NativeId(3);
+        let id = engine
+            .run_script(&mut host, "a.script", Some(owner))
+            .unwrap();
+        engine.tick(&mut host);
+        engine.apply_event(&mut host, owner, "bump", false);
+        engine.tick(&mut host);
+        let thread = engine.scripts()[1].id();
+        assert_eq!(engine.script(thread).unwrap().state(), State::Sleeping);
+        let snapshot = engine.snapshot();
+        assert_eq!(snapshot.scripts[0].program, None, "idle: read again");
+        assert_eq!(snapshot.scripts[1].program, Some(0), "sleeping: kept");
+        assert_eq!(snapshot.programs.len(), 1);
+
+        // The game is patched: the file is another program now, whose
+        // handler adds 100 where the old one added 10.
+        let mut a = Assembler::new("a.script");
+        a.def_var("n");
+        a.emit(Instruction::Ret);
+        a.event("bump");
+        a.emit(Instruction::Scope);
+        a.push_var("n");
+        a.push_int(100);
+        a.emit(Instruction::Add);
+        a.pop_var("n");
+        a.emit(Instruction::RetEvent);
+        let mut later = Later(Files(vec![("a.script".to_string(), a.build())], Vec::new()));
+        let mut engine = Engine::new();
+        engine.restore(snapshot.clone(), &mut later).unwrap();
+        assert!(later.0.1.is_empty(), "{:?}", later.0.1);
+        // The sleeping thread ends the old handler: 2 + 10.
+        engine.tick(&mut later);
+        assert_eq!(engine.script(id).unwrap().global("n"), Some(Value::Int(12)));
+        // The idle script answers the next event with the new file.
+        engine.apply_event(&mut later, owner, "bump", false);
+        engine.tick(&mut later);
+        assert_eq!(
+            engine.script(id).unwrap().global("n"),
+            Some(Value::Int(112))
+        );
+
+        // Bytecode that is not a program ends the script, logged.
+        let mut broken = snapshot;
+        broken.programs[0] = b"not a program".to_vec();
+        let mut engine = Engine::new();
+        engine.restore(broken, &mut later).unwrap();
+        assert_eq!(engine.scripts().len(), 1);
+        assert!(
+            later
+                .0
+                .1
+                .iter()
+                .any(|l| l.contains("Error reinitializing script 'a.script'")),
+            "{:?}",
+            later.0.1
+        );
+    }
+
+    /// The host a second later, for the sleeps to end.
+    struct Later(Files);
+
+    impl Natives for Later {
+        fn class_name(&self, id: NativeId) -> String {
+            self.0.class_name(id)
+        }
+
+        fn get_property(&self, id: NativeId, name: &str) -> Option<Value> {
+            self.0.get_property(id, name)
+        }
+
+        fn set_property(&mut self, id: NativeId, name: &str, value: &Value) -> bool {
+            self.0.set_property(id, name, value)
+        }
+    }
+
+    impl Host for Later {
+        fn read_script(&mut self, filename: &str) -> Option<Vec<u8>> {
+            self.0.read_script(filename)
+        }
+
+        fn log(&mut self, message: &str) {
+            self.0.log(message);
+        }
+
+        fn timer(&self) -> u64 {
+            1000
+        }
+
+        fn clock(&self) -> u64 {
+            1000
+        }
+
+        fn valid_object(&self, id: NativeId) -> bool {
+            self.0.valid_object(id)
+        }
+
+        fn is_ready(&self, id: NativeId) -> bool {
+            self.0.is_ready(id)
+        }
+
+        fn random(&mut self, from: i32, to: i32) -> i32 {
+            self.0.random(from, to)
+        }
+
+        fn call_method(
+            &mut self,
+            target: NativeId,
+            name: &str,
+            args: &[Value],
+            ctx: Context<'_>,
+        ) -> Option<Return> {
+            self.0.call_method(target, name, args, ctx)
+        }
+
+        fn call_function(
+            &mut self,
+            name: &str,
+            args: &[Value],
+            ctx: Context<'_>,
+        ) -> Option<Return> {
+            self.0.call_function(name, args, ctx)
+        }
     }
 
     #[test]

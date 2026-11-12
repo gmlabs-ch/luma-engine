@@ -21,8 +21,12 @@ A saved game holds:
   pointer, value stack, `this` stack, scopes, call stack and state
   (running, sleeping until a time, waiting for an object or a thread,
   paused by a frozen game, persistent), the globals a script shares with
-  its threads, and the engine-wide globals; programs are named by the
-  file they were loaded from;
+  its threads, and the engine-wide globals. A script in the middle of
+  its code (running, sleeping, waiting) is saved with its bytecode, once
+  per program, and resumes that code after a load even if the game's
+  script file changed since (a patched game); an idle script, waiting
+  for events, is named by the file it was loaded from and takes the
+  file as it is at the load (`CScScript::Persist`, `AfterLoad`);
 - the native objects and their handles, which stay the same after a
   load, so that every reference in a script is still good, with the
   script properties set on each and its runtime state (`ObjectState`:
@@ -117,8 +121,13 @@ is raised on the game and runs to completion. When the file cannot be
 written, the error is logged and the script's result becomes `false`,
 as the original engine pops its `true`.
 
-`quick` is accepted and ignored: the original engine only uses it to
-skip the saving screen.
+`quick` skips the saving screen and the progress indicator, as in the
+original engine (see below).
+
+A save asked while the game is frozen (a save menu, a
+system-exclusive window) is an ordinary save: the freeze, its level and
+the windows are part of the state, and the loaded game is frozen under
+the same menu.
 
 ## Loading
 
@@ -133,6 +142,13 @@ raised on the game and runs to completion.
 
 A script whose program cannot be read any more is logged and dropped,
 as the original engine ends it; a script waiting for it gets `null`.
+
+What the running game showed on top of its state goes at a load, as
+the original's `CBGame::Cleanup` and `AccessUnpause` do: the messages
+of `Game.Msg`, the loading icon, the Ctrl+Space pause. A fade started
+with `SystemFadeIn` / `SystemFadeOut` (on the wall clock) is ended by
+the load, at its target colour (`CBFader::Persist`); a fade on the game
+timer goes on where it was.
 
 A file of another game (its `NAME` differs), a file that is not a Luma
 Engine saved game, or one written by a newer layout version is refused
@@ -182,10 +198,49 @@ The world does not draw by itself, so the picture is taken from the
 can be read back, and `World::deliver_frame` receives the pixels
 (`luma-player` renders the frame once more into an offscreen texture
 when a request is pending). The original engine reads the screen at
-the call instead, and takes a fresh picture at save time when none was
-stored; Luma cannot, so a save without `StoreSaveThumbnail` before it
-carries no thumbnail. A headless run renders nothing and fulfils no
+the call instead. A headless run renders nothing and fulfils no
 request.
+
+When a game with a thumbnail size saves without a stored thumbnail,
+the original takes the picture at that moment, of the game drawn
+without its normal windows, sentences, cursor and fader
+(`CBPersistMgr::InitSave`, `StoreThumbnail(true)`,
+`DisplayContent(false)`): the save menu is not in it. Luma writes the
+file at once, without thumbnail, and asks for the picture of the frame
+that follows, drawn the same way (see the saving screen below); when
+the front-end delivers it, it is scaled (bilinear, as the original's
+`CBImage::CopyFrom`) and put into the header of the file already
+written (`save::patch_thumbnail`). A thumbnail asked with
+`StoreSaveThumbnail` and not rendered yet when the game saves becomes
+that picture. A load drops a picture still due.
+
+### Thumbnails as image files
+
+A file name `savegame:<slot>` is the thumbnail of that slot's saved
+game, read as an image (`CBSaveThumbFile`): a window's `IMAGE`, a
+button's image, a sprite (`CBSprite::LoadFile` makes a one-frame sprite
+of it) can show it, which is how load and save menus show their slots.
+`savegame:<slot>,g` is the same picture in grey
+(`CBImage::Grayscale`: `0.30 R + 0.59 G + 0.11 B` for the three
+channels). The slot is the digits after the colon, read as `atoi` does
+(none is slot 0); the prefix is matched without case; what follows the
+digits is ignored, except a final `,g` or `,G`. The name does not exist
+when the slot is free, holds another game's file or a saved game
+without thumbnail: a sprite of it then shows the engine's placeholder
+image, like any missing image.
+
+The file is served by the game's file system through a source of files
+made on demand (`Vfs::add_virtual_source`, registered by
+`World::register_thumbnail_files`), which reads the slot's header. The
+picture is a PNG where the original hands out a BMP; images are
+recognised by content, so nothing depends on it.
+
+When a slot is written or emptied, the images already shown from
+`savegame:` names are looked at again (`World::refresh_thumbnails`):
+their textures are released and decoded anew, and a sprite turns into
+the placeholder or back. The original keeps a loaded surface as long
+as something uses it, so a menu shows the new picture only once it is
+loaded again; in Luma it shows it at once.
 
 `Game.Screenshot(name)` and `Game.ScreenshotEx(file, width, height)`
 work the same way, writing the frame to a file: `Screenshot` to
@@ -204,18 +259,37 @@ game loads, `SetSavingScreen(file, x, y)` one drawn while the game
 saves; `null` removes it. The game file sets them first (`LOAD_IMAGE`,
 `LOAD_IMAGE_X`, `LOAD_IMAGE_Y`, `SAVE_IMAGE`, `SAVE_IMAGE_X`,
 `SAVE_IMAGE_Y`, see [formats/game.md](formats/game.md)), and both
-travel with a saved game, as in the original engine. The original
-engine draws them over black while it writes or reads the file, with
-its progress indicator (`INDICATOR_*`, which Luma reads and ignores).
-In Luma:
+travel with a saved game, as in the original engine.
 
-- the **loading screen** is drawn over black in the frame between
-  `Game.LoadGame` and the load, which happens at the start of the next
-  frame: the player sees it for one frame, longer when the load takes
-  time;
-- the **saving screen** is never seen: a save completes inside the
-  frame that asks for it, with no frame drawn in between. The value is
-  kept, read back and saved all the same.
+The original engine redraws the screen many times while it writes or
+reads the file (`CSysClassRegistry::SaveTable`, `SaveInstances`,
+`LoadTable`, `LoadInstances`), with a **progress indicator**
+(`CBGame::DisplayIndicator`): the saving or loading image at its
+position, then a bar of `INDICATOR_HEIGHT` lines from `INDICATOR_X`,
+`INDICATOR_Y`, `INDICATOR_WIDTH * progress / 100` long, in
+`INDICATOR_COLOR` (by default the bottom 8 lines of the screen, over
+its whole width, translucent red; a height of 0 draws no bar). While
+loading, the screen is black under them (`DisplayContentSimple`); while
+saving, the game is drawn under them without its normal windows,
+sentences, cursor and fader (`DisplayContent(false)`), and a quick save
+(`SaveGame(slot, description, true)`) draws nothing.
+
+A Luma save or load completes inside one frame, so each has **one**
+such frame (`World::draw`):
+
+- the frame **before a load**, between `Game.LoadGame` and the load at
+  the start of the next frame: black, the loading screen if there is
+  one, and the bar at 0 %, that is no bar yet;
+- the frame **of a save** (`World::save_display`): the scene, the
+  in-game windows, the inventory and the response box, then the saving
+  screen and the bar at 100 %; the next frame is the game's again. A
+  quick save has no such frame, unless its thumbnail is due: then the
+  frame is drawn the same way without screen or bar. The picture taken
+  for the thumbnail never has the screen or the bar on it.
+
+`World::indicator_bar` gives the bar's rectangle and colour; it is
+drawn as a filled rectangle, which covers the same pixels as the
+original's lines.
 
 `Game.DisplayLoadingIcon(sprite, x, y, persistent)` shows a sprite over
 everything else (after the fader, before the messages of `Game.Msg`),
@@ -352,7 +426,8 @@ is hidden by a freeze, and its talk definition (`.talk`) with the sprite
 it is at; and what each item is doing (a sentence, a played animation).
 Version 20 keeps the caption slots 2 to 7 in the remembered scene
 states, the `SaveState` flag of region nodes, the sounds of sprite
-frames still playing and the videos.
+frames still playing, the videos, and the bytecode of the scripts saved
+in the middle of their code.
 
 ## Checking a game
 
@@ -371,7 +446,20 @@ luma-player path/to/game --headless --mute --ticks 60 --load 5 --entities
 window can be driven: open the menu with `--key 27`, click its "Save"
 button, a slot, "Save" again, type a name and click "OK".
 
-## Not yet
+## Saved games of the original engine
 
-- The `savegame:` images (a saved game's thumbnail shown by a window).
-- `Game.AutoSaveOnExit` and `AutoSaveSlot`.
+Luma does not load the original engine's `.dsv` files. Their start can
+be read (`CBPersistMgr::InitLoad`: the magic `DEC0ADDE`, `SAVE` or
+`SAV2`, the engine version, the game's name, the thumbnail as a BMP,
+the description and the timestamp, the whole inside the `ZCMP`
+container when compressed and after a `RGMH` header on Windows Vista
+and later), but the body is every object of the game written field by
+field by its class's `Persist` (about 150 classes, with fields added
+under version tests and objects referred to by class and instance
+numbers): reading it means reproducing each of those layouts and
+turning the original's object graph into Luma's state. A slot holding
+such a file reads as used, with an empty description, and loading it
+is refused with "not a Luma Engine saved game".
+
+The original engine has no automatic save (`AutoSaveOnExit`,
+`AutoSaveSlot` belong to later engines): there is nothing to port.

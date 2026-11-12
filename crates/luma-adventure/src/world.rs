@@ -269,6 +269,16 @@ pub struct World {
     pub(crate) personal_save: bool,
     /// Whether the game's save directory was tried.
     pub(crate) save_dir_checked: bool,
+    /// `personal_save`, shared with what serves the saved games'
+    /// thumbnails as image files.
+    pub(crate) save_personal: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// How the frame after a save is drawn; cleared when the next frame
+    /// starts.
+    pub(crate) save_display: Option<crate::save::SaveDisplay>,
+    /// How far a save or a load is, in percent
+    /// (`CBGame::m_IndicatorProgress`): 100 in the frame after a save, 0
+    /// in the frame before a load.
+    pub(crate) indicator_progress: i32,
     /// The accessibility switches and state (`CBAccessMgr`).
     pub(crate) access: Accessibility,
     /// Where the editors copy to and paste from.
@@ -452,9 +462,15 @@ impl World {
             pending_save: None,
             personal_save: personal_savegames,
             save_dir_checked: false,
+            save_personal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                personal_savegames,
+            )),
+            save_display: None,
+            indicator_progress: 0,
             access: Accessibility::new(),
             clipboard: Box::new(crate::input::MemoryClipboard::default()),
         };
+        world.register_thumbnail_files();
         // What the scan of the packages had to say (`RegisterPackages`).
         for line in world.vfs.warnings().to_vec() {
             world.log(line);
@@ -845,16 +861,18 @@ impl World {
         }
     }
 
-    /// Draws the loading screen over black, when a load is scheduled
-    /// and the game has one (`DisplayIndicator`); whether it did.
+    /// Draws the frame shown while a saved game loads
+    /// (`CBGame::DisplayContentSimple`), when a load is scheduled: black,
+    /// the loading screen if the game has one and the progress
+    /// indicator; whether it did.
     fn draw_loading_screen<'a>(
         &'a self,
         list: &mut luma_render::DrawList<'a>,
         white: Option<&'a luma_render::Texture>,
     ) -> bool {
-        let (Some(screen), true) = (&self.loading_screen, self.scheduled_load.is_some()) else {
+        if self.scheduled_load.is_none() {
             return false;
-        };
+        }
         if let Some(white) = white {
             list.fill(
                 white,
@@ -867,15 +885,80 @@ impl World {
                 },
             );
         }
-        self.draw_ui_image(
-            list,
-            &screen.path,
-            0,
-            screen.x,
-            screen.y,
-            Rgba::OPAQUE_WHITE,
-        );
+        self.draw_indicator(list, white, true);
         true
+    }
+
+    /// The rectangle of the progress indicator and its colour
+    /// (`CBGame::DisplayIndicator`): `INDICATOR_HEIGHT` lines from
+    /// `INDICATOR_X`, `INDICATOR_Y`, `INDICATOR_WIDTH * progress / 100`
+    /// long (to the left for a negative width), in `INDICATOR_COLOR`;
+    /// with the defaults of `CBGame::Initialize3` (the left edge, the
+    /// bottom of the screen, the screen's width). `None` when the
+    /// height is not positive or the bar has no length yet.
+    pub fn indicator_bar(&self) -> Option<(luma_render::Rect, Rgba)> {
+        let game = &self.game_file;
+        let height = game.indicator_height;
+        if height <= 0 {
+            return None;
+        }
+        let x = if game.indicator_x == -1 {
+            0
+        } else {
+            game.indicator_x
+        };
+        let y = if game.indicator_y == -1 {
+            self.settings.height as i32 - height
+        } else {
+            game.indicator_y
+        };
+        let width = if game.indicator_width == -1 {
+            self.settings.width as i32
+        } else {
+            game.indicator_width
+        };
+        let length = (width as f32 * (self.indicator_progress as f32 / 100.0)) as i32;
+        if length == 0 {
+            return None;
+        }
+        let left = x.min(x.saturating_add(length));
+        Some((
+            luma_render::Rect::new(
+                left as f32,
+                y as f32,
+                length.unsigned_abs() as f32,
+                height as f32,
+            ),
+            game.indicator_color,
+        ))
+    }
+
+    /// Draws the saving or loading screen and the progress indicator
+    /// over what is drawn so far (`CBGame::DisplayIndicator`).
+    fn draw_indicator<'a>(
+        &'a self,
+        list: &mut luma_render::DrawList<'a>,
+        white: Option<&'a luma_render::Texture>,
+        loading: bool,
+    ) {
+        let screen = if loading {
+            &self.loading_screen
+        } else {
+            &self.saving_screen
+        };
+        if let Some(screen) = screen {
+            self.draw_ui_image(
+                list,
+                &screen.path,
+                0,
+                screen.x,
+                screen.y,
+                Rgba::OPAQUE_WHITE,
+            );
+        }
+        if let (Some(white), Some((bar, color))) = (white, self.indicator_bar()) {
+            list.fill(white, bar, color);
+        }
     }
 
     /// Draws the loading icon at its current frame.
@@ -1997,6 +2080,18 @@ impl World {
         // (`CAdGame::DisplayContent`): a menu opened during a dialogue
         // covers the responses.
         self.draw_responses(list, white);
+        if let Some(display) = self.save_display {
+            // The frame of a save (`DisplayContent(false)`): the scene
+            // and what belongs to it, then the saving screen and the
+            // indicator; no normal window, sentence, cursor or fader.
+            // The picture taken for the thumbnail has neither screen
+            // nor indicator (`InitSave` takes it before they are up).
+            if display.indicator && !self.save_thumbnail_due() {
+                self.draw_indicator(list, white, false);
+            }
+            self.draw_loading_icon(list);
+            return;
+        }
         self.draw_windows(list, false, white);
         if let Some(white) = white {
             self.draw_access_hint(list, white);
@@ -3728,6 +3823,9 @@ impl Runtime {
     /// and the events raised reach their scripts. Returns the log lines
     /// of the frame.
     pub fn tick(&mut self, dt: u64) -> Vec<String> {
+        // The frame of the last save was shown.
+        self.world.save_display = None;
+        self.world.indicator_progress = 0;
         if let Some(slot) = self.world.scheduled_load.take() {
             // A game loads before anything else of the frame, as the
             // original engine does between two frames.

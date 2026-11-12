@@ -161,7 +161,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp
 - Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`, `accessibility.rs`)
-- Count: 152 done, 0 todo, 13 no-op
+- Count: 153 done, 0 todo, 12 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -207,7 +207,7 @@ How the list was made. For every class with a script interface, the names tested
 | `OpenDocument` | method | **done** | Opens a file or URL with the system's default application (`open`, `xdg-open`, `start`). WME also minimizes a fullscreen window first. |
 | `DEBUG_DumpClassRegistry` | method | **no-op** | Writes the class registry to the log; debugging aid. |
 | `SetLoadingScreen` | method | **done** | Sets the image shown while a saved game loads (file, x, y; `null` removes it). Luma draws it over black in the frame between `LoadGame` and the load (see `docs/saving.md`). |
-| `SetSavingScreen` | method | **no-op** | Sets the image shown while saving (file, x, y). Luma keeps and saves the value, but a save completes inside the frame that asks for it, so no frame can show the image. |
+| `SetSavingScreen` | method | **done** | Sets the image shown while saving (file, x, y). A Luma save completes inside one frame: the image and the progress indicator are drawn in that frame, over the game without its normal windows (not for a quick save; `docs/saving.md`). |
 | `SetWaitCursor`, `RemoveWaitCursor`, `GetWaitCursor` | method | **done** | Sets, removes, reads the cursor shown while the game is not interactive. |
 | `GetWaitCursorObject` | method | **done** | The wait cursor as a sprite object; `null` without one. |
 | `ClearScriptCache` | method | **done** | Empties the compiled-script cache and returns true: running scripts keep their program, the next script started from a file reads the file again. |
@@ -216,7 +216,7 @@ How the list was made. For every class with a script interface, the names tested
 | `DumpTextureStats` | method | **no-op** | Writes texture memory statistics to a file (D3D only); debugging aid. |
 | `AccOutputText` | method | **done** | Speaks text through the accessibility text-to-speech (text, type: 0 caption, 1 talk, 2 keypress), when it is on and the type's switch allows it. The backend is macOS's `say`; elsewhere the text-to-speech is unavailable, as WME's is without a SAPI voice. |
 | `IsShadowTypeSupported` | method | **done** | True when the renderer supports a 3D shadow type: the four types (0..3) with wgpu, where WME asks the device. |
-| `StoreSaveThumbnail`, `DeleteSaveThumbnail` | method | **done** | Captures / discards the screenshot stored in the next save file (size from `THUMBNAIL_WIDTH/HEIGHT`). The capture is the next frame rendered; a save without a stored thumbnail carries none, where WME takes one at save time. |
+| `StoreSaveThumbnail`, `DeleteSaveThumbnail` | method | **done** | Captures / discards the screenshot stored in the next save file (size from `THUMBNAIL_WIDTH/HEIGHT`). The capture is the next frame rendered. A save without a stored thumbnail gets the picture of the frame that follows it, where WME takes one at save time. |
 | `GetFileChecksum` | method | **done** | CRC-32 of a file in the virtual file system, as integer or hex string; `null` for a missing file. |
 | `EnableScriptProfiling`, `DisableScriptProfiling` | method | **done** | Turns the script profiler on / off: the real time each script file runs is added up, and turning it off writes WME's table to the log (see `docs/scripting.md`, The profiler). |
 | `Type` | get | **done** | `game`. |
@@ -1033,7 +1033,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 72 | 0 | 0 | 72 |
-| CBGame | 152 | 0 | 13 | 165 |
+| CBGame | 153 | 0 | 12 | 165 |
 | CAdGame | 65 | 0 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
 | CAdScene | 81 | 0 | 2 | 83 |
@@ -1072,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 62 | 0 | 5 | 67 |
 | CAdAttach3DX | 7 | 0 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **1084** | **0** | **69** | **1153** |
+| **All** | **1085** | **0** | **68** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1063 done, 0 todo, 69 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1064 done, 0 todo, 68 no-op.
 
 ## WME classes Luma lacks entirely
 
