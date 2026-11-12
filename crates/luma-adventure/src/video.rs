@@ -446,7 +446,9 @@ impl VideoPlayer {
         }
         match sound_position {
             Some(position) => position,
-            None => clock.saturating_sub(self.start_clock) + self.time_offset_ms,
+            None => clock
+                .saturating_sub(self.start_clock)
+                .saturating_add(self.time_offset_ms),
         }
     }
 
@@ -464,7 +466,9 @@ impl VideoPlayer {
             Some(sound) if audio.is_playing(sound) => Some(audio.position_ms(sound)),
             Some(_) => Some(match self.sound_heard {
                 Some((clock, position)) => position + now.saturating_sub(clock),
-                None => now.saturating_sub(self.start_clock) + self.time_offset_ms,
+                None => now
+                    .saturating_sub(self.start_clock)
+                    .saturating_add(self.time_offset_ms),
             }),
             None => None,
         };
@@ -575,7 +579,9 @@ pub(crate) fn step_player(
         }
         (Some(_), Some(_)) => Some(match player.sound_heard {
             Some((clock, position)) => position + now.saturating_sub(clock),
-            None => now.saturating_sub(player.start_clock) + player.time_offset_ms,
+            None => now
+                .saturating_sub(player.start_clock)
+                .saturating_add(player.time_offset_ms),
         }),
         _ => None,
     };
@@ -1051,6 +1057,10 @@ impl World {
             finished: false,
             subtitler,
             subtitle_height: 0,
+            alpha_file: None,
+            volume: 100,
+            subtitle_file: subtitle_file.map(str::to_string),
+            pause_after_frame: false,
         });
         self.update_video(engine);
         true
@@ -1455,7 +1465,8 @@ impl World {
         let subtitler = self.load_subtitler(&saved.filename, saved.subtitle_file.as_deref());
         Some(VideoPlayer {
             filename: saved.filename.clone(),
-            video,
+            video: Box::new(video),
+            avi: None,
             info,
             playback: saved.playback,
             x: saved.x,

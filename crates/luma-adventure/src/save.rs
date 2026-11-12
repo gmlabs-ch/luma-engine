@@ -108,6 +108,9 @@ impl SlotFiles {
             return None;
         }
         let thumbnail = header.thumbnail?;
+        if thumbnail.len() > MAX_THUMBNAIL {
+            return None;
+        }
         let bytes = rest.as_bytes();
         let grey = bytes.len() >= 2
             && bytes[bytes.len() - 2] == b','
@@ -117,6 +120,9 @@ impl SlotFiles {
         }
         let mut image =
             luma_formats::image::decode(&thumbnail, luma_formats::DEFAULT_COLOR_KEY).ok()?;
+        if u64::from(image.width) * u64::from(image.height) > MAX_THUMBNAIL_PIXELS {
+            return None;
+        }
         image.grayscale();
         image.to_png().ok()
     }
@@ -351,7 +357,20 @@ fn write_file(path: &Path, header: &SaveHeader, body: &[u8]) -> Result<(), Strin
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    std::fs::write(path, out).map_err(|e| format!("{}: {e}", path.display()))
+    write_atomically(path, &out)
+}
+
+/// Writes a file so that a crash or a full disk cannot leave half of it:
+/// the bytes go to a file beside it, which then replaces it.
+fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut temporary = path.as_os_str().to_owned();
+    temporary.push(".tmp");
+    let temporary = PathBuf::from(temporary);
+    let result = std::fs::write(&temporary, bytes).and_then(|()| std::fs::rename(&temporary, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result.map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Reads the header of a saved game and the offset of its body.
@@ -393,8 +412,15 @@ fn read_file(path: &Path) -> Result<(SaveHeader, Vec<u8>), String> {
     }
     let mut body = Vec::new();
     ZlibDecoder::new(&bytes[offset..])
+        .take(MAX_BODY + 1)
         .read_to_end(&mut body)
         .map_err(|e| format!("{}: {e}", path.display()))?;
+    if body.len() as u64 > MAX_BODY {
+        return Err(format!(
+            "{}: the saved game is larger than {MAX_BODY} bytes once unpacked",
+            path.display()
+        ));
+    }
     Ok((header, body))
 }
 
@@ -494,7 +520,7 @@ pub(crate) fn patch_thumbnail(path: &Path, thumbnail: Vec<u8>) -> Result<(), Str
     out.extend_from_slice(&header_len.to_le_bytes());
     out.extend_from_slice(&header_bytes);
     out.extend_from_slice(&bytes[offset..]);
-    std::fs::write(path, out).map_err(|e| format!("{}: {e}", path.display()))
+    write_atomically(path, &out)
 }
 
 /// Loads the game of a slot (`CBGame::LoadGame`): everything the file
@@ -971,9 +997,38 @@ impl World {
     }
 }
 
+/// The most bytes a saved game's body may unpack to: far above any game's
+/// state, far below what a crafted file could ask the engine to hold.
+const MAX_BODY: u64 = 512 * 1024 * 1024;
+
+/// The largest thumbnail, in bytes of its image file and in pixels, that
+/// the `savegame:` images serve.
+const MAX_THUMBNAIL: usize = 8 * 1024 * 1024;
+const MAX_THUMBNAIL_PIXELS: u64 = 4096 * 4096;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_write_replaces_the_file_whole_and_leaves_nothing_beside_it() {
+        let dir = std::env::temp_dir().join(format!("luma-atomic-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("save001.dsv");
+        write_atomically(&path, b"first").unwrap();
+        write_atomically(&path, b"second").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["save001.dsv"]);
+        // A destination that cannot be written leaves no temporary file.
+        let missing = dir.join("no").join("such").join("save.dsv");
+        assert!(write_atomically(&missing, b"x").is_err());
+        assert!(!dir.join("no").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn headers_round_trip_and_foreign_files_are_refused() {
