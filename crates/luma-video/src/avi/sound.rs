@@ -164,11 +164,19 @@ fn ms_adpcm(format: &WaveFormat, data: &[u8]) -> Vec<i16> {
             } else {
                 i32::from(code)
             };
-            let predicted = (first[c] * coefficient[c].0 + second[c] * coefficient[c].1) / 256;
-            let sample = (predicted + signed * delta[c]).clamp(-32768, 32767);
+            // The header's step and predictors come from the file: the
+            // arithmetic is wide enough that no value of theirs overflows.
+            let predicted = (i64::from(first[c]) * i64::from(coefficient[c].0)
+                + i64::from(second[c]) * i64::from(coefficient[c].1))
+                / 256;
+            let sample =
+                (predicted + i64::from(signed) * i64::from(delta[c])).clamp(-32768, 32767) as i32;
             second[c] = first[c];
             first[c] = sample;
-            delta[c] = (MS_ADAPTATION[usize::from(code)] * delta[c] / 256).max(16);
+            // The step is bounded: a run of the largest code would
+            // otherwise grow it without end.
+            delta[c] = (i64::from(MS_ADAPTATION[usize::from(code)]) * i64::from(delta[c]) / 256)
+                .clamp(16, 1 << 24) as i32;
             out.push(sample as i16);
         }
     }
@@ -255,6 +263,23 @@ mod tests {
             bits,
             extra: Vec::new(),
         }
+    }
+
+    #[test]
+    fn ms_adpcm_survives_extreme_headers_and_runs_of_the_largest_code() {
+        // One block: a header with the largest step and sample values and
+        // predictors of -32768, then codes that grow the step at every
+        // sample. This panicked in a debug build.
+        let mut f = format(2, 1, 512, 4);
+        f.extra = vec![0; 4];
+        f.extra[2] = 1;
+        f.extra.extend_from_slice(&[0x00, 0x80, 0x00, 0x80]);
+        let mut block = vec![0u8]; // predictor 0
+        block.extend_from_slice(&32767i16.to_le_bytes()); // step
+        block.extend_from_slice(&(-32768i16).to_le_bytes()); // first
+        block.extend_from_slice(&(-32768i16).to_le_bytes()); // second
+        block.resize(512, 0x88);
+        assert!(to_wav(&f, &block).is_ok());
     }
 
     #[test]

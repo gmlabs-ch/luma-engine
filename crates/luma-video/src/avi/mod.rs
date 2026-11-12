@@ -25,9 +25,9 @@ use crate::{Error, Frame, FrameSource, Result, VideoInfo};
 const MAX_SIDE: u32 = 8192;
 /// The largest picture accepted, in pixels (64 MB of RGBA).
 const MAX_PIXELS: u64 = 16 * 1024 * 1024;
-/// The longest video accepted, in milliseconds (a day): a damaged header
+/// The longest video accepted, in milliseconds (two hours): a damaged header
 /// must not freeze a game for good.
-const MAX_DURATION_MS: u64 = 24 * 60 * 60 * 1000;
+const MAX_DURATION_MS: u64 = 2 * 60 * 60 * 1000;
 /// How deep `LIST` chunks are followed inside `movi` (`rec ` groups).
 const MAX_DEPTH: u32 = 4;
 

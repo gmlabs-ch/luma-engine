@@ -33,7 +33,7 @@ Implemented by `luma_video::AviFile` (the container), `luma_video::AviVideo`
 **An AVI file is untrusted.** Every size and offset is checked against
 the bytes at hand, a chunk longer than its list is cut to it, the picture
 is at most 8192 pixels a side and 16 million pixels in all, the video at
-most a day long, and a damaged frame is an error for that frame alone.
+most two hours long, and a damaged frame is an error for that frame alone.
 The tests cut each kind of file at every length and change every byte of
 it; nothing may panic.
 
