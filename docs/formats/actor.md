@@ -137,9 +137,11 @@ changes when the walk starts by at most a frame.
 The actor first turns towards the segment's direction (see below), then,
 each time the walking sprite shows a new frame, advances
 `max(|MOVE x|, |MOVE y|, 1) + 1` steps along the line (`MOVE` is the
-frame's key, see [sprite.md](sprite.md)). A step that lands on a point
-blocked by another object (the floor regions do not count here) raises
-`ActorIsBlocked` on the actor; the actor then looks for a new path, or
+frame's key, scaled by the scene's zoom at a scalable actor, see
+[sprite.md](sprite.md#animation)). A step that lands on a blocked point
+(inside another object's blocked region, inside a `BLOCKED` region, or
+outside every region of the main layer: `IsBlockedAt(x, y, true,
+this)`) raises `ActorIsBlocked` on the actor; the actor then looks for a new path, or
 stops with `ActorIsBlocked` set when `STOP_ON_BLOCKED` is on. At the
 end of the last segment the actor is placed exactly on the target and,
 when the walk came from `GoToObject`, turns to the entity's

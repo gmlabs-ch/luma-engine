@@ -403,7 +403,9 @@ The cursor drawn (`CBGame::ShowCursor`), in order: nothing while
 interactive; the active object's own `CURSOR`; the `ACTIVE_CURSOR` over
 an active object that can be used (an entity, an actor or an item, the
 engine's `usable` flag; not a window or a button); the `CURSOR`. A cursor that was not shown last frame
-restarts its animation. `Game.SetActiveCursor`, `RemoveActiveCursor`,
+restarts its animation; cursors animate on the live timer, so they keep
+moving while a menu freezes the game (see
+[formats/sprite.md](formats/sprite.md#animation)). `Game.SetActiveCursor`, `RemoveActiveCursor`,
 `SetWaitCursor`, `RemoveWaitCursor`, `HasActiveCursor`,
 `GetActiveCursor` and `GetWaitCursor` change and read them;
 `GetActiveCursorObject` and `GetWaitCursorObject` return them as

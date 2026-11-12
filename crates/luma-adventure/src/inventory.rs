@@ -764,7 +764,8 @@ impl World {
         if !self.load_cursor(&path) {
             return;
         }
-        self.cursors.step_anim(&path, self.timer());
+        // An item's cursor sprites have no owner: the live timer.
+        self.cursors.step_anim(&path, self.clock);
         self.cursors.item_cursor = Some(path);
     }
 }

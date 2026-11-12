@@ -773,7 +773,8 @@ impl World {
     /// goes after the frame that showed it (`CAdGame::DisplayContent`
     /// deletes it after its first display); a persistent one animates.
     pub(crate) fn update_loading_icon(&mut self) {
-        let timer = self.timer;
+        // The icon's sprite has no owner: the live timer.
+        let timer = self.clock;
         let Some(icon) = self.loading_icon.as_mut() else {
             return;
         };
@@ -1588,7 +1589,9 @@ impl World {
             shown.extend(view.take_shown());
         }
         let random = self.next_random();
-        self.game_view.advance_with(timer, random);
+        // The game's own entities take the zoom of the scene shown.
+        let levels = self.scene.as_ref().map(|v| &v.scene);
+        self.game_view.advance_in(timer, random, levels);
         shown.extend(self.game_view.take_shown());
         for (r, sprite, index) in shown {
             let frame = self

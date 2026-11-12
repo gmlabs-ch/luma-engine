@@ -1012,13 +1012,22 @@ impl World {
         self.correct_size(id);
     }
 
-    /// The bounding size of a sprite's first frame placed at the origin
-    /// (`CBSprite::GetBoundingRect`), reading the images for the
-    /// sub-frames without a rectangle.
+    /// The bounding size of a sprite placed at the origin
+    /// (`CBSprite::GetBoundingRect`): the rectangle around the
+    /// sub-frames of every frame, reading the images for the sub-frames
+    /// without a rectangle.
     fn sprite_size(&mut self, path: &str) -> Option<(i32, i32)> {
-        let frame = self.ui.bank.sprite(path)?.sprite.frames.first()?.clone();
+        let subframes: Vec<luma_formats::SubFrame> = self
+            .ui
+            .bank
+            .sprite(path)?
+            .sprite
+            .frames
+            .iter()
+            .flat_map(|f| f.subframes.iter().cloned())
+            .collect();
         let (mut left, mut top, mut right, mut bottom) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
-        for sub in &frame.subframes {
+        for sub in &subframes {
             let (w, h) = match sub.rect.filter(|r| !r.is_empty()) {
                 Some(r) => (r.width() as i32, r.height() as i32),
                 None => {
@@ -1029,6 +1038,10 @@ impl World {
                     (mask.width as i32, mask.height as i32)
                 }
             };
+            // `UnionRect` leaves an empty rectangle out.
+            if w <= 0 || h <= 0 {
+                continue;
+            }
             left = left.min(-sub.hotspot_x);
             top = top.min(-sub.hotspot_y);
             right = right.max(-sub.hotspot_x + w);
@@ -1842,11 +1855,15 @@ impl World {
     /// that becomes current plays its sound and raises its events on the
     /// entity.
     fn step_ui_entity_anim(&mut self, index: Option<usize>) {
-        let timer = self.timer();
+        let (timer, clock) = (self.timer(), self.clock);
         let Some(index) = index else { return };
         let Some(entity) = self.ui_entities.get_mut(index) else {
             return;
         };
+        // The sprite of an owner that is not freezable runs on the live
+        // timer (`CBSprite::GetCurrentFrame`): a container's entity is
+        // not, unless a script made it so.
+        let timer = if entity.freezable { timer } else { clock };
         let Some(path) = entity.def.sprite.clone() else {
             entity.anim = None;
             return;
@@ -1871,7 +1888,10 @@ impl World {
     /// frame that becomes current plays its sound, raises `FrameChanged`
     /// on the slot's sprite object and the frame's events on the control.
     fn step_control_image(&mut self, id: NativeId, slot: ImageSlot) {
-        let timer = self.timer();
+        // A control's images have no owner: they run on the live timer
+        // (`CBSprite::GetCurrentFrame`) and go on while the game is
+        // frozen.
+        let timer = self.clock;
         let Some(control) = self.ui.controls.get_mut(&id) else {
             return;
         };
@@ -3028,12 +3048,13 @@ impl World {
         }
     }
 
-    /// The bounding size of a loaded sprite's first frame, from what is
-    /// already decoded (no reading at draw time).
+    /// The bounding size of a loaded sprite, every frame counted
+    /// (`CBSprite::GetBoundingRect`), from what is already decoded (no
+    /// reading at draw time).
     pub(crate) fn sprite_size_loaded(&self, path: &str) -> Option<(i32, i32)> {
-        let frame = self.ui.bank.sprite(path)?.sprite.frames.first()?;
+        let sprite = &self.ui.bank.sprite(path)?.sprite;
         let (mut left, mut top, mut right, mut bottom) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
-        for sub in &frame.subframes {
+        for sub in sprite.frames.iter().flat_map(|f| f.subframes.iter()) {
             let (w, h) = match sub.rect.filter(|r| !r.is_empty()) {
                 Some(r) => (r.width() as i32, r.height() as i32),
                 None => {
@@ -3054,6 +3075,9 @@ impl World {
                     }
                 }
             };
+            if w <= 0 || h <= 0 {
+                continue;
+            }
             left = left.min(-sub.hotspot_x);
             top = top.min(-sub.hotspot_y);
             right = right.max(-sub.hotspot_x + w);

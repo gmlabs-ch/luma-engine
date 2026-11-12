@@ -137,7 +137,7 @@ How the list was made. For every class with a script interface, the names tested
 | `X`, `Y` | get/set | **done** | Position in scene coordinates. |
 | `Height` | get | **done** | Height of the current frame, scaled. |
 | `Ready` | get | **done** | False while the object is talking, walking or playing an animation a script waits for. |
-| `Movable` | get/set | **done** | Whether the engine may move the object. Kept per object; WME 1.x only reads it in `CBSprite::Draw`, which no scene object goes through, so it changes nothing on screen in either engine. |
+| `Movable` | get/set | **done** | Whether the engine may move the object; false for an inventory item, true for the rest. Kept per object; WME 1.x only reads it in `CBSprite::Draw`, which no scene object goes through, so it changes nothing on screen in either engine. |
 | `Registrable` | get/set | **done** | Whether the object is registered for mouse interaction (same as `Interactive`). |
 | `Interactive` | get/set | **done** | Whether the object reacts to the mouse. |
 | `Zoomable`, `Scalable` | get/set | **done** | Whether the scene's scale levels apply to the object. |

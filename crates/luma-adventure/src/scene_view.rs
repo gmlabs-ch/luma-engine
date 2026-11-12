@@ -680,6 +680,17 @@ pub struct SceneView {
     shown: Vec<(EntityRef, String, usize)>,
 }
 
+/// A frame's `MOVE` on one axis at a zoom in percent
+/// (`CBSprite::GetCurrentFrame`): scaled and truncated, as written at
+/// 100.
+pub(crate) fn scaled_move(amount: i32, zoom: f32) -> i32 {
+    if zoom == 100.0 {
+        amount
+    } else {
+        (amount as f32 * (zoom / 100.0)) as i32
+    }
+}
+
 impl SceneView {
     /// Loads a scene file from the game and the sprites of its entities.
     /// A missing or broken sprite is recorded in [`SceneView::missing`],
@@ -1231,6 +1242,13 @@ impl SceneView {
     /// Like [`SceneView::advance`], with a random number for the talk
     /// sprites of talking entities.
     pub fn advance_with(&mut self, timer: u64, random: u32) {
+        self.advance_in(timer, random, None);
+    }
+
+    /// Like [`SceneView::advance_with`], for entities shown in another
+    /// scene than the view's own (the game's entities): `levels` is the
+    /// scene whose zoom scales a frame's `MOVE`, `None` for the view's.
+    pub fn advance_in(&mut self, timer: u64, random: u32, levels: Option<&Scene>) {
         self.talk_step(timer, random);
         for r in self.entity_refs() {
             let Some(entity) = self.entity(r) else {
@@ -1239,6 +1257,14 @@ impl SceneView {
             if !entity.active || entity.kind != EntityKind::Normal {
                 continue;
             }
+            // `GetCurrentFrame(zoom)`: the X move of a frame is scaled
+            // by the scene's zoom at a scalable entity; the Y move is
+            // not (the original passes the zoom for X only).
+            let zoom = if entity.scalable {
+                levels.unwrap_or(&self.scene).zoom_at(entity.x, entity.y)
+            } else {
+                100.0
+            };
             let Some(sprite_key) = self.anim_mut(r).map(|s| s.sprite.clone()) else {
                 continue;
             };
@@ -1254,6 +1280,7 @@ impl SceneView {
             };
             if changed {
                 self.shown.push((r, sprite_key, frame));
+                let move_x = scaled_move(move_x, zoom);
                 if move_x != 0 || move_y != 0 {
                     if let Some(entity) = self.entity_mut(r) {
                         entity.x += move_x;

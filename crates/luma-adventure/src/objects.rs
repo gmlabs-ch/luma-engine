@@ -253,6 +253,8 @@ impl ObjectState {
     pub fn for_kind(kind: &Kind) -> ObjectState {
         ObjectState {
             non_int_mouse_events: matches!(kind, Kind::Control | Kind::Entity(EntityRef::Ui(_))),
+            // `CAdItem::CAdItem` sets `m_Movable = false`.
+            movable: !matches!(kind, Kind::Item),
             ..ObjectState::default()
         }
     }

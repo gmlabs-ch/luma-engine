@@ -482,3 +482,143 @@ on "Go" {
     );
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// A sprite of two frames, 50 ms each, looping.
+const BLINK: &str = "SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"red.png\" } FRAME { DELAY=50 IMAGE=\"green.png\" } }";
+
+#[test]
+fn sprites_without_a_freezable_owner_animate_while_the_game_is_frozen() {
+    let (dir, mut runtime, log) = start_with(
+        "GAME { NAME=\"Frame\" SCRIPT=\"game.script\" CURSOR=\"blink.sprite\" }",
+        r#"
+global result = new Object();
+global menu;
+Game.ChangeScene("anim.scene", false, false);
+on "Menu" {
+  menu = Game.LoadWindow("anim.window");
+  result.button = menu.GetControl("b");
+  menu.GoSystemExclusive();
+}
+"#,
+        &[
+            File::Text("blink.sprite", BLINK),
+            File::Text(
+                "anim.scene",
+                "SCENE { NAME=\"Anim\" LAYER { NAME=\"main\" MAIN=TRUE WIDTH=64 HEIGHT=48
+  ENTITY { NAME=\"lamp\" X=40 Y=30 SPRITE=\"blink.sprite\" } } }",
+            ),
+            File::Text(
+                "anim.window",
+                "WINDOW { NAME=\"menu\" X=0 Y=0 WIDTH=20 HEIGHT=20 TRANSPARENT=TRUE
+  BUTTON { NAME=\"b\" X=2 Y=2 WIDTH=8 HEIGHT=8 IMAGE=\"blink.sprite\" } }",
+            ),
+        ],
+    );
+    no_errors(&log);
+    no_errors(&raise(&mut runtime, "Menu"));
+    runtime.tick(16);
+    assert!(runtime.world.is_frozen());
+    let button = object(&runtime, "button");
+    let lamp = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    let frames = |runtime: &Runtime| {
+        (
+            runtime.world.cursors().frame(),
+            runtime
+                .world
+                .control(button)
+                .and_then(|c| c.anim.as_ref())
+                .map_or(0, |a| a.current_frame),
+            runtime.world.scene().unwrap().frame_of(lamp),
+        )
+    };
+    // Every 50 ms of the live timer the cursor and the button's image
+    // change frame; the entity, whose owner is freezable, stands still
+    // with the game timer.
+    let mut cursor_changes = 0;
+    let mut button_changes = 0;
+    let mut last = frames(&runtime);
+    for _ in 0..6 {
+        runtime.tick(50);
+        let now = frames(&runtime);
+        cursor_changes += usize::from(now.0 != last.0);
+        button_changes += usize::from(now.1 != last.1);
+        assert_eq!(now.2, last.2, "the entity is frozen");
+        last = now;
+    }
+    assert!(cursor_changes >= 5, "{cursor_changes}");
+    assert!(button_changes >= 5, "{button_changes}");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_frames_move_is_scaled_by_the_scene_zoom_at_a_scalable_entity() {
+    let (dir, mut runtime, log) = start(
+        r#"
+global result = new Object();
+Game.ChangeScene("half.scene", false, false);
+"#,
+        &[
+            File::Text(
+                "step.sprite",
+                "SPRITE { LOOPING=FALSE FRAME { DELAY=50 IMAGE=\"red.png\" }
+  FRAME { DELAY=5000 IMAGE=\"green.png\" MOVE {10,10} } }",
+            ),
+            File::Text(
+                "half.scene",
+                "SCENE { NAME=\"Half\"
+  LAYER { NAME=\"main\" MAIN=TRUE WIDTH=64 HEIGHT=48 }
+  SCALE_LEVEL { Y=0 SCALE=50 }
+  SCALE_LEVEL { Y=48 SCALE=50 }
+  ENTITY { NAME=\"scaled\" X=10 Y=20 SCALABLE=TRUE SPRITE=\"step.sprite\" }
+  ENTITY { NAME=\"plain\" X=30 Y=20 SCALABLE=FALSE SPRITE=\"step.sprite\" }
+}",
+            ),
+        ],
+    );
+    no_errors(&log);
+    for _ in 0..5 {
+        runtime.tick(20);
+    }
+    let view = runtime.world.scene().unwrap();
+    let at = |name: &str| {
+        let entity = view
+            .entity(view.free_ref(view.find_free(name).unwrap()))
+            .unwrap();
+        (entity.x, entity.y)
+    };
+    // The X move takes the zoom, the Y move does not (the original
+    // passes the zoom for X only).
+    assert_eq!(at("scaled"), (15, 30));
+    assert_eq!(at("plain"), (40, 30));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_control_sized_from_an_animated_image_takes_the_largest_frame() {
+    let (dir, runtime, log) = start(
+        r#"
+global result = new Object();
+var w = Game.LoadWindow("grow.window");
+var b = w.GetControl("b");
+result.width = b.Width;
+result.height = b.Height;
+"#,
+        &[
+            File::Raw("wide.png", png(20, 4, GREEN)),
+            File::Text(
+                "grow.sprite",
+                "SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"red.png\" } FRAME { DELAY=50 IMAGE=\"wide.png\" } }",
+            ),
+            File::Text(
+                "grow.window",
+                "WINDOW { NAME=\"w\" X=0 Y=0 WIDTH=40 HEIGHT=40
+  BUTTON { NAME=\"b\" X=2 Y=2 IMAGE=\"grow.sprite\" } }",
+            ),
+        ],
+    );
+    no_errors(&log);
+    // 8x8 and 20x4 frames: the rectangle around both.
+    assert_eq!(result(&runtime, "width"), Value::Int(20));
+    assert_eq!(result(&runtime, "height"), Value::Int(8));
+    std::fs::remove_dir_all(dir).ok();
+}

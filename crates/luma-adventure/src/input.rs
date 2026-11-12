@@ -715,7 +715,10 @@ impl World {
                 self.cursors.anims.insert(k.clone(), AnimState::new(path));
                 self.cursors.last = Some(k.clone());
             }
-            let timer = self.timer();
+            // A cursor's sprite has no owner: it runs on the live
+            // timer (`CBSprite::GetCurrentFrame`) and goes on while the
+            // game is frozen.
+            let timer = self.clock;
             if let Some(loaded) = self.cursors.bank.sprite(path) {
                 let state = self
                     .cursors
