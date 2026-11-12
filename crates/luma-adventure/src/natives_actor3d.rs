@@ -765,12 +765,12 @@ impl World {
                     Return::value(started)
                 }
             }
-            "StopAnim" | "StopAnimChannel" => {
-                let channel = if name == "StopAnim" {
-                    Some(0)
-                } else {
-                    usize::try_from(arg(0).get_int(self)).ok()
-                };
+            "StopAnim" => Return::value(
+                self.attachment3d_mut(id)
+                    .is_some_and(|a| a.stop_all_anims()),
+            ),
+            "StopAnimChannel" => {
+                let channel = usize::try_from(arg(0).get_int(self)).ok();
                 Return::value(channel.is_some_and(|channel| {
                     self.attachment3d_mut(id)
                         .is_some_and(|a| a.stop_anim(channel))

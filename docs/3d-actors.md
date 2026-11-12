@@ -1329,7 +1329,10 @@ the **main** layer, the remaining free objects are drawn the same way. So:
   among equal `Y` is that of a `qsort`, i.e. unspecified.
 - Without geometry, 3D entity nodes of the layers are skipped; free 3D
   objects are not guarded in the original (undefined). Luma should draw no
-  3D object in a scene without geometry.
+  3D object in a scene without geometry. The update still runs: in a scene
+  without geometry or camera a 3D actor runs its whole state machine (walks end
+  at their target, `PlayAnim` and `Talk` end, `Ready` becomes true) on an empty
+  geometry, but has no 2D position, no region events and no rectangle.
 - The debug overlay (`Scene.ShowGeometry`) is drawn after all layers.
 
 **As implemented** (`luma_adventure::draw3d`, `World::draw`,
@@ -1615,7 +1618,7 @@ success and `false` on failure.
 
 ### 11.3 The attachment object
 
-Returned by `GetAttachment`: `PlayAnim`/`PlayAnimAsync(name)`, `StopAnim()`,
+Returned by `GetAttachment`: `PlayAnim`/`PlayAnimAsync(name)`, `StopAnim()` (all ten channels, at once),
 `StopAnimChannel(channel)`, `PlayAnimChannel`/`Async(channel, name)` (forced
 restart, channel 0 by default; they pass transition time 0, but the model's
 owner is the actor, so when the channel already plays something the actor's
@@ -1626,7 +1629,9 @@ of `CAdObject3D` (`PosX/Y/Z`, `Angle`, `Scale`, `Active`...), `Type` =
 **As implemented** (`natives_actor3d.rs`, `attachment3d_*`): `Type`
 (`attachment`), `Name`, `Filename` (the model file), `Active`, `Ready`
 (always true), `PosX`, `PosY`, `PosZ`, `Angle`, `DirectionAngle`/`DirAngle`
-(normalised on set), `Scale` (percent), `DrawBackfaces`, and `Bone`, the
+(normalised on set), `Scale` (percent), `DrawBackfaces` (true at the start; the
+drawing uses the **actor's** flag, since the attachment's model has the actor as
+its owner, which `CXModel::Render` culls by) and `Bone`, the
 parent bone, a Luma extension (the original keeps it private); the six
 animation methods above (`false` when the model has no such set; the
 blocking forms wait for the attachment, which is always ready), `SkipTo3D`

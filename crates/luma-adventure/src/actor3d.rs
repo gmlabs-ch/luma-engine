@@ -219,7 +219,20 @@ impl Attachment3d {
         model.play_with(channel, name, transition, 0, true)
     }
 
-    /// Stops a channel at once (`StopAnim`, `StopAnimChannel`).
+    /// Stops every channel at once (`StopAnim`: `m_ModelX->StopAnim(0)`
+    /// resolves to the overload that takes a transition time and stops
+    /// all ten channels).
+    pub fn stop_all_anims(&mut self) -> bool {
+        match self.model.model.as_mut() {
+            Some(model) => {
+                model.stop_all(0);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Stops a channel at once (`StopAnimChannel`).
     pub fn stop_anim(&mut self, channel: usize) -> bool {
         self.model
             .model
@@ -476,6 +489,9 @@ pub struct Update3d<'a> {
     pub finder: &'a mut PathFinder,
     /// The projection of the frame.
     pub projection: &'a Projection,
+    /// Whether the scene has a camera: without one the actor runs its
+    /// state machine and animation, but has no 2D position.
+    pub has_camera: bool,
     /// The 2D floor when the scene path-finds in 2D (`2D_PATHFINDING`).
     pub floor: Option<Floor<'a>>,
     /// The game timer, in milliseconds.
@@ -795,7 +811,8 @@ impl Actor3d {
             position: Vec3::ZERO,
             angle: 0.0,
             scale: 1.0,
-            draw_backfaces: false,
+            // `CBObject::m_DrawBackfaces` starts true.
+            draw_backfaces: true,
             world_matrix: self.world_matrix,
             bounding_rect: None,
         };
@@ -1367,7 +1384,7 @@ impl Actor3d {
             }
         }
         self.world_matrix = world_matrix(self.position, self.angle, self.scale);
-        if self.position != self.last_position {
+        if ctx.has_camera && self.position != self.last_position {
             self.last_position = self.position;
             let (x, y) = ctx.projection.project(self.position);
             if (x, y) != (self.x, self.y) {
@@ -1382,7 +1399,9 @@ impl Actor3d {
             Some(model) => model.update(delta_ms),
             None => Vec::new(),
         };
-        self.update_bounding_rect(ctx.projection);
+        if ctx.has_camera {
+            self.update_bounding_rect(ctx.projection);
+        }
         // `UpdateAttachments`: the active attachments animate, their events
         // go to the actor; one whose bone is gone keeps its last matrix.
         if let Some(model) = self.model.model.as_ref() {
@@ -1433,12 +1452,15 @@ impl Actor3d {
             DirectTurn::None => {}
         }
         if self.direct_walk == DirectWalk::None {
+            // Turning alone: the turn (or idle) animation is requested
+            // first, then, as in the original, the walk test runs with an
+            // unchanged position and succeeds, so the walk animation
+            // follows.
             let anim = self
                 .direct_turn_anim
                 .clone()
                 .unwrap_or_else(|| self.idle_anim.clone());
             self.request(&anim);
-            return;
         }
         let walk_velocity = if self.direct_walk_velocity == 0.0 {
             self.velocity
@@ -1448,10 +1470,10 @@ impl Actor3d {
         let step = walk_velocity * self.scale * dt;
         let heading = deg_to_rad(self.angle);
         let mut new_position = self.position;
-        let sign = if self.direct_walk == DirectWalk::Back {
-            -1.0
-        } else {
-            1.0
+        let sign = match self.direct_walk {
+            DirectWalk::Back => -1.0,
+            DirectWalk::Forward => 1.0,
+            DirectWalk::None => 0.0,
         };
         new_position.x += -heading.sin() * step * sign;
         new_position.z += -heading.cos() * step * sign;
@@ -1484,7 +1506,17 @@ impl Actor3d {
                 self.state = Actor3dState::FollowingPath;
                 self.init_line(self.position, first, true);
             }
-            None => self.arrive(),
+            None => self.arrive_empty(),
+        }
+    }
+
+    /// An empty path (`FollowPath3D`, `FollowPath2D`): the after-walk turn,
+    /// else straight to `Ready`, whatever the next state was.
+    fn arrive_empty(&mut self) {
+        if self.after_walk_angle != -1.0 {
+            self.turn_to(self.after_walk_angle);
+        } else {
+            self.state = Actor3dState::Ready;
         }
     }
 
@@ -1572,7 +1604,7 @@ impl Actor3d {
                 self.state = Actor3dState::FollowingPath;
                 self.init_line(self.position, first, true);
             }
-            None => self.arrive(),
+            None => self.arrive_empty(),
         }
     }
 
@@ -1602,16 +1634,6 @@ impl Actor3d {
         } else {
             self.position = new_position;
         }
-    }
-
-    /// The talking state alone, for a scene the actor cannot be fully
-    /// updated in.
-    pub(crate) fn update_talk_only(&mut self, timer: u64) {
-        if self.model.model.is_none() || self.state != Actor3dState::Talking {
-            return;
-        }
-        self.talk_step(timer);
-        self.ready = self.state == Actor3dState::Ready;
     }
 
     /// One frame of talking (section 8.2, `STATE_TALKING`): the
@@ -1734,6 +1756,9 @@ impl Actor3d {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 /// `0xAARRGGBB` of a colour.
 fn rgba_int(c: Rgba) -> i32 {
@@ -1923,48 +1948,46 @@ impl World {
     /// for the 3D objects): the path finder runs its open request, then
     /// each actor's state machine, position and model advance. The
     /// events raised are queued.
-    /// The talking state of the 3D actors in a scene without geometry
-    /// or camera, where the rest of their update cannot run: a sentence
-    /// still plays its stances, ends, and gives the actor back to the
-    /// scripts waiting for it (the original runs the whole
-    /// `CAdActor3DX::Update` there).
-    fn update_actors3d_talk(&mut self) {
-        let timer = self.timer;
-        for (_, actor) in &mut self.actors3d {
-            if actor.active {
-                actor.update_talk_only(timer);
-            }
-        }
-    }
-
+    /// One frame of every active 3D actor (`CAdScene::UpdateFreeObjects`
+    /// for the 3D objects): the path finder runs its open request, then
+    /// each actor's state machine, position and model advance. The
+    /// events raised are queued. In a scene without geometry or camera
+    /// the whole state machine still runs (`Talk` and `PlayAnim` end,
+    /// `Ready` becomes true), on an empty geometry and without a 2D
+    /// position.
     pub(crate) fn update_actors3d(&mut self) {
         if self.actors3d.is_empty() {
             return;
         }
-        let Some(projection) = self.projection_3d() else {
-            self.update_actors3d_talk();
-            return;
-        };
+        let camera_projection = self.projection_3d();
+        let has_camera = camera_projection.is_some();
+        let projection = camera_projection.unwrap_or_else(|| self.fallback_projection());
         self.run_path_finder_3d();
         let (timer, delta_ms) = (self.timer, self.timer_delta);
         let ids = self.actor3d_ids();
         let obstacles: Vec<_> = ids.iter().map(|id| self.obstacles_for(*id)).collect();
         let mut raised: Vec<(NativeId, Vec<ActorEvent>, Vec<String>)> = Vec::new();
         {
-            let Some(scene3d) = self.scene.as_mut().and_then(|v| v.three_d.as_mut()) else {
-                self.update_actors3d_talk();
-                return;
-            };
-            scene3d.set_projection(Some(projection.clone()));
+            let fallback_geometry = SceneGeometry::default();
+            let mut fallback_finder = PathFinder::new();
             let Some(view) = self.scene.as_mut() else {
                 return;
             };
-            let Some(scene3d) = view.three_d.as_mut() else {
-                return;
+            let (geometry, finder) = match view.three_d.as_mut() {
+                Some(scene3d) => {
+                    if has_camera {
+                        scene3d.set_projection(Some(projection.clone()));
+                    }
+                    let Scene3d {
+                        geometry, finder, ..
+                    } = scene3d;
+                    (&*geometry, finder)
+                }
+                None => {
+                    fallback_finder.run(&fallback_geometry);
+                    (&fallback_geometry, &mut fallback_finder)
+                }
             };
-            let Scene3d {
-                geometry, finder, ..
-            } = scene3d;
             let scene = &view.scene;
             for (index, (id, actor)) in self.actors3d.iter_mut().enumerate() {
                 if !actor.active {
@@ -1981,6 +2004,7 @@ impl World {
                     geometry,
                     finder,
                     projection: &projection,
+                    has_camera,
                     floor,
                     timer,
                     delta_ms,
@@ -2104,7 +2128,9 @@ impl World {
                             bone: &a.bone,
                             model: a.model()?,
                             world: a.world_matrix(),
-                            draw_backfaces: a.draw_backfaces,
+                            // The attachment's model has the actor as its
+                            // owner, which `CXModel::Render` culls by.
+                            draw_backfaces: actor.draw_backfaces,
                         })
                     })
                     .collect(),

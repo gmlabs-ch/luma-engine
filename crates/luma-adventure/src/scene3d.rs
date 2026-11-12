@@ -342,6 +342,28 @@ impl World {
         Some(Projection::new(camera, &settings, setup))
     }
 
+    /// A projection for a scene without geometry or camera, so that the
+    /// 3D actors there still run their state machine; nothing they do
+    /// with it is observable (their 2D position is left alone).
+    pub(crate) fn fallback_projection(&self) -> Projection {
+        let resolution = (self.settings.width as i32, self.settings.height as i32);
+        let camera = luma_3d::Camera {
+            name: String::new(),
+            position: luma_3d::Vec3::new(0.0, 0.0, -10.0),
+            target: luma_3d::Vec3::ZERO,
+            bank: 0.0,
+            fov: 1.0,
+        };
+        let setup = ViewSetup::for_scene(
+            resolution,
+            resolution,
+            false,
+            Some(Viewport::new(0, 0, resolution.0, resolution.1)),
+            (0, 0),
+        );
+        Projection::new(&camera, &CameraSettings::default(), setup)
+    }
+
     /// Runs the open path request of the scene's finder
     /// (`CAdSceneGeometry::InitLoop`), once per frame before the 3D
     /// actors update.
