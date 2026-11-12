@@ -512,3 +512,110 @@ fn blends_additively_and_subtractively() {
         "half subtracted",
     );
 }
+
+#[test]
+fn a_clip_rectangle_cuts_the_quads_pushed_under_it() {
+    let Some(renderer) = renderer() else { return };
+    let gpu = renderer.gpu();
+    let target = Offscreen::new(gpu, 32, 32);
+    let white = renderer.white();
+    let red = rgba(255, 0, 0, 255);
+    let green = rgba(0, 255, 0, 255);
+
+    let mut list = DrawList::new(32.0, 32.0);
+    // Clipped to the 8x8 square at (4, 4): a fill of the whole target
+    // shows there only.
+    list.set_clip(Some(Rect::new(4.0, 4.0, 8.0, 8.0)));
+    list.fill(white, Rect::new(0.0, 0.0, 32.0, 32.0), red);
+    // The clip replaced, not intersected: this one is outside the first.
+    list.set_clip(Some(Rect::new(20.0, 20.0, 4.0, 4.0)));
+    list.fill(white, Rect::new(0.0, 0.0, 32.0, 32.0), green);
+    // Wholly outside the target: nothing, and no error.
+    list.set_clip(Some(Rect::new(40.0, 0.0, 8.0, 8.0)));
+    list.fill(white, Rect::new(0.0, 0.0, 32.0, 32.0), green);
+    // Back to the whole screen.
+    list.set_clip(None);
+    list.fill(white, Rect::new(30.0, 0.0, 2.0, 2.0), green);
+    renderer.render(target.target(), BLACK, &list).unwrap();
+    let out = target.read(gpu).unwrap();
+
+    close(out.pixel(4, 4).unwrap(), red, "inside the first clip");
+    close(
+        out.pixel(11, 11).unwrap(),
+        red,
+        "last pixel of the first clip",
+    );
+    close(out.pixel(3, 4).unwrap(), BLACK, "left of the first clip");
+    close(out.pixel(12, 11).unwrap(), BLACK, "right of the first clip");
+    close(out.pixel(21, 21).unwrap(), green, "inside the second clip");
+    close(
+        out.pixel(24, 21).unwrap(),
+        BLACK,
+        "right of the second clip",
+    );
+    close(out.pixel(31, 1).unwrap(), green, "unclipped again");
+    close(out.pixel(16, 16).unwrap(), BLACK, "between the clips");
+}
+
+#[test]
+fn lines_cover_the_pixels_of_a_line_list_without_the_last_one() {
+    let Some(renderer) = renderer() else { return };
+    let gpu = renderer.gpu();
+    let target = Offscreen::new(gpu, 16, 16);
+    let white = renderer.white();
+    let red = rgba(255, 0, 0, 255);
+
+    let mut list = DrawList::new(16.0, 16.0);
+    list.line(white, 2, 1, 6, 1, red);
+    list.line(white, 6, 3, 2, 3, red);
+    list.line(white, 1, 5, 1, 9, red);
+    list.line(white, 8, 8, 12, 12, red);
+    list.line(white, 5, 5, 5, 5, red);
+    renderer.render(target.target(), BLACK, &list).unwrap();
+    let out = target.read(gpu).unwrap();
+
+    for x in 2..6 {
+        close(out.pixel(x, 1).unwrap(), red, "horizontal");
+    }
+    close(out.pixel(6, 1).unwrap(), BLACK, "the end is left out");
+    close(out.pixel(1, 1).unwrap(), BLACK, "before the start");
+    // Drawn backwards: the end (2) is left out, the start (6) is drawn.
+    close(out.pixel(6, 3).unwrap(), red, "backwards start");
+    close(out.pixel(3, 3).unwrap(), red, "backwards");
+    close(out.pixel(2, 3).unwrap(), BLACK, "backwards end");
+    for y in 5..9 {
+        close(out.pixel(1, y).unwrap(), red, "vertical");
+    }
+    close(out.pixel(1, 9).unwrap(), BLACK, "vertical end");
+    for i in 8..12 {
+        close(out.pixel(i, i).unwrap(), red, "diagonal");
+    }
+    close(out.pixel(12, 12).unwrap(), BLACK, "diagonal end");
+    close(out.pixel(9, 8).unwrap(), BLACK, "beside the diagonal");
+    close(out.pixel(5, 5).unwrap(), BLACK, "an empty line");
+
+    // The outline of a rectangle covers both ends on each axis.
+    let mut list = DrawList::new(16.0, 16.0);
+    list.rect_outline(white, 2, 2, 9, 7, red, 2);
+    renderer.render(target.target(), BLACK, &list).unwrap();
+    let out = target.read(gpu).unwrap();
+    for (x, y) in [
+        (2, 2),
+        (9, 2),
+        (2, 7),
+        (9, 7),
+        (3, 3),
+        (8, 6),
+        (5, 3),
+        (8, 4),
+    ] {
+        close(out.pixel(x, y).unwrap(), red, "frame");
+    }
+    for (x, y) in [(1, 2), (10, 7), (2, 8), (4, 4), (7, 5)] {
+        close(
+            out.pixel(x, y).unwrap(),
+            BLACK,
+            "outside or inside the frame",
+        );
+    }
+}

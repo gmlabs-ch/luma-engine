@@ -31,7 +31,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBActiveRect::CBActiveRect #4` | done | `HitArea::model3d` (`HitShape::Model3D`): the projected rectangle of an X model, confirmed by a pick into the model. |
 | `CBActiveRect::CBActiveRect #5` | done | `HitShape::Polygon` with `HitArea::layer_offset`: the region's points tested with the offset added back, as the rectangle is moved by `-Offset` and the offset kept. |
 | `CBActiveRect::~CBActiveRect` | replaced | Rust ownership. |
-| `CBActiveRect::ClipRect` | todo | Clips the rectangle to the current viewport (`GetCurrentViewportRect`) and notes how much was cut off the left and top. Luma's hit areas are not clipped: the part of a scene object lying outside the scene viewport still takes the mouse. |
+| `CBActiveRect::ClipRect` | done | `luma-adventure/src/input.rs` `HitArea::clip`, set by `clip_hits` for the scene's objects (`World::scene_clip`) and for a clipping window's contents (`World::window_clip`, `ui.rs` `window_hits`); `World::object_at` skips an area when the point is outside its viewport, or outside the screen when no viewport was pushed, and tests the unclipped area otherwise, which reads the same pixel as the original's cut rectangle with `m_OffsetX`/`m_OffsetY`; `World::hit_rect` gives the part inside the viewport. |
 
 ## `wme_base/BAnimTransitionTime.cpp`
 
@@ -271,9 +271,9 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBGame::IsSaveSlotUsed` | done | `World::is_save_slot_used`. |
 | `CBGame::EmptySaveSlot` | done | `World::empty_save_slot`. |
 | `CBGame::SetActiveObject` | done | `World::update_active_object` (`input.rs`): none while not interactive unless the object has `NonIntMouseEvents`; `MouseLeave` on the old one, the caption spoken, `MouseEntry` on the new one (queued, delivered at the end of the frame). |
-| `CBGame::PushViewport` | partial | No viewport stack: `World::viewport` and `Camera` (`origin_x`, `origin_y`) place the scene in its viewport, but the renderer is not clipped to it (`docs/game-loop.md`: a scene larger than its viewport draws over what lies outside), where `m_Renderer->SetViewport` clips. The second user, a window with `CLIP_CONTENTS` (`CUIWindow::Display` pushes its rectangle), is not clipped either: `clip_contents` is kept in `ui.rs` and read by nothing. |
-| `CBGame::PopViewport` | partial | See `PushViewport`: nothing to restore, as nothing is clipped. |
-| `CBGame::GetCurrentViewportRect` | partial | `World::viewport` gives the scene viewport or the whole screen; it is not a stack, and it is not what clips the active rectangles (see `CBActiveRect::ClipRect`). |
+| `CBGame::PushViewport` | done | `luma-render/src/draw.rs` `DrawList::set_clip` with the viewport's rectangle: `World::draw` (`world.rs`) for the scene when it or the game has a viewport (`World::scene_clip`), `World::draw_window` (`ui.rs`) for a window with `CLIP_CONTENTS` (`World::window_clip`). A rectangle replaces the one before, as `m_Renderer->SetViewport` does; the stack is the call stack (the previous rectangle is kept in a local). |
+| `CBGame::PopViewport` | done | `World::draw` goes back to no clip after the scene, `World::draw_window` to the rectangle in force before the window (`list.set_clip(outer_clip)`). |
+| `CBGame::GetCurrentViewportRect` | done | `DrawList::clip` while drawing; for the hit areas `World::scene_clip` and `World::window_clip` (`CBActiveRect::ClipRect`), the screen without a viewport (`World::object_at`). |
 | `CBGame::GetCurrentViewportOffset` | done | `Camera::origin_x`, `origin_y` from `World::camera` (`world.rs`): the viewport's top-left, 0 without one. |
 | `CBGame::WindowLoadHook` | n/a | Base stub returning failure; `CAdGame` overrides it (adventure table). |
 | `CBGame::WindowScriptMethodHook` | n/a | Base stub returning failure; `CAdGame` overrides it (adventure table). |
@@ -599,7 +599,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBViewport::CBViewport` | done | `World::scene_viewport` (`None`: the whole screen) and `Scene::viewport` (`luma-formats`). |
 | `CBViewport::~CBViewport` | replaced | Rust ownership. |
 | `CBViewport::Persist` | done | `scene_viewport` is in the saved world state (`save.rs`), the scene's own with the scene. |
-| `CBViewport::SetRect` | partial | `Game.SetSceneViewport` (`natives.rs`) and `World::viewport`. Missing: the clamp to the screen (`left`, `top` not below 0, `right`, `bottom` not past the renderer's size) that WME applies unless `NoCheck`. |
+| `CBViewport::SetRect` | done | `Game.SetSceneViewport` (`natives.rs` `game_call`), `Scene.SetViewport` (`scene_call`) and `World::window_clip` (`ui.rs`) keep the rectangle on the screen; a scene file's `VIEWPORT` is taken as written (`NoCheck`). The game file's `SCENE_VIEWPORT` is the loading wave's (`CAdGame::LoadBuffer`). |
 | `CBViewport::GetRect` | done | `World::viewport`. |
 | `CBViewport::GetWidth` | done | `World::viewport` width. |
 | `CBViewport::GetHeight` | done | `World::viewport` height. |

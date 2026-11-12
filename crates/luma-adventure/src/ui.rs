@@ -2215,6 +2215,30 @@ impl World {
         }
     }
 
+    /// The viewport of a window that clips its contents
+    /// (`CLIP_CONTENTS`, `CUIWindow::Display`): its rectangle on screen,
+    /// kept inside the screen (`CBViewport::SetRect`), as `(left, top,
+    /// right, bottom)`; `None` for a window that does not clip.
+    pub(crate) fn window_clip(
+        &self,
+        id: NativeId,
+        ox: i32,
+        oy: i32,
+    ) -> Option<(i32, i32, i32, i32)> {
+        let control = self.control(id)?;
+        if !control.window()?.clip_contents {
+            return None;
+        }
+        let (x, y) = (control.x + ox, control.y + oy);
+        let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
+        Some((
+            x.max(0),
+            y.max(0),
+            (x + control.width).min(sw),
+            (y + control.height).min(sh),
+        ))
+    }
+
     pub(crate) fn window_hits(&mut self, id: NativeId, ox: i32, oy: i32, hits: &mut Vec<HitArea>) {
         let Some(control) = self.control(id) else {
             return;
@@ -2238,6 +2262,10 @@ impl World {
         if !visible {
             return;
         }
+        // What follows is registered inside the window's viewport when
+        // it clips its contents.
+        let clip_start = hits.len();
+        let clip = self.window_clip(id, ox, oy);
         if !transparent {
             match image.as_deref().and_then(|p| self.ui.bank.sprite(p)) {
                 Some(loaded) => {
@@ -2327,6 +2355,9 @@ impl World {
                     }
                 }
             }
+        }
+        if let Some(clip) = clip {
+            crate::input::clip_hits(hits, clip_start, clip);
         }
     }
 
@@ -2701,6 +2732,18 @@ impl World {
                 flip_y: false,
             });
         }
+        // `CLIP_CONTENTS`: the window and its controls are drawn inside
+        // its rectangle (`PushViewport`); the viewport in force before
+        // comes back when the window is done (`PopViewport`).
+        let outer_clip = list.clip();
+        if let Some((l, t, r, b)) = self.window_clip(id, ox, oy) {
+            list.set_clip(Some(Rect::new(
+                l as f32,
+                t as f32,
+                (r - l).max(0) as f32,
+                (b - t).max(0) as f32,
+            )));
+        }
         let tint = window.alpha_color.unwrap_or(tint);
         let focused = self.is_focused(id);
         let (x, y) = (control.x + ox, control.y + oy);
@@ -2747,6 +2790,7 @@ impl World {
                 }
             }
         }
+        list.set_clip(outer_clip);
     }
 
     /// Draws a container's entity at the container's position inside its

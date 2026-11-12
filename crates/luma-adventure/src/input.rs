@@ -391,6 +391,21 @@ pub struct HitArea {
     /// The scroll offset of the layer the object is drawn in.
     layer_offset: (i32, i32),
     shape: HitShape,
+    /// The viewport in force when the area was registered, on screen
+    /// (left, top, right, bottom): the area takes the mouse only inside
+    /// it (`CBActiveRect::ClipRect`). `None` outside any viewport.
+    clip: Option<(i32, i32, i32, i32)>,
+}
+
+/// Limits the hit areas registered from `start` on to a viewport, those
+/// an inner viewport already limited excepted (a viewport replaces the
+/// one under it while it is pushed).
+pub(crate) fn clip_hits(hits: &mut [HitArea], start: usize, clip: (i32, i32, i32, i32)) {
+    for hit in hits.iter_mut().skip(start) {
+        if hit.clip.is_none() {
+            hit.clip = Some(clip);
+        }
+    }
 }
 
 impl HitArea {
@@ -400,6 +415,7 @@ impl HitArea {
             owner,
             layer_offset: (0, 0),
             shape: HitShape::Rect(x, y, w, h),
+            clip: None,
         }
     }
 
@@ -415,6 +431,7 @@ impl HitArea {
             owner,
             layer_offset,
             shape: HitShape::Model3D(left, top, right, bottom),
+            clip: None,
         }
     }
 }
@@ -755,6 +772,10 @@ impl World {
         self.hits.clear();
         let mut hits = Vec::new();
         self.scene_hits(&mut hits);
+        // The scene's objects are registered inside its viewport.
+        if let Some(clip) = self.scene_clip() {
+            clip_hits(&mut hits, 0, clip);
+        }
         self.ui_hits_in_game(&mut hits);
         self.inventory_hits(&mut hits);
         // In drawing order: the response box is under the normal windows.
@@ -917,6 +938,7 @@ impl World {
                     color_key: sub.color_key,
                     area: pixel_area(sub, x, y, transform, sprite.precise),
                 },
+                clip: None,
             });
         }
     }
@@ -957,6 +979,7 @@ impl World {
                 owner: id,
                 layer_offset,
                 shape: HitShape::Polygon(region.points.clone()),
+                clip: None,
             });
         }
         let Some(path) = view.shown_sprite(r) else {
@@ -1065,7 +1088,18 @@ impl World {
             if w <= 0 || h <= 0 {
                 continue;
             }
-            found = Some((x - hit.layer_offset.0, y - hit.layer_offset.1, w, h));
+            let (mut x, mut y, mut w, mut h) =
+                (x - hit.layer_offset.0, y - hit.layer_offset.1, w, h);
+            // Only the part inside the viewport it was registered in.
+            if let Some((cl, ct, cr, cb)) = hit.clip {
+                let (l, t) = (x.max(cl), y.max(ct));
+                let (r, b) = ((x + w).min(cr), (y + h).min(cb));
+                if r <= l || b <= t {
+                    continue;
+                }
+                (x, y, w, h) = (l, t, r - l, b - t);
+            }
+            found = Some((x, y, w, h));
             break;
         }
         self.hits = hits;
@@ -1097,7 +1131,20 @@ impl World {
     pub fn object_at(&mut self, x: i32, y: i32) -> Option<NativeId> {
         let hits = std::mem::take(&mut self.hits);
         let mut found = None;
+        let screen = (
+            0,
+            0,
+            self.settings.width as i32,
+            self.settings.height as i32,
+        );
         for hit in hits.iter().rev() {
+            // `CBActiveRect::ClipRect`: the rectangle was cut to the
+            // viewport in force (the screen without one), so a point
+            // outside it misses.
+            let (cl, ct, cr, cb) = hit.clip.unwrap_or(screen);
+            if x < cl || y < ct || x >= cr || y >= cb {
+                continue;
+            }
             let (lx, ly) = (x + hit.layer_offset.0, y + hit.layer_offset.1);
             let inside = match &hit.shape {
                 HitShape::Polygon(points) => crate::path::polygon_contains(points, lx, ly),

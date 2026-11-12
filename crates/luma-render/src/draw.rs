@@ -350,6 +350,9 @@ pub struct Placed3d<'a> {
     /// Index of the first quad drawn after the item (the number of quads
     /// pushed before it).
     pub before_quad: usize,
+    /// The clip rectangle in force when the item was pushed
+    /// ([`DrawList::set_clip`]).
+    pub clip: Option<Rect>,
     /// The draw.
     pub draw: Draw3d<'a>,
 }
@@ -454,9 +457,13 @@ pub struct DrawList<'a> {
     pub letterbox: bool,
     /// Added to every quad position (scroll offset of the current layer).
     pub offset: (f32, f32),
+    /// The clip rectangle of the following quads and 3D draws.
+    clip: Option<Rect>,
     quads: Vec<Quad<'a>>,
     /// One per quad.
     attributes: Vec<Attributes>,
+    /// One per quad: the clip rectangle it was pushed under.
+    clips: Vec<Option<Rect>>,
     /// The 3D draws, each before the quad whose index it carries;
     /// `before_quad` never decreases along the list.
     draws_3d: Vec<Placed3d<'a>>,
@@ -470,16 +477,21 @@ impl<'a> DrawList<'a> {
             height,
             letterbox: false,
             offset: (0.0, 0.0),
+            clip: None,
             quads: Vec::new(),
             attributes: Vec::new(),
+            clips: Vec::new(),
             draws_3d: Vec::new(),
         }
     }
 
-    /// Removes every quad and 3D draw, keeping the size and offset.
+    /// Removes every quad and 3D draw, keeping the size and offset; the
+    /// clip rectangle is removed too.
     pub fn clear(&mut self) {
+        self.clip = None;
         self.quads.clear();
         self.attributes.clear();
+        self.clips.clear();
         self.draws_3d.clear();
     }
 
@@ -498,6 +510,27 @@ impl<'a> DrawList<'a> {
     /// order.
     pub fn draws_3d(&self) -> &[Placed3d<'a>] {
         &self.draws_3d
+    }
+
+    /// The clip rectangles of the quads, in the same order as
+    /// [`DrawList::quads`].
+    pub fn clips(&self) -> &[Option<Rect>] {
+        &self.clips
+    }
+
+    /// Sets the clip rectangle of the following quads and 3D draws, in
+    /// logical pixels, or removes it (`CBRenderer::SetViewport`, which
+    /// sets the Direct3D viewport: nothing is drawn outside it;
+    /// `SetScreenViewport` is `None`). The rectangle replaces the
+    /// previous one, it is not intersected with it, and the offset does
+    /// not apply to it. An empty rectangle draws nothing.
+    pub fn set_clip(&mut self, clip: Option<Rect>) {
+        self.clip = clip;
+    }
+
+    /// The clip rectangle of the following quads.
+    pub fn clip(&self) -> Option<Rect> {
+        self.clip
     }
 
     /// Sets the offset added to the following quads.
@@ -519,6 +552,7 @@ impl<'a> DrawList<'a> {
         attributes.pivot.1 += self.offset.1;
         self.quads.push(quad);
         self.attributes.push(attributes);
+        self.clips.push(self.clip);
     }
 
     /// Appends a mesh draw at this place in the order: it is drawn after
@@ -551,6 +585,7 @@ impl<'a> DrawList<'a> {
     pub fn push_3d(&mut self, draw: Draw3d<'a>) {
         self.draws_3d.push(Placed3d {
             before_quad: self.quads.len(),
+            clip: self.clip,
             draw,
         });
     }
@@ -582,6 +617,84 @@ impl<'a> DrawList<'a> {
     /// Fills a rectangle with a colour, using a white texture.
     pub fn fill(&mut self, white: &'a Texture, dst: Rect, color: Rgba) {
         self.sprite(white, dst, None, color);
+    }
+}
+
+/// The most pixels one [`DrawList::line`] covers: a line longer than
+/// any screen is cut, so that coordinates out of a game file cannot make
+/// the list grow without bound.
+const MAX_LINE_PIXELS: i32 = 16384;
+
+impl<'a> DrawList<'a> {
+    /// Draws a one-pixel line from `(x1, y1)` to `(x2, y2)` in a colour,
+    /// using a white texture (`CBRenderD3D::DrawLine`): the pixels a
+    /// Direct3D line list covers between two pixel centres, the last one
+    /// left out, so a line from `(0, 5)` to `(10, 5)` covers `x` 0 to 9
+    /// of row 5 and one whose ends are equal covers nothing. The offset
+    /// applies. A horizontal or vertical line is one quad; a slanted one
+    /// is a quad per run of pixels along its longer axis.
+    pub fn line(&mut self, white: &'a Texture, x1: i32, y1: i32, x2: i32, y2: i32, color: Rgba) {
+        let (dx, dy) = (i64::from(x2) - i64::from(x1), i64::from(y2) - i64::from(y1));
+        let steps = dx.abs().max(dy.abs());
+        if steps == 0 {
+            return;
+        }
+        let steps = steps.min(i64::from(MAX_LINE_PIXELS));
+        let horizontal = dx.abs() >= dy.abs();
+        // Along the longer axis one pixel per step from the first end,
+        // the other coordinate rounded to the nearest pixel.
+        let (major0, minor0, major_d, minor_d) = if horizontal {
+            (i64::from(x1), i64::from(y1), dx, dy)
+        } else {
+            (i64::from(y1), i64::from(x1), dy, dx)
+        };
+        let dir = major_d.signum();
+        let minor_at = |i: i64| -> i64 {
+            // Rounded half away from the start, in integers.
+            let n = 2 * minor_d * i + minor_d.signum() * major_d.abs();
+            minor0 + n / (2 * major_d.abs())
+        };
+        let mut run_start = 0i64;
+        let mut run_minor = minor_at(0);
+        for i in 1..=steps {
+            let minor = if i < steps { minor_at(i) } else { i64::MAX };
+            if minor == run_minor {
+                continue;
+            }
+            // The run covers the steps `run_start..i`.
+            let (a, b) = (major0 + dir * run_start, major0 + dir * (i - 1));
+            let (low, len) = (a.min(b), (i - run_start) as f32);
+            let dst = if horizontal {
+                Rect::new(low as f32, run_minor as f32, len, 1.0)
+            } else {
+                Rect::new(run_minor as f32, low as f32, 1.0, len)
+            };
+            self.fill(white, dst, color);
+            run_start = i;
+            run_minor = minor;
+        }
+    }
+
+    /// Draws the outline of a rectangle `width` pixels thick, inwards
+    /// (`CBRenderer::DrawRect`): the frame covers `x1..=x2` and
+    /// `y1..=y2`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rect_outline(
+        &mut self,
+        white: &'a Texture,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        color: Rgba,
+        width: i32,
+    ) {
+        for i in 0..width.clamp(0, 64) {
+            self.line(white, x1 + i, y1 + i, x2 - i, y1 + i, color);
+            self.line(white, x1 + i, y2 - i, x2 - i + 1, y2 - i, color);
+            self.line(white, x1 + i, y1 + i, x1 + i, y2 - i, color);
+            self.line(white, x2 - i, y1 + i, x2 - i, y2 - i + 1, color);
+        }
     }
 }
 

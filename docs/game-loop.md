@@ -224,6 +224,32 @@ the tests. The original engine registers the unrotated rectangle and
 hits a turned sprite where it would be unrotated; Luma follows the
 transform instead, deliberately.
 
+### Viewports
+
+A viewport limits what is drawn and what takes the mouse to a rectangle
+of the screen (`CBGame::PushViewport`, `CBRenderer::SetViewport`,
+`CBActiveRect::ClipRect`). Two things push one:
+
+- the scene, while its layers, objects and its own fader are drawn, when
+  it has a viewport of its own (`VIEWPORT`, `Scene.SetViewport`) or the
+  game has one (`SCENE_VIEWPORT`, `Game.SetSceneViewport`); without
+  either nothing is clipped;
+- a window whose `CLIP_CONTENTS` is on, for its back, image, title and
+  controls (not for the shield under it nor its `FADE_COLOR`, drawn
+  before): its rectangle, kept on the screen.
+
+A viewport replaces the one under it while it is pushed and gives it
+back afterwards: a clipping window inside another clipping window is cut
+to its own rectangle, not to both. An object's area is cut to the
+viewport it was drawn in, so the part of a sprite, a region or a button
+that lies outside is neither seen nor hit; the pixel test of a cut
+sprite still reads the right pixel. `Game.SetSceneViewport` and
+`Scene.SetViewport` take a width or height of zero or less as the
+screen's and keep the rectangle on the screen (`CBViewport::SetRect`).
+In Luma the viewport is the draw list's clip rectangle (see
+[rendering.md](rendering.md#clip-rectangle)) and a rectangle kept with
+each hit area (`World::scene_clip`, `World::window_clip`).
+
 While the game is not interactive there is no active object, so a
 click skips the sentences and nothing else (per `TALK_SKIP_BUTTON`).
 The exception is an object whose `NonIntMouseEvents` is on
@@ -353,9 +379,8 @@ add the scene's scroll offset and take off the scene viewport's origin
 `Scene.SetViewport` comes before it, see
 [formats/scene.md](formats/scene.md)). The viewport also sizes the view
 the scroll centres on the main object, and `Scene.IsPointInViewport`
-answers for it. The scene is not clipped to it yet: a scene taller than
-its viewport draws over whatever lies below, which the games seen so far
-cover with a window. `Game.ActiveObject` is the active object,
+answers for it. The scene is clipped to it (see [Viewports](#viewports)).
+`Game.ActiveObject` is the active object,
 `Game.SelectedItem` the inventory item in use. The inventory box, when
 `Game.InventoryVisible`, is drawn between the `IN_GAME` windows and the
 others, and its items are active objects through their sprites.

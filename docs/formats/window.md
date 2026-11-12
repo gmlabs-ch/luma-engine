@@ -91,7 +91,7 @@ height. A `BACK` tiled image then rounds the size down to whole tiles.
 | `TRANSPARENT` | bool | `FALSE` | The window itself is not an active object: only its controls catch the mouse. |
 | `MENU` | bool | `FALSE` | A menu: a click anywhere outside the window closes it. |
 | `IN_GAME` | bool | `FALSE` | Drawn with the scene, under the sentences and the other windows. |
-| `CLIP_CONTENTS` | bool | `FALSE` | The controls are clipped to the window. |
+| `CLIP_CONTENTS` | bool | `FALSE` | The window's back, image, title and controls are drawn and take the mouse inside the window's rectangle only (see [game-loop.md](../game-loop.md#viewports)). |
 | `PAUSE_MUSIC` | bool | `TRUE` | `GoSystemExclusive` pauses the music too. |
 | `FADE_COLOR` | `r, g, b` | | The screen is tinted with this colour under the window. |
 | `FADE_ALPHA` | int | `255` | The tint's opacity. |

@@ -512,6 +512,25 @@ impl World {
         ))
     }
 
+    /// The viewport the scene pushes while it is drawn
+    /// (`CAdScene::TraverseNodes`): its own or the game's, as `(left,
+    /// top, right, bottom)`; `None` when neither is set, and nothing is
+    /// then clipped. Drawing and the hit areas of the scene's objects
+    /// are limited to it (`CBRenderer::SetViewport`,
+    /// `CBActiveRect::ClipRect`).
+    pub fn scene_clip(&self) -> Option<(i32, i32, i32, i32)> {
+        if self
+            .scene
+            .as_ref()
+            .is_some_and(|v| v.scene.viewport.is_some())
+            || self.scene_viewport.is_some()
+        {
+            let (x, y, w, h) = self.viewport();
+            return Some((x, y, x + w, y + h));
+        }
+        None
+    }
+
     /// The camera showing the scene at its current offset, in the
     /// scene viewport.
     pub fn camera(&self) -> Camera {
@@ -1880,6 +1899,16 @@ impl World {
             return;
         }
         if let Some(view) = &self.scene {
+            // The scene is drawn inside its viewport when it has one
+            // (`PushViewport` in `CAdScene::TraverseNodes`).
+            if let Some((l, t, r, b)) = self.scene_clip() {
+                list.set_clip(Some(luma_render::Rect::new(
+                    l as f32,
+                    t as f32,
+                    (r - l) as f32,
+                    (b - t) as f32,
+                )));
+            }
             let (drawables, overlays) = self.scene_draw_parts();
             view.draw_with_overlays(
                 list,
@@ -1895,6 +1924,7 @@ impl World {
             if let Some(white) = white {
                 self.draw_scene_fade(list, white);
             }
+            list.set_clip(None);
         }
         self.draw_windows(list, true, white);
         self.draw_inventory(list, white);

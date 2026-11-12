@@ -1027,7 +1027,15 @@ impl World {
                     arg(2).get_int(self),
                     arg(3).get_int(self),
                 );
-                self.scene_viewport = Some((x, y, w.max(0), h.max(0)));
+                // A size of zero or less is the screen's, and the
+                // rectangle is kept on the screen (`CBViewport::SetRect`).
+                let (sw, sh) = (self.settings().width as i32, self.settings().height as i32);
+                let w = if w <= 0 { sw } else { w };
+                let h = if h <= 0 { sh } else { h };
+                let (left, top) = (x.max(0), y.max(0));
+                let (right, bottom) = (x.saturating_add(w).min(sw), y.saturating_add(h).min(sh));
+                self.scene_viewport =
+                    Some((left, top, (right - left).max(0), (bottom - top).max(0)));
                 Return::value(true)
             }
             "QueryItem" => Return::value(native_or_null(match arg(0) {

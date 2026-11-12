@@ -24,7 +24,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use luma_formats::Rgba;
-use luma_render::{DrawList, Quad, Rect, Texture};
+use luma_render::{DrawList, Texture};
 use luma_script::{Engine, NativeId, Value};
 
 use crate::objects::Kind;
@@ -639,29 +639,15 @@ impl World {
         let Some((left, top, right, bottom)) = self.access.hint else {
             return;
         };
-        let (l, t, r, b) = (left as f32, top as f32, right as f32, bottom as f32);
-        let width = 4.0;
         let red = Rgba {
             r: 255,
             g: 0,
             b: 0,
             a: 255,
         };
-        for dst in [
-            Rect::new(l, t, r - l, width),
-            Rect::new(l, b - width, r - l, width),
-            Rect::new(l, t, width, b - t),
-            Rect::new(r - width, t, width, b - t),
-        ] {
-            list.push(Quad {
-                texture: white,
-                dst,
-                src: None,
-                tint: red,
-                flip_x: false,
-                flip_y: false,
-            });
-        }
+        // `DrawRect(left, top, right, bottom, 0xFFFF0000, 4)`: four
+        // nested one-pixel outlines, the right and bottom edges included.
+        list.rect_outline(white, left, top, right, bottom, red, 4);
     }
 
     /// Pauses the game under a shield window (`CBGame::AccessPause`): a
