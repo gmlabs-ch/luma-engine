@@ -2347,6 +2347,9 @@ impl World {
                 self.attach(engine, id, &script);
             }
         }
+        // The rest of `CAdScene::LoadState`: what is kept with the
+        // entities' handles.
+        self.restore_scene_captions();
         Ok(())
     }
 

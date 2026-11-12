@@ -556,11 +556,24 @@ run). The states are kept by scene file name, without case; a scene the
 player never left has none. Per named node marked `SAVE_STATE` (the
 default) the engine keeps:
 
-- for an entity: `Active`, the caption, `AlphaColor`, the cursor, and
-  the sprite it was switched to, unless the entity is a hotspot (a
-  `REGION` without sprite) or the scene says
+- for an entity (a node of a layer or a free entity): `Active`, the
+  seven caption slots (`SetCaption(text, slot)`), `AlphaColor`, the
+  cursor, and the sprite it was switched to, unless the entity is a
+  hotspot (a `REGION` without sprite) or the scene says
   `PERSISTENT_STATE_SPRITES=FALSE`;
-- for a region: `Active`.
+- for a region: `Active`, unless a script set the region's `SaveState`
+  to false before the scene was left;
+- for a waypoint group: `Active`.
+
+All of them share one list of names per scene, compared without case,
+as in the original: an entity, a region and a waypoint group of the
+same name share one remembered `Active`.
+
+The original engine moves the caption slots through `SetCaption(text,
+i)` with `i` counted from 0 where the slots count from 1, so slot 2
+overwrites slot 1 and every later slot comes back one place lower
+(`CAdNodeState::TransferEntity`). Luma does not reproduce this: each
+slot comes back where it was.
 
 Nothing else comes back: positions, script variables and the scripts
 themselves start over from the file, and a scene's init script runs on
@@ -572,9 +585,7 @@ items file again, and sets the non-native script globals back to
 left. The flag that skips that one save travels with a saved game, as
 in the original engine. A remembered sprite
 that cannot be loaded is logged and the entity keeps the file's. The
-states are part of a saved game (see [saving.md](saving.md)). Whether
-a waypoint group is active (`WaypointGroup.Active`) is not remembered
-between visits, in either engine.
+states are part of a saved game (see [saving.md](saving.md)).
 
 ## Dialogue responses
 

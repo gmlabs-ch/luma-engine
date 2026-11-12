@@ -247,6 +247,15 @@ impl World {
             "Movable" => Value::Bool(state.movable),
             "SceneIndependent" => Value::Bool(state.scene_independent),
             "NonIntMouseEvents" => Value::Bool(state.non_int_mouse_events),
+            // A region node's own flag; the other kinds answer theirs.
+            "SaveState"
+                if matches!(
+                    self.objects.get(id).map(|n| &n.kind),
+                    Some(Kind::Region { .. })
+                ) =>
+            {
+                Value::Bool(state.save_state)
+            }
             // `AccCaption` belongs to every CBObject (`m_AccessCaption`).
             "AccCaption" if self.has_access_caption(id) => self.access_caption_value(id),
             "NumAttachments"
@@ -269,10 +278,15 @@ impl World {
             return true;
         }
         let flag = value.get_bool(self);
+        let region = matches!(
+            self.objects.get(id).map(|n| &n.kind),
+            Some(Kind::Region { .. })
+        );
         let Some(state) = self.object_state_mut(id) else {
             return false;
         };
         match name {
+            "SaveState" if region => state.save_state = flag,
             "Movable" => state.movable = flag,
             "SceneIndependent" => state.scene_independent = flag,
             "NonIntMouseEvents" => state.non_int_mouse_events = flag,

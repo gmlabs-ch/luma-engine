@@ -3276,8 +3276,8 @@ fn persistent_scenes_remember_their_nodes_between_visits() {
     let hall = &states["scenes\\hall.scene"];
     assert_eq!(
         hall.nodes.len(),
-        2,
-        "the fixed entity is not kept: {hall:?}"
+        3,
+        "the fixed entity is not kept, the waypoint group is: {hall:?}"
     );
     assert_eq!(
         hall.nodes["door"].sprite.as_deref(),

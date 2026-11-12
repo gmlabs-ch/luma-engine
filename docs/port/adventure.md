@@ -554,10 +554,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdNodeState::SetName` | done | The key of `SceneState::nodes`. |
 | `CAdNodeState::SetFilename` | done | `NodeState::sprite`. |
 | `CAdNodeState::SetCursor` | done | `NodeState::cursor`. |
-| `CAdNodeState::Persist` | partial | serde derive on `NodeState`; only the first of the seven caption cases exists (see `SetCaption`). |
-| `CAdNodeState::SetCaption` | partial | `NodeState::caption` holds one caption (case 1). The original keeps the seven caption cases of the entity (`SetCaption(text, case)`); cases 2 to 7 are lost between visits in Luma. |
-| `CAdNodeState::GetCaption` | partial | As `SetCaption`: only case 1. |
-| `CAdNodeState::TransferEntity` | partial | `NodeState::note` / `NodeState::apply`: sprite (only without a `REGION`, empty when `PERSISTENT_STATE_SPRITES=FALSE`), cursor, alpha colour and `Active` agree, restoring included (sprite and cursor only when different). Missing: caption cases 2 to 7. |
+| `CAdNodeState::Persist` | done | serde derive on `NodeState` (`luma-adventure/src/scene_state.rs`): active, sprite, cursor, alpha colour, the caption and the caption slots 2 to 7 (`captions`); the name is the key of `SceneState::nodes`. Round trip: `tests/saved_games.rs` `a_scene_remembers_captions_regions_and_waypoint_groups_across_a_save`. |
+| `CAdNodeState::SetCaption` | done | `NodeState::caption` (slot 1) and `NodeState::captions` (slots 2 to 7), filled by `NodeState::note` (`scene_state.rs`) from texts the entity's `SetCaption` already expanded. |
+| `CAdNodeState::GetCaption` | done | `NodeState::caption` and `NodeState::captions`, read by `NodeState::apply` and `World::restore_scene_captions` (`scene_state.rs`); a slot never set stays as the file gives it. |
+| `CAdNodeState::TransferEntity` | partial | deliberate: `NodeState::note` / `NodeState::apply` and `World::restore_scene_captions` (`scene_state.rs`): sprite (only without a `REGION`, empty when `PERSISTENT_STATE_SPRITES=FALSE`), cursor, alpha colour, `Active` and the seven caption slots, restoring included (sprite and cursor only when different). The original passes the 0-based loop index to `SetCaption(text, case)`, whose cases count from 1: saving, slot 2 overwrites slot 1 and slots 3 to 7 land one place lower; loading shifts them down once more. Luma keeps each slot where it was (a defect no game can rely on; `docs/game-loop.md`). |
 
 ## `wme_ad/AdObject.cpp`
 
@@ -886,9 +886,9 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CAdScene::PointInViewport` | partial | `Runtime::mouse_in_viewport` and `Scene.IsPointInViewport`: Luma excludes `x == left+width` and `y == top+height`, the original includes them. |
 | `CAdScene::SetOffset` | done | No caller in the engine; `World::offset_x/offset_y` are plain fields. |
 | `CAdScene::GetNodeByName` | partial | `World::find_node`: layer nodes, then free entities. The waypoint groups, looked up last by the original, are not searched. |
-| `CAdScene::SaveState` | partial | `scene_state.rs` `save_scene_state`; see `PersistState`. |
-| `CAdScene::LoadState` | partial | `scene_state.rs` `restore_scene_state`; see `PersistState`. |
-| `CAdScene::PersistState` | partial | `scene_state.rs`. Missing: the `Active` flag of the waypoint groups is neither noted nor put back; a region with `SaveState=false` is still noted (regions have no `SaveState` in Luma). Entities (layer nodes and free, `SAVE_STATE`), regions' `Active`, lookup by name without case and the key by file name agree. |
+| `CAdScene::SaveState` | done | `scene_state.rs` `save_scene_state`; see `PersistState`. |
+| `CAdScene::LoadState` | done | `scene_state.rs` `restore_scene_state`, then `restore_scene_captions` once the nodes have their handles (`World::load_scene`, before any script of the scene runs); see `PersistState`. |
+| `CAdScene::PersistState` | done | `luma-adventure/src/scene_state.rs` `save_scene_state` / `restore_scene_state`: only for a `PERSISTENT_STATE` scene; layer entities and free entities with `SAVE_STATE` through `TransferEntity`; region nodes' `Active` unless the region's `SaveState` is false (`ObjectState::save_state`, set by script, `natives_object.rs` `object_get`/`object_set`); the waypoint groups' `Active`; one list of names per scene, looked up without case, created only when saving, keyed by the scene's file name. Test: `tests/saved_games.rs` `a_scene_remembers_captions_regions_and_waypoint_groups_across_a_save`. |
 | `CAdScene::GetRotationAt` | done | `Scene::rotation_at`: 0 outside the levels. |
 | `CAdScene::HandleItemAssociations` | partial | `inventory.rs` `handle_item_associations`: layer and free entities. Luma compares the item name without case, the original with `strcmp`. |
 | `CAdScene::GetRegionsAt` | done | `scene_view.rs` `regions_at`: active regions of the main layer, last first, at most 9. |

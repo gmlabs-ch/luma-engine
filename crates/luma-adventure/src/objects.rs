@@ -202,6 +202,11 @@ pub struct ObjectState {
     /// box's definition file. `None` for an object written inside
     /// another file or created empty: its `Filename` reads `null`.
     pub filename: Option<String>,
+    /// `SaveState` (`CBObject::m_SaveState`, true by default) for the
+    /// kinds that keep it nowhere else: a region node whose flag is
+    /// false is not remembered between visits of its scene. An entity
+    /// keeps its own (`SAVE_STATE`).
+    pub save_state: bool,
 }
 
 /// The inventory of an object other than the game (`CAdInventory`).
@@ -242,6 +247,7 @@ impl Default for ObjectState {
             shadow_light: None,
             freezable: true,
             filename: None,
+            save_state: true,
         }
     }
 }
