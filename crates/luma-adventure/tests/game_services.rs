@@ -197,7 +197,8 @@ fn game() -> std::path::PathBuf {
         "tint.window",
         b"WINDOW { NAME=\"tint\" X=0 Y=0 WIDTH=60 HEIGHT=40 ALPHA_COLOR { 10,20,30 } ALPHA=128
           STATIC { NAME=\"bm\" X=0 Y=0 WIDTH=50 HEIGHT=4 FONT=\"bm.font\" TEXT=\"ab\" }
-          STATIC { NAME=\"tt\" X=0 Y=10 WIDTH=50 HEIGHT=20 FONT=\"tt.font\" TEXT=\"cd\" } }"
+          STATIC { NAME=\"tt\" X=0 Y=10 WIDTH=50 HEIGHT=20 FONT=\"tt.font\" TEXT=\"cd\" }
+          STATIC { NAME=\"none\" X=0 Y=30 WIDTH=7 HEIGHT=9 FONT=\"bm.font\" } }"
             .to_vec(),
     );
     pkg.add_file("art\\red.png", png(4, 4, [255, 0, 0, 255]));
@@ -903,6 +904,68 @@ fn a_windows_alpha_colour_reaches_its_texts() {
         );
     } else {
         eprintln!("skipped: no system font to stand for the game's");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// `CUIText::SizeToFit`, `HeightToFit` and the alignment properties.
+#[test]
+fn a_static_sizes_itself_to_its_text_even_an_empty_one() {
+    use luma_script::Natives;
+    let (dir, mut runtime, _) = start();
+    let game = runtime.world.game_id();
+    let window = call_native(
+        &mut runtime,
+        game,
+        "LoadWindow",
+        &[Value::from("tint.window")],
+    )
+    .as_native()
+    .unwrap();
+    let widget = |runtime: &mut Runtime, name: &str| {
+        call_native(runtime, window, "GetWidget", &[Value::from(name)])
+            .as_native()
+            .unwrap()
+    };
+    let size = |runtime: &Runtime, id| {
+        let c = runtime.world.control(id).unwrap();
+        (c.width, c.height)
+    };
+    // The bitmap font is 1 by 1 a character.
+    let bm = widget(&mut runtime, "bm");
+    call_native(&mut runtime, bm, "SizeToFit", &[]);
+    assert_eq!(size(&runtime, bm), (2, 1));
+    // An empty text is a text: no width, and the line a bitmap font
+    // gives an empty text.
+    runtime.world.set_property(bm, "Text", &Value::from(""));
+    runtime.world.set_property(bm, "Height", &Value::Int(9));
+    call_native(&mut runtime, bm, "HeightToFit", &[]);
+    assert_eq!(size(&runtime, bm), (2, 1));
+    call_native(&mut runtime, bm, "SizeToFit", &[]);
+    assert_eq!(size(&runtime, bm), (0, 1));
+    // A static that never had a text keeps its size.
+    let none = widget(&mut runtime, "none");
+    call_native(&mut runtime, none, "SizeToFit", &[]);
+    call_native(&mut runtime, none, "HeightToFit", &[]);
+    assert_eq!(size(&runtime, none), (7, 9));
+    // A TrueType font gives an empty text no height.
+    let tt = widget(&mut runtime, "tt");
+    if runtime.world.fonts().get("tt.font").is_some() {
+        runtime.world.set_property(tt, "Text", &Value::from(""));
+        call_native(&mut runtime, tt, "SizeToFit", &[]);
+        assert_eq!(size(&runtime, tt), (0, 0));
+    }
+    // A number that is no alignment is the first one.
+    let get = |runtime: &Runtime, name: &str| runtime.world.get_property(bm, name).unwrap();
+    for (given, kept) in [(1, 1), (2, 2), (3, 0), (-1, 0), (0, 0)] {
+        runtime
+            .world
+            .set_property(bm, "TextAlign", &Value::Int(given));
+        assert_eq!(get(&runtime, "TextAlign"), Value::Int(kept));
+        runtime
+            .world
+            .set_property(bm, "VerticalAlign", &Value::Int(given));
+        assert_eq!(get(&runtime, "VerticalAlign"), Value::Int(kept));
     }
     std::fs::remove_dir_all(&dir).ok();
 }

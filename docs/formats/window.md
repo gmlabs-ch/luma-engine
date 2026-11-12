@@ -138,7 +138,13 @@ height; a button without image nor text is 100 by 100.
 | `VERTICAL_ALIGN` | `top`, `center`, `bottom` | `center` | Vertical placement of the text in the height. |
 
 A static never catches the mouse. `SizeToFit` sets its size to its
-text; `HeightToFit` only its height.
+text (the width of the text on one line, then its height in that
+width); `HeightToFit` only its height. Both need the static's own
+`FONT` and a text; an empty text set by a script counts: it is 0 wide
+and as high as the font makes an empty text (one line of a bitmap font,
+0 for a TrueType font). A file's empty `TEXT` is not told from none in
+Luma Engine. A script setting `TextAlign` or `VerticalAlign` to a
+number that is no alignment gets the first one (left, top).
 
 ## `EDIT`
 

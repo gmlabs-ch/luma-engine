@@ -209,8 +209,11 @@ impl World {
                         _ => false,
                     },
                     ControlKind::Button(b) => match name {
+                        // A number that is no alignment is the first
+                        // one, left.
                         "TextAlign" => {
-                            b.text_align = TextAlign::from_code(int);
+                            b.text_align =
+                                TextAlign::from_code(if (0..=2).contains(&int) { int } else { 0 });
                             true
                         }
                         "Focusable" => {
@@ -228,12 +231,20 @@ impl World {
                         _ => false,
                     },
                     ControlKind::Static(s) => match name {
+                        // A number that is no alignment is the first
+                        // one: left, top.
                         "TextAlign" => {
-                            s.text_align = TextAlign::from_code(int);
+                            s.text_align =
+                                TextAlign::from_code(if (0..=2).contains(&int) { int } else { 0 });
                             true
                         }
                         "VerticalAlign" => {
-                            s.vertical_align = VerticalAlign::from_code(int);
+                            s.vertical_align =
+                                VerticalAlign::from_code(if (0..=2).contains(&int) {
+                                    int
+                                } else {
+                                    0
+                                });
                             true
                         }
                         _ => false,

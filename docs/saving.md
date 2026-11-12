@@ -308,7 +308,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `15` today |
+| 4 | layout version, little-endian; `17` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -340,7 +340,9 @@ actors' attachments, material overrides and bone emitters, and the
 shadow image and light position every object keeps (`SetShadowImage`,
 `SetLightPosition`). Version 15, after 14, added the start position a
 sound keeps for its later plays and moved the sound event from the
-sound to its object.
+sound to its object. Version 17 added to every control whether it was
+ever given a text (an empty text is not the same as none for
+`SizeToFit`).
 
 ## Checking a game
 

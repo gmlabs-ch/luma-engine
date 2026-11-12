@@ -368,6 +368,10 @@ pub struct Control {
     pub can_focus: bool,
     /// The label, the text, the title.
     pub text: String,
+    /// Whether the control was ever given a text, even an empty one
+    /// (`m_Text` is not null): a static sizes itself to an empty text
+    /// and leaves its size alone without one.
+    pub has_text: bool,
     /// The font of the text.
     pub font: Option<String>,
     /// The image or sprite.
@@ -402,6 +406,8 @@ impl Control {
             parent_notify: false,
             can_focus,
             text: String::new(),
+            // An editor is made with an empty text (`SetText("")`).
+            has_text: matches!(kind, ControlKind::Edit(_)),
             font: None,
             image: None,
             back: None,
@@ -580,6 +586,7 @@ impl Control {
             e.sel_end = selection_offset(&text, end);
         }
         self.text = text;
+        self.has_text = true;
     }
 
     /// Whether the control is drawn pressed.
@@ -1044,6 +1051,8 @@ impl World {
         self.apply_control_def(engine, id, &def.base);
         let text = self.expand(&def.text);
         if let Some(control) = self.control_mut(id) {
+            // A file's empty `TEXT` is not told from none.
+            control.has_text |= !text.is_empty();
             control.text = text;
             control.can_focus = false;
             control.kind = ControlKind::Static(StaticState {
@@ -1171,13 +1180,17 @@ impl World {
         self.fonts.get_mut(&path).map_or(0, |f| f.text_width(text))
     }
 
-    /// Sets a static's size to its text (`SizeToFit`), or only its height
-    /// (`HeightToFit`).
+    /// Sets a static's size to its text (`CUIText::SizeToFit`), or only
+    /// its height (`HeightToFit`): the width of the text on one line,
+    /// then its height in that width. Nothing without a font of its own
+    /// or without a text; an empty text is a text, 0 wide and as high as
+    /// its font makes an empty text (a line of a bitmap font, 0 for a
+    /// TrueType font).
     pub fn size_static_to_fit(&mut self, id: NativeId, width_too: bool) {
         let Some(control) = self.control(id) else {
             return;
         };
-        if control.font.is_none() || control.text.is_empty() {
+        if control.font.is_none() || !control.has_text {
             return;
         }
         let (font, text, width) = (control.font.clone(), control.text.clone(), control.width);
