@@ -106,10 +106,10 @@ STORER0041	I'm back!|How was that possible?
 - The identifier and the text are separated by a tab, or by the first
   space when there is no tab. Identifiers are case-insensitive.
 - A `|` in the text is a line break.
-- Lines end with CR LF. The engine cuts a line at the line feed and then
-  drops the byte before it, which it takes for the carriage return: in a
-  file with bare line feeds every text but the last loses its last
-  character.
+- Lines end with CR LF or with a bare line feed. (The original cuts a
+  line at the line feed and drops the byte before it whatever it is, so
+  that a file with bare line feeds loses the last character of every
+  text; Luma does not reproduce that.)
 - When the file cannot be read the table has already been emptied (unless
   it was loaded to extend the current one).
 - A file starting with the UTF-8 byte order mark switches the game's

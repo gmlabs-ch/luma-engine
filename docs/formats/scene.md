@@ -136,7 +136,7 @@ A cursor or a sprite that cannot be loaded is left out the same way.
 | `PERSISTENT_STATE` | bool | false | Remember the state of the scene's named nodes (active, caption, sprite, cursor, alpha colour) when the player leaves, and put it back when they come back; see [game-loop.md](../game-loop.md#scene-state-between-visits). Positions and script variables are not kept. |
 | `PERSISTENT_STATE_SPRITES` | bool | true | With `PERSISTENT_STATE`, also keep the sprites objects were switched to. |
 | `CURSOR` | string | | Sprite used as the mouse cursor over the scene instead of the game's cursor. |
-| `VIEWPORT` | `left,top,right,bottom` | the game's `SCENE_VIEWPORT`, else the whole window | Part of the window the scene is drawn in and scrolled for; the scene's own viewport comes before the game's. `Scene.SetViewport(x, y, width, height)` sets it at run time (a width or height of 0 or less means the window's; the rectangle is kept inside the window), and it goes with the scene. Not written by the editor. The engine's `case` for this key has no `break`: the text of the viewport is then read as `PERSISTENT_STATE`, which is true only when it starts with `1`. A scene with a viewport is therefore persistent only when the viewport's left is 1, or when `PERSISTENT_STATE=TRUE` is written **after** `VIEWPORT` (the scene editor writes it before). |
+| `VIEWPORT` | `left,top,right,bottom` | the game's `SCENE_VIEWPORT`, else the whole window | Part of the window the scene is drawn in and scrolled for; the scene's own viewport comes before the game's. `Scene.SetViewport(x, y, width, height)` sets it at run time (a width or height of 0 or less means the window's; the rectangle is kept inside the window), and it goes with the scene. Not written by the editor. (The original's `case` for this key has no `break` and goes on to read the viewport as `PERSISTENT_STATE`; Luma does not reproduce that defect.) |
 | `GEOMETRY` | string | | The `.3ds` scene geometry of a 3D scene, see [geometry.md](geometry.md) and [3D keys](#3d-keys). A 2D scene has none. |
 | `CAMERA` | string | the geometry's first | Name of the active camera of the scene geometry (case-insensitive); an unknown name keeps the first camera. |
 | `FOV_OVERRIDE` | float | | Vertical field of view in **radians** (SceneEdit shows degrees and writes radians) replacing the camera's. Absent or negative keeps the camera's. |
@@ -218,11 +218,11 @@ scene and the root block of an `.entity` file.
 | `TALK` | string, repeatable | | Sprites played while the entity talks. |
 | `TALK_SPECIAL` | string, repeatable | | Alternative talk sprites, chosen by the script. |
 | `SUBTYPE` | string | normal | `"sound"` makes a sound source instead of a visible entity: no sprite, not clickable, not scalable. |
-| `SOUND` | string | | Sound loaded (not started) where the key stands, with the volume and the start offset read **before** it (a sound entity's sound, or an ambience). |
-| `SOUND_START_TIME` | int | 0 | Start offset of the sound, in milliseconds. Written after `SOUND`, as the scene editor does, it does not reach the loaded sound: it is kept for the next `PlaySound()` without a file. |
-| `SOUND_VOLUME` | int | 100 | Volume of the sound in percent. Written after `SOUND`, it applies at the next `PlaySound()` without a file, and only when the start offset is not 0. |
+| `SOUND` | string | | Sound loaded (not started) with the entity (a sound entity's sound, or an ambience). |
+| `SOUND_START_TIME` | int | 0 | Start offset of the sound, in milliseconds. |
+| `SOUND_VOLUME` | int | 100 | Volume of the sound in percent. The original only applies the volume and the start offset written before `SOUND`, while its editor writes them after; Luma applies them wherever they stand. |
 | `SOUND_PANNING` | bool | true | Pan the sound according to the entity's position on screen. |
-| `TEMPLATE` | string | | Another entity file, loaded where the key stands: the keys before it are overridden, the keys after it override. The entity's `Filename` is then the template's, and the template's `ALPHA_COLOR`/`ALPHA` are replaced by this block's (none when it has none). |
+| `TEMPLATE` | string | | Another entity file, loaded where the key stands: the keys before it are overridden, the keys after it override. The template's `ALPHA_COLOR`/`ALPHA` stay unless this block names its own. |
 | `EDITOR_SELECTED`, `EDITOR_PROPERTY` | | | Editor state, ignored. |
 | `EVENTS` | | | Reserved, ignored. |
 
@@ -252,7 +252,7 @@ joined to the first. A region in a layer carries the extra keys marked
 | `SCALE` (or `ZOOM`) | int | 0 | *scene.* Scale in percent applied to whoever stands inside; `0` means "use the scale levels". |
 | `ALPHA_COLOR` | `r,g,b` | `255,255,255` | *scene.* Tint applied to whoever stands inside (with `COLORABLE`). |
 | `ALPHA` | int 0–255 | 255 | *scene.* Opacity applied the same way. |
-| `TEMPLATE` | string | | Another region file (a `REGION` root block), loaded where the key stands. Loading a region drops its points first, so the template's points replace those read before the key; its `ALPHA_COLOR`/`ALPHA` are replaced by this block's. |
+| `TEMPLATE` | string | | Another region file (a `REGION` root block), loaded where the key stands. Loading a region drops its points first, so the template's points replace those read before the key; its `ALPHA_COLOR`/`ALPHA` stay unless this block names its own. |
 | `EDITOR_SELECTED`, `EDITOR_SELECTED_POINT`, `EDITOR_PROPERTY` | | | Editor state, ignored. |
 
 Scripts edit a polygon at run time with `AddPoint(x, y)`,

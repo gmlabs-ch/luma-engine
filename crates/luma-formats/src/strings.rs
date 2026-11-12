@@ -60,17 +60,18 @@ impl StringTable {
         let mut count = 0;
         let mut pos = 0;
         while pos < bytes.len() {
-            // A line runs to the next line feed or NUL. The original
-            // expects a carriage return before it and drops the byte it
-            // finds there, whatever it is: a file with bare line feeds
-            // loses the last character of every line but the last.
+            // A line runs to the next line feed or NUL, without the
+            // carriage return before it. (The original drops the byte
+            // before the line break whatever it is, so that a file with
+            // bare line feeds loses the last character of every line: a
+            // defect, not reproduced.)
             let length = bytes[pos..]
                 .iter()
                 .position(|&b| b == b'\n' || b == 0)
                 .unwrap_or(bytes.len() - pos);
             let terminated = pos + length < bytes.len();
-            let real = if terminated {
-                length.saturating_sub(1)
+            let real = if terminated && length > 0 && bytes[pos + length - 1] == b'\r' {
+                length - 1
             } else {
                 length
             };
@@ -186,14 +187,13 @@ mod tests {
         assert!(!table.right_to_left);
     }
 
-    /// `CBStringTable::LoadFile` drops the byte before each line break,
-    /// which it takes for a carriage return.
+    /// Lines end with CR LF or with a bare line feed; the text is whole
+    /// either way (the original drops the byte before every line break).
     #[test]
-    fn a_line_loses_the_byte_before_its_line_break() {
-        let table = StringTable::parse(b"A\tone\nB\ttwo\nC\tthree");
-        assert_eq!(table.get("A"), Some("on"));
-        assert_eq!(table.get("B"), Some("tw"));
-        // The last line has no line break: nothing is dropped.
+    fn a_line_keeps_its_text_with_either_line_ending() {
+        let table = StringTable::parse(b"A\tone\nB\ttwo\r\nC\tthree");
+        assert_eq!(table.get("A"), Some("one"));
+        assert_eq!(table.get("B"), Some("two"));
         assert_eq!(table.get("C"), Some("three"));
         // A NUL ends a line as a line feed does.
         let table = StringTable::parse(b"A\tone\r\0B\ttwo");

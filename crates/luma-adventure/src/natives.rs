@@ -403,14 +403,9 @@ impl World {
         Some(match name {
             "Type" => Value::from("game"),
             "Name" => Value::from(self.name.clone()),
-            // The game file, or the last `TEMPLATE` read into it
-            // (`CBGame::LoadFile` keeps the name of the file it reads).
-            "Filename" => Value::from(
-                self.game_file
-                    .filename
-                    .clone()
-                    .unwrap_or_else(|| self.settings.game_file.clone()),
-            ),
+            // The game file (the original answers the last `TEMPLATE`
+            // read into it instead, a defect).
+            "Filename" => Value::from(self.settings.game_file.clone()),
             "Caption" => Value::from(self.caption.clone()),
             // `CBUtils::GetUsedMemMB`: the working set in the original's
             // debug builds, 0 in its release builds.

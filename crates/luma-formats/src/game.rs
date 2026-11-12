@@ -24,9 +24,6 @@ pub struct GameFile {
     /// The last `TEMPLATE` file named; it was applied where the key
     /// stands.
     pub template: Option<String>,
-    /// The last `TEMPLATE` file that was read: the file name the game
-    /// then answers (`Filename`). `None` without a template.
-    pub filename: Option<String>,
     /// `SYSTEM_FONT`: the font of system messages.
     pub system_font: Option<String>,
     /// `VIDEO_FONT`: the font of video subtitles.
@@ -119,7 +116,6 @@ impl Default for GameFile {
             caption: String::new(),
             scripts: Vec::new(),
             template: None,
-            filename: None,
             system_font: None,
             video_font: None,
             cursor: None,
@@ -296,10 +292,7 @@ impl GameFile {
                     // that cannot be loaded is skipped (the original's
                     // error code is overwritten by the next statement).
                     let name = node.text();
-                    if let Ok(doc) = files.open(&name) {
-                        self.filename = Some(name.clone());
-                        let _ = files.nested(|files| self.load(&doc, files));
-                    }
+                    let _ = files.template(&name, |doc, files| self.load(doc, files));
                     self.template = Some(name);
                 }
                 "NAME" => self.name = node.text(),
@@ -477,7 +470,6 @@ AD_GAME {
             "the template overrides what was before"
         );
         assert_eq!(game.name, "mine", "what follows overrides the template");
-        assert_eq!(game.filename.as_deref(), Some("base.game"));
         assert_eq!(game.subtitles_speed, 5);
         assert!(!game.subtitles && !game.video_subtitles);
         assert_eq!(game.items.as_deref(), Some("my.items"));

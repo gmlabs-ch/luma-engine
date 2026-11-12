@@ -121,7 +121,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBParser::GetTokenFloat` | n/a | No caller in `wme_base`/`wme_ad`. |
 | `CBParser::GetTokenInt` | n/a | No caller in `wme_base`/`wme_ad`. |
 | `CBParser::SkipToken` | n/a | No caller in `wme_base`/`wme_ad`. |
-| `CBParser::ScanStr` | done | `scan_int`, `scan_ints`, `scan_float`, `scan_floats`, `scan_bool`, `scan_int_list` (`crates/luma-formats/src/def.rs`), reached through `Node::read_int`, `read_ints`, `read_float`, `read_bool`: the formats the engine uses (`%d`, `%f`, `%b`, `%d,%d...`, `%f,%f,%f`, `%D`). An empty value leaves the variable; text that is not a number is 0; `%b` compares the leading run of letters and digits over its own length; a list stops where a comma is missing and a carriage return is not skipped after a number. `%s`, `%S` and `%F` have no caller. |
+| `CBParser::ScanStr` | partial | deliberate: a carriage return is skipped like the other blanks, so a list broken over lines of a CR LF file is read whole; the original stops at the carriage return after the first number (a defect). Otherwise as the original: `scan_int`, `scan_ints`, `scan_float`, `scan_floats`, `scan_bool`, `scan_int_list` (`crates/luma-formats/src/def.rs`), reached through `Node::read_int`, `read_ints`, `read_float`, `read_bool`: an empty value leaves the variable; text that is not a number is 0; `%b` compares the leading run of letters and digits over its own length; a list stops where a comma is missing. `%s`, `%S` and `%F` have no caller. |
 
 ## `wme_base/BPkgFile.cpp`
 
@@ -174,7 +174,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBUtils::SetString` | replaced | `String` assignment. |
 | `CBUtils::StrNumEntries` | n/a | No caller in `wme_base`/`wme_ad`. |
 | `CBUtils::StrEntry` | n/a | Only splits the debugger's `Breakpoint<n>` registry values (`CScEngine::LoadBreakpoints`) and a plugin DLL's version string (`CBPlugin`). |
-| `CBUtils::RandomInt` | partial | `World::random` for the scripts' `Random` (`crates/luma-adventure/src/world.rs`; the bounds are swapped when reversed in `crates/luma-script/src/engine.rs`) and `Rng::int` for particles (`particles.rs`): `rand() % (to - from + 1) + from` with the 15 bits of the C library's `rand()`, so `Random(a, b)` never exceeds `a + 32767`. Remaining: the generator starts from a constant (`rng: 0x2545F4914F6CDD1D` in `World`), so every launch of a game draws the same sequence, where the original seeds with `srand(time(NULL))` in `CBGame::CBGame`; the tests and the headless runs rely on it, a decision for the maintainer. |
+| `CBUtils::RandomInt` | partial | `World::random` for the scripts' `Random` (`crates/luma-adventure/src/world.rs`; the bounds are swapped when reversed in `crates/luma-script/src/engine.rs`) and `Rng::int` for particles (`particles.rs`). See the keyboard and window wave for the seed and the range. |
 | `CBUtils::RandomFloat` | partial | `Rng::float` (`crates/luma-adventure/src/particles.rs`): `from + (to - from) * unit`, either order. Same fixed seed as `RandomInt`: particle emitters produce the same pattern at each launch. |
 | `CBUtils::RandomAngle` | done | `Rng::angle` (`crates/luma-adventure/src/particles.rs`): `to` raised by whole turns until not below `from`, result normalised. The seed is in the `RandomInt` row. |
 | `CBUtils::IsWinNT` | n/a | Chooses between ANSI and wide-character Win32 calls. |

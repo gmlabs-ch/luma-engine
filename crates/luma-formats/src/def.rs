@@ -152,10 +152,13 @@ impl Scalar {
     }
 }
 
-/// The characters `CBParser::ScanStr` skips around values. A carriage
-/// return is not one of them.
+/// The characters skipped around values: those `CBParser::ScanStr`
+/// skips (space, tab, line feed, form feed) and the carriage return. The
+/// original does not skip a carriage return, so that a list broken over
+/// lines of a CR LF file is read up to its first line break: a defect,
+/// not reproduced.
 fn scan_skip(text: &str) -> &str {
-    text.trim_start_matches([' ', '\t', '\n', '\x0c'])
+    text.trim_start_matches([' ', '\t', '\n', '\x0c', '\r'])
 }
 
 /// The characters C's `isspace` knows, which `atoi` and `atof` skip.
@@ -238,7 +241,7 @@ pub fn scan_ints(text: &str) -> Vec<i64> {
         rest = scan_skip(rest);
         values.push(parse_int(rest).unwrap_or(0));
         rest = rest.trim_start_matches(|c: char| {
-            c.is_ascii_digit() || matches!(c, '+' | '-' | ' ' | '\t' | '\n' | '\x0c')
+            c.is_ascii_digit() || matches!(c, '+' | '-' | ' ' | '\t' | '\n' | '\x0c' | '\r')
         });
         match rest.strip_prefix(',') {
             Some(after) => rest = after,
@@ -284,7 +287,10 @@ pub fn scan_floats(text: &str) -> Vec<f64> {
         values.push(parse_float(rest).unwrap_or(0.0));
         rest = rest.trim_start_matches(|c: char| {
             c.is_ascii_digit()
-                || matches!(c, '.' | 'e' | 'E' | '+' | '-' | ' ' | '\t' | '\n' | '\x0c')
+                || matches!(
+                    c,
+                    '.' | 'e' | 'E' | '+' | '-' | ' ' | '\t' | '\n' | '\x0c' | '\r'
+                )
         });
         match rest.strip_prefix(',') {
             Some(after) => rest = after,
@@ -1103,8 +1109,7 @@ mod tests {
         // Nothing to read: the engine leaves the variable alone.
         assert_eq!(scan_bool(""), None);
         assert_eq!(scan_bool(" \t\n"), None);
-        // A carriage return is not skipped, and is no letter: true.
-        assert_eq!(scan_bool("\r"), Some(true));
+        assert_eq!(scan_bool("\r\n"), None);
     }
 
     #[test]
@@ -1138,16 +1143,17 @@ mod tests {
         // After a comma with spaces the engine reads one more value, 0.
         assert_eq!(scan_ints("1,2,3, "), vec![1, 2, 3, 0]);
         assert_eq!(scan_ints("1,2,3,"), vec![1, 2, 3]);
-        // A carriage return after a number stops the scan.
+        // A list may be broken over lines, CR LF included (the original
+        // stops at the carriage return).
         assert_eq!(scan_ints("\n 1,\n 2"), vec![1, 2]);
-        assert_eq!(scan_ints("1\r\n,2"), vec![1]);
-        assert_eq!(scan_ints("\r\n 1, 2"), vec![1]);
+        assert_eq!(scan_ints("1\r\n,2"), vec![1, 2]);
+        assert_eq!(scan_ints("\r\n 1,\r\n 2\r\n"), vec![1, 2]);
         assert_eq!(scan_ints(""), Vec::<i64>::new());
         // `%D`: no value for what is not a number.
         assert_eq!(scan_int_list(" 1, 2 ,3, "), vec![1, 2, 3]);
         assert_eq!(scan_int_list("1 2"), vec![1]);
         assert_eq!(scan_int_list("1,x"), vec![1]);
-        assert_eq!(scan_int_list("1,\r\n2"), vec![1]);
+        assert_eq!(scan_int_list("1,\r\n2"), vec![1, 2]);
     }
 
     #[test]

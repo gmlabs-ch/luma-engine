@@ -211,9 +211,6 @@ pub struct Actor {
     /// The last `TEMPLATE` file named; it was applied where the key
     /// stands.
     pub template: Option<String>,
-    /// The file the actor was loaded from (`Filename`): the last
-    /// `TEMPLATE` file read into it, when there is one.
-    pub filename: Option<String>,
     /// Starting position.
     pub x: i32,
     /// See `x`.
@@ -289,7 +286,6 @@ impl Default for Actor {
             name: String::new(),
             caption: String::new(),
             template: None,
-            filename: None,
             x: 0,
             y: 0,
             active: true,
@@ -423,17 +419,17 @@ impl Actor {
     /// statement overwrites.
     fn apply(&mut self, root: &Node, files: &mut Files<'_>) -> Result<()> {
         let (mut r, mut g, mut b, mut alpha) = (0, 0, 0, 0);
+        // Whether this block names a tint of its own.
+        let mut tinted = false;
         for item in keys(root, ACTOR_KEYS, "ACTOR") {
             let (key, child) = item?;
             match key {
                 "TEMPLATE" => {
-                    // `LoadFile` on the actor itself; the file name the
-                    // actor answers is then the template's.
+                    // `LoadFile` on the actor itself. (The original then
+                    // answers the template's name as the actor's file;
+                    // the actor keeps its own here.)
                     let name = child.text();
-                    if let Ok(doc) = files.open(&name) {
-                        self.filename = Some(name.clone());
-                        let _ = files.nested(|files| self.load_file(&doc, files));
-                    }
+                    let _ = files.template(&name, |doc, files| self.load_file(doc, files));
                     self.template = Some(name);
                 }
                 "NAME" => self.name = child.text(),
@@ -455,8 +451,14 @@ impl Actor {
                 "ROTATABLE" | "ROTABLE" => child.read_bool(&mut self.rotatable),
                 "INTERACTIVE" | "REGISTRABLE" => child.read_bool(&mut self.interactive),
                 "COLORABLE" | "SHADOWABLE" => child.read_bool(&mut self.colorable),
-                "ALPHA_COLOR" => child.read_ints(&mut [&mut r, &mut g, &mut b]),
-                "ALPHA" => child.read_int(&mut alpha),
+                "ALPHA_COLOR" => {
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    tinted = true;
+                }
+                "ALPHA" => {
+                    child.read_int(&mut alpha);
+                    tinted = true;
+                }
                 "IGNORE_ITEMS" => child.read_bool(&mut self.ignore_items),
                 "WALK" => self.walk = SpriteSet::from_wrapper(child, files).ok(),
                 "STAND" => self.stand = SpriteSet::from_wrapper(child, files).ok(),
@@ -486,13 +488,16 @@ impl Actor {
                 _ => {}
             }
         }
-        // The tint is that of this file alone: a template's is replaced,
-        // by none when the file names none.
-        if alpha != 0 && r == 0 && g == 0 && b == 0 {
-            (r, g, b) = (255, 255, 255);
+        // A file that names no tint keeps the one the actor has: a
+        // template's. (The original computes it again from this file
+        // alone and loses the template's.)
+        if tinted {
+            if alpha != 0 && r == 0 && g == 0 && b == 0 {
+                (r, g, b) = (255, 255, 255);
+            }
+            let tint = Rgba::from_ints(r, g, b, alpha);
+            self.tint = (tint != Rgba::from_ints(0, 0, 0, 0)).then_some(tint);
         }
-        let tint = Rgba::from_ints(r, g, b, alpha);
-        self.tint = (tint != Rgba::from_ints(0, 0, 0, 0)).then_some(tint);
         Ok(())
     }
 }
@@ -642,8 +647,8 @@ ACTOR {
     }
 
     /// `CAdActor::LoadBuffer TEMPLATE`: the template is loaded into the
-    /// actor where the key stands; its tint is replaced by the outer
-    /// file's (none), and the file name becomes the template's.
+    /// actor where the key stands; its tint stays when the outer file
+    /// names none.
     #[test]
     fn a_template_is_loaded_in_place() {
         let base = br#"ACTOR { NAME="base" X=10 Y=20 ALPHA=100 SCALABLE=FALSE
@@ -662,8 +667,8 @@ ACTOR {
         assert_eq!((actor.x, actor.y), (10, 99));
         assert_eq!(actor.caption, "Mine");
         assert!(!actor.scalable);
-        assert_eq!(actor.tint, None, "the template's tint is lost");
-        assert_eq!(actor.filename.as_deref(), Some("base.actor"));
+        // The file names no tint: the template's stays.
+        assert_eq!(actor.tint, Some(Rgba::from_ints(255, 255, 255, 100)));
         assert_eq!(actor.talk.len(), 1);
         assert_eq!(
             actor.walk.as_ref().unwrap().sprite(Direction::Left),

@@ -331,21 +331,14 @@ pub struct Entity {
     pub save_state: bool,
     /// Sound started when the entity loads.
     pub sound: Option<String>,
-    /// Start offset the next `PlaySound()` without a file applies, in
-    /// milliseconds: the `SOUND_START_TIME` read after `SOUND`.
+    /// Start offset of the sound, in milliseconds.
     pub sound_start_ms: i32,
     /// Volume of the sound, in percent.
     pub sound_volume: i32,
     /// Pan the sound with the position on screen.
     pub sound_panning: bool,
-    /// Volume in effect where `SOUND` was read: the one the sound is
-    /// loaded with. `sound_volume` is the one a later `PlaySound()`
-    /// without a file applies.
-    pub sound_load_volume: i32,
-    /// Start offset in effect where `SOUND` was read, in milliseconds.
-    pub sound_load_start_ms: i32,
-    /// The file the entity was loaded from (`Filename`): the `.entity`
-    /// file, or the last `TEMPLATE` file read into it.
+    /// The `.entity` file the entity was loaded from (`Filename`); none
+    /// for an entity written in a scene.
     pub filename: Option<String>,
 }
 
@@ -391,8 +384,6 @@ impl Default for Entity {
             sound_start_ms: 0,
             sound_volume: 100,
             sound_panning: true,
-            sound_load_volume: 100,
-            sound_load_start_ms: 0,
             filename: None,
         }
     }
@@ -809,10 +800,9 @@ impl Scene {
                         &mut rect.bottom,
                     ]);
                     self.viewport = Some(rect);
-                    // The original's `case` has no `break`: the text of
-                    // the viewport is then read as `PERSISTENT_STATE`,
-                    // which is true only when it starts with `1`.
-                    node.read_bool(&mut self.persistent_state);
+                    // The original's `case` has no `break` and goes on to
+                    // read the viewport's text as `PERSISTENT_STATE`: a
+                    // defect, not reproduced.
                 }
                 "PERSISTENT_STATE" => node.read_bool(&mut self.persistent_state),
                 "PERSISTENT_STATE_SPRITES" => node.read_bool(&mut self.persistent_state_sprites),
@@ -1198,17 +1188,19 @@ impl Entity {
     /// leaves the entity without one.
     fn load(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
         let (mut r, mut g, mut b, mut alpha) = (0, 0, 0, 0);
+        // Whether this block names a tint of its own.
+        let mut tinted = false;
         for item in keys(node, ENTITY_KEYS, "ENTITY") {
             let (key, child) = item?;
             match key {
                 "TEMPLATE" => {
-                    // `LoadFile` on the entity itself. The file name the
-                    // entity answers is then the template's.
+                    // `LoadFile` on the entity itself. (The original then
+                    // answers the template's name as the entity's file;
+                    // the entity keeps its own here.)
                     let name = child.text();
-                    if let Ok(doc) = files.open(&name) {
-                        self.filename = Some(name.clone());
-                        let _ = files.nested(|files| self.load(root_of(&doc, "ENTITY")?, files));
-                    }
+                    let _ = files.template(&name, |doc, files| {
+                        self.load(root_of(doc, "ENTITY")?, files)
+                    });
                     self.template = Some(name);
                 }
                 "NAME" => self.name = child.text(),
@@ -1235,8 +1227,14 @@ impl Entity {
                 "ROTABLE" | "ROTATABLE" => child.read_bool(&mut self.rotatable),
                 "REGISTRABLE" | "INTERACTIVE" => child.read_bool(&mut self.interactive),
                 "SHADOWABLE" | "COLORABLE" => child.read_bool(&mut self.colorable),
-                "ALPHA_COLOR" => child.read_ints(&mut [&mut r, &mut g, &mut b]),
-                "ALPHA" => child.read_int(&mut alpha),
+                "ALPHA_COLOR" => {
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    tinted = true;
+                }
+                "ALPHA" => {
+                    child.read_int(&mut alpha);
+                    tinted = true;
+                }
                 "CURSOR" => self.cursor = Some(child.text()),
                 "REGION" => {
                     let mut region = Region::default();
@@ -1275,28 +1273,23 @@ impl Entity {
                         self.colorable = false;
                     }
                 }
-                "SOUND" => {
-                    // The sound is loaded where the key stands, with the
-                    // volume and the start offset read so far; a start
-                    // offset that was used is spent.
-                    self.sound = Some(child.text());
-                    self.sound_load_volume = self.sound_volume;
-                    self.sound_load_start_ms = self.sound_start_ms;
-                    self.sound_start_ms = 0;
-                }
+                "SOUND" => self.sound = Some(child.text()),
                 "SOUND_START_TIME" => child.read_int(&mut self.sound_start_ms),
                 "SOUND_VOLUME" => child.read_int(&mut self.sound_volume),
                 "SOUND_PANNING" => child.read_bool(&mut self.sound_panning),
                 _ => {}
             }
         }
-        // The tint is that of this file alone: a template's is replaced,
-        // by none when the file names none.
-        if alpha != 0 && r == 0 && g == 0 && b == 0 {
-            (r, g, b) = (255, 255, 255);
+        // A block that names no tint keeps the one it has: a template's.
+        // (The original computes it again from this block alone and
+        // loses the template's.)
+        if tinted {
+            if alpha != 0 && r == 0 && g == 0 && b == 0 {
+                (r, g, b) = (255, 255, 255);
+            }
+            let tint = Rgba::from_ints(r, g, b, alpha);
+            self.tint = (tint != Rgba::from_ints(0, 0, 0, 0)).then_some(tint);
         }
-        let tint = Rgba::from_ints(r, g, b, alpha);
-        self.tint = (tint != Rgba::from_ints(0, 0, 0, 0)).then_some(tint);
         Ok(())
     }
 }
@@ -1327,6 +1320,8 @@ impl Region {
     fn load(&mut self, node: &Node, scene: bool, files: &mut Files<'_>) -> Result<()> {
         self.points.clear();
         let (mut r, mut g, mut b, mut alpha) = (255, 255, 255, 255);
+        // Whether this block names a tint of its own.
+        let mut tinted = false;
         let (table, what) = if scene {
             (SCENE_REGION_KEYS, "REGION")
         } else {
@@ -1357,13 +1352,19 @@ impl Region {
                     child.read_int(&mut zoom);
                     self.zoom = (zoom != 0).then_some(zoom as f32);
                 }
-                "ALPHA_COLOR" => child.read_ints(&mut [&mut r, &mut g, &mut b]),
-                "ALPHA" => child.read_int(&mut alpha),
+                "ALPHA_COLOR" => {
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    tinted = true;
+                }
+                "ALPHA" => {
+                    child.read_int(&mut alpha);
+                    tinted = true;
+                }
                 _ => {}
             }
         }
-        if scene {
-            // The tint is that of this file alone: a template's is lost.
+        // A block that names no tint keeps the one it has: a template's.
+        if scene && tinted {
             self.tint = Rgba::from_ints(r, g, b, alpha);
         }
         Ok(())
@@ -2072,18 +2073,13 @@ SCENE {
         // The template's points replace those read before it.
         assert_eq!(region.points.len(), 4);
         assert_eq!(region.points[0], Point { x: 1, y: 1 });
-        assert_eq!(
-            region.tint,
-            Rgba::OPAQUE_WHITE,
-            "the template's tint is lost"
-        );
+        assert_eq!(region.tint, Rgba::from_ints(255, 255, 255, 10));
 
         let entity = layer.entities().nth(2).unwrap();
         assert_eq!((entity.x, entity.y), (7, 50));
         assert_eq!(entity.sprite.as_deref(), Some("tpl.sprite"));
         assert_eq!(entity.scripts, ["tpl.script", "mine.script"]);
-        assert_eq!(entity.tint, None, "the template's tint is lost");
-        assert_eq!(entity.filename.as_deref(), Some("e.entity"));
+        assert_eq!(entity.tint, Some(Rgba::from_ints(255, 255, 255, 99)));
 
         let group = &scene.waypoint_groups[0];
         assert_eq!(group.name, "tpl");
@@ -2149,42 +2145,33 @@ SCENE {
         );
     }
 
-    /// `CAdScene::LoadBuffer VIEWPORT`: the `case` has no `break`, so
-    /// the text of the viewport is then read as `PERSISTENT_STATE`.
+    /// `CAdScene::LoadBuffer VIEWPORT`: the original's `case` has no
+    /// `break` and reads the viewport as `PERSISTENT_STATE` too; that
+    /// defect is not reproduced.
     #[test]
-    fn a_viewport_also_sets_the_persistent_state() {
+    fn a_viewport_leaves_the_persistent_state_alone() {
         let scene =
             Scene::parse(b"SCENE { PERSISTENT_STATE=TRUE VIEWPORT { 0,0,800,600 } }").unwrap();
-        assert!(!scene.persistent_state, "`0,...` is not true");
-        let scene = Scene::parse(b"SCENE { VIEWPORT { 1,0,800,600 } }").unwrap();
-        assert!(scene.persistent_state, "`1,...` is true");
-        let scene =
-            Scene::parse(b"SCENE { VIEWPORT { 10,0,800,600 } PERSISTENT_STATE=TRUE }").unwrap();
         assert!(scene.persistent_state);
+        let scene = Scene::parse(b"SCENE { VIEWPORT { 1,0,800,600 } }").unwrap();
+        assert!(!scene.persistent_state);
         let rect = scene.viewport.unwrap();
-        assert_eq!((rect.left, rect.right, rect.bottom), (10, 800, 600));
+        assert_eq!((rect.left, rect.right, rect.bottom), (1, 800, 600));
     }
 
-    /// `CAdEntity::LoadBuffer SOUND`: the sound is loaded where the key
-    /// stands, with the volume and start time read before it.
+    /// `CAdEntity::LoadBuffer SOUND`: the volume and the start time
+    /// count wherever they stand (the original only takes those read
+    /// before `SOUND`).
     #[test]
-    fn an_entity_sound_takes_the_values_read_before_it() {
-        let after =
-            Entity::parse(b"ENTITY { SOUND=\"a.ogg\" SOUND_START_TIME=500 SOUND_VOLUME=40 }")
-                .unwrap();
-        assert_eq!(
-            (after.sound_load_volume, after.sound_load_start_ms),
-            (100, 0)
-        );
-        assert_eq!((after.sound_volume, after.sound_start_ms), (40, 500));
-        let before =
-            Entity::parse(b"ENTITY { SOUND_START_TIME=500 SOUND_VOLUME=40 SOUND=\"a.ogg\" }")
-                .unwrap();
-        assert_eq!(
-            (before.sound_load_volume, before.sound_load_start_ms),
-            (40, 500)
-        );
-        assert_eq!((before.sound_volume, before.sound_start_ms), (40, 0));
+    fn an_entity_sound_takes_its_values_in_any_order() {
+        for text in [
+            "ENTITY { SOUND=\"a.ogg\" SOUND_START_TIME=500 SOUND_VOLUME=40 }",
+            "ENTITY { SOUND_START_TIME=500 SOUND_VOLUME=40 SOUND=\"a.ogg\" }",
+        ] {
+            let entity = Entity::parse(text.as_bytes()).unwrap();
+            assert_eq!(entity.sound.as_deref(), Some("a.ogg"));
+            assert_eq!((entity.sound_volume, entity.sound_start_ms), (40, 500));
+        }
     }
 
     #[test]
@@ -2246,11 +2233,11 @@ SCENE {
         assert_eq!(
             scene.ambient_light_color,
             Rgb {
-                r: 44,
+                r: 255,
                 g: 20,
-                b: 251
+                b: 0
             },
-            "each number cut to its low byte"
+            "each number kept within 0 to 255"
         );
     }
 

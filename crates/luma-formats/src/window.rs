@@ -1191,7 +1191,11 @@ impl WindowDef {
     /// default: those of a template are replaced.
     pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
         let (mut fade_r, mut fade_g, mut fade_b, mut fade_a) = (0, 0, 0, 0);
+        // Whether this block names a fade of its own.
+        let mut faded = false;
         let (mut r, mut g, mut b, mut alpha) = (0, 0, 0, 0);
+        // Whether this block names a tint of its own.
+        let mut tinted = false;
         for item in keys(node, WINDOW_KEYS, "WINDOW") {
             let (key, child) = item?;
             if self.base.apply_key(key, child) {
@@ -1228,13 +1232,21 @@ impl WindowDef {
                 "FADE_COLOR" => {
                     child.read_ints(&mut [&mut fade_r, &mut fade_g, &mut fade_b]);
                     self.fade_background = true;
+                    faded = true;
                 }
                 "FADE_ALPHA" => {
                     child.read_int(&mut fade_a);
                     self.fade_background = true;
+                    faded = true;
                 }
-                "ALPHA_COLOR" => child.read_ints(&mut [&mut r, &mut g, &mut b]),
-                "ALPHA" => child.read_int(&mut alpha),
+                "ALPHA_COLOR" => {
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    tinted = true;
+                }
+                "ALPHA" => {
+                    child.read_int(&mut alpha);
+                    tinted = true;
+                }
                 "BUTTON" => {
                     let mut def = ButtonDef::default();
                     def.apply_with(child, files)?;
@@ -1264,15 +1276,18 @@ impl WindowDef {
             }
         }
         // An alpha without a colour means white at that alpha; nothing at
-        // all means no tint.
-        if alpha != 0 && r == 0 && g == 0 && b == 0 {
-            (r, g, b) = (255, 255, 255);
+        // all means no tint. A block that names neither keeps the tint
+        // it has, a template's, and the same holds for the fade. (The
+        // original computes both again from this block alone and loses
+        // the template's.)
+        if tinted {
+            if alpha != 0 && r == 0 && g == 0 && b == 0 {
+                (r, g, b) = (255, 255, 255);
+            }
+            let tint = Rgba::from_ints(r, g, b, alpha);
+            self.alpha_color = (tint != Rgba::from_ints(0, 0, 0, 0)).then_some(tint);
         }
-        let tint = Rgba::from_ints(r, g, b, alpha);
-        self.alpha_color = (tint != Rgba::from_ints(0, 0, 0, 0)).then_some(tint);
-        // Once a fade was asked for (here or in a template), its colour
-        // is this block's.
-        if self.fade_background {
+        if faded {
             self.fade_color = Some(Rgba::from_ints(fade_r, fade_g, fade_b, fade_a));
         }
         Ok(())
@@ -1549,6 +1564,8 @@ impl ItemDef {
     /// white, so `ALPHA` alone makes the item translucent.
     pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
         let (mut r, mut g, mut b, mut alpha) = (0, 0, 0, 255);
+        // Whether this block names a tint of its own.
+        let mut tinted = false;
         for item in keys(node, ITEM_KEYS, "ITEM") {
             let (key, child) = item?;
             match key {
@@ -1579,15 +1596,24 @@ impl ItemDef {
                 "TALK_SPECIAL" => self.talk_special.push(child.text()),
                 "SCRIPT" => self.scripts.push(child.text()),
                 "PROPERTY" => self.properties.extend(Property::from_node(child)),
-                "ALPHA_COLOR" => child.read_ints(&mut [&mut r, &mut g, &mut b]),
-                "ALPHA" => child.read_int(&mut alpha),
+                "ALPHA_COLOR" => {
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    tinted = true;
+                }
+                "ALPHA" => {
+                    child.read_int(&mut alpha);
+                    tinted = true;
+                }
                 _ => {}
             }
         }
-        if alpha != 0 && r == 0 && g == 0 && b == 0 {
-            (r, g, b) = (255, 255, 255);
+        // An item that names no tint keeps the one it has: a template's.
+        if tinted {
+            if alpha != 0 && r == 0 && g == 0 && b == 0 {
+                (r, g, b) = (255, 255, 255);
+            }
+            self.alpha_color = Rgba::from_ints(r, g, b, alpha);
         }
-        self.alpha_color = Rgba::from_ints(r, g, b, alpha);
         Ok(())
     }
 }
@@ -2028,7 +2054,7 @@ ITEM { NAME = "key" SPRITE = "items\key.sprite" CURSOR_COMBINED = FALSE AMOUNT =
     }
 
     /// `CUIWindow::LoadBuffer`: the tint and the fade are computed at the
-    /// end of each block from its own keys, which all default to 0.
+    /// end of a block from its own keys, which all default to 0.
     #[test]
     fn window_tint_and_fade_follow_the_original() {
         let get = |src: &str| WindowDef::parse(src.as_bytes()).unwrap();
@@ -2051,8 +2077,8 @@ ITEM { NAME = "key" SPRITE = "items\key.sprite" CURSOR_COMBINED = FALSE AMOUNT =
         let w = get("WINDOW { FADE_COLOR { 1,2,3 } }");
         assert_eq!(w.fade_color, Some(Rgba::from_ints(1, 2, 3, 0)));
 
-        // A template's tint and fade are replaced by the outer block's,
-        // which has none: no tint, and a fade of alpha 0.
+        // A template's tint and fade stay when the outer block names
+        // none (the original loses them), and are replaced when it does.
         let w = window_with(
             r#"WINDOW { TEMPLATE="t.window" }"#,
             files(&[(
@@ -2060,8 +2086,17 @@ ITEM { NAME = "key" SPRITE = "items\key.sprite" CURSOR_COMBINED = FALSE AMOUNT =
                 "WINDOW { ALPHA=128 FADE_COLOR { 9,9,9 } FADE_ALPHA=77 }",
             )]),
         );
-        assert_eq!(w.alpha_color, None);
-        assert_eq!(w.fade_color, Some(Rgba::from_ints(0, 0, 0, 0)));
+        assert_eq!(w.alpha_color, Some(Rgba::from_ints(255, 255, 255, 128)));
+        assert_eq!(w.fade_color, Some(Rgba::from_ints(9, 9, 9, 77)));
+        let w = window_with(
+            r#"WINDOW { TEMPLATE="t.window" ALPHA=10 FADE_ALPHA=20 }"#,
+            files(&[(
+                "t.window",
+                "WINDOW { ALPHA=128 FADE_COLOR { 9,9,9 } FADE_ALPHA=77 }",
+            )]),
+        );
+        assert_eq!(w.alpha_color, Some(Rgba::from_ints(255, 255, 255, 10)));
+        assert_eq!(w.fade_color, Some(Rgba::from_ints(0, 0, 0, 20)));
     }
 
     /// A key outside the loader's table is a syntax error; a control
@@ -2252,11 +2287,7 @@ ITEM { NAME = "key" SPRITE = "items\key.sprite" CURSOR_COMBINED = FALSE AMOUNT =
         assert_eq!(item.caption, "Base");
         assert_eq!(item.sprite.as_deref(), Some("base.sprite"));
         assert_eq!(item.talk, ["t.sprite"]);
-        assert_eq!(
-            item.alpha_color,
-            Rgba::OPAQUE_WHITE,
-            "the template's tint is replaced"
-        );
+        assert_eq!(item.alpha_color, Rgba::from_ints(255, 255, 255, 50));
 
         // An item that fails is left out; a statement that is not an
         // `ITEM` ends the file with an error, after the items before it.

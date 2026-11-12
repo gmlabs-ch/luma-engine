@@ -183,9 +183,7 @@ impl Actor {
             x: def.x,
             y: def.y,
             stop_on_blocked: def.stop_on_blocked,
-            // The file the actor answers as its own is the last template
-            // read into it, when there is one (`CAdActor::LoadFile`).
-            filename: def.filename.clone().unwrap_or_else(|| path.to_string()),
+            filename: path.to_string(),
             def,
             scene_bound,
             dir: Direction::Left,

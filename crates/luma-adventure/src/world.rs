@@ -2229,12 +2229,12 @@ impl World {
         }
     }
 
-    /// Loads the `SOUND` of an entity without playing it, as
-    /// `CAdEntity::LoadBuffer` does where the key stands
-    /// (`PlaySFX(file, false, false)`): with the volume and the start
-    /// offset read before the key. Those read after it are kept for the
-    /// next `PlaySound()` without a file. An entity of the game or of a
-    /// window is handled like one of the scene.
+    /// Loads the `SOUND` of an entity without playing it
+    /// (`PlaySFX(file, false, false)` in `CAdEntity::LoadBuffer`), with
+    /// its `SOUND_VOLUME` and `SOUND_START_TIME` wherever they stand in
+    /// the block. (The original only takes those read before `SOUND`: a
+    /// defect, not reproduced.) An entity of the game or of a window is
+    /// handled like one of the scene.
     pub(crate) fn load_entity_sound(&mut self, id: NativeId) {
         let Some(Kind::Entity(r)) = self.objects.get(id).map(|n| n.kind.clone()) else {
             return;
@@ -2243,13 +2243,11 @@ impl World {
             return;
         };
         let sound = entity.sound.clone();
-        let (load_volume, load_start) = (entity.sound_load_volume, entity.sound_load_start_ms);
         let (volume, start) = (entity.sound_volume, entity.sound_start_ms);
+        self.set_sfx_fields(id, volume, start.max(0) as u64);
         if let Some(sound) = sound {
-            self.set_sfx_fields(id, load_volume, load_start.max(0) as u64);
             self.play_sfx(id, Some(&sound), false, false, None, 0);
         }
-        self.set_sfx_fields(id, volume, start.max(0) as u64);
     }
 
     /// The screen fader.
@@ -3199,10 +3197,7 @@ impl Host for World {
         self.rng ^= self.rng >> 12;
         self.rng ^= self.rng << 25;
         self.rng ^= self.rng >> 27;
-        // `CBUtils::RandomInt`: `rand() % (to - from + 1) + from`, and
-        // the C library's `rand()` gives 15 bits: a span wider than
-        // 32768 is never covered.
-        let value = (self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 49) & 0x7FFF;
+        let value = self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32;
         let span = i64::from(to) - i64::from(from) + 1;
         if span <= 0 {
             return from;

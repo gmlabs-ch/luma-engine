@@ -196,7 +196,7 @@ impl World {
     /// Reads an `.entity` file (`CAdEntity::LoadFile`), with the
     /// `TEMPLATE` files it names loaded where the keys stand; `None`,
     /// logged, when it cannot be read or parsed. The entity keeps the
-    /// name of its file (`Filename`): this one, or its last template's.
+    /// name of its file (`Filename`).
     pub(crate) fn read_entity_def(&mut self, path: &str) -> Option<Entity> {
         let bytes = match self.vfs.read(path) {
             Ok(bytes) => bytes,
@@ -211,7 +211,7 @@ impl World {
         let mut read = |file: &str| vfs.read(file).ok();
         match Entity::parse_with(&bytes, &mut luma_formats::Files::new(&mut read)) {
             Ok(mut def) => {
-                def.filename.get_or_insert_with(|| path.to_string());
+                def.filename = Some(path.to_string());
                 Some(def)
             }
             Err(err) => {

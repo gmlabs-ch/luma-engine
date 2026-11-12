@@ -651,7 +651,8 @@ SPRITE {
         assert_eq!(images, [None, Some("b.png")]);
     }
 
-    /// Values read as the original's `ScanStr` and `DRGBA` do.
+    /// Values read as the original's `ScanStr` does; colours are kept
+    /// within 0 to 255.
     #[test]
     fn frame_values_follow_the_original() {
         let s = Sprite::parse(
@@ -661,12 +662,12 @@ SPRITE {
         assert!(s.looping, "a scalar in braces");
         assert!(s.precise, "an empty value keeps the default");
         let sub = &s.frames[0].subframes[0];
-        assert_eq!(sub.tint.a, 44, "300 cut to its low byte");
+        assert_eq!(sub.tint.a, 255, "300 kept within 0 to 255");
         assert_eq!(
             sub.color_key,
             Rgb {
-                r: 44,
-                g: 255,
+                r: 255,
+                g: 0,
                 b: 255
             }
         );

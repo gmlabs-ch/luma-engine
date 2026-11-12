@@ -136,12 +136,15 @@ These are the rules of `CBParser::ScanStr`, which every loader uses
   digit. `yess` and `10` are false.
 - In a **list** (`%d,%d,...`), each number must be followed by a comma
   for the next one to be read; where the comma is missing the scan stops
-  and the remaining variables keep what they had. After a number the
-  engine skips digits, signs, spaces, tabs and line feeds, but **not a
-  carriage return**: a list broken over several lines of a CR LF file is
-  read up to its first line break.
-- **Colours** are packed with `DRGBA`, which keeps the low byte of each
-  number: 256 is 0 and -1 is 255 (`Rgba::from_ints`).
+  and the remaining variables keep what they had. A list may be broken
+  over several lines.
+- **Colours** are kept within 0 to 255 per component (`Rgba::from_ints`).
+
+Two defects of the original are not reproduced here. Its scan does not
+skip a carriage return after a number, so that a list broken over lines
+of a CR LF file is read up to its first line break; Luma reads the whole
+list. Its `DRGBA` keeps the low byte of each colour component (256 is 0,
+-1 is 255); Luma clamps.
 
 Strings are 8-bit text in the game's Windows code page; the files of most
 games are plain ASCII.
@@ -200,13 +203,13 @@ keys written before `TEMPLATE` are overridden by the template, the keys
 after it override the template, and what a block appends (the controls of
 a window, the nodes of a layer, the scripts) comes in file order.
 
-Two consequences of loading in place, the same for every kind:
-
-- values a loader puts together at the end of its block (the tint from
-  `ALPHA_COLOR` and `ALPHA`, the fade of a window) are computed again by
-  the outer block from its own keys: a template's tint is lost unless the
-  outer file repeats it;
-- the object's file name (`Filename`) becomes the template's.
+Values a loader puts together at the end of its block (the tint from
+`ALPHA_COLOR` and `ALPHA`, the fade of a window) are the template's
+unless the outer block names its own, and the object keeps the name of
+its own file (`Filename`). The original gets both wrong, which Luma does
+not reproduce: it computes the tint and the fade again from the outer
+block alone, losing the template's, and answers the template's name as
+the object's file.
 
 A template that cannot be loaded is skipped by some loaders and fails the
 object in others; each format's document says which. The original has no

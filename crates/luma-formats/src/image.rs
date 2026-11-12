@@ -24,14 +24,14 @@ pub struct Rgb {
 }
 
 impl Rgb {
-    /// The colour the engine makes of three integers read from a file:
-    /// each one is cut to its low byte (`DRGBA`, a `BYTE` argument), so
-    /// 256 is 0 and -1 is 255.
+    /// The colour of three integers read from a file, each kept within
+    /// 0 to 255. (The original cuts each one to its low byte, so that
+    /// 256 is 0: a defect, not reproduced.)
     pub fn from_ints(r: i32, g: i32, b: i32) -> Rgb {
         Rgb {
-            r: (r & 0xff) as u8,
-            g: (g & 0xff) as u8,
-            b: (b & 0xff) as u8,
+            r: r.clamp(0, 255) as u8,
+            g: g.clamp(0, 255) as u8,
+            b: b.clamp(0, 255) as u8,
         }
     }
 }
@@ -59,15 +59,15 @@ impl Rgba {
         a: 255,
     };
 
-    /// The colour the engine's `DRGBA(r, g, b, a)` makes of four integers
-    /// read from a file: each one is cut to its low byte, so 256 is 0 and
-    /// -1 is 255.
+    /// The colour of four integers read from a file, each kept within 0
+    /// to 255. (The original's `DRGBA` cuts each one to its low byte, so
+    /// that 256 is 0: a defect, not reproduced.)
     pub fn from_ints(r: i32, g: i32, b: i32, a: i32) -> Rgba {
         Rgba {
-            r: (r & 0xff) as u8,
-            g: (g & 0xff) as u8,
-            b: (b & 0xff) as u8,
-            a: (a & 0xff) as u8,
+            r: r.clamp(0, 255) as u8,
+            g: g.clamp(0, 255) as u8,
+            b: b.clamp(0, 255) as u8,
+            a: a.clamp(0, 255) as u8,
         }
     }
 }

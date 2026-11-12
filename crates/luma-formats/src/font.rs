@@ -582,7 +582,7 @@ fn color_of(node: &Node, color: &mut Rgba) {
 fn alpha_of(node: &Node, color: &mut Rgba) {
     let mut a = 0;
     node.read_int(&mut a);
-    color.a = (a & 0xff) as u8;
+    color.a = a.clamp(0, 255) as u8;
 }
 
 #[cfg(test)]

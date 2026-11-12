@@ -172,7 +172,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBGame::GetSequence` | replaced | Object ids are `NativeId`s handed out by `Objects::insert` (`luma-adventure/src/objects.rs`); `m_ID` is not visible to scripts. |
 | `CBGame::SetOffset` | done | `World::offset_x`, `offset_y` (`luma-adventure/src/world.rs`), set by `scroll_step`, `skip_to`; per-layer offsets come from `Camera::layer_offset`. |
 | `CBGame::GetOffset` | done | `World::offset`. |
-| `CBGame::LoadFile` | done | `World::with_audio` reads the file named by the settings with `GameFile::parse_with` (`luma-formats/src/game.rs`); a missing or unparsable file is an error, as in WME. `Game.Filename` (`natives.rs` `game_get`) answers the file, or the last `TEMPLATE` read into it (`GameFile::filename`), as `m_Filename` ends. |
+| `CBGame::LoadFile` | partial | deliberate: `Game.Filename` (`natives.rs` `game_get`) answers the game file named by the settings; the original answers the last `TEMPLATE` read into it (a defect). `World::with_audio` reads the file with `GameFile::parse_with` (`luma-formats/src/game.rs`); a missing or unparsable file is an error, as in WME. |
 | `CBGame::LoadBuffer` | done | `GameFile::load_game` (`luma-formats/src/game.rs`): the original's table (a key outside it fails the load), keys in order; a cursor that does not load is logged and dropped as in the original (its error code is overwritten by the next statement, `World::load_cursors`); after the loop `World::with_audio` falls back to the built-in `system_font.fnt` when the game has no system font, and the built-in shadow stands for `shadow.png` when `SHADOW_IMAGE` is absent. |
 | `CBGame::LoadBuffer GAME` | done | `GameFile::from_document` requires the `GAME` block. |
 | `CBGame::LoadBuffer TEMPLATE` | done | `GameFile::load_game` (`luma-formats/src/game.rs`): the named game file is read whole (`GAME` and `AD_GAME` blocks, `CAdGame::LoadFile`) where the key stands, through `Files` (`World::with_audio` gives the game's files); one that cannot be loaded is skipped. |
@@ -529,7 +529,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CBSubFrame::CBSubFrame` | done | `SubFrame::default` (`luma-formats/src/sprite.rs`): no image, hotspot 0, white opaque tint, magenta colour key, no rectangle, no mirroring, not a decoration. |
 | `CBSubFrame::~CBSubFrame` | replaced | Rust ownership; textures live in the banks. |
-| `CBSubFrame::LoadBuffer` | done | `SubFrame::from_node` (`luma-formats/src/sprite.rs`): the original's table (a key outside it is a syntax error; the frame then drops that sub-frame and goes on), values read with `ScanStr` rules, colours cut to their low byte (`DRGBA`), a sub-frame without image allowed. |
+| `CBSubFrame::LoadBuffer` | partial | deliberate: colour components out of 0..255 are clamped (`Rgba::from_ints`, `Rgb::from_ints`); the original's `DRGBA` and `BYTE` arguments keep their low byte (256 is 0), a defect. Otherwise `SubFrame::from_node` (`luma-formats/src/sprite.rs`) as the original: its table (a key outside it is a syntax error; the frame then drops that sub-frame and goes on), values read with `ScanStr` rules, a sub-frame without image allowed. |
 | `CBSubFrame::LoadBuffer IMAGE` | done | `SubFrame::image`. |
 | `CBSubFrame::LoadBuffer TRANSPARENT` | done | `SubFrame::color_key`. |
 | `CBSubFrame::LoadBuffer RECT` | done | `SubFrame::rect`; empty is the whole image. |

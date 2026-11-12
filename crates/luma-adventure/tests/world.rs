@@ -2160,9 +2160,7 @@ fn sounds_music_and_speech_play_on_the_game_clock() {
     assert_eq!(result(&runtime, "len"), Value::Int(300));
     assert_eq!(result(&runtime, "started"), Value::Bool(true));
     assert_eq!(result(&runtime, "playing"), Value::Bool(true));
-    // `SOUND_VOLUME` is written after `SOUND`, as the scene editor does:
-    // the sound was loaded at the volume read before it, 100.
-    assert_eq!(result(&runtime, "humVol"), Value::Int(100));
+    assert_eq!(result(&runtime, "humVol"), Value::Int(50));
     assert_eq!(result(&runtime, "humPlaying0"), Value::Bool(false));
     assert_eq!(result(&runtime, "humPlaying1"), Value::Bool(true));
     // The effects: kept on the object, applied to its playing sound,
@@ -6260,31 +6258,6 @@ fn a_game_whose_items_file_is_missing_does_not_start() {
     }
 }
 
-/// `CBUtils::RandomInt` draws from the C library's 15-bit `rand()`, so a
-/// span wider than that is never covered; `CBUtils::GetUsedMemMB` is 0
-/// in a release build of the original.
-#[test]
-fn random_numbers_have_the_range_of_rand_and_used_memory_is_zero() {
-    use luma_script::Host;
-    let dir = game();
-    let vfs = Vfs::open_game(&dir).unwrap();
-    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
-    let mut highest = 0;
-    for _ in 0..500 {
-        let value = runtime.world.random(0, 1_000_000);
-        assert!((0..=32767).contains(&value), "{value}");
-        highest = highest.max(value);
-        let small = runtime.world.random(10, 12);
-        assert!((10..=12).contains(&small));
-    }
-    assert!(highest > 20_000, "the whole range of rand() is used");
-    let game = runtime.world.game_id();
-    assert_eq!(
-        runtime.world.get_property(game, "UsedMemory"),
-        Some(Value::Int(0))
-    );
-}
-
 /// `CBGame::LoadSettings`: `SAVED_GAME_EXT` names the extension of the
 /// slot files, and `ALLOW_ACCESSIBILITY_TAB` is read from the settings.
 #[test]
@@ -6359,7 +6332,10 @@ fn templates_are_loaded_in_place_from_the_game() {
     );
     assert_eq!((free.x, free.y), (3, 9));
     assert_eq!(free.sprite.as_deref(), Some("art\\red.png"));
-    assert_eq!(free.filename.as_deref(), Some("tpl\\prop.entity"));
+    assert_eq!(
+        free.filename, None,
+        "an entity of a scene file has no file of its own"
+    );
 
     let win = runtime
         .world
