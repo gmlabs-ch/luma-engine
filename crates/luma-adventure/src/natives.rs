@@ -1509,6 +1509,11 @@ impl World {
         let Some(entity) = view.entity(r) else {
             return 0;
         };
+        // An entity with a region and no sprite is as high as the
+        // region's bounding rectangle (`CAdEntity::GetHeight`).
+        if let (Some(region), None) = (&entity.region, &entity.sprite) {
+            return region.bounds().map_or(0, |b| b.bottom - b.top);
+        }
         // The sprite being shown (a talk sprite, a played animation), as
         // the frame index is its own; else the entity's sprite.
         let shown = view.shown_sprite(r);
@@ -1737,14 +1742,28 @@ impl World {
             }
             return true;
         }
+        // `CBObject::ScSetProperty`: each of `X` and `Y` is followed by
+        // `AfterMove`, which raises the region events for entities too.
+        if name == "X" || name == "Y" {
+            let Some(e) = self.entity_def_mut(r) else {
+                return false;
+            };
+            if name == "X" {
+                e.x = int;
+            } else {
+                e.y = int;
+            }
+            if let Some(id) = self.node_id(r) {
+                self.object_moved(id);
+            }
+            return true;
+        }
         let Some(e) = self.entity_def_mut(r) else {
             return false;
         };
         match name {
             "Name" => e.name = text,
             "Caption" => e.caption = caption,
-            "X" => e.x = int,
-            "Y" => e.y = int,
             "Registrable" | "Interactive" => e.interactive = flag,
             "Zoomable" | "Scalable" => e.scalable = flag,
             "Rotatable" => e.rotatable = flag,
@@ -1787,6 +1806,10 @@ impl World {
                 if let Some(e) = self.entity_def_mut(r) {
                     e.x = x;
                     e.y = y;
+                }
+                // `CBObject::SkipTo` ends with `AfterMove`.
+                if let Some(id) = self.node_id(r) {
+                    self.object_moved(id);
                 }
                 Return::null()
             }

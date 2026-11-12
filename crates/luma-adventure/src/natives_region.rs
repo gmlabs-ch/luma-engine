@@ -133,6 +133,32 @@ impl World {
         Some(self.objects.insert(Kind::EntityRegion(owner)))
     }
 
+    /// `CAdEntity::UpdatePosition`, at the end of an entity's loading:
+    /// an entity with a region and no sprite stands at the bottom centre
+    /// of the region's bounding rectangle, whatever `X` and `Y` its
+    /// file gives; it is where its subtitles go, where an actor sent to
+    /// it without a walk-to point walks, and what `X` and `Y` read.
+    pub(crate) fn update_entity_position(&mut self, owner: NativeId) {
+        let Some(Kind::Entity(r)) = self.objects.get(owner).map(|n| n.kind.clone()) else {
+            return;
+        };
+        let Some(entity) = self.entity_def_mut(r) else {
+            return;
+        };
+        if entity.sprite.is_some() {
+            return;
+        }
+        let Some(region) = &entity.region else {
+            return;
+        };
+        // A region without points has an empty rectangle at the origin.
+        let (left, right, bottom) = region
+            .bounds()
+            .map_or((0, 0, 0), |b| (b.left, b.right, b.bottom));
+        entity.x = left + (right - left) / 2;
+        entity.y = bottom;
+    }
+
     /// The handle of an entity's region object, if it has one.
     pub fn entity_region_id(&self, owner: NativeId) -> Option<NativeId> {
         self.objects.find(|k| *k == Kind::EntityRegion(owner))

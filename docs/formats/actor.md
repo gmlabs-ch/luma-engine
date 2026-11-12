@@ -148,7 +148,15 @@ when the walk came from `GoToObject`, turns to the entity's
 `WALK_TO_DIR`.
 
 Every move raises `ActorEntry` on the regions of the main layer the
-actor enters and `ActorLeave` on those it leaves.
+actor enters and `ActorLeave` on those it leaves (`CAdObject::AfterMove`:
+the active regions containing the position, at most nine, compared with
+those of the last move): a step of a walk, a frame's `MOVE`, `SkipTo`,
+and a script setting `X` or `Y`, each of the two on its own, so setting
+both passes through the point in between. The first frame an actor
+shows counts as a move, so an actor loaded inside a region enters it
+then. Entities raise the same two events on the regions when a script
+moves them (`X`, `Y`, `SkipTo`); a frame's `MOVE` moves an entity
+without them, as in the original.
 
 **Direction of a segment** from its angle in degrees (`atan2`, y down,
 truncated to an integer): up for `(-112, -67]`, up-right for

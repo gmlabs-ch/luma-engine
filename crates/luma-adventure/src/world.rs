@@ -2372,6 +2372,8 @@ impl World {
         // (`CAdGame::ChangeScene`).
         for (_, slot) in self.objects.iter_mut() {
             slot.state.stick_region = None;
+            // `InvalidateCurrRegions`.
+            slot.state.current_regions.clear();
         }
         self.hide_taken_item_entities();
         for (_, actor) in &mut self.actors {
@@ -2431,6 +2433,7 @@ impl World {
                 let id = self.objects.insert(kind);
                 self.load_entity_sound(id);
                 self.register_entity_region(id);
+                self.update_entity_position(id);
                 for script in scripts {
                     self.attach(engine, id, &script);
                 }
@@ -2446,6 +2449,7 @@ impl World {
                 .insert(Kind::Entity(crate::scene_view::EntityRef::Free(i)));
             self.load_entity_sound(id);
             self.register_entity_region(id);
+            self.update_entity_position(id);
             let scripts = self.scene().unwrap().scene.free_entities[i].scripts.clone();
             for script in scripts {
                 self.attach(engine, id, &script);
@@ -2996,6 +3000,29 @@ impl World {
     /// The object the view follows (`Game.MainObject`).
     pub fn main_object(&self) -> Option<NativeId> {
         self.main_object.filter(|id| self.objects.contains(*id))
+    }
+
+    /// An entity or a 2D actor was moved by a script (`X`, `Y`,
+    /// `SkipTo`): `CAdObject::AfterMove` raises `ActorEntry` on the
+    /// regions of the main layer it entered and `ActorLeave` on those
+    /// it left, for entities as for actors.
+    pub(crate) fn object_moved(&mut self, id: NativeId) {
+        let position = match self.objects.get(id).map(|n| n.kind.clone()) {
+            Some(Kind::Actor) => self.actor(id).map(|a| (a.x, a.y)),
+            Some(Kind::Entity(r)) => self.entity_def(r).map(|e| (e.x, e.y)),
+            _ => None,
+        };
+        let (Some((x, y)), Some(view)) = (position, self.scene.as_ref()) else {
+            return;
+        };
+        let new = crate::scene_view::regions_at(&view.scene, x, y);
+        let mut events = Vec::new();
+        if let Some(actor) = self.actor_mut(id) {
+            actor.enter_regions(new, &mut events);
+        } else if let Some(state) = self.object_state_mut(id) {
+            crate::actor::region_events(&mut state.current_regions, new, &mut events);
+        }
+        self.queue_events(id, events);
     }
 
     /// Moves an actor to a point (`SkipTo`), raising the region events.

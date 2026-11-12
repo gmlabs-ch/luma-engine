@@ -106,14 +106,26 @@ impl World {
                 text.clone()
             }
         };
+        // `CBObject::ScSetProperty`: each of `X` and `Y` is followed by
+        // `AfterMove` (the region events).
+        if name == "X" || name == "Y" {
+            let Some(actor) = self.actor_mut(id) else {
+                return false;
+            };
+            if name == "X" {
+                actor.x = int;
+            } else {
+                actor.y = int;
+            }
+            self.object_moved(id);
+            return true;
+        }
         let Some(actor) = self.actor_mut(id) else {
             return false;
         };
         match name {
             "Name" => actor.def.name = text,
             "Caption" => actor.def.caption = caption,
-            "X" => actor.x = int,
-            "Y" => actor.y = int,
             "Direction" => {
                 if let Some(dir) = Direction::from_index(i64::from(int)) {
                     actor.dir = dir;

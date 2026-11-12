@@ -683,25 +683,13 @@ impl Actor {
     /// layer the actor entered and left (`CAdObject::AfterMove`).
     fn after_move(&mut self, scene: &Scene, events: &mut Vec<ActorEvent>) {
         let new = crate::scene_view::regions_at(scene, self.x, self.y);
-        for &(layer, index) in &new {
-            if !self.current_regions.contains(&(layer, index)) {
-                events.push(ActorEvent::OnRegion {
-                    layer,
-                    index,
-                    event: "ActorEntry",
-                });
-            }
-        }
-        for &(layer, index) in &self.current_regions {
-            if !new.contains(&(layer, index)) {
-                events.push(ActorEvent::OnRegion {
-                    layer,
-                    index,
-                    event: "ActorLeave",
-                });
-            }
-        }
-        self.current_regions = new;
+        self.enter_regions(new, events);
+    }
+
+    /// The actor now stands in the regions `new`: `ActorEntry` for
+    /// those it was not in, then `ActorLeave` for those it left.
+    pub(crate) fn enter_regions(&mut self, new: Vec<(usize, usize)>, events: &mut Vec<ActorEvent>) {
+        region_events(&mut self.current_regions, new, events);
     }
 
     /// One frame (`CAdActor::Update`): animations advance, turns and
@@ -1036,6 +1024,36 @@ impl Actor {
             100.0
         }
     }
+}
+
+/// `CAdObject::AfterMove`: an object that stood in the regions `current`
+/// now stands in `new`. `ActorEntry` is raised on the regions entered,
+/// in the order found (last node first), then `ActorLeave` on those
+/// left; `current` becomes `new`.
+pub(crate) fn region_events(
+    current: &mut Vec<(usize, usize)>,
+    new: Vec<(usize, usize)>,
+    events: &mut Vec<ActorEvent>,
+) {
+    for &(layer, index) in &new {
+        if !current.contains(&(layer, index)) {
+            events.push(ActorEvent::OnRegion {
+                layer,
+                index,
+                event: "ActorEntry",
+            });
+        }
+    }
+    for &(layer, index) in current.iter() {
+        if !new.contains(&(layer, index)) {
+            events.push(ActorEvent::OnRegion {
+                layer,
+                index,
+                event: "ActorLeave",
+            });
+        }
+    }
+    *current = new;
 }
 
 /// Points relative to an object, scaled and moved to its position

@@ -53,6 +53,11 @@ impl World {
         for (_, actor) in &mut self.actors {
             actor.remap_regions(|(l, i)| node(l, i));
         }
+        for (_, slot) in self.objects.iter_mut() {
+            for region in &mut slot.state.current_regions {
+                *region = node(region.0, region.1);
+            }
+        }
         #[cfg(feature = "3d")]
         for (_, actor) in &mut self.actors3d {
             actor.remap_regions(|(l, i)| node(l, i));
@@ -162,6 +167,7 @@ impl World {
         self.apply_properties(id, &entity.properties);
         self.load_entity_sound(id);
         self.register_entity_region(id);
+        self.update_entity_position(id);
         for script in entity.scripts {
             self.attach(engine, id, &script);
         }

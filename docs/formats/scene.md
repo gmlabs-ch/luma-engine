@@ -192,7 +192,7 @@ scene and the root block of an `.entity` file.
 | `ALPHA_COLOR` | `r,g,b` | none | Fixed tint, overriding the scene's. |
 | `ALPHA` | int 0–255 | none | Fixed opacity. `ALPHA` without `ALPHA_COLOR` means `255,255,255` with that alpha. |
 | `CURSOR` | string | | Sprite used as the mouse cursor over the entity. |
-| `REGION` | block | | Clickable area as a polygon, see [`REGION`](#region); only the base keys are read. Without it, the sprite's pixels are the clickable area. |
+| `REGION` | block | | Clickable area as a polygon, see [`REGION`](#region); only the base keys are read. Without it, the sprite's pixels are the clickable area. An entity with a region and no `SPRITE` is placed, once loaded, at the bottom centre of the region's bounding rectangle whatever its `X` and `Y` (`CAdEntity::UpdatePosition`), and its `Height` is the rectangle's: that point is where its subtitles go and where an actor sent to it without a walk-to point walks. |
 | `BLOCKED_REGION` | block | | Polygon that blocks actors while the entity is there (a crate on the floor). Only for a [free entity](#free-entities) or an entity of the game: the path finder does not look at the entities that are nodes of a layer. |
 | `WAYPOINTS` | block | | Waypoints that become available while the entity is there (a ladder). Same restriction. |
 | `WALK_TO_X`, `WALK_TO_Y` | int | 0 | Where the actor walks before interacting with the entity. |

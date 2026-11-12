@@ -207,6 +207,11 @@ pub struct ObjectState {
     /// the response box's): set by `SetCursor`, shown while the object
     /// is the one under the mouse.
     pub cursor: Option<String>,
+    /// The regions of the main layer an entity stood in when it last
+    /// moved (`CAdObject::m_CurrentRegions`), as `(layer, node)`: what
+    /// `ActorEntry` and `ActorLeave` are raised against. An actor keeps
+    /// its own list.
+    pub current_regions: Vec<(usize, usize)>,
 }
 
 /// The inventory of an object other than the game (`CAdInventory`).
@@ -248,6 +253,7 @@ impl Default for ObjectState {
             freezable: true,
             filename: None,
             cursor: None,
+            current_regions: Vec::new(),
         }
     }
 }

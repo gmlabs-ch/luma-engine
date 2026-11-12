@@ -1833,6 +1833,7 @@ impl World {
         let entity = self.objects.insert(Kind::Entity(EntityRef::Ui(index)));
         self.set_holder_filename(entity, path);
         self.register_entity_region(entity);
+        self.update_entity_position(entity);
         for script in scripts {
             self.attach(engine, entity, &script);
         }

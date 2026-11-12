@@ -964,3 +964,113 @@ on "Close" {
     assert_eq!(runtime.world.access_objects(), vec![near, flyer, walker]);
     std::fs::remove_dir_all(dir).ok();
 }
+
+const ZONES: &str = "SCENE {
+  NAME=\"Zones\"
+  LAYER {
+    NAME=\"main\" MAIN=TRUE WIDTH=64 HEIGHT=48
+    REGION { NAME=\"floor\" SCRIPT=\"floor.script\" POINT {0,24} POINT {64,24} POINT {64,48} POINT {0,48} }
+    ENTITY { NAME=\"spot\" X=7 Y=9 REGION { POINT {10,4} POINT {30,4} POINT {30,20} POINT {10,20} } }
+    ENTITY { NAME=\"mover\" X=5 Y=5 SPRITE=\"red.png\" }
+  }
+}";
+
+#[test]
+fn moving_an_entity_or_an_actor_by_script_raises_the_region_events() {
+    let (dir, mut runtime, log) = start(
+        r#"
+global result = new Object();
+result.entries = 0;
+result.leaves = 0;
+Game.ChangeScene("zones.scene", false, false);
+global bob = Game.LoadActor("bob.actor");
+on "Enter" {
+  var scene = Game.Scene;
+  var mover = scene.GetNode("mover");
+  mover.Y = 30;
+}
+on "Leave" {
+  var scene = Game.Scene;
+  var mover = scene.GetNode("mover");
+  mover.SkipTo(5, 5);
+}
+on "ActorOut" {
+  bob.Y = 2;
+}
+on "ActorIn" {
+  bob.Y = 40;
+}
+"#,
+        &[
+            File::Text("zones.scene", ZONES),
+            File::Script(
+                "floor.script",
+                r#"
+global result;
+on "ActorEntry" {
+  result.entries = result.entries + 1;
+}
+on "ActorLeave" {
+  result.leaves = result.leaves + 1;
+}
+"#,
+            ),
+            File::Text(
+                "bob.actor",
+                "ACTOR { NAME=\"bob\" X=60 Y=44 SCALABLE=FALSE STAND { SPRITESET { LEFT=\"red.png\" } } }",
+            ),
+        ],
+    );
+    no_errors(&log);
+    let counts = |runtime: &Runtime| (result(runtime, "entries"), result(runtime, "leaves"));
+    let step = |runtime: &mut Runtime, event: &str| {
+        no_errors(&raise(runtime, event));
+        runtime.tick(16);
+        runtime.tick(16);
+    };
+    // The actor, loaded on the floor, entered it with its first frame.
+    runtime.tick(16);
+    assert_eq!(counts(&runtime), (Value::Int(1), Value::Int(0)));
+    // An entity whose `Y` a script sets enters the floor region...
+    step(&mut runtime, "Enter");
+    assert_eq!(counts(&runtime), (Value::Int(2), Value::Int(0)));
+    // ...and `SkipTo` takes it out again.
+    step(&mut runtime, "Leave");
+    assert_eq!(counts(&runtime), (Value::Int(2), Value::Int(1)));
+    // The same for an actor whose `Y` is set.
+    step(&mut runtime, "ActorOut");
+    assert_eq!(counts(&runtime), (Value::Int(2), Value::Int(2)));
+    step(&mut runtime, "ActorIn");
+    assert_eq!(counts(&runtime), (Value::Int(3), Value::Int(2)));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn an_entity_with_a_region_and_no_sprite_stands_at_the_regions_foot() {
+    let (dir, runtime, log) = start(
+        r#"
+global result = new Object();
+Game.ChangeScene("zones.scene", false, false);
+var scene = Game.Scene;
+var spot = scene.GetNode("spot");
+result.x = spot.X;
+result.y = spot.Y;
+result.height = spot.Height;
+var mover = scene.GetNode("mover");
+result.moverX = mover.X;
+"#,
+        &[
+            File::Text("zones.scene", ZONES),
+            File::Script("floor.script", "global result;"),
+        ],
+    );
+    no_errors(&log);
+    // The bottom centre of the region's rectangle (10..30, 4..20), not
+    // the X and Y of the file; the height is the rectangle's.
+    assert_eq!(result(&runtime, "x"), Value::Int(20));
+    assert_eq!(result(&runtime, "y"), Value::Int(20));
+    assert_eq!(result(&runtime, "height"), Value::Int(16));
+    // An entity with a sprite keeps the position of its file.
+    assert_eq!(result(&runtime, "moverX"), Value::Int(5));
+    std::fs::remove_dir_all(dir).ok();
+}
