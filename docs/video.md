@@ -3,13 +3,18 @@
 How Luma Engine plays the videos a game asks for with `Game.PlayTheora`
 (full-frame cut-scenes) and `Entity.PlayTheora` (a video in an entity's
 place): Ogg files holding a Theora picture stream and, usually, a Vorbis
-sound track. The rules follow the original engine (`VidTheoraPlayer.cpp`,
+sound track; and with the older `Game.PlayVideo`: AVI files (see
+[`Game.PlayVideo`](#gameplayvideo-avi-files)). The rules follow the
+original engine (`VidTheoraPlayer.cpp`, `VidPlayer.cpp`, `BSoundAVI.cpp`,
 `VidSubtitler.cpp`, `BGame.cpp` and `AdEntity.cpp` of Wintermute Engine
 1.x, MIT) so that intros and cut-scenes behave as their authors expect.
 
 Implemented by the `luma-video` core crate (demuxing, decoding,
 colour conversion) and `luma_adventure::video` (playback, timing,
-skipping, subtitles, drawing).
+skipping, subtitles, drawing). Both kinds of video are a
+`luma_video::FrameSource` to the player (frames in order, each with its
+time), which shares everything between them but the clock: placement,
+the texture, the subtitles, the freeze, skipping.
 
 ## Decoding
 
@@ -169,15 +174,8 @@ Game.PlayTheora(filename, type, x, y, freezeMusic, dropFrames, subtitleFile)
 The call returns `true` when the file opened, `false` otherwise (the
 missing file is logged and the script goes on).
 
-`Game.PlayVideo` is the deprecated older name: in the original engine it
-played **AVI** files through DirectShow and whatever codecs the Windows
-machine had. Luma decodes Ogg Theora only: `PlayVideo` plays an Ogg file
-given to it as `PlayTheora` does (same arguments, no subtitle file, the
-deprecation warning logged), and refuses an `.avi` file with a log line
-(`Game.PlayVideo: AVI files are not supported`) and `false`, so that the
-script goes on as after a missing file. A game that ships AVI videos
-needs them converted to Ogg Theora; the file name in the script stays
-the same if the `.ogg` keeps it.
+`Game.PlayVideo` is the older call, for AVI files: see
+[below](#gameplayvideo-avi-files).
 
 While a video plays:
 
@@ -232,6 +230,126 @@ on the clock from the sound's last position, so that the remaining
 frames show at their times and the video ends. This is Luma's own rule:
 the original engine plays the sound through a streaming buffer whose
 behaviour at the end of the data was not read from its sources.
+
+## `Game.PlayVideo`: AVI files
+
+```
+Game.PlayVideo(filename, type, x, y, freezeMusic, subtitleFile)
+```
+
+The video player of the engine before it had Theora (`CVidPlayer`),
+kept for the games made then; the call logs
+`Warning: Game.PlayVideo() is now deprecated. Use Game.PlayTheora() instead.`
+each time, as in the engine. The arguments are those of `PlayTheora`
+without `dropFrames`: the **sixth** is the subtitle file.
+
+Everything said above of a video that plays holds here too: the game
+freezes (the music with it when `freezeMusic`), no script runs until the
+video is over, only the video is drawn, a click with the
+`VIDEO_SKIP_BUTTON` or the `Escape` key skips it, `Game.IsVideoPlaying`
+is true meanwhile and `Game.StopVideo` stops it. The call returns `true`
+when the video started. What differs from the Theora player:
+
+- **Placement** is by the picture's own size (`biWidth` × `biHeight`):
+  an AVI has no coded frame around its picture. The three types and
+  their arithmetic are the same.
+- **Timing** (`CVidPlayer::Update`). The movie time is the **wall clock
+  since the call, never the sound's position**. At each step the frame
+  shown is the one of that instant, `time × rate / scale` rounded down
+  (`AVIStreamTimeToSample`; the rounding is inferred, the function being
+  Windows' own), whatever was shown before: after a long step the frames
+  between are passed over. The video ends as soon as the time reaches
+  the end of the picture stream (frames × scale / rate), whether or not
+  the sound is over; the sound stops with it.
+- **Subtitles.** The same `.sub` format, from the file given or the
+  video's name with `.sub`, loaded when `Game.VideoSubtitles` is on at
+  that moment; the subtitle's frame numbers are the AVI's frames. Two
+  details of this player's own copy of the code are kept: a
+  `{1}{1}text` line is a subtitle here (the Theora player drops it),
+  and the subtitle is drawn even if `VideoSubtitles` is turned off
+  during the video.
+- **Sound.** The track plays as a sound effect, from the start of the
+  video, without any tie to the pictures.
+- A frame that cannot be decoded leaves the picture as it was (logged
+  once), and the video goes on.
+
+### Codecs
+
+The original engine decoded nothing itself: Windows did, with the codecs
+installed on the player's machine, so that a game's video played on one
+machine and not on another. Luma decodes the AVI container
+([formats/avi.md](formats/avi.md)) and these codecs itself:
+
+| Pictures | FourCC |
+|----------|--------|
+| Uncompressed, 1 to 32 bits per pixel | `BI_RGB` (0), `BI_BITFIELDS` (3), `DIB `, `RGB `, `RAW ` |
+| Microsoft RLE, 4 and 8 bits | `BI_RLE8` (1), `BI_RLE4` (2), `RLE `, `MRLE` |
+| Motion JPEG | `MJPG`, `JPEG` |
+| Microsoft Video 1, 8 and 16 bits | `CRAM`, `MSVC`, `WHAM` |
+| Cinepak | `cvid` |
+
+| Sound | Format tag |
+|-------|-----------|
+| PCM, 8 to 32 bits, mono or stereo | 0x0001 |
+| Microsoft ADPCM | 0x0002 |
+| IMA ADPCM | 0x0011 |
+
+**Not decoded**, among the codecs games of those years shipped:
+
+| Codec | FourCC or tag | Why |
+|-------|---------------|-----|
+| MPEG-4 part 2 (DivX, Xvid) | `DIVX`, `DX50`, `XVID`, `MP4V`, `FMP4` | No pure Rust decoder under a licence the engine can take (the known ones are LGPL or GPL). |
+| Microsoft MPEG-4 | `MP42`, `MP43`, `DIV3`, `DIV4` | The same. |
+| Intel Indeo | `IV31`, `IV32`, `IV41`, `IV50` | No public specification and no usable decoder. |
+| H.264, WMV, others | `H264`, `WMV1` to `WMV3`, ... | Rare in AVI files of the time; no decoder in the engine. |
+| MP3 | 0x0055 | No MP3 decoder is built into the audio engine today. |
+| AC-3, WMA, Vorbis in AVI, others | 0x2000, 0x0160 to 0x0163, ... | No decoder. |
+
+A video whose **picture** codec is not decoded does not play: the call
+logs
+
+```
+Error: Unsupported AVI format (file 'intro.avi'): video codec 'DIVX' is not supported
+```
+
+and returns `false` at once, so the script goes on as after a video that
+ended (the engine did the same on a machine without the codec). A video
+whose **sound** codec is not decoded plays without sound, after
+
+```
+Error initializing sound buffer for AVI file 'intro.avi': unsupported codec: sound format tag 0x0055 (MP3)
+```
+
+(the engine, too, played on when its sound buffer could not be made).
+A game with such videos needs them converted, to Ogg Theora (the script
+then calls `PlayVideo` or `PlayTheora` on the new file, see below) or to
+one of the codecs above.
+
+### Differences from the original, deliberate
+
+- **Which files play.** The engine played what the machine's codecs
+  played; Luma plays the list above on every machine.
+- **Sound codecs.** The engine gave the stream's format to DirectSound
+  as it was, which takes PCM only (inferred from `CBSoundAVI`: the
+  buffer is created with the stream's own format): a video with ADPCM
+  sound played silent there. Luma decodes the two ADPCM codecs.
+- **Sound volume.** The engine marked the AVI's sound as a sound effect
+  but never set a volume on its buffer, so it played at full level
+  whatever the player's sound effects volume. Luma plays it at the sound
+  effects' volume.
+- **Where the file is.** Video for Windows opened a file on the disk, so
+  the engine could not play an AVI stored in a package. Luma reads the
+  file through the game's file system, packages included.
+- **An Ogg Theora file given to `PlayVideo`** failed in the engine. In
+  Luma it plays, as with `PlayTheora` (frames dropped when late, the
+  sixth argument the subtitle file), so that a game whose videos were
+  converted needs no change to its scripts when the new file keeps the
+  old name. The file is recognised by its content, not its extension.
+- **Subtitle files with Unix line ends** lose no character (see
+  [Subtitles](#subtitles)); the AVI player's parser had the same defect.
+- The first sample of a stream that does not start at 0 (`dwStart`) is
+  honoured as described in [formats/avi.md](formats/avi.md#frames-and-time);
+  what Video for Windows did with such a file was not checked.
 
 ## `Entity.PlayTheora`
 
@@ -347,7 +465,8 @@ The file is read as the engine reads it (`CVidSubtitler::LoadSubtitles`):
 
 ## Not yet
 
-- The `.avi` player of the old `PlayVideo` (see above: by design).
+- The AVI codecs listed as not decoded under
+  [Codecs](#codecs); MP3 sound is the one most likely to be met.
 - `SetTheoraTexture` on 3D actors, with the rest of the 3D module.
 - An entity's video in saved games.
 - The White Chamber's own videos (`assets\data0001.ogg` and the others)

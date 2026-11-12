@@ -638,7 +638,46 @@ impl World {
                 self.schedule_scene(&path, fade_in);
                 Return::null()
             }
-            "PlayTheora" | "PlayVideo" => {
+            "PlayVideo" => {
+                // `CBGame::ScCallMethod`: six arguments, the last the
+                // subtitle file; the AVI player (`CVidPlayer`).
+                self.log(
+                    "Warning: Game.PlayVideo() is now deprecated. Use Game.PlayTheora() instead."
+                        .to_string(),
+                );
+                let filename = arg(0).get_string(self);
+                let playback = match arg(1) {
+                    Value::Null => VideoPlayback::Stretch,
+                    v => VideoPlayback::from_code(v.get_int(self)),
+                };
+                let (x, y) = (arg(2).get_int(self), arg(3).get_int(self));
+                let freeze_music = match arg(4) {
+                    Value::Null => true,
+                    v => v.get_bool(self),
+                };
+                let subtitle_file = match arg(5) {
+                    Value::Null => None,
+                    v => Some(v.get_string(self)),
+                };
+                let started = self.play_video(
+                    ctx.engine,
+                    &filename,
+                    playback,
+                    x,
+                    y,
+                    freeze_music,
+                    subtitle_file.as_deref(),
+                );
+                if started {
+                    Return {
+                        value: Value::Bool(true),
+                        effect: Effect::Sleep(0),
+                    }
+                } else {
+                    Return::value(false)
+                }
+            }
+            "PlayTheora" => {
                 let filename = arg(0).get_string(self);
                 let playback = match arg(1) {
                     Value::Null => VideoPlayback::Stretch,
@@ -657,21 +696,6 @@ impl World {
                     Value::Null => None,
                     v => Some(v.get_string(self)),
                 };
-                if name == "PlayVideo" {
-                    self.log(
-                        "Warning: Game.PlayVideo() is now deprecated. Use Game.PlayTheora() instead."
-                            .to_string(),
-                    );
-                    if filename.to_ascii_lowercase().ends_with(".avi") {
-                        // The engine played AVI files through DirectShow
-                        // and the codecs installed on Windows; Luma
-                        // decodes Ogg Theora only.
-                        self.log(format!(
-                            "Game.PlayVideo: AVI files are not supported ('{filename}'); only Ogg Theora videos play."
-                        ));
-                        return Some(Return::value(false));
-                    }
-                }
                 let started = self.play_theora(
                     ctx.engine,
                     &filename,

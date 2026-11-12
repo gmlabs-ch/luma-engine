@@ -132,5 +132,7 @@ pub use ui::{
     ButtonListener, ButtonState, Control, ControlKind, EditState, ImageSlot, StaticState, Ui,
     WindowMode, WindowState,
 };
-pub use video::{Subtitle, Subtitler, VideoPlayback, VideoPlayer, parse_subtitles};
+pub use video::{
+    AviClock, Subtitle, Subtitler, VideoPlayback, VideoPlayer, parse_avi_subtitles, parse_subtitles,
+};
 pub use world::{FIXED_SEED, LoadingIcon, QuickMessage, Runtime, ScreenImage, World};

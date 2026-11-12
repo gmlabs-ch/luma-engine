@@ -1,8 +1,12 @@
-//! Video playback in the game (`Game.PlayTheora`) and in an entity's
-//! place (`Entity.PlayTheora`): timing, skipping, looping, subtitles and
-//! drawing of a video decoded by `luma-video`.
+//! Video playback in the game (`Game.PlayTheora`, and `Game.PlayVideo`
+//! for AVI files) and in an entity's place (`Entity.PlayTheora`): timing,
+//! skipping, looping, subtitles and drawing of a video decoded by
+//! `luma-video`. The two players of the engine share everything here
+//! but their clock: [`step_player`] follows `CVidTheoraPlayer::Update`
+//! or, for an AVI file, `CVidPlayer::Update`.
 //!
-//! Written with reference to `VidTheoraPlayer.cpp`, `VidSubtitler.cpp`,
+//! Written with reference to `VidTheoraPlayer.cpp`, `VidPlayer.cpp`,
+//! `BSoundAVI.cpp`, `VidSubtitler.cpp`,
 //! `BGame.cpp` and `AdEntity.cpp` of Wintermute Engine 1.x (MIT License,
 //! Copyright (c) 2003-2013 Jan Nedoma); see `NOTICE`. The rules are
 //! documented in `docs/video.md`.
@@ -14,7 +18,7 @@ use luma_formats::font::TextAlign;
 use luma_formats::{DEFAULT_COLOR_KEY, Image, Rgba};
 use luma_render::{DrawList, Quad, Rect, Texture};
 use luma_script::{Engine, NativeId};
-use luma_video::{Frame, Video, VideoInfo};
+use luma_video::{AviVideo, Frame, FrameSource, Video, VideoInfo};
 
 use crate::objects::Kind;
 use crate::scene_view::{EntityRef, VideoOverlay};
@@ -133,6 +137,17 @@ fn atoi(text: &[u8]) -> i64 {
 /// rest of the game's text: the font reads it in the game's encoding
 /// when it is drawn. The string table is applied by the caller.
 pub fn parse_subtitles(bytes: &[u8]) -> Vec<Subtitle> {
+    parse_subtitle_lines(bytes, false)
+}
+
+/// Parses the `.sub` file of an AVI video (`CVidPlayer::LoadSubtitles`):
+/// as [`parse_subtitles`], except that a `{1}{1}` line is kept, the AVI
+/// player's copy of the parser not having that rule.
+pub fn parse_avi_subtitles(bytes: &[u8]) -> Vec<Subtitle> {
+    parse_subtitle_lines(bytes, true)
+}
+
+fn parse_subtitle_lines(bytes: &[u8], keep_one_one: bool) -> Vec<Subtitle> {
     let mut out = Vec::new();
     let size = bytes.len();
     let mut pos = 0;
@@ -183,7 +198,7 @@ pub fn parse_subtitles(bytes: &[u8]) -> Vec<Subtitle> {
                 _ => body.push(char::from(byte)),
             }
         }
-        if start != -1 && !body.is_empty() && (start != 1 || end != 1) {
+        if start != -1 && !body.is_empty() && (keep_one_one || start != 1 || end != 1) {
             out.push(Subtitle {
                 text: body,
                 start,
@@ -256,11 +271,31 @@ impl Subtitler {
     }
 }
 
-/// A video being played (`CVidTheoraPlayer`).
+/// The clock of the AVI player (`CVidPlayer`): what tells its timing
+/// from the Theora player's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AviClock {
+    /// The stream sample the first frame stands for (`dwStart`).
+    pub first_sample: u64,
+    /// When the video stream ends, in milliseconds
+    /// (`m_TotalVideoTime`).
+    pub total_ms: u64,
+    /// The sample of the last step (`m_LastSample`).
+    last_sample: Option<u64>,
+    /// Whether a frame that could not be decoded was logged.
+    warned: bool,
+}
+
+/// A video being played (`CVidTheoraPlayer`, or `CVidPlayer` when `avi`
+/// is set).
 pub struct VideoPlayer {
     /// The file played.
     pub filename: String,
-    video: Video,
+    video: Box<dyn FrameSource>,
+    /// Set for an AVI file played by `Game.PlayVideo`: the video then
+    /// runs on the wall clock alone and shows the frame of each instant
+    /// (`CVidPlayer::Update`).
+    pub avi: Option<AviClock>,
     /// The picture size and frame rate.
     pub info: VideoInfo,
     /// How it is placed.
@@ -332,7 +367,8 @@ impl VideoPlayer {
         let info = video.info().clone();
         VideoPlayer {
             filename: filename.to_string(),
-            video,
+            video: Box::new(video),
+            avi: None,
             info,
             playback: VideoPlayback::Pos,
             x: 0,
@@ -442,6 +478,9 @@ pub(crate) fn step_player(
     now: u64,
     log: &mut Vec<String>,
 ) -> bool {
+    if player.avi.is_some() {
+        return step_avi_player(player, audio, now, log);
+    }
     // The sound's position while it plays. A sound track shorter than
     // the pictures ends first: the movie then goes on on the clock, from
     // where the sound was last heard.
@@ -536,6 +575,73 @@ pub(crate) fn step_player(
         let frame = player.info.frame_at_ms(movie_time) as i64;
         subtitler.update(frame);
     }
+    false
+}
+
+/// One step of an AVI video's playback (`CVidPlayer::Update`). The
+/// movie time is the wall clock since the start, never the sound's
+/// position; the video ends once that time reaches the end of the video
+/// stream; otherwise the frame shown is the stream sample of that time
+/// (`AVIStreamTimeToSample`), whatever was shown before: the frames
+/// between are passed over. The subtitle is that sample's. A frame that
+/// cannot be decoded leaves the picture as it was (the engine's `Update`
+/// failed for that step and went on at the next); it is logged once.
+/// `true` when the video ended.
+fn step_avi_player(
+    player: &mut VideoPlayer,
+    audio: Option<&mut Audio>,
+    now: u64,
+    log: &mut Vec<String>,
+) -> bool {
+    let Some(mut avi) = player.avi else {
+        return true;
+    };
+    if !player.started {
+        // `Play`: the sound starts, then the clock.
+        player.started = true;
+        player.start_clock = now;
+        if let (Some(sound), Some(audio)) = (player.sound, audio) {
+            audio.play(sound, false);
+        }
+    }
+    let time = now.saturating_sub(player.start_clock);
+    if time >= avi.total_ms {
+        return true;
+    }
+    let sample = player.info.frame_at_ms(time);
+    if avi.last_sample != Some(sample) {
+        avi.last_sample = Some(sample);
+        if let Some(subtitler) = player.subtitler.as_mut() {
+            subtitler.update(i64::try_from(sample).unwrap_or(i64::MAX));
+        }
+        // Before the stream's first sample there is no frame yet.
+        let index = sample
+            .checked_sub(avi.first_sample)
+            .filter(|index| *index >= player.video.next_index());
+        if let Some(index) = index {
+            let frame = player
+                .video
+                .skip_to(index)
+                .and_then(|()| player.video.next_frame());
+            match frame {
+                Ok(Some(frame)) => {
+                    player.frame = Some(frame);
+                    player.frame_serial += 1;
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    if !avi.warned {
+                        avi.warned = true;
+                        log.push(format!(
+                            "Error decoding a frame of AVI file '{}': {err}",
+                            player.filename
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    player.avi = Some(avi);
     false
 }
 
@@ -641,6 +747,17 @@ impl World {
     /// is off, even if it is turned on during the video, or when the
     /// file is absent.
     fn load_subtitler(&mut self, filename: &str, subtitle_file: Option<&str>) -> Option<Subtitler> {
+        self.load_subtitler_with(filename, subtitle_file, parse_subtitles)
+    }
+
+    /// [`World::load_subtitler`] with the parser of one of the two
+    /// players.
+    fn load_subtitler_with(
+        &mut self,
+        filename: &str,
+        subtitle_file: Option<&str>,
+        parse: fn(&[u8]) -> Vec<Subtitle>,
+    ) -> Option<Subtitler> {
         if !self.video_subtitles {
             return None;
         }
@@ -648,7 +765,7 @@ impl World {
             .map(str::to_string)
             .unwrap_or_else(|| subtitle_path_of(filename));
         let bytes = self.vfs.read(&path).ok()?;
-        let mut subtitles = parse_subtitles(&bytes);
+        let mut subtitles = parse(&bytes);
         for subtitle in &mut subtitles {
             subtitle.text = self.expand(&subtitle.text);
         }
@@ -684,7 +801,8 @@ impl World {
         self.freeze(engine, freeze_music);
         self.video = Some(VideoPlayer {
             filename: filename.to_string(),
-            video,
+            video: Box::new(video),
+            avi: None,
             info,
             playback,
             x: px,
@@ -692,6 +810,135 @@ impl World {
             zoom,
             freeze_game: true,
             dont_drop_frames: !drop_frames,
+            looping: false,
+            paused: false,
+            time_offset_ms: 0,
+            alpha: None,
+            started: false,
+            start_clock: 0,
+            pause_started: None,
+            sound_heard: None,
+            sound,
+            pending: None,
+            frame: None,
+            frame_serial: 0,
+            finished: false,
+            subtitler,
+            subtitle_height: 0,
+        });
+        self.update_video(engine);
+        true
+    }
+
+    /// Opens and starts an AVI video (`Game.PlayVideo`:
+    /// `CVidPlayer::Initialize` then `Play`). The file is placed by its
+    /// picture size, the game freezes, the sound starts and the video
+    /// runs on the wall clock from this moment (see
+    /// [`step_avi_player`]). `false`, logged, when the file cannot be
+    /// opened, has no video stream, or is coded with a codec Luma does
+    /// not decode (the log names it); a sound track that cannot be
+    /// played is logged and the video plays without it, as in the
+    /// engine.
+    ///
+    /// Differences, deliberate: the engine opened the file from the
+    /// disk only (Video for Windows), Luma reads it through the game's
+    /// packages too; an Ogg Theora file given to `PlayVideo` (which the
+    /// engine refused) plays as with `PlayTheora`; and the sound follows
+    /// the sound effects' volume, which the engine's AVI sound buffer
+    /// was meant to (`SOUND_SFX`) but never did, no volume being set on
+    /// it.
+    #[allow(clippy::too_many_arguments, reason = "the engine's own signature")]
+    pub fn play_video(
+        &mut self,
+        engine: &mut Engine,
+        filename: &str,
+        playback: VideoPlayback,
+        x: i32,
+        y: i32,
+        freeze_music: bool,
+        subtitle_file: Option<&str>,
+    ) -> bool {
+        self.stop_video(engine);
+        let bytes = match self.vfs.read(filename) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                self.log(format!("Error opening AVI file '{filename}': {err}"));
+                return false;
+            }
+        };
+        if bytes.starts_with(b"OggS") {
+            return self.play_theora(
+                engine,
+                filename,
+                playback,
+                x,
+                y,
+                freeze_music,
+                true,
+                subtitle_file,
+            );
+        }
+        let video = match AviVideo::open(bytes) {
+            Ok(video) => video,
+            Err(luma_video::Error::NoVideoStream) => {
+                self.log(format!(
+                    "Error finding video stream in AVI file '{filename}'"
+                ));
+                return false;
+            }
+            Err(luma_video::Error::UnsupportedCodec(codec)) => {
+                self.log(format!(
+                    "Error: Unsupported AVI format (file '{filename}'): {codec} is not supported"
+                ));
+                return false;
+            }
+            Err(err) => {
+                self.log(format!("Error opening AVI file '{filename}': {err}"));
+                return false;
+            }
+        };
+        // `CBSoundAVI::InitializeBuffer`: a sound effect, not looping.
+        let clip = video
+            .sound_track()
+            .map_err(|e| e.to_string())
+            .and_then(|track| match track {
+                Some(wav) => luma_audio::decode(&wav)
+                    .map(Some)
+                    .map_err(|e| e.to_string()),
+                None => Ok(None),
+            });
+        let sound = match clip {
+            Ok(clip) => clip.map(|clip| self.sounds.audio.add(Arc::new(clip), SoundType::Sfx, 100)),
+            Err(err) => {
+                self.log(format!(
+                    "Error initializing sound buffer for AVI file '{filename}': {err}"
+                ));
+                None
+            }
+        };
+        let subtitler = self.load_subtitler_with(filename, subtitle_file, parse_avi_subtitles);
+        let info = FrameSource::info(&video).clone();
+        let screen = (self.settings.width as f32, self.settings.height as f32);
+        let picture = (info.width as f32, info.height as f32);
+        let (px, py, zoom) = placement(playback, x, y, screen, picture);
+        let avi = AviClock {
+            first_sample: video.first_sample(),
+            total_ms: video.duration_ms(),
+            last_sample: None,
+            warned: false,
+        };
+        self.freeze(engine, freeze_music);
+        self.video = Some(VideoPlayer {
+            filename: filename.to_string(),
+            video: Box::new(video),
+            avi: Some(avi),
+            info,
+            playback,
+            x: px,
+            y: py,
+            zoom,
+            freeze_game: true,
+            dont_drop_frames: false,
             looping: false,
             paused: false,
             time_offset_ms: 0,
@@ -824,7 +1071,8 @@ impl World {
         let subtitler = self.load_subtitler(filename, None);
         let player = VideoPlayer {
             filename: filename.to_string(),
-            video,
+            video: Box::new(video),
+            avi: None,
             info,
             playback: VideoPlayback::Pos,
             x: 0,
@@ -1062,8 +1310,17 @@ impl World {
         })
     }
 
+    /// Whether the game video's subtitle is drawn: while
+    /// `VideoSubtitles` is on for a Theora video
+    /// (`CVidTheoraPlayer::Display`); always for an AVI video, whose
+    /// player looks at the setting only when it loads the file
+    /// (`CVidPlayer::Display`).
+    fn video_subtitle_shown(&self) -> bool {
+        self.video_subtitles || self.video.as_ref().is_some_and(|p| p.avi.is_some())
+    }
+
     fn prepare_video_subtitle(&mut self) {
-        if !self.video_subtitles {
+        if !self.video_subtitle_shown() {
             return;
         }
         let Some(text) = self
@@ -1198,7 +1455,7 @@ impl World {
                 flip_y: false,
             });
         }
-        if !self.video_subtitles {
+        if !self.video_subtitle_shown() {
             return;
         }
         let Some(text) = player.subtitler.as_ref().and_then(Subtitler::shown) else {
@@ -1366,11 +1623,188 @@ mod tests {
     }
 
     fn player_of(bytes: Vec<u8>, sound: Option<SoundId>) -> VideoPlayer {
-        let video = Video::open(bytes).unwrap();
+        player_from(Box::new(Video::open(bytes).unwrap()), sound)
+    }
+
+    /// The player of an AVI file, as `World::play_video` makes it.
+    fn avi_player_of(bytes: Vec<u8>, sound: Option<SoundId>) -> VideoPlayer {
+        let video = AviVideo::open(bytes).unwrap();
+        let avi = AviClock {
+            first_sample: video.first_sample(),
+            total_ms: video.duration_ms(),
+            last_sample: None,
+            warned: false,
+        };
+        let mut player = player_from(Box::new(video), sound);
+        player.avi = Some(avi);
+        player
+    }
+
+    /// The first pixel's red of the frame shown: `synthetic_avi` gives
+    /// frame `n` the value `n * 10`.
+    fn shown_red(player: &VideoPlayer) -> Option<u8> {
+        player.frame.as_ref().map(|f| f.rgba[0])
+    }
+
+    /// `CVidPlayer::Update`: the wall clock alone picks the frame.
+    #[test]
+    fn an_avi_video_shows_the_frame_of_each_instant() {
+        // Ten frames at 10 per second: one second.
+        let mut player = avi_player_of(luma_video::synthetic_avi(8, 8, 10, 10, 0), None);
+        let mut log = Vec::new();
+        // The clock starts anywhere.
+        assert!(!step_player(&mut player, None, 5000, &mut log));
+        assert_eq!(
+            (player.frame_index(), shown_red(&player)),
+            (Some(0), Some(0))
+        );
+        assert_eq!(player.frame_serial, 1);
+        assert!(!step_player(&mut player, None, 5099, &mut log));
+        assert_eq!(player.frame_serial, 1, "the same sample: nothing new");
+        assert!(!step_player(&mut player, None, 5100, &mut log));
+        assert_eq!(
+            (player.frame_index(), shown_red(&player)),
+            (Some(1), Some(10))
+        );
+        // A long step: the frame of that instant, the ones between
+        // passed over (the Theora player would show none before its
+        // time, and drop the late ones as it decodes them).
+        assert!(!step_player(&mut player, None, 5560, &mut log));
+        assert_eq!(
+            (player.frame_index(), shown_red(&player)),
+            (Some(5), Some(50))
+        );
+        assert_eq!(player.frame_serial, 3);
+        assert!(!step_player(&mut player, None, 5999, &mut log));
+        assert_eq!(player.frame_index(), Some(9));
+        // The video ends when the clock reaches the stream's end.
+        assert!(step_player(&mut player, None, 6000, &mut log));
+        assert!(log.is_empty(), "{log:?}");
+    }
+
+    /// The AVI player never looks at the sound's position.
+    #[test]
+    fn an_avi_video_runs_on_the_clock_whatever_its_sound() {
+        for sound_ms in [300u64, 3000] {
+            let mut audio = Audio::null();
+            let sound = audio.add(
+                Arc::new(luma_audio::Clip::silence(8000, sound_ms)),
+                SoundType::Sfx,
+                100,
+            );
+            let mut player = avi_player_of(luma_video::synthetic_avi(8, 8, 10, 10, 0), Some(sound));
+            let mut log = Vec::new();
+            let mut shown = Vec::new();
+            let mut ended_at = None;
+            for step in 0..100u64 {
+                if step_player(&mut player, Some(&mut audio), step * 20, &mut log) {
+                    ended_at = Some(step * 20);
+                    break;
+                }
+                if step == 0 {
+                    assert!(audio.is_playing(sound), "the sound starts with the video");
+                }
+                let index = player.frame_index().unwrap();
+                if shown.last().is_none_or(|(_, last)| *last != index) {
+                    shown.push((step * 20, index));
+                }
+                audio.tick(20);
+            }
+            let expected: Vec<(u64, u64)> = (0..10).map(|n| (n * 100, n)).collect();
+            assert_eq!(shown, expected, "sound of {sound_ms} ms");
+            assert_eq!(ended_at, Some(1000), "sound of {sound_ms} ms");
+            assert!(log.is_empty(), "{log:?}");
+        }
+    }
+
+    /// A stream whose first sample is not 0 shows nothing before it,
+    /// and a frame that cannot be decoded leaves the picture as it was.
+    #[test]
+    fn an_avi_video_starts_late_and_survives_a_bad_frame() {
+        let frame = |red: u8| [0, 0, red, 0, 0, red, 0, 0].repeat(2);
+        let spec = luma_video::AviSpec {
+            width: 2,
+            height: 2,
+            bit_count: 24,
+            rate: 10,
+            scale: 1,
+            start: 2,
+            // The second frame is too short for its picture.
+            frames: vec![frame(10), vec![1, 2, 3], frame(30)],
+            index: true,
+            ..Default::default()
+        };
+        let mut player = avi_player_of(luma_video::build_avi(&spec), None);
+        assert_eq!(player.avi.unwrap().total_ms, 500);
+        let mut log = Vec::new();
+        assert!(!step_player(&mut player, None, 0, &mut log));
+        assert!(!step_player(&mut player, None, 199, &mut log));
+        assert_eq!(player.frame_index(), None, "before the first sample");
+        assert!(!step_player(&mut player, None, 200, &mut log));
+        assert_eq!(
+            (player.frame_index(), shown_red(&player)),
+            (Some(0), Some(10))
+        );
+        assert!(!step_player(&mut player, None, 300, &mut log));
+        assert_eq!(player.frame_index(), Some(0), "the picture stays");
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert!(
+            log[0].starts_with("Error decoding a frame of AVI file 'clip.ogv':"),
+            "{log:?}"
+        );
+        assert!(!step_player(&mut player, None, 400, &mut log));
+        assert_eq!(
+            (player.frame_index(), shown_red(&player)),
+            (Some(2), Some(30))
+        );
+        assert!(step_player(&mut player, None, 500, &mut log));
+        assert_eq!(log.len(), 1);
+    }
+
+    /// `CVidPlayer::LoadSubtitles` keeps the `{1}{1}` lines that
+    /// `CVidSubtitler::LoadSubtitles` drops, and the subtitle follows
+    /// the stream's sample.
+    #[test]
+    fn avi_subtitles_keep_first_frame_lines() {
+        let file = b"{1}{1}First\r\n{3}{5}Hello|avi\r\n{-1}{2}no";
+        assert_eq!(parse_subtitles(file).len(), 1);
+        let subtitles = parse_avi_subtitles(file);
+        assert_eq!(subtitles.len(), 2);
+        assert_eq!((subtitles[0].start, subtitles[0].end), (1, 1));
+        let mut player = avi_player_of(luma_video::synthetic_avi(8, 8, 10, 10, 0), None);
+        player.subtitler = Some(Subtitler::new(subtitles));
+        let mut log = Vec::new();
+        let mut shown = Vec::new();
+        for step in 0..10u64 {
+            assert!(!step_player(&mut player, None, step * 100, &mut log));
+            let text = player.subtitler.as_ref().unwrap().shown();
+            shown.push(text.map(str::to_string));
+        }
+        let first = Some("First".to_string());
+        let hello = Some("Hello\navi".to_string());
+        assert_eq!(
+            shown,
+            [
+                first.clone(),
+                first,
+                None,
+                hello.clone(),
+                hello.clone(),
+                hello,
+                None,
+                None,
+                None,
+                None
+            ]
+        );
+    }
+
+    fn player_from(video: Box<dyn FrameSource>, sound: Option<SoundId>) -> VideoPlayer {
         let info = video.info().clone();
         VideoPlayer {
             filename: "clip.ogv".into(),
             video,
+            avi: None,
             info,
             playback: VideoPlayback::Pos,
             x: 0,

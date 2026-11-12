@@ -161,7 +161,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp
 - Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`, `accessibility.rs`)
-- Count: 152 done, 0 todo, 13 no-op
+- Count: 153 done, 0 todo, 12 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -185,7 +185,7 @@ How the list was made. For every class with a script interface, the names tested
 | `GetSoundLength` | method | **done** | Duration in milliseconds of a sound file. |
 | `SetMousePos` | method | **done** | Moves the mouse cursor, kept on the screen; the front-end moves the system cursor there (`World::take_cursor_warp`). |
 | `LockMouseRect` | method | **done** | Confines the mouse to a rectangle (edges put in order; applies while all four are non-zero, as in WME). A mouse outside the rectangle is put back on its edge, the system cursor with it. |
-| `PlayVideo` | method | **no-op** | Deprecated AVI player (DirectShow, Windows codecs). Luma plays an Ogg Theora file given to it as `PlayTheora` does and refuses an `.avi` with a log line and `false`; AVI decoding is out of scope (see `docs/video.md`). |
+| `PlayVideo` | method | **done** | The deprecated AVI player (file, type, x, y, freeze music, subtitles): the game freezes and the video runs on the wall clock. WME left the decoding to the codecs installed on Windows; Luma decodes uncompressed, Microsoft RLE, Motion JPEG, Microsoft Video 1 and Cinepak pictures with PCM or ADPCM sound, and answers `false` with the codec's name in the log for the others (DivX, Indeo, ...). An Ogg Theora file given to it plays too. See `docs/video.md`. |
 | `PlayTheora` | method | **done** | Plays an Ogg Theora video full-frame (file, type, x, y, freeze music, drop frames, subtitles). |
 | `QuitGame` | method | **done** | Ends the game. |
 | `RegWriteNumber`, `RegWriteString` | method | **done** | Stores a value in the game's private settings: the `PrivateSettings` section of `wme.ini` in WME, of `settings.ini` in the save directory in Luma (see `docs/saving.md`). |
@@ -1033,7 +1033,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 72 | 0 | 0 | 72 |
-| CBGame | 152 | 0 | 13 | 165 |
+| CBGame | 153 | 0 | 12 | 165 |
 | CAdGame | 65 | 0 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
 | CAdScene | 81 | 0 | 2 | 83 |
@@ -1072,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 62 | 0 | 5 | 67 |
 | CAdAttach3DX | 7 | 0 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **1084** | **0** | **69** | **1153** |
+| **All** | **1085** | **0** | **68** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1063 done, 0 todo, 69 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1064 done, 0 todo, 68 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1085,9 +1085,9 @@ These classes have no done member in Luma: the object does not exist for scripts
 | `CBFrame` | A frame of a sprite (delay, sound, move, sub-frames, events) | 21 |
 | `CBSubFrame` | The image part of a frame (hotspot, mirror, alpha) | 20 |
 
-Classes that exist in WME 1.x with a script interface but that are no-op by design: `CAdActor3D` (the legacy Milkshape 3D actor WME deprecated in 1.6; `LoadActor3D` refuses its files with a clear error), `CSXPluginObject` (Windows DLL plugins), `CUIMarkup` (never instantiated), the Windows-only parts of `CSXDirectory` (`GetDrives`, the working directory) and `CSXMemBuffer`, and the AVI side of `Game.PlayVideo` (DirectShow).
+Classes that exist in WME 1.x with a script interface but that are no-op by design: `CAdActor3D` (the legacy Milkshape 3D actor WME deprecated in 1.6; `LoadActor3D` refuses its files with a clear error), `CSXPluginObject` (Windows DLL plugins), `CUIMarkup` (never instantiated), and the Windows-only parts of `CSXDirectory` (`GetDrives`, the working directory) and `CSXMemBuffer`.
 
-WME classes with no script interface of their own (nothing to port; scripts reach them only through the owner's methods): `CBSound`, `CBFont`/`CBFontBitmap`/`CBFontTT`, `CAdInventory`, `CAdInventoryBox`, `CAdResponseBox`, `CAdResponse`, `CAdSceneNode`, `CAdSentence`, `CAdSpriteSet`, `CAdTalkDef`, `CAdScaleLevel`, `CAdRotLevel`, `CAdWalkplane`, `CAdBlock`, `CAdGeneric`, `CBViewport`, `CBFader`, `CUITiledImage`, `CBPersistMgr`, `CBEventSet`, the video players (`VidTheoraPlayer`), `C3DLight`, `C3DModel`. The inventory, responses, fader and viewport are driven through `Game` methods and properties (`GetInventoryWindow`, `AddResponse`, `FadeOut`, `SetSceneViewport`), which the tables above cover.
+WME classes with no script interface of their own (nothing to port; scripts reach them only through the owner's methods): `CBSound`, `CBFont`/`CBFontBitmap`/`CBFontTT`, `CAdInventory`, `CAdInventoryBox`, `CAdResponseBox`, `CAdResponse`, `CAdSceneNode`, `CAdSentence`, `CAdSpriteSet`, `CAdTalkDef`, `CAdScaleLevel`, `CAdRotLevel`, `CAdWalkplane`, `CAdBlock`, `CAdGeneric`, `CBViewport`, `CBFader`, `CUITiledImage`, `CBPersistMgr`, `CBEventSet`, the video players (`VidTheoraPlayer`, `VidPlayer`), `C3DLight`, `C3DModel`. The inventory, responses, fader and viewport are driven through `Game` methods and properties (`GetInventoryWindow`, `AddResponse`, `FadeOut`, `SetSceneViewport`), which the tables above cover.
 
 ## Groups the work falls into
 
