@@ -233,7 +233,8 @@ dropped when the encoding changes.
 
 ## Speech
 
-`Talk(text, sound, duration, stances, align)` on an actor or entity shows
+`Talk(text, sound, duration, stances, align)` on an actor, an entity or
+an inventory item (see [window.md](window.md#the-inventory)) shows
 the text above the object and plays its talk sprites until the sentence
 ends. The text is expanded through the string table.
 

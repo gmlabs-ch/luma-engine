@@ -1798,12 +1798,22 @@ impl World {
                     },
                     (None, _) => true,
                 };
-                if ok {
-                    if let Some(e) = self.entity_def_mut(r) {
-                        e.sprite = path;
-                    }
+                // `CAdTalkHolder::SetSprite`: the old sprite goes first, so
+                // a file that does not load leaves the entity without
+                // one. The new sprite is shown at once only when the
+                // entity was showing its own: a sprite `PlayAnim` plays,
+                // or a talk sprite, goes on.
+                if let Some(e) = self.entity_def_mut(r) {
+                    e.sprite = if ok { path.clone() } else { None };
+                }
+                let busy = !matches!(r, EntityRef::Ui(_))
+                    && self
+                        .view_of(r)
+                        .is_some_and(|v| v.is_playing_anim(r) || v.is_talking(r));
+                if !busy {
                     self.reset_entity_anim(r);
-                } else {
+                }
+                if !ok {
                     let path = path.unwrap_or_default();
                     self.log(format!("SetSprite method failed for file '{path}'"));
                 }

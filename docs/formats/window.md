@@ -363,10 +363,23 @@ The items file is a list of `ITEM` blocks:
 | `CURSOR_COMBINED` | bool | `TRUE` | The item's cursor is drawn over the normal cursor instead of replacing it. |
 | `FONT` | string | | Font of the item's speech and amount. |
 | `AMOUNT`, `DISPLAY_AMOUNT`, `AMOUNT_OFFSET_X`, `AMOUNT_OFFSET_Y`, `AMOUNT_ALIGN`, `AMOUNT_STRING` | | | A count drawn on the item. |
-| `TALK`, `TALK_SPECIAL` | string | | Talk sprites, as for entities. |
+| `TALK`, `TALK_SPECIAL` | string | | Talk sprites, as for entities: an item says sentences (`Talk`) and plays animations (`PlayAnim`) like an entity. |
 | `SCRIPT` | string | | A script attached to the item; repeatable. |
 | `PROPERTY` | block | | A script property. |
 | `ALPHA_COLOR`, `ALPHA` | | | Tint and opacity. |
+
+An item is a talking object like an entity (`CAdItem` is a
+`CAdTalkHolder`): `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`,
+`ForceTalkAnim`, `PlayAnim`, `PlayAnimAsync`, `Reset`, `AddTalkSprite`,
+`SetTalkSprite` and `RemoveTalkSprite` work on it as on an entity (see
+[font.md](font.md#speech)), with its `TALK` and `TALK_SPECIAL` sprites
+and a `.talk` definition beside the speech file. The sentence is placed
+from where the box last drew the item, the middle of its sprite's top
+edge. An item is updated only while the inventory box draws it
+(`CAdInventoryBox::Display` calls `CAdItem::Update`): while the box is
+hidden, or the item scrolled out of it or not taken, its animation and
+its sentence stand still, the text is not shown, and a script waiting
+for it keeps waiting, as in the original.
 
 `Game.TakeItem(name, after)` puts the item in the inventory (again, if
 it was there, after the named item or at the end); `DropItem` takes it

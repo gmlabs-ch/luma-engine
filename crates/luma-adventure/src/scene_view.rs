@@ -1053,8 +1053,9 @@ impl SceneView {
     }
 
     /// Removes a talk sprite from an entity (`RemoveTalkSprite`), by file
-    /// name; an entity playing it goes back to its own sprite until the
-    /// next stance.
+    /// name; an entity playing it shows its own sprite in its place
+    /// (`m_TempSprite2 = m_Sprite`) until that sprite has played or the
+    /// sentence ends.
     pub fn remove_talk_sprite(&mut self, r: EntityRef, path: &str, special: bool) {
         let Some(entity) = self.entity_mut(r) else {
             return;
@@ -1064,12 +1065,14 @@ impl SceneView {
         } else {
             &mut entity.talk_sprites
         };
-        if let Some(i) = list.iter().position(|p| key(p) == key(path)) {
-            list.remove(i);
-        }
+        let Some(i) = list.iter().position(|p| key(p) == key(path)) else {
+            return;
+        };
+        list.remove(i);
+        let own = entity.sprite.clone();
         if let Some(talk) = self.talks.get_mut(&r) {
             if talk.sprite.as_deref().is_some_and(|p| key(p) == key(path)) {
-                talk.sprite = None;
+                talk.sprite = own;
             }
         }
     }

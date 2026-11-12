@@ -2,7 +2,7 @@
 //! License, Copyright (c) 2011 Jan Nedoma; see `NOTICE`).
 
 use luma_formats::font::TextAlign;
-use luma_script::{NativeId, Return, Value};
+use luma_script::{Effect, NativeId, Return, Value};
 
 use crate::objects::CursorSlot;
 use crate::world::World;
@@ -68,6 +68,14 @@ impl World {
         let arg = |n: usize| args.get(n).cloned().unwrap_or(Value::Null);
         self.item(id)?;
         let ret = match name {
+            // `CAdTalkHolder::SetSprite(null)` takes the sprite away.
+            "SetSprite" if arg(0).is_null() => {
+                if let Some(item) = self.item_mut(id) {
+                    item.def.sprite = None;
+                    item.anim = None;
+                }
+                Return::value(true)
+            }
             "SetSprite" | "SetHoverSprite" => {
                 let path = arg(0).get_string(self);
                 let ok = self.load_ui_image(&path);
@@ -129,15 +137,14 @@ impl World {
                     .and_then(|i| i.def.font.clone())
                     .map_or(Value::Null, Value::from),
             ),
-            "IsTalking" => Return::value(false),
+            "IsTalking" => Return::value(self.is_talking(id)),
             "GetSpriteObject" => {
                 Return::value(self.sprite_object(id).map_or(Value::Null, Value::Native))
             }
             "AddTalkSprite" | "SetTalkSprite" | "RemoveTalkSprite" => {
-                // Items do not talk in Luma; the sets are loaded and kept
-                // for the scripts' sake only.
                 let path = arg(0).get_string(self);
-                let ok = name == "RemoveTalkSprite" || self.load_ui_image(&path);
+                let special = arg(1).get_bool(self);
+                let ok = self.item_talk_sprite(id, name, &path, special);
                 if !ok {
                     self.log(format!("{name} method failed for file '{path}'"));
                 }
@@ -158,8 +165,29 @@ impl World {
                         .map_or(Value::Null, Value::Native),
                 )
             }
-            "Talk" | "TalkAsync" | "StopTalk" | "PlayAnim" | "PlayAnimAsync" | "Reset" => {
-                self.stub(&format!("Item.{name}"));
+            // An item is a `CAdObject`: it talks and plays animations.
+            "Talk" | "TalkAsync" => self.talk_call(id, name == "Talk", args),
+            "StopTalk" | "StopTalking" => Return::value(self.stop_talk(id)),
+            "PlayAnim" | "PlayAnimAsync" => {
+                let path = arg(0).get_string(self);
+                if !self.item_play_anim(id, &path) {
+                    let who = self.describe(id);
+                    self.log(format!(
+                        "CAdObject::PlayAnim: error loading temp sprite (object:\"{who}\" sprite:\"{path}\")"
+                    ));
+                    return Some(Return::value(false));
+                }
+                Return {
+                    value: Value::Bool(true),
+                    effect: if name == "PlayAnim" {
+                        Effect::WaitFor(id)
+                    } else {
+                        Effect::None
+                    },
+                }
+            }
+            "Reset" => {
+                self.item_reset(id);
                 Return::null()
             }
             _ => return None,

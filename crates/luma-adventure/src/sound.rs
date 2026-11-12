@@ -1008,6 +1008,21 @@ impl World {
                 }
             }
         }
+        for (_, item) in &mut self.inventory.items {
+            let talking = item.state == crate::inventory::ItemState::Talking;
+            if let Some(sentence) = &mut item.sentence {
+                if let Some(id) = sentence.sound {
+                    let ended = ended(id);
+                    if ended {
+                        sentence.finish();
+                    }
+                    if !talking || ended {
+                        finished.push(id);
+                        sentence.sound = None;
+                    }
+                }
+            }
+        }
         for id in finished {
             self.sounds.audio.stop(id);
             self.sounds.audio.remove(id);
@@ -1031,6 +1046,11 @@ impl World {
         let views = self.scene.iter_mut().chain([&mut self.game_view]);
         for view in views {
             out.extend(view.sentences_mut());
+        }
+        for (_, item) in &mut self.inventory.items {
+            if item.state == crate::inventory::ItemState::Talking {
+                out.extend(item.sentence.as_mut());
+            }
         }
         out
     }
@@ -1085,6 +1105,13 @@ impl World {
         let views = self.scene.iter_mut().chain([&mut self.game_view]);
         for view in views {
             for sentence in view.sentences_mut() {
+                if sentence.duration == 0 {
+                    stopped.extend(sentence.sound.take());
+                }
+            }
+        }
+        for (_, item) in &mut self.inventory.items {
+            if let Some(sentence) = &mut item.sentence {
                 if sentence.duration == 0 {
                     stopped.extend(sentence.sound.take());
                 }

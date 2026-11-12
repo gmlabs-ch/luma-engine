@@ -2302,6 +2302,7 @@ impl World {
             #[cfg(feature = "3d")]
             Some(Kind::Actor3D) => self.actor3d(id).and_then(|a| a.font.clone()),
             Some(Kind::Entity(r)) => self.entity_def(*r).and_then(|e| e.font.clone()),
+            Some(Kind::Item) => self.item(id).and_then(|i| i.def.font.clone()),
             _ => None,
         }
     }
@@ -2427,7 +2428,7 @@ impl World {
         align: TextAlign,
     ) -> bool {
         let kind = match self.objects.get(id).map(|n| n.kind.clone()) {
-            Some(kind @ (Kind::Actor | Kind::Actor3D | Kind::Entity(_))) => kind,
+            Some(kind @ (Kind::Actor | Kind::Actor3D | Kind::Entity(_) | Kind::Item)) => kind,
             _ => return false,
         };
         // End the sentence being said, with its sound.
@@ -2471,6 +2472,16 @@ impl World {
             #[cfg(feature = "3d")]
             Kind::Actor3D => self.actor3d(id).map_or((0, 0), |a| (a.x, a.y)),
             Kind::Entity(r) => self.entity_def(*r).map_or((0, 0), |e| (e.x, e.y)),
+            // Where the box last drew it: the middle of its sprite's
+            // top edge (`CAdItem::Display`).
+            Kind::Item => self.item(id).map_or((0, 0), |item| {
+                let width = item
+                    .current_sprite
+                    .as_deref()
+                    .and_then(|p| self.sprite_size_loaded(p))
+                    .map_or(0, |(w, _)| w);
+                (item.x + width / 2, item.y)
+            }),
             _ => (0, 0),
         };
         // A scene-independent object is placed on the screen already.
@@ -2515,7 +2526,7 @@ impl World {
         // file, whether or not the sound itself loaded. Only objects
         // with sprites use it.
         let talk_def = match (&kind, &speech_file) {
-            (Kind::Actor | Kind::Entity(_), Some(file)) => self.load_talk_def(file),
+            (Kind::Actor | Kind::Entity(_) | Kind::Item, Some(file)) => self.load_talk_def(file),
             _ => None,
         };
         let talk_sprites: Vec<String> = talk_def
@@ -2590,6 +2601,7 @@ impl World {
                     view.talk(r, sentence, forced);
                 }
             }
+            Kind::Item => self.item_talk(id, sentence, forced),
             _ => {}
         }
         true
@@ -2641,6 +2653,7 @@ impl World {
                 .is_some_and(|(vfs, actor)| actor.bank.add_sprite(vfs, &path)),
             // A 3D actor has no talk sprites: the name is kept and ignored.
             Some(Kind::Actor3D) => true,
+            Some(Kind::Item) => self.ui.bank.add_sprite(&self.vfs, &path),
             Some(Kind::Entity(r)) => {
                 let vfs = &self.vfs;
                 match r {
@@ -2671,6 +2684,7 @@ impl World {
             #[cfg(feature = "3d")]
             Some(Kind::Actor3D) => self.actor3d_mut(id).is_some_and(|a| a.stop_talk()),
             Some(Kind::Entity(r)) => self.view_of_mut(r).is_some_and(|v| v.stop_talk(r)),
+            Some(Kind::Item) => self.item_stop_talk(id),
             _ => false,
         }
     }
@@ -2682,6 +2696,9 @@ impl World {
             #[cfg(feature = "3d")]
             Some(Kind::Actor3D) => self.actor3d(id).is_some_and(|a| a.is_talking()),
             Some(Kind::Entity(r)) => self.view_of(*r).is_some_and(|v| v.is_talking(*r)),
+            Some(Kind::Item) => self
+                .item(id)
+                .is_some_and(|i| i.state == crate::inventory::ItemState::Talking),
             _ => false,
         }
     }
@@ -2709,6 +2726,13 @@ impl World {
             view.skip_sentences(timer);
         }
         self.game_view.skip_sentences(timer);
+        for (_, item) in &mut self.inventory.items {
+            if let Some(sentence) = &mut item.sentence {
+                if sentence.can_skip(timer) {
+                    sentence.finish();
+                }
+            }
+        }
         self.stop_speech();
         self.access.stop();
     }
@@ -2758,6 +2782,17 @@ impl World {
         for view in views {
             for (_, sentence) in view.sentences() {
                 if let Some(draw) = SentenceDraw::of(sentence, ox, oy, sw) {
+                    draws.push(draw);
+                }
+            }
+        }
+        for (_, item) in &self.inventory.items {
+            if item.show_sentence {
+                if let Some(draw) = item
+                    .sentence
+                    .as_ref()
+                    .and_then(|s| SentenceDraw::of(s, ox, oy, sw))
+                {
                     draws.push(draw);
                 }
             }
@@ -3321,6 +3356,7 @@ impl Host for World {
             Some(Kind::Scene) => self.is_scrolled(),
             Some(Kind::Fader) => self.fader.ready,
             Some(Kind::SceneFader) => self.scene_fader.ready,
+            Some(Kind::Item) => self.item(id).is_none_or(|i| i.ready),
             Some(Kind::ResponseBox) => self.responses.waiting.is_none(),
             Some(Kind::Control) => self
                 .control(id)

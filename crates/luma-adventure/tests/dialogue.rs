@@ -883,3 +883,259 @@ fn an_actor_shows_the_talk_definition_sprite_of_its_direction() {
     assert_eq!(shown(&runtime).as_deref(), Some("art\\green.png"));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn an_item_talks_and_plays_animations_while_the_box_shows_it() {
+    let (dir, mut runtime, _) = start(&[
+        (
+            "default.game",
+            b"GAME { NAME=\"Dialogue\" SCRIPT=\"game.script\" SYSTEM_FONT=\"fonts\\sys.font\" } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" }".to_vec(),
+        ),
+        (
+            "items.items",
+            b"ITEM { NAME=\"key\" IMAGE=\"art\\green.png\" TALK=\"art\\wave.sprite\" TALK_SPECIAL=\"art\\shout.sprite\" }".to_vec(),
+        ),
+        (
+            "inv.def",
+            b"INVENTORY_BOX { ITEM_WIDTH=8 ITEM_HEIGHT=8 AREA { 0, 0, 32, 8 } WINDOW { X=0 Y=0 WIDTH=64 HEIGHT=8 } }".to_vec(),
+        ),
+        (
+            "art\\wave.sprite",
+            b"SPRITE { NAME=\"wave\" LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" } }".to_vec(),
+        ),
+        (
+            "art\\shout.sprite",
+            b"SPRITE { NAME=\"Shout\" LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\blue.png\" } }".to_vec(),
+        ),
+        (
+            "art\\once.sprite",
+            b"SPRITE { LOOPING=FALSE FRAME { DELAY=40 IMAGE=\"art\\red.png\" } FRAME { DELAY=40 IMAGE=\"art\\blue.png\" } }".to_vec(),
+        ),
+    ]);
+    let game = runtime.world.game_id();
+    call_native(&mut runtime, game, "TakeItem", &[Value::from("key")]);
+    let key = call_native(&mut runtime, game, "QueryItem", &[Value::from("key")])
+        .as_native()
+        .unwrap();
+    runtime
+        .world
+        .set_property(game, "InventoryVisible", &Value::Bool(true));
+    runtime.tick(10);
+    let shown = |runtime: &Runtime| runtime.world.item(key).unwrap().current_sprite.clone();
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\green.png"));
+
+    // A sentence: the special talk sprite the stance names, by the
+    // `NAME` of its sprite file; the text is shown; the item is busy.
+    assert!(runtime.world.talk(
+        key,
+        "Hi",
+        None,
+        300,
+        Some("shout".into()),
+        TextAlign::Center
+    ));
+    runtime.tick(10);
+    runtime.tick(10);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\shout.sprite"));
+    assert!(runtime.world.is_talking(key));
+    assert_eq!(runtime.world.sentences().len(), 1);
+    assert_eq!(runtime.world.sentences()[0].text, "Hi");
+    assert_eq!(
+        call_native(&mut runtime, key, "IsTalking", &[]),
+        Value::Bool(true)
+    );
+    for _ in 0..32 {
+        runtime.tick(10);
+    }
+    assert!(!runtime.world.is_talking(key));
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\green.png"));
+    assert!(runtime.world.sentences().is_empty());
+
+    // Without a stance, a generic talk sprite. An item is updated only
+    // while the inventory box draws it: hidden, its sentence is neither
+    // shown nor ended.
+    assert!(
+        runtime
+            .world
+            .talk(key, "Hi", None, 100, None, TextAlign::Center)
+    );
+    runtime.tick(10);
+    runtime.tick(10);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\wave.sprite"));
+    runtime
+        .world
+        .set_property(game, "InventoryVisible", &Value::Bool(false));
+    for _ in 0..20 {
+        runtime.tick(10);
+    }
+    assert!(runtime.world.is_talking(key));
+    assert!(runtime.world.sentences().is_empty());
+    runtime
+        .world
+        .set_property(game, "InventoryVisible", &Value::Bool(true));
+    runtime.tick(10);
+    runtime.tick(10);
+    assert!(!runtime.world.is_talking(key));
+
+    // `PlayAnim`: the sprite plays to its end, then the item's own.
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            key,
+            "PlayAnimAsync",
+            &[Value::from("art\\once.sprite")]
+        ),
+        Value::Bool(true)
+    );
+    runtime.tick(10);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\once.sprite"));
+    assert!(!runtime.world.item(key).unwrap().ready);
+    for _ in 0..15 {
+        runtime.tick(10);
+    }
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\green.png"));
+    assert!(runtime.world.item(key).unwrap().ready);
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            key,
+            "PlayAnim",
+            &[Value::from("art\\none.sprite")]
+        ),
+        Value::Bool(false)
+    );
+
+    // The talk sprite sets are the item's, as an entity's.
+    let sets = |runtime: &Runtime| {
+        let def = &runtime.world.item(key).unwrap().def;
+        (def.talk.clone(), def.talk_special.clone())
+    };
+    let file = |name: &str| Value::from(name);
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            key,
+            "AddTalkSprite",
+            &[file("art\\once.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            key,
+            "SetTalkSprite",
+            &[file("art\\wave.sprite"), Value::Bool(true)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            key,
+            "RemoveTalkSprite",
+            &[file("ART\\WAVE.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        sets(&runtime),
+        (
+            vec!["art\\once.sprite".to_string()],
+            vec!["art\\wave.sprite".to_string()]
+        )
+    );
+    assert_eq!(
+        call_native(
+            &mut runtime,
+            key,
+            "AddTalkSprite",
+            &[file("art\\none.sprite"), Value::Bool(false)]
+        ),
+        Value::Bool(false)
+    );
+    // `SetSprite(null)` takes the sprite away and answers true.
+    assert_eq!(
+        call_native(&mut runtime, key, "SetSprite", &[Value::Null]),
+        Value::Bool(true)
+    );
+    assert_eq!(runtime.world.item(key).unwrap().def.sprite, None);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_entitys_sprite_and_talk_sprites_change_as_in_the_original() {
+    let (dir, mut runtime, _) = start(&[
+        (
+            "art\\loop.sprite",
+            b"SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" } FRAME { DELAY=50 IMAGE=\"art\\blue.png\" } }".to_vec(),
+        ),
+        ("art\\broken.sprite", b"SPRITE { FRAME {".to_vec()),
+    ]);
+    let (r, id) = prop(&runtime);
+    let shown = |runtime: &Runtime| runtime.world.scene().unwrap().shown_sprite(r);
+    let own = |runtime: &Runtime| {
+        runtime
+            .world
+            .scene()
+            .unwrap()
+            .entity(r)
+            .unwrap()
+            .sprite
+            .clone()
+    };
+    // A sprite `PlayAnim` plays goes on when the entity's own sprite is
+    // replaced; the new one shows once it is over.
+    let file = |name: &str| Value::from(name);
+    call_native(
+        &mut runtime,
+        id,
+        "PlayAnimAsync",
+        &[file("art\\loop.sprite")],
+    );
+    runtime.tick(10);
+    assert_eq!(
+        call_native(&mut runtime, id, "SetSprite", &[file("art\\blue.png")]),
+        Value::Bool(true)
+    );
+    runtime.tick(10);
+    assert!(runtime.world.scene().unwrap().is_playing_anim(r));
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\loop.sprite"));
+    call_native(&mut runtime, id, "Reset", &[]);
+    runtime.tick(10);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\blue.png"));
+    // A talk sprite removed while it plays: the entity's own sprite
+    // takes its place.
+    call_native(
+        &mut runtime,
+        id,
+        "AddTalkSprite",
+        &[file("art\\loop.sprite"), Value::Bool(false)],
+    );
+    runtime
+        .world
+        .talk(id, "Hi", None, 2000, None, TextAlign::Center);
+    runtime.tick(10);
+    runtime.tick(10);
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\loop.sprite"));
+    call_native(
+        &mut runtime,
+        id,
+        "RemoveTalkSprite",
+        &[file("art\\loop.sprite"), Value::Bool(false)],
+    );
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\blue.png"));
+    runtime.tick(10);
+    assert!(runtime.world.is_talking(id));
+    assert_eq!(shown(&runtime).as_deref(), Some("art\\blue.png"));
+    runtime.world.stop_talk(id);
+    runtime.tick(10);
+    // A file that does not load leaves the entity without a sprite: the
+    // old one went first.
+    assert_eq!(
+        call_native(&mut runtime, id, "SetSprite", &[file("art\\broken.sprite")]),
+        Value::Bool(false)
+    );
+    assert_eq!(own(&runtime), None);
+    std::fs::remove_dir_all(&dir).ok();
+}

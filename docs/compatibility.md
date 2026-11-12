@@ -470,12 +470,12 @@ How the list was made. For every class with a script interface, the names tested
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `SetSprite` | method | **done** | Sets the object's default sprite. |
+| `SetSprite` | method | **done** | Sets the object's default sprite; null takes it away; a file that does not load leaves the object without one. |
 | `GetSprite` | method | **done** | File of the current default sprite. |
 | `GetSpriteObject` | method | **done** | The default sprite as a script object: an entity's sprite, the sprite `SetSprite` gave an actor, an item's image. |
-| `AddTalkSprite` | method | **done** | Adds a sprite to the talk animation set (file, "ex" flag). On actors and items the file is loaded and nothing else, as in WME (an actor's own sprite sets hide the list; items do not talk). |
-| `RemoveTalkSprite` | method | **done** | Removes a talk sprite (entities). |
-| `SetTalkSprite` | method | **done** | Replaces the talk sprite set with one sprite (entities). |
+| `AddTalkSprite` | method | **done** | Adds a sprite to the talk animation set (file, "ex" flag). On entities and items. On actors the file is loaded and nothing else, as in WME (an actor's own sprite sets hide the list). |
+| `RemoveTalkSprite` | method | **done** | Removes a talk sprite (entities, items); the object's own sprite takes the place of the one being played. |
+| `SetTalkSprite` | method | **done** | Replaces the talk sprite set with one sprite (entities, items). |
 | `Type` | get | **done** | Class name of the object. |
 
 ### CAdActor (2D walking character)

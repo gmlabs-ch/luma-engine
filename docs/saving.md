@@ -345,7 +345,8 @@ Version 17, after 16, keeps the dialogue-branch context of
 every once-per-game response chosen (it kept the id alone), whether the
 response box's window is the engine's own, and with each sentence being
 said its speech file and position, whether it is hidden by a freeze, and
-its talk definition (`.talk`) with the sprite it is at.
+its talk definition (`.talk`) with the sprite it is at; the items keep
+what they are doing (a sentence, a played animation).
 
 ## Checking a game
 

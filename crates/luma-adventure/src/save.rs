@@ -727,6 +727,18 @@ impl World {
         for (_, item) in &self.inventory.items {
             images.extend(item.def.sprite.clone());
             images.extend(item.def.sprite_hover.clone());
+            // What a talking or animated item shows.
+            images.extend(item.def.talk.iter().cloned());
+            images.extend(item.def.talk_special.iter().cloned());
+            images.extend(item.anim_sprite.clone());
+            images.extend(item.talk_sprite.clone());
+            images.extend(item.forced_talk.clone());
+            if let Some(sentence) = &item.sentence {
+                fonts.extend(sentence.font.clone());
+                if let Some(talk) = &sentence.talk {
+                    images.extend(talk.def.sprite_paths().into_iter().map(str::to_string));
+                }
+            }
             fonts.extend(item.def.font.clone());
             cursors.extend(item.def.cursor.clone());
             cursors.extend(item.def.cursor_hover.clone());
