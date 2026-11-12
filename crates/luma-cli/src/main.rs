@@ -133,6 +133,10 @@ fn open(game: &Path) -> Result<Vfs, Failure> {
         Ok(vfs)
     } else {
         let vfs = Vfs::open_game(game)?;
+        // The packages the engine would ignore.
+        for warning in vfs.warnings() {
+            eprintln!("{}", warning.trim_start());
+        }
         if vfs.packages().is_empty() {
             return Err(Failure::Error(format!(
                 "{}: no .dcp package found",
@@ -286,6 +290,11 @@ fn dump(path: &Path, name: Option<&str>) -> Result<(), Failure> {
         None => (path.display().to_string(), fs::read(path)?),
     };
     let doc = Document::parse(&bytes).map_err(|err| Failure::Error(format!("{label}: {err}")))?;
+    // The engine reads a file one block at a time and only fails on the
+    // blocks it reads; a dump is a check of the whole file.
+    if let Some(err) = doc.first_syntax_error() {
+        return Err(Failure::Error(format!("{label}: {err}")));
+    }
     let stdout = io::stdout();
     let mut out = BufWriter::new(stdout.lock());
     write!(out, "{doc}")?;
@@ -525,7 +534,9 @@ fn script(game: &Path, name: Option<&str>) -> Result<(), Failure> {
 fn scene(game: &Path, name: &str) -> Result<(), Failure> {
     let vfs = open(game)?;
     let bytes = vfs.read(name)?;
-    let scene = Scene::parse(&bytes).map_err(|err| Failure::Error(format!("{name}: {err}")))?;
+    let mut read = |file: &str| vfs.read(file).ok();
+    let scene = Scene::parse_with(&bytes, &mut luma_formats::Files::new(&mut read))
+        .map_err(|err| Failure::Error(format!("{name}: {err}")))?;
     let stdout = io::stdout();
     let mut out = BufWriter::new(stdout.lock());
     writeln!(

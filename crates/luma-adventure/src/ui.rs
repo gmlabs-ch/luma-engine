@@ -232,9 +232,13 @@ pub struct StaticState {
 pub struct EditState {
     /// The font of the selected part of the text.
     pub font_selected: Option<String>,
-    /// Start of the selection, in bytes.
+    /// Start of the selection, in bytes of the text. A value past the
+    /// end of the text stands for a character index past its last
+    /// character, as far past it as the value is past the end (see
+    /// [`selection_index`]): the original keeps the number a script or
+    /// its constructor gave until the editor is next drawn.
     pub sel_start: usize,
-    /// End of the selection and position of the caret, in bytes.
+    /// End of the selection and position of the caret, as `sel_start`.
     pub sel_end: usize,
     /// First character shown.
     pub scroll_offset: usize,
@@ -254,22 +258,53 @@ pub struct EditState {
     /// text and the caret when right-to-left text sits against the
     /// right edge (`CUIEdit::Display`'s `AlignOffset`), 0 otherwise.
     pub align_offset: i32,
+    /// The parts of the text the editor draws this frame, laid out by
+    /// the last update; not saved.
+    #[serde(skip)]
+    pub pieces: Vec<EditPiece>,
+    /// The caret this frame, when the editor has the focus; not saved.
+    #[serde(skip)]
+    pub caret: Option<EditPiece>,
+    /// The height the parts are drawn in: the taller letter of the two
+    /// fonts; not saved.
+    #[serde(skip)]
+    pub line_height: i32,
+}
+
+/// A part of an editor's text as `CUIEdit::Display` draws it: the text
+/// before the selection, the selection, the text after it, the caret.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EditPiece {
+    /// The characters drawn.
+    pub text: String,
+    /// Where the part starts, from the editor's left edge.
+    pub x: i32,
+    /// The room left up to the right frame, which the part is cut at.
+    pub width: i32,
+    /// Whether it is drawn with `FONT_SELECTED`.
+    pub selected: bool,
 }
 
 impl Default for EditState {
     fn default() -> Self {
         EditState {
             font_selected: None,
-            sel_start: usize::MAX,
-            sel_end: usize::MAX,
+            // `m_SelStart = m_SelEnd = 10000`: past any text until the
+            // editor is drawn.
+            sel_start: 10000,
+            sel_end: 10000,
             scroll_offset: 0,
             frame_width: 0,
             max_length: -1,
             cursor_char: "|".to_string(),
-            cursor_blink_rate: 600,
+            // `GetCaretBlinkTime()` on a Windows left at its default.
+            cursor_blink_rate: 530,
             last_blink: 0,
             cursor_visible: true,
             align_offset: 0,
+            pieces: Vec::new(),
+            caret: None,
+            line_height: 0,
         }
     }
 }
@@ -333,6 +368,10 @@ pub struct Control {
     pub can_focus: bool,
     /// The label, the text, the title.
     pub text: String,
+    /// Whether the control was ever given a text, even an empty one
+    /// (`m_Text` is not null): a static sizes itself to an empty text
+    /// and leaves its size alone without one.
+    pub has_text: bool,
     /// The font of the text.
     pub font: Option<String>,
     /// The image or sprite.
@@ -367,6 +406,8 @@ impl Control {
             parent_notify: false,
             can_focus,
             text: String::new(),
+            // An editor is made with an empty text (`SetText("")`).
+            has_text: matches!(kind, ControlKind::Edit(_)),
             font: None,
             image: None,
             back: None,
@@ -532,14 +573,20 @@ impl Control {
             .or_else(|| self.image.as_ref().map(|_| ImageSlot::Image))
     }
 
-    /// Sets the text; `|` becomes a line break (`SetText`). The caret
-    /// stays inside the new text, between two characters.
+    /// Sets the text; `|` becomes a line break (`SetText`). An editor's
+    /// selection keeps its character indexes, as the original keeps
+    /// `m_SelStart` and `m_SelEnd` untouched: past the end of a shorter
+    /// text until the editor is next drawn.
     pub fn set_text(&mut self, text: &str) {
-        self.text = luma_formats::window::control_text(text);
+        let text = luma_formats::window::control_text(text);
         if let ControlKind::Edit(e) = &mut self.kind {
-            e.sel_start = char_floor(&self.text, e.sel_start);
-            e.sel_end = char_floor(&self.text, e.sel_end);
+            let start = selection_index(&self.text, e.sel_start);
+            let end = selection_index(&self.text, e.sel_end);
+            e.sel_start = selection_offset(&text, start);
+            e.sel_end = selection_offset(&text, end);
         }
+        self.text = text;
+        self.has_text = true;
     }
 
     /// Whether the control is drawn pressed.
@@ -549,14 +596,33 @@ impl Control {
     }
 }
 
-/// The two lines an editor shows, from the first character in view:
-/// the text alone, and the text with the caret's character at the
-/// caret.
-fn edit_lines(text: &str, scroll: usize, caret: usize, cursor_char: &str) -> (String, String) {
-    let shown = text.get(scroll..).unwrap_or("");
-    let before = text.get(scroll.min(caret)..caret).unwrap_or("");
-    let after = text.get(caret..).unwrap_or("");
-    (shown.to_string(), format!("{before}{cursor_char}{after}"))
+/// The colour a window forces on the texts drawn in it, from the tint
+/// its images are drawn with (`m_ForceAlphaColor`, set by `ALPHA_COLOR`
+/// and `ALPHA`): none when nothing is tinted.
+fn forced_color(tint: Rgba) -> Option<Rgba> {
+    (tint != Rgba::OPAQUE_WHITE).then_some(tint)
+}
+
+/// The character index a selection end stands for (`m_SelStart`,
+/// `m_SelEnd`): the characters before its byte offset, or, past the end
+/// of the text, as many more as it is past it.
+pub(crate) fn selection_index(text: &str, at: usize) -> usize {
+    match at.checked_sub(text.len()) {
+        Some(past) => text.chars().count().saturating_add(past),
+        None => text[..char_floor(text, at)].chars().count(),
+    }
+}
+
+/// The selection end of a character index: the byte offset of that
+/// character, or, past the last character, as far past the end of the
+/// text.
+pub(crate) fn selection_offset(text: &str, index: usize) -> usize {
+    match text.char_indices().nth(index) {
+        Some((at, _)) => at,
+        None => text
+            .len()
+            .saturating_add(index - text.chars().count().min(index)),
+    }
 }
 
 /// The windows of a game and what freezing them holds.
@@ -635,59 +701,45 @@ impl World {
     // Loading
     // ----------------------------------------------------------------
 
-    /// Reads a `.window` file with its `TEMPLATE` chain.
-    fn read_window_def(&mut self, path: &str, depth: u32) -> Option<WindowDef> {
-        if depth > 8 {
-            self.log(format!("window template chain too deep at '{path}'"));
-            return None;
-        }
+    /// Reads a `.window` file (`CUIWindow::LoadFile`), with the `TEMPLATE`
+    /// files it names, of the window and of its controls, loaded where
+    /// the keys stand. A file that cannot be read, a key the original
+    /// does not know or a template that cannot be loaded gives no
+    /// window.
+    fn read_window_def(&mut self, path: &str) -> Option<WindowDef> {
         let bytes = match self.vfs.read(path) {
             Ok(bytes) => bytes,
             Err(err) => {
-                self.log(format!("Error opening window file '{path}': {err}"));
+                self.log(format!(
+                    "CUIWindow::LoadFile failed for file '{path}': {err}"
+                ));
                 return None;
             }
-        };
-        let doc = match luma_formats::Document::parse(&bytes) {
-            Ok(doc) => doc,
-            Err(err) => {
-                self.log(format!("Error parsing window file '{path}': {err}"));
-                return None;
-            }
-        };
-        use luma_formats::Nodes;
-        let Some(root) = doc.get("WINDOW") else {
-            self.log(format!("'WINDOW' keyword expected in '{path}'"));
-            return None;
-        };
-        // The controls' own templates (`TEMPLATE` in a `BUTTON`, `STATIC`
-        // or `EDIT` block) are read from the game where they stand.
-        let mut missing = Vec::new();
-        let mut def = match WindowDef::template_of(root) {
-            Some(template) => self.read_window_def(&template, depth + 1)?,
-            None => WindowDef::default(),
         };
         let vfs = &self.vfs;
-        def.apply_with(root, &mut |file| match vfs.read(file) {
-            Ok(bytes) => Some(bytes),
+        let mut read = |file: &str| vfs.read(file).ok();
+        match WindowDef::parse_with(&bytes, &mut luma_formats::Files::new(&mut read)) {
+            Ok(def) => Some(def),
             Err(err) => {
-                missing.push(format!("Error opening template file '{file}': {err}"));
+                self.log(format!("Error parsing WINDOW file '{path}': {err}"));
                 None
             }
-        });
-        for line in missing {
-            self.log(line);
         }
-        Some(def)
     }
 
     /// Loads a window file and adds the window to the game
     /// (`Game.LoadWindow`); `None` when the file cannot be read.
     pub fn load_window(&mut self, engine: &mut Engine, path: &str) -> Option<NativeId> {
-        let def = self.read_window_def(path, 0)?;
+        let def = self.read_window_def(path)?;
         let id = self.new_control(ControlKind::Window(Box::default()), None);
         self.ui.windows.push(id);
-        self.apply_window_def(engine, id, def, Some(path));
+        if !self.apply_window_def(engine, id, def, Some(path)) {
+            // A background, an image, a font, a cursor or a control that
+            // does not load fails the window (`CUIWindow::LoadBuffer`).
+            self.log(format!("Error loading WINDOW definition '{path}'"));
+            self.unload_object(engine, id);
+            return None;
+        }
         Some(id)
     }
 
@@ -703,14 +755,13 @@ impl World {
 
     /// Reads a window file into an existing window (`LoadFromFile`).
     pub fn load_window_into(&mut self, engine: &mut Engine, id: NativeId, path: &str) -> bool {
-        let Some(def) = self.read_window_def(path, 0) else {
+        let Some(def) = self.read_window_def(path) else {
             return false;
         };
         if self.control(id).and_then(Control::window).is_none() {
             return false;
         }
-        self.apply_window_def(engine, id, def, Some(path));
-        true
+        self.apply_window_def(engine, id, def, Some(path))
     }
 
     fn new_control(&mut self, kind: ControlKind, parent: Option<NativeId>) -> NativeId {
@@ -766,26 +817,20 @@ impl World {
                 return None;
             }
         };
-        let mut tiled = match TiledImage::parse(&bytes) {
+        // A `TEMPLATE` is another `.tiled` file, loaded where the key
+        // stands (`CUITiledImage::LoadBuffer`).
+        let parsed = {
+            let vfs = &self.vfs;
+            let mut read = |file: &str| vfs.read(file).ok();
+            TiledImage::parse_with(&bytes, &mut luma_formats::Files::new(&mut read))
+        };
+        let mut tiled = match parsed {
             Ok(tiled) => tiled,
             Err(err) => {
-                self.log(format!("Error parsing tiled image '{path}': {err}"));
+                self.log(format!("Error parsing TILED_IMAGE file '{path}': {err}"));
                 return None;
             }
         };
-        if let Some(template) = tiled.template.clone() {
-            if let Some(mut base) = self.load_tiled(&template) {
-                base.image = tiled.image.clone().or(base.image);
-                for (row, tiles) in tiled.tiles.iter().enumerate() {
-                    for (col, tile) in tiles.iter().enumerate() {
-                        if !tile.is_empty() {
-                            base.tiles[row][col] = *tile;
-                        }
-                    }
-                }
-                tiled = base;
-            }
-        }
         if let Some(image) = tiled.image.clone() {
             if self.load_ui_image(&image) {
                 if let Some(mask) = self.ui.bank.mask(&self.vfs, &image, DEFAULT_COLOR_KEY) {
@@ -797,37 +842,52 @@ impl World {
         Some(tiled)
     }
 
-    fn load_control_font(&mut self, path: &Option<String>) -> Option<String> {
+    /// Loads the font a control names; `ok` turns false when it names one
+    /// that does not load, which fails the control in the original.
+    fn load_control_font(&mut self, path: &Option<String>, ok: &mut bool) -> Option<String> {
         let path = path.as_deref()?;
         if self.load_font(path) {
             Some(path.to_string())
         } else {
+            *ok = false;
             None
         }
     }
 
-    fn load_control_image(&mut self, path: &Option<String>) -> Option<String> {
+    /// Loads the image a control names; see [`World::load_control_font`].
+    /// An image that does not exist is the placeholder and loads.
+    fn load_control_image(&mut self, path: &Option<String>, ok: &mut bool) -> Option<String> {
         let path = path.as_deref()?;
         if self.load_ui_image(path) {
             Some(path.to_string())
         } else {
+            *ok = false;
             None
         }
     }
 
-    fn load_control_back(&mut self, path: &Option<String>) -> Option<TiledImage> {
+    /// Loads the tiled image a control names; see
+    /// [`World::load_control_font`].
+    fn load_control_back(&mut self, path: &Option<String>, ok: &mut bool) -> Option<TiledImage> {
         let path = path.as_deref()?;
-        self.load_tiled(path)
+        let tiled = self.load_tiled(path);
+        if tiled.is_none() {
+            *ok = false;
+        }
+        tiled
     }
 
     /// Fills a control's common fields from a definition, loading what
-    /// it names.
-    fn apply_control_def(&mut self, engine: &mut Engine, id: NativeId, def: &ControlDef) {
-        let font = self.load_control_font(&def.font);
-        let image = self.load_control_image(&def.image);
-        let back = self.load_control_back(&def.back);
+    /// it names. `false` when something it names does not load: the
+    /// original's loaders of windows and controls stop there and the
+    /// control fails.
+    fn apply_control_def(&mut self, engine: &mut Engine, id: NativeId, def: &ControlDef) -> bool {
+        let mut ok = true;
+        let font = self.load_control_font(&def.font, &mut ok);
+        let image = self.load_control_image(&def.image, &mut ok);
+        let back = self.load_control_back(&def.back, &mut ok);
         if let Some(cursor) = &def.cursor {
-            self.load_cursor(cursor);
+            ok &= self.load_cursor(cursor);
         }
         if let Some(control) = self.control_mut(id) {
             control.apply_base(def);
@@ -839,20 +899,25 @@ impl World {
         for script in &def.scripts {
             self.attach(engine, id, script);
         }
+        ok
     }
 
+    /// Fills a window from its definition and creates its controls
+    /// (`CUIWindow::LoadBuffer`). `false` when the window fails: a
+    /// background, an image, a font, a cursor or a control of it does
+    /// not load. The caller then drops the window.
     pub(crate) fn apply_window_def(
         &mut self,
         engine: &mut Engine,
         id: NativeId,
         def: WindowDef,
         filename: Option<&str>,
-    ) {
-        self.apply_control_def(engine, id, &def.base);
+    ) -> bool {
+        let mut ok = self.apply_control_def(engine, id, &def.base);
         let title = self.expand(&def.title);
-        let back_inactive = self.load_control_back(&def.back_inactive);
-        let image_inactive = self.load_control_image(&def.image_inactive);
-        let font_inactive = self.load_control_font(&def.font_inactive);
+        let back_inactive = self.load_control_back(&def.back_inactive, &mut ok);
+        let image_inactive = self.load_control_image(&def.image_inactive, &mut ok);
+        let font_inactive = self.load_control_font(&def.font_inactive, &mut ok);
         if let Some(control) = self.control_mut(id) {
             control.text = title;
             control.can_focus = true;
@@ -874,9 +939,10 @@ impl World {
             }
         }
         for widget in def.widgets {
-            self.create_widget(engine, id, widget);
+            ok &= self.create_widget_checked(engine, id, widget).1;
         }
         self.correct_size(id);
+        ok
     }
 
     /// Adds a control from its definition to a window.
@@ -886,44 +952,55 @@ impl World {
         parent: NativeId,
         def: WidgetDef,
     ) -> NativeId {
-        let id = match def {
+        self.create_widget_checked(engine, parent, def).0
+    }
+
+    /// Adds a control from its definition to a window; the flag is false
+    /// when the control fails to load (something it names does not load,
+    /// or its entity for a container), which fails its window.
+    fn create_widget_checked(
+        &mut self,
+        engine: &mut Engine,
+        parent: NativeId,
+        def: WidgetDef,
+    ) -> (NativeId, bool) {
+        let (id, ok) = match def {
             WidgetDef::Button(def) => {
                 let id = self.new_control(ControlKind::Button(Box::default()), Some(parent));
-                self.apply_button_def(engine, id, &def);
-                id
+                (id, self.apply_button_def(engine, id, &def))
             }
             WidgetDef::Static(def) => {
                 let id =
                     self.new_control(ControlKind::Static(StaticState::default()), Some(parent));
-                self.apply_static_def(engine, id, &def);
-                id
+                (id, self.apply_static_def(engine, id, &def))
             }
             WidgetDef::Edit(def) => {
                 let id = self.new_control(ControlKind::Edit(Box::default()), Some(parent));
-                self.apply_edit_def(engine, id, &def);
-                id
+                (id, self.apply_edit_def(engine, id, &def))
             }
             WidgetDef::Window(def) => {
                 let id = self.new_control(ControlKind::Window(Box::default()), Some(parent));
-                self.apply_window_def(engine, id, *def, None);
-                id
+                (id, self.apply_window_def(engine, id, *def, None))
             }
             WidgetDef::EntityContainer(def) => {
                 let id = self.new_control(ControlKind::EntityContainer(None), Some(parent));
-                self.apply_control_def(engine, id, &def.base);
+                let mut ok = self.apply_control_def(engine, id, &def.base);
                 if let Some(control) = self.control_mut(id) {
                     control.can_focus = false;
                 }
                 if let Some(path) = &def.entity {
-                    self.set_container_entity(engine, id, path);
+                    ok &= self.set_container_entity(engine, id, path);
                 }
-                id
+                // `CorrectSize`: a container has no image, so it is 100
+                // wide and keeps its height.
+                self.correct_size(id);
+                (id, ok)
             }
         };
         if let Some(window) = self.control_mut(parent).and_then(Control::window_mut) {
             window.widgets.push(id);
         }
-        id
+        (id, ok)
     }
 
     /// Adds an empty control to a window (`CreateButton`, `CreateStatic`,
@@ -944,26 +1021,28 @@ impl World {
         id
     }
 
-    fn apply_button_def(&mut self, engine: &mut Engine, id: NativeId, def: &ButtonDef) {
-        self.apply_control_def(engine, id, &def.base);
+    /// `CUIButton::LoadBuffer`, on a parsed definition; `false` when the
+    /// button fails (something it names does not load).
+    fn apply_button_def(&mut self, engine: &mut Engine, id: NativeId, def: &ButtonDef) -> bool {
+        let mut ok = self.apply_control_def(engine, id, &def.base);
         let text = self.expand(&def.text);
         let state = ButtonState {
-            back_hover: self.load_control_back(&def.back_hover),
-            back_press: self.load_control_back(&def.back_press),
-            back_disable: self.load_control_back(&def.back_disable),
-            back_focus: self.load_control_back(&def.back_focus),
-            image_hover: self.load_control_image(&def.image_hover),
-            image_press: self.load_control_image(&def.image_press),
-            image_disable: self.load_control_image(&def.image_disable),
-            image_focus: self.load_control_image(&def.image_focus),
+            back_hover: self.load_control_back(&def.back_hover, &mut ok),
+            back_press: self.load_control_back(&def.back_press, &mut ok),
+            back_disable: self.load_control_back(&def.back_disable, &mut ok),
+            back_focus: self.load_control_back(&def.back_focus, &mut ok),
+            image_hover: self.load_control_image(&def.image_hover, &mut ok),
+            image_press: self.load_control_image(&def.image_press, &mut ok),
+            image_disable: self.load_control_image(&def.image_disable, &mut ok),
+            image_focus: self.load_control_image(&def.image_focus, &mut ok),
             anim_hover: None,
             anim_press: None,
             anim_disable: None,
             anim_focus: None,
-            font_hover: self.load_control_font(&def.font_hover),
-            font_press: self.load_control_font(&def.font_press),
-            font_disable: self.load_control_font(&def.font_disable),
-            font_focus: self.load_control_font(&def.font_focus),
+            font_hover: self.load_control_font(&def.font_hover, &mut ok),
+            font_press: self.load_control_font(&def.font_press, &mut ok),
+            font_disable: self.load_control_font(&def.font_disable, &mut ok),
+            font_focus: self.load_control_font(&def.font_focus, &mut ok),
             text_align: def.text_align,
             hover: false,
             press: false,
@@ -979,12 +1058,17 @@ impl World {
             control.kind = ControlKind::Button(Box::new(state));
         }
         self.correct_size(id);
+        ok
     }
 
-    fn apply_static_def(&mut self, engine: &mut Engine, id: NativeId, def: &StaticDef) {
-        self.apply_control_def(engine, id, &def.base);
+    /// `CUIText::LoadBuffer`, on a parsed definition; `false` when the
+    /// control fails.
+    fn apply_static_def(&mut self, engine: &mut Engine, id: NativeId, def: &StaticDef) -> bool {
+        let ok = self.apply_control_def(engine, id, &def.base);
         let text = self.expand(&def.text);
         if let Some(control) = self.control_mut(id) {
+            // A file's empty `TEXT` is not told from none.
+            control.has_text |= !text.is_empty();
             control.text = text;
             control.can_focus = false;
             control.kind = ControlKind::Static(StaticState {
@@ -993,13 +1077,19 @@ impl World {
             });
         }
         self.correct_size(id);
+        ok
     }
 
-    fn apply_edit_def(&mut self, engine: &mut Engine, id: NativeId, def: &EditDef) {
-        self.apply_control_def(engine, id, &def.base);
-        let font_selected = self.load_control_font(&def.font_selected);
+    /// `CUIEdit::LoadBuffer`, on a parsed definition; `false` when the
+    /// control fails. The text goes through the string table.
+    fn apply_edit_def(&mut self, engine: &mut Engine, id: NativeId, def: &EditDef) -> bool {
+        let mut ok = self.apply_control_def(engine, id, &def.base);
+        let font_selected = self.load_control_font(&def.font_selected, &mut ok);
+        // `Game->m_StringTable->Expand(&m_Text)`; an editor holds
+        // characters.
+        let text = self.display_text(&self.expand(&def.text));
         if let Some(control) = self.control_mut(id) {
-            control.set_text(&def.text);
+            control.set_text(&text);
             control.can_focus = true;
             control.kind = ControlKind::Edit(Box::new(EditState {
                 font_selected,
@@ -1010,6 +1100,7 @@ impl World {
             }));
         }
         self.correct_size(id);
+        ok
     }
 
     /// The bounding size of a sprite's first frame placed at the origin
@@ -1109,13 +1200,17 @@ impl World {
         self.fonts.get_mut(&path).map_or(0, |f| f.text_width(text))
     }
 
-    /// Sets a static's size to its text (`SizeToFit`), or only its height
-    /// (`HeightToFit`).
+    /// Sets a static's size to its text (`CUIText::SizeToFit`), or only
+    /// its height (`HeightToFit`): the width of the text on one line,
+    /// then its height in that width. Nothing without a font of its own
+    /// or without a text; an empty text is a text, 0 wide and as high as
+    /// its font makes an empty text (a line of a bitmap font, 0 for a
+    /// TrueType font).
     pub fn size_static_to_fit(&mut self, id: NativeId, width_too: bool) {
         let Some(control) = self.control(id) else {
             return;
         };
-        if control.font.is_none() || control.text.is_empty() {
+        if control.font.is_none() || !control.has_text {
             return;
         }
         let (font, text, width) = (control.font.clone(), control.text.clone(), control.width);
@@ -1769,17 +1864,8 @@ impl World {
     /// cannot be frozen and gets mouse events while the game is not
     /// interactive, as the original engine sets it up.
     pub fn set_container_entity(&mut self, engine: &mut Engine, id: NativeId, path: &str) -> bool {
-        let def = match self
-            .vfs
-            .read(path)
-            .map_err(|e| e.to_string())
-            .and_then(|bytes| Entity::parse(&bytes).map_err(|e| e.to_string()))
-        {
-            Ok(def) => def,
-            Err(reason) => {
-                self.log(format!("Error parsing ENTITY file '{path}': {reason}"));
-                return false;
-            }
+        let Some(def) = self.read_entity_def(path) else {
+            return false;
         };
         let Some(ControlKind::EntityContainer(previous)) = self.control(id).map(|c| c.kind.clone())
         else {
@@ -2127,6 +2213,32 @@ impl World {
         }
     }
 
+    /// The width of a part of an editor's text in a font. The part is
+    /// characters; the fonts take text as the game holds it.
+    fn edit_width(&mut self, font: &str, part: &str) -> i32 {
+        if part.is_empty() {
+            return 0;
+        }
+        let text = self.game_text(part);
+        self.measure_text_width(Some(font), &text)
+    }
+
+    /// The half of `CUIEdit::Display` that changes the editor: the
+    /// selection is brought inside the text, the first character shown
+    /// moves on until the text up to the caret fits, the parts to draw
+    /// are laid out, and the caret blinks.
+    ///
+    /// The parts are the text before the selection, the selection (in
+    /// `FONT_SELECTED`) and the text after it, with the caret where the
+    /// selection ends. Each is drawn in the room left up to the right
+    /// frame and one letter high, so the line is cut there. The caret
+    /// keeps its room while the editor has the focus, shown or not.
+    ///
+    /// Deliberate: the original measures the parts with `GetTextWidth`
+    /// and a length, which its TrueType font ignores: with such a font
+    /// every part is as wide as all the text that follows, and a caret
+    /// inside the text stands far from its place. The parts are
+    /// measured for what they are here, as with a bitmap font.
     fn update_edit(&mut self, id: NativeId) {
         self.step_control_image(id, ImageSlot::Image);
         let clock = self.clock;
@@ -2141,56 +2253,126 @@ impl World {
         let font = self.control_font(control.font.as_deref());
         let rtl = self.text_rtl;
         let Some(e) = control.edit() else { return };
-        let (frame, sel_end, mut scroll, blink_rate, last_blink, cursor_char) = (
-            e.frame_width,
-            e.sel_end.min(text.len()),
-            e.scroll_offset.min(text.len()),
-            e.cursor_blink_rate,
-            e.last_blink,
-            e.cursor_char.clone(),
-        );
-        // Keep the caret in view.
-        let mut align_offset = 0;
-        if let Some(font) = &font {
-            // The editor's text and caret are characters, whatever the
-            // game's encoding (`CUIEdit::Display` draws them as ANSI);
-            // the fonts take text as the game holds it.
-            let cursor_width = self.measure_text_width(Some(font), &self.game_text(&cursor_char));
+        let selected_font = e.font_selected.clone().or_else(|| font.clone());
+        let (frame, cursor_char) = (e.frame_width, e.cursor_char.clone());
+        let len = text.len();
+        let sel_start = char_floor(&text, e.sel_start);
+        let sel_end = char_floor(&text, e.sel_end);
+        let mut scroll = char_floor(&text, e.scroll_offset);
+        let part = |from: usize, to: usize| text.get(from..to.max(from)).unwrap_or("");
+        let mut pieces = Vec::new();
+        let mut caret = None;
+        let (mut align_offset, mut line_height) = (0, 0);
+        if let (Some(font), Some(selected_font)) = (&font, &selected_font) {
+            let cursor_width = self.edit_width(font, &cursor_char);
+            let room = width - cursor_width - 2 * frame;
+            // The selection runs from `first` to `last`; the caret is at
+            // the end the user moves, before it or after it.
+            let caret_first = sel_start >= sel_end;
+            let (first, last) = (sel_start.min(sel_end), sel_start.max(sel_end));
             loop {
-                let shown = self.game_text(text.get(scroll..sel_end).unwrap_or(""));
-                let w = self.measure_text_width(Some(font), &shown);
-                if w <= width - cursor_width - 2 * frame || scroll >= text.len() {
+                let used = if caret_first {
+                    self.edit_width(font, part(scroll, sel_end))
+                } else {
+                    let from = scroll.max(sel_start);
+                    self.edit_width(font, part(scroll, sel_start))
+                        + self.edit_width(selected_font, part(from, sel_end))
+                };
+                if used <= room {
                     break;
                 }
                 scroll += 1;
-                while scroll < text.len() && !text.is_char_boundary(scroll) {
+                while scroll < len && !text.is_char_boundary(scroll) {
                     scroll += 1;
+                }
+                if scroll >= len {
+                    break;
                 }
             }
             scroll = scroll.min(sel_end);
-            let (shown, with_caret) = edit_lines(&text, scroll, sel_end, &cursor_char);
-            let (shown, with_caret) = (self.game_text(&shown), self.game_text(&with_caret));
+            let shown_first = first.max(scroll);
+            let before = self.edit_width(font, part(scroll, first));
+            let selection = self.edit_width(selected_font, part(shown_first, last));
+            let after = self.edit_width(font, part(last, len));
+            let caret_room = if focused { cursor_width } else { 0 };
             // Right-to-left text sits against the right edge: it starts
             // after the room the text and the caret leave.
             if rtl {
-                let used = self.measure_text_width(Some(font), &shown)
-                    + if focused { cursor_width } else { 0 };
-                align_offset = (width - 2 * frame - used).max(0);
+                align_offset = (width - 2 * frame - before - caret_room - selection - after).max(0);
             }
-            if let Some(f) = self.fonts.get_mut(font) {
-                f.prepare(&shown, -1, TextAlign::Left, -1);
-                f.prepare(&with_caret, -1, TextAlign::Left, -1);
+            line_height = [font, selected_font]
+                .iter()
+                .filter_map(|f| self.fonts.get(f))
+                .map(crate::text::Font::line_height)
+                .max()
+                .unwrap_or(0);
+            let right = width - frame;
+            let mut x = frame + align_offset;
+            let piece = |x: i32, text: &str, selected: bool| EditPiece {
+                text: text.to_string(),
+                x,
+                width: right - x,
+                selected,
+            };
+            let caret_piece = |x: i32| {
+                // The caret is measured whole and drawn as its first
+                // character.
+                let first: String = cursor_char.chars().take(1).collect();
+                EditPiece {
+                    text: first,
+                    x,
+                    width: right - x,
+                    selected: false,
+                }
+            };
+            if first > scroll {
+                pieces.push(piece(x, part(scroll, first), false));
+                x += before;
+            }
+            if focused && caret_first {
+                caret = Some(caret_piece(x));
+                x += cursor_width;
+            }
+            if last > shown_first {
+                pieces.push(piece(x, part(shown_first, last), true));
+                x += selection;
+            }
+            if focused && !caret_first {
+                caret = Some(caret_piece(x));
+                x += cursor_width;
+            }
+            pieces.push(piece(x, part(last, len), false));
+            // Nothing is drawn of an empty part, nor in no room at all.
+            pieces.retain(|p| !p.text.is_empty() && p.width > 0);
+            caret = caret.filter(|p| !p.text.is_empty() && p.width > 0);
+            // A TrueType font draws a text it was given before.
+            for p in pieces.iter().chain(&caret) {
+                let name = if p.selected { selected_font } else { font };
+                let shown = self.game_text(&p.text);
+                if let Some(f) = self.fonts.get_mut(name) {
+                    f.prepare(&shown, p.width, TextAlign::Left, line_height);
+                }
             }
         }
-        let blink = blink_rate > 0 && clock.saturating_sub(last_blink) >= blink_rate as u64;
         if let Some(e) = self.control_mut(id).and_then(Control::edit_mut) {
+            e.sel_start = sel_start;
+            e.sel_end = sel_end;
             e.scroll_offset = scroll;
             e.align_offset = align_offset;
-            if !focused {
-                e.cursor_visible = false;
-            } else if blink || last_blink == 0 {
-                e.cursor_visible = last_blink == 0 || !e.cursor_visible;
-                e.last_blink = clock;
+            e.pieces = pieces;
+            e.caret = caret;
+            e.line_height = line_height;
+            // The caret changes each time the blink rate has passed
+            // since it last did. The original compares unsigned numbers,
+            // against a clock that has run for long: a caret that never
+            // blinked is due, and a negative rate never is.
+            if focused && e.cursor_blink_rate >= 0 {
+                let due = e.last_blink == 0
+                    || clock.saturating_sub(e.last_blink) >= e.cursor_blink_rate as u64;
+                if due {
+                    e.last_blink = clock;
+                    e.cursor_visible = !e.cursor_visible;
+                }
             }
         }
     }
@@ -2417,8 +2599,10 @@ impl World {
         } else {
             translated.or(text.filter(|c| !c.is_control()))
         };
-        let typed =
-            ch.is_some_and(|ch| self.edit_message(id, true, crate::input::char_code(ch), Some(ch)));
+        let typed = ch.is_some_and(|ch| {
+            let code = crate::input::char_code_in(ch, self.ansi_code_page());
+            self.edit_message(id, true, code, Some(ch))
+        });
         down || typed
     }
 
@@ -2722,7 +2906,7 @@ impl World {
         }
         if let (Some(rect), false) = (window.title_rect, control.text.is_empty()) {
             if let Some(font) = self.window_font(id).and_then(|f| self.fonts.get(&f)) {
-                font.draw(
+                font.draw_forced(
                     list,
                     &control.text,
                     x + rect.left,
@@ -2730,6 +2914,7 @@ impl World {
                     rect.width() as i32,
                     window.title_align,
                     rect.height() as i32,
+                    forced_color(tint),
                 );
             }
         }
@@ -2864,7 +3049,7 @@ impl World {
             if let Some(font) = self.button_font(id).and_then(|f| self.fonts.get(&f)) {
                 let offset = (control.height - control.text_height) / 2;
                 let shift = i32::from(pressed);
-                font.draw(
+                font.draw_forced(
                     list,
                     &control.text,
                     x + shift,
@@ -2872,6 +3057,7 @@ impl World {
                     control.width,
                     b.text_align,
                     -1,
+                    forced_color(tint),
                 );
             }
         }
@@ -2912,7 +3098,7 @@ impl World {
                     VerticalAlign::Bottom => control.height - control.text_height,
                     VerticalAlign::Center => (control.height - control.text_height) / 2,
                 };
-                font.draw(
+                font.draw_forced(
                     list,
                     &control.text,
                     x,
@@ -2920,6 +3106,7 @@ impl World {
                     control.width,
                     s.text_align,
                     control.height,
+                    forced_color(tint),
                 );
             }
         }
@@ -2952,34 +3139,26 @@ impl World {
             .control_font(control.font.as_deref())
             .and_then(|f| self.fonts.get(&f));
         let Some(font) = font else { return };
-        // The two lines `update_edit` prepared: a TrueType font only
-        // draws a text it was given before.
-        let (shown, with_caret) = edit_lines(
-            &control.text,
-            e.scroll_offset.min(control.text.len()),
-            e.sel_end.min(control.text.len()),
-            &e.cursor_char,
-        );
-        let frame = e.frame_width + e.align_offset;
-        if e.cursor_visible && self.is_focused(id) {
-            font.draw(
+        let selected_font = e
+            .font_selected
+            .as_deref()
+            .and_then(|f| self.fonts.get(f))
+            .unwrap_or(font);
+        // The parts `update_edit` laid out: the text around the
+        // selection in the editor's font, the selection in
+        // `FONT_SELECTED`, the caret while it shows.
+        let caret = e.caret.as_ref().filter(|_| e.cursor_visible);
+        for piece in e.pieces.iter().chain(caret) {
+            let font = if piece.selected { selected_font } else { font };
+            font.draw_forced(
                 list,
-                &self.game_text(&with_caret),
-                x + frame,
+                &self.game_text(&piece.text),
+                x + piece.x,
                 y + e.frame_width,
-                -1,
+                piece.width,
                 TextAlign::Left,
-                -1,
-            );
-        } else {
-            font.draw(
-                list,
-                &self.game_text(&shown),
-                x + frame,
-                y + e.frame_width,
-                -1,
-                TextAlign::Left,
-                -1,
+                e.line_height,
+                forced_color(tint),
             );
         }
     }

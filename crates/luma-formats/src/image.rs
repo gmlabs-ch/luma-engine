@@ -23,6 +23,19 @@ pub struct Rgb {
     pub b: u8,
 }
 
+impl Rgb {
+    /// The colour of three integers read from a file, each kept within
+    /// 0 to 255. (The original cuts each one to its low byte, so that
+    /// 256 is 0: a defect, not reproduced.)
+    pub fn from_ints(r: i32, g: i32, b: i32) -> Rgb {
+        Rgb {
+            r: r.clamp(0, 255) as u8,
+            g: g.clamp(0, 255) as u8,
+            b: b.clamp(0, 255) as u8,
+        }
+    }
+}
+
 /// A colour with opacity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -45,6 +58,18 @@ impl Rgba {
         b: 255,
         a: 255,
     };
+
+    /// The colour of four integers read from a file, each kept within 0
+    /// to 255. (The original's `DRGBA` cuts each one to its low byte, so
+    /// that 256 is 0: a defect, not reproduced.)
+    pub fn from_ints(r: i32, g: i32, b: i32, a: i32) -> Rgba {
+        Rgba {
+            r: r.clamp(0, 255) as u8,
+            g: g.clamp(0, 255) as u8,
+            b: b.clamp(0, 255) as u8,
+            a: a.clamp(0, 255) as u8,
+        }
+    }
 }
 
 /// How a sprite is blended with what is under it (`TSpriteBlendMode`,

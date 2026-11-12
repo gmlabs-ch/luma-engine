@@ -61,9 +61,10 @@ on "offerOnce"
 on "reset"  { Game.ResetResponse(result.resetId); }
 on "askIcons"
 {
-  Game.AddResponse(1, "one", "art\missing.png", "art\nohover.png", "art\nopress.png", "fonts\missing.font");
+  Game.AddResponse(1, "one", "art\bad1.sprite", "art\bad2.sprite", "art\bad3.sprite", "fonts\missing.font");
   Game.AddResponse(2, "two", "art\red.png", "art\blue.png");
   Game.AddResponse(3, "three", null, null, null, "fonts\big.font");
+  Game.AddResponse(4, "four", "art\missing.png");
   result.asked = Game.GetResponse();
 }
 on "loadBox"
@@ -121,6 +122,10 @@ fn game(extra: &[(&str, Vec<u8>)]) -> std::path::PathBuf {
             "fonts\\big.font".into(),
             b"FONT { IMAGE=\"art\\font.png\" COLUMNS=16 TILE_WIDTH=8 TILE_HEIGHT=10 DEFAULT_WIDTH=4 }".to_vec(),
         ),
+        // Files that are there and are not sprites.
+        ("art\\bad1.sprite".into(), b"NOTASPRITE { }".to_vec()),
+        ("art\\bad2.sprite".into(), b"NOTASPRITE { }".to_vec()),
+        ("art\\bad3.sprite".into(), b"NOTASPRITE { }".to_vec()),
         ("art\\red.png".into(), png(4, 4, [255, 0, 0, 255])),
         ("art\\green.png".into(), png(4, 4, [0, 255, 0, 255])),
         ("art\\blue.png".into(), png(4, 4, [0, 0, 255, 255])),
@@ -444,15 +449,25 @@ fn response_buttons_take_the_fonts_icons_and_cursor_the_original_gives_them() {
     let (dir, mut runtime, _) = start(&[]);
     let log = event(&mut runtime, "askIcons");
     for line in [
-        "CAdResponse::SetIcon failed for file 'art\\missing.png'",
-        "CAdResponse::SetIconHover failed for file 'art\\nohover.png'",
-        "CAdResponse::SetIconPressed failed for file 'art\\nopress.png'",
+        "CAdResponse::SetIcon failed for file 'art\\bad1.sprite'",
+        "CAdResponse::SetIconHover failed for file 'art\\bad2.sprite'",
+        "CAdResponse::SetIconPressed failed for file 'art\\bad3.sprite'",
         "CAdResponse::SetFont failed for file 'fonts\\missing.font'",
     ] {
         assert!(log.iter().any(|l| l == line), "{line}: {log:?}");
     }
     let buttons = response_buttons(&runtime);
-    assert_eq!(buttons.len(), 3);
+    assert_eq!(buttons.len(), 4);
+    // An icon file that is missing loads, as the engine's placeholder
+    // image: an icon choice, without a word in the log about the
+    // response.
+    let four = runtime.world.control(buttons[3]).unwrap();
+    assert_eq!(four.image.as_deref(), Some("art\\missing.png"));
+    assert_eq!(four.text, "");
+    assert!(
+        !log.iter()
+            .any(|l| l.contains("failed for file 'art\\missing.png'"))
+    );
     // An icon that did not load makes a text choice, in the box's font
     // when its own did not load; the hover font is the system font when
     // the box names none; a text choice has no cursor of its own.
@@ -485,8 +500,8 @@ fn response_buttons_take_the_fonts_icons_and_cursor_the_original_gives_them() {
     // Each choice is listed once for the keyboard navigation, before
     // the window's own buttons.
     let objects = runtime.world.access_objects();
-    assert_eq!(&objects[..3], &buttons[..]);
-    assert_eq!(objects.len(), 5, "three choices, prev and next");
+    assert_eq!(&objects[..4], &buttons[..]);
+    assert_eq!(objects.len(), 6, "four choices, prev and next");
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -529,7 +544,7 @@ fn a_response_box_that_does_not_load_leaves_the_game_without_one() {
     assert_eq!(result(&runtime, "window"), Value::Null);
     assert!(
         log.iter()
-            .any(|l| l.starts_with("Error parsing RESPONSE_BOX file 'bad.def'")),
+            .any(|l| l.starts_with("Error parsing response box 'bad.def'")),
         "{log:?}"
     );
     let log = event(&mut runtime, "offerGame");
@@ -691,7 +706,7 @@ fn a_bad_talk_definition_is_logged_and_the_sentence_goes_without() {
     let mut files = talk_files();
     files.push((
         "voices\\line.talk",
-        b"TALK { ACTION { START_TIME=0 LOOP=TRUE } }".to_vec(),
+        b"TALK { ACTION { START_TIME=0 SPRITE=\"art\\blue.png\" } LOOP=TRUE }".to_vec(),
     ));
     let (dir, mut runtime, _) = start(&files);
     let (r, id) = prop(&runtime);
@@ -995,12 +1010,14 @@ fn an_item_talks_and_plays_animations_while_the_box_shows_it() {
     }
     assert_eq!(shown(&runtime).as_deref(), Some("art\\green.png"));
     assert!(runtime.world.item(key).unwrap().ready);
+    // A file that is there and is not a sprite does not load (a missing
+    // one would, as the placeholder image).
     assert_eq!(
         call_native(
             &mut runtime,
             key,
             "PlayAnim",
-            &[Value::from("art\\none.sprite")]
+            &[Value::from("art\\bad1.sprite")]
         ),
         Value::Bool(false)
     );
@@ -1050,7 +1067,7 @@ fn an_item_talks_and_plays_animations_while_the_box_shows_it() {
             &mut runtime,
             key,
             "AddTalkSprite",
-            &[file("art\\none.sprite"), Value::Bool(false)]
+            &[file("art\\bad1.sprite"), Value::Bool(false)]
         ),
         Value::Bool(false)
     );
@@ -1070,7 +1087,7 @@ fn an_entitys_sprite_and_talk_sprites_change_as_in_the_original() {
             "art\\loop.sprite",
             b"SPRITE { LOOPING=TRUE FRAME { DELAY=50 IMAGE=\"art\\red.png\" } FRAME { DELAY=50 IMAGE=\"art\\blue.png\" } }".to_vec(),
         ),
-        ("art\\broken.sprite", b"SPRITE { FRAME {".to_vec()),
+        ("art\\broken.sprite", b"NOTASPRITE { }".to_vec()),
     ]);
     let (r, id) = prop(&runtime);
     let shown = |runtime: &Runtime| runtime.world.scene().unwrap().shown_sprite(r);

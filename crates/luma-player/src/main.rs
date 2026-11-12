@@ -51,6 +51,12 @@ OPTIONS:
                           that draws the same numbers every time, or `clock` for the clock,
                           as the original engine does. By default the clock in a window, a
                           fixed seed in headless mode, so that headless runs can be compared
+    --code-page <n>       The ANSI code page of the system the game was made for, when its
+                          text is not UTF-8: 1250 Central European, 1251 Cyrillic, 1252
+                          Western (the default), 1253 Greek, 1254 Turkish, 1255 Hebrew, 1256
+                          Arabic, 1257 Baltic, 1258 Vietnamese, 874 Thai, 932 Japanese, 936
+                          and 950 Chinese, 949 Korean. By default what the game's TrueType
+                          fonts say with CHARSET, else 1252
     --scale <n>           Open the window at n times the game's resolution (by default the
                           largest whole number that keeps it within 1280 points wide)
     --fullscreen          Run the game full screen (the frame fills the desktop, letterboxed)
@@ -184,6 +190,8 @@ struct Options {
     mute: bool,
     /// Window size as a multiple of the game's resolution (`--scale`).
     scale: Option<u32>,
+    /// The game's ANSI code page (`--code-page`).
+    code_page: Option<luma::adventure::code_page::CodePage>,
     /// `--windowed` (true) or `--fullscreen` (false).
     windowed: Option<bool>,
     /// `--seed`: a number, or `Seed::Clock`.
@@ -213,6 +221,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut font = None;
     let mut mute = false;
     let mut scale = None;
+    let mut code_page = None;
     let mut windowed = None;
     let mut seed = None;
     let mut steps = Vec::new();
@@ -279,6 +288,17 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                 load = Some(save_slot_of(v).ok_or_else(|| {
                     format!("--savegame expects a saved game named save<slot>.dsv, got `{v}`")
                 })?);
+            }
+            "--code-page" => {
+                let v = value(&mut i)?;
+                code_page = Some(
+                    v.parse::<u16>()
+                        .ok()
+                        .and_then(luma::adventure::code_page::CodePage::new)
+                        .ok_or_else(|| {
+                            format!("--code-page expects a Windows code page, got `{v}`")
+                        })?,
+                );
             }
             "--scale" => {
                 let v = value(&mut i)?;
@@ -457,6 +477,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         font,
         mute,
         scale,
+        code_page,
         windowed,
         seed,
         steps,
@@ -541,6 +562,7 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
         Audio::new()
     };
     let mut runtime = Runtime::with_audio(vfs, audio).map_err(|e| e.to_string())?;
+    runtime.world.set_ansi_code_page(options.code_page);
     // Headless runs are compared with one another: the same random
     // numbers at every run unless the clock is asked for.
     match options.seed {
@@ -1177,6 +1199,7 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         .ok()
         .and_then(|v| v.parse().ok());
     let mut runtime = runtime;
+    runtime.world.set_ansi_code_page(options.code_page);
     // The world is seeded from the clock, as the original; a number
     // makes the run repeatable.
     if let Some(Seed::Fixed(seed)) = options.seed {
@@ -1664,5 +1687,9 @@ mod tests {
         let options = parse_args(&args(&["game", "--seed", "Clock"])).unwrap();
         assert_eq!(options.seed, Some(Seed::Clock));
         assert!(parse_args(&args(&["game", "--seed", "dice"])).is_err());
+        assert_eq!(options.code_page, None);
+        let options = parse_args(&args(&["game", "--code-page", "1251"])).unwrap();
+        assert_eq!(options.code_page.map(|page| page.number()), Some(1251));
+        assert!(parse_args(&args(&["game", "--code-page", "437"])).is_err());
     }
 }

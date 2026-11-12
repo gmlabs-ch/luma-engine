@@ -58,8 +58,25 @@ impl StringTable {
             }
         };
         let mut count = 0;
-        for raw in bytes.split(|&b| b == b'\n' || b == 0) {
-            let raw = raw.strip_suffix(b"\r").unwrap_or(raw);
+        let mut pos = 0;
+        while pos < bytes.len() {
+            // A line runs to the next line feed or NUL, without the
+            // carriage return before it. (The original drops the byte
+            // before the line break whatever it is, so that a file with
+            // bare line feeds loses the last character of every line: a
+            // defect, not reproduced.)
+            let length = bytes[pos..]
+                .iter()
+                .position(|&b| b == b'\n' || b == 0)
+                .unwrap_or(bytes.len() - pos);
+            let terminated = pos + length < bytes.len();
+            let real = if terminated && length > 0 && bytes[pos + length - 1] == b'\r' {
+                length - 1
+            } else {
+                length
+            };
+            let raw = &bytes[pos..pos + real];
+            pos += length + 1;
             let line: String = raw.iter().map(|&b| char::from(b)).collect();
             if line.starts_with(';') || line.is_empty() {
                 continue;
@@ -72,6 +89,12 @@ impl StringTable {
             count += 1;
         }
         count
+    }
+
+    /// Empties the table (what the original has done by the time it
+    /// finds that a file to load does not exist).
+    pub fn clear(&mut self) {
+        self.strings.clear();
     }
 
     /// Adds or replaces an entry.
@@ -164,9 +187,26 @@ mod tests {
         assert!(!table.right_to_left);
     }
 
+    /// Lines end with CR LF or with a bare line feed; the text is whole
+    /// either way (the original drops the byte before every line break).
+    #[test]
+    fn a_line_keeps_its_text_with_either_line_ending() {
+        let table = StringTable::parse(b"A\tone\nB\ttwo\r\nC\tthree");
+        assert_eq!(table.get("A"), Some("one"));
+        assert_eq!(table.get("B"), Some("two"));
+        assert_eq!(table.get("C"), Some("three"));
+        // A NUL ends a line as a line feed does.
+        let table = StringTable::parse(b"A\tone\r\0B\ttwo");
+        assert_eq!(table.get("A"), Some("one"));
+        assert_eq!(table.get("B"), Some("two"));
+        let mut table = StringTable::parse(b"A\t1\r\n");
+        table.clear();
+        assert!(table.is_empty());
+    }
+
     #[test]
     fn detects_the_byte_order_mark_and_rtl() {
-        let table = StringTable::parse(b"\xEF\xBB\xBF@right-to-left\nA\tb\n");
+        let table = StringTable::parse(b"\xEF\xBB\xBF@right-to-left\r\nA\tb\r\n");
         assert!(table.utf8);
         assert!(table.right_to_left);
         assert_eq!(table.len(), 1);
@@ -188,8 +228,8 @@ mod tests {
         assert_eq!(table.expand("/NONE/fallback"), "fallback");
 
         // The flags are those of the last file loaded.
-        let mut table = StringTable::parse(b"\xEF\xBB\xBF@right-to-left\nA\tb\n");
-        table.load(b"A\tcaf\xe9\n", true);
+        let mut table = StringTable::parse(b"\xEF\xBB\xBF@right-to-left\r\nA\tb\r\n");
+        table.load(b"A\tcaf\xe9\r\n", true);
         assert!(!table.utf8);
         assert!(!table.right_to_left);
         assert_eq!(table.get("A"), Some("café"));
@@ -197,18 +237,18 @@ mod tests {
 
     #[test]
     fn load_can_extend_or_replace() {
-        let mut table = StringTable::parse(b"A\t1\nB\t2\n");
-        assert_eq!(table.load(b"B\t3\nC\t4\n", false), 2);
+        let mut table = StringTable::parse(b"A\t1\r\nB\t2\r\n");
+        assert_eq!(table.load(b"B\t3\r\nC\t4\r\n", false), 2);
         assert_eq!(table.get("A"), Some("1"));
         assert_eq!(table.get("B"), Some("3"));
-        assert_eq!(table.load(b"D\t5\n", true), 1);
+        assert_eq!(table.load(b"D\t5\r\n", true), 1);
         assert_eq!(table.get("A"), None);
         assert_eq!(table.get("D"), Some("5"));
     }
 
     #[test]
     fn finds_keys() {
-        let table = StringTable::parse(b"HELLO\tBonjour\nREF\t/HELLO/x\n");
+        let table = StringTable::parse(b"HELLO\tBonjour\r\nREF\t/HELLO/x\r\n");
         assert_eq!(table.key_of("/HELLO/Hello").as_deref(), Some("hello"));
         assert_eq!(table.key_of("/REF/x").as_deref(), Some("hello"));
         assert_eq!(table.key_of("/NOPE/text").as_deref(), Some("nope"));
@@ -218,7 +258,7 @@ mod tests {
 
     #[test]
     fn expands_references() {
-        let table = StringTable::parse(b"HELLO\tBonjour\nREF\t/HELLO/x\nLOOP\t/LOOP/y\n");
+        let table = StringTable::parse(b"HELLO\tBonjour\r\nREF\t/HELLO/x\r\nLOOP\t/LOOP/y\r\n");
         assert_eq!(table.expand("/HELLO/Hello"), "Bonjour");
         assert_eq!(table.expand("/hello/Hello"), "Bonjour");
         assert_eq!(table.expand("/NOPE/Hello there"), "Hello there");

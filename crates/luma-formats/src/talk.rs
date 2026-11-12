@@ -7,17 +7,42 @@
 //! (`AdTalkDef.cpp`, `AdTalkNode.cpp`, `AdSentence.cpp`, Copyright (c)
 //! 2011 Jan Nedoma). See `NOTICE` at the root of the repository.
 
-use crate::actor::{SetFiles, SpriteSet};
-use crate::def::{Document, Node, Nodes};
+use crate::actor::SpriteSet;
+use crate::def::{Document, Node, keys};
 use crate::error::{Error, Result};
 use crate::scene::Direction;
-
-/// How many `TEMPLATE` files a talk definition may chain.
-const TEMPLATE_DEPTH: u32 = 8;
+use crate::template::Files;
 
 /// How many `ACTION` nodes a talk definition may hold (with its
 /// templates). The original has no limit; a file is untrusted input.
 const MAX_NODES: usize = 4096;
+
+/// Whether a sprite file loads (`CBSprite::LoadFile`).
+pub type SpriteLoads<'a> = dyn FnMut(&str) -> bool + 'a;
+
+/// The keys of `CAdTalkDef::LoadBuffer`, in the order of its table.
+const TALK_KEYS: &[&str] = &[
+    "TALK",
+    "TEMPLATE",
+    "ACTION",
+    "DEFAULT_SPRITESET_FILE",
+    "DEFAULT_SPRITESET",
+    "DEFAULT_SPRITE",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CAdTalkNode::LoadBuffer`, in the order of its table.
+const ACTION_KEYS: &[&str] = &[
+    "ACTION",
+    "SPRITESET_FILE",
+    "SPRITESET",
+    "SPRITE",
+    "START_TIME",
+    "END_TIME",
+    "COMMENT",
+    "PRECACHE",
+    "EDITOR_PROPERTY",
+];
 
 /// One timed action of a talk definition (`ACTION`, `CAdTalkNode`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -87,51 +112,55 @@ impl TalkNode {
         }
     }
 
-    /// Reads an `ACTION` block (`CAdTalkNode::LoadBuffer`).
-    fn read(node: &Node, files: &mut SetFiles<'_>) -> Result<TalkNode> {
+    /// Reads an `ACTION` block (`CAdTalkNode::LoadBuffer`). The node
+    /// fails on a key that is not in the table and, with `PRECACHE`, on
+    /// a sprite or a set file that does not load; an inline `SPRITESET`
+    /// that fails only leaves the node without it.
+    fn read(
+        node: &Node,
+        files: &mut Files<'_>,
+        sprite_loads: &mut SpriteLoads<'_>,
+    ) -> Result<TalkNode> {
         let mut action = TalkNode::default();
-        for child in node.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "SPRITE" => action.sprite_file = child.as_str().map(str::to_string),
-                "SPRITESET_FILE" => action.set_file = child.as_str().map(str::to_string),
+        let (mut start, mut end) = (0i32, 0i32);
+        for item in keys(node, ACTION_KEYS, "ACTION") {
+            let (key, child) = item?;
+            match key {
+                "SPRITE" => action.sprite_file = Some(child.text()),
+                "SPRITESET_FILE" => action.set_file = Some(child.text()),
                 "SPRITESET" => {
                     let mut set = SpriteSet::default();
-                    set.read(child, files)?;
-                    action.set = Some(set);
+                    action.set = set.apply_with(child, files).is_ok().then_some(set);
                 }
-                "START_TIME" => action.start_time = time_of(child),
-                "END_TIME" => action.end_time = time_of(child),
-                "PRECACHE" => action.precache = child.as_bool().unwrap_or(false),
-                "COMMENT" | "EDITOR_PROPERTY" => {}
-                other => {
-                    return Err(Error::Invalid {
-                        reason: format!(
-                            "Syntax error in ACTION definition: unknown key {other} at line {}",
-                            child.line
-                        ),
-                    });
-                }
+                "START_TIME" => child.read_int(&mut start),
+                "END_TIME" => child.read_int(&mut end),
+                "PRECACHE" => child.read_bool(&mut action.precache),
+                _ => {}
             }
         }
+        // The times are unsigned in the original: a negative value read
+        // by its `%d` is a huge one.
+        action.start_time = start as u32;
+        action.end_time = end as u32;
         action.play_to_end = action.end_time == 0;
         if action.precache {
-            // Loaded with the file: a failure fails the definition.
+            // Loaded with the file: a failure fails the node.
             if let Some(file) = &action.sprite_file {
-                if !(files.sprite_loads)(file) {
+                if !sprite_loads(file) {
                     return Err(load_error("ACTION", file));
                 }
                 action.sprite_loaded = true;
             }
             if let Some(file) = &action.set_file {
-                action.set = Some(load_set(file, files).ok_or_else(|| load_error("ACTION", file))?);
+                action.set = Some(SpriteSet::load_named(file, files)?);
             }
         } else if let Some(file) = &action.sprite_file {
             // Loaded at first use (`LoadSprite`): the sprite first; the
             // set file only for a node without `SPRITE` and without an
             // inline set. A failure leaves the node without it.
-            action.sprite_loaded = (files.sprite_loads)(file);
+            action.sprite_loaded = sprite_loads(file);
         } else if let (Some(file), None) = (&action.set_file, &action.set) {
-            action.set = load_set(file, files);
+            action.set = SpriteSet::load_named(file, files).ok();
         }
         Ok(action)
     }
@@ -163,72 +192,64 @@ impl TalkDef {
         format!("{}.talk", &sound[..stem_end])
     }
 
-    /// Parses a `.talk` file with the game's files, as `CAdTalkDef::
-    /// LoadFile` does: a `TALK` root block; a `TEMPLATE` file is read
-    /// where the key stands; a node, a set or a template that fails,
-    /// and a key the block does not know, fail the definition; then the
-    /// default sprite and the default set file are loaded, and fail it
-    /// when they do not load. The inline `DEFAULT_SPRITESET` block is
-    /// read (a bad one fails the file) and dropped, as in the original.
-    pub fn parse_with(bytes: &[u8], files: &mut SetFiles<'_>) -> Result<TalkDef> {
+    /// Parses a `.talk` file as `CAdTalkDef::LoadFile` does, reading
+    /// the files it names through `files`: a `TALK` root block, its keys
+    /// in order. A `TEMPLATE` file is read into the same definition
+    /// where the key stands. A template or an `ACTION` that fails is
+    /// skipped (the original's error code is overwritten by the next
+    /// statement); a key that is not in the table is a syntax error and
+    /// fails the definition. At the end the default sprite and the
+    /// default set file are loaded, and fail the definition when they do
+    /// not load. The inline `DEFAULT_SPRITESET` block is dropped, as in
+    /// the original.
+    pub fn parse_with(
+        bytes: &[u8],
+        files: &mut Files<'_>,
+        sprite_loads: &mut SpriteLoads<'_>,
+    ) -> Result<TalkDef> {
         let mut def = TalkDef::default();
-        def.read_file(bytes, files, 0)?;
+        def.read_file(&Document::parse(bytes)?, files, sprite_loads)?;
         Ok(def)
     }
 
-    fn read_file(&mut self, bytes: &[u8], files: &mut SetFiles<'_>, depth: u32) -> Result<()> {
-        let doc = Document::parse(bytes)?;
-        let root = doc.get("TALK").ok_or_else(|| Error::Invalid {
+    fn read_file(
+        &mut self,
+        doc: &Document,
+        files: &mut Files<'_>,
+        sprite_loads: &mut SpriteLoads<'_>,
+    ) -> Result<()> {
+        let root = doc.root("TALK").ok_or_else(|| Error::Invalid {
             reason: "'TALK' keyword expected".into(),
         })?;
-        for child in root.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
+        for item in keys(root, TALK_KEYS, "TALK") {
+            let (key, child) = item?;
+            match key {
                 "TEMPLATE" => {
-                    let file = child.as_str().unwrap_or_default().to_string();
-                    let bytes = if depth < TEMPLATE_DEPTH {
-                        files.read(&file)
-                    } else {
-                        None
-                    };
-                    let bytes = bytes.ok_or_else(|| Error::Invalid {
-                        reason: format!("CAdTalkDef::LoadFile failed for file '{file}'"),
-                    })?;
-                    self.read_file(&bytes, files, depth + 1)?;
+                    let name = child.text();
+                    let _ = files
+                        .template(&name, |doc, files| self.read_file(doc, files, sprite_loads));
                 }
                 "ACTION" => {
-                    if self.nodes.len() >= MAX_NODES {
-                        return Err(Error::Invalid {
-                            reason: format!("more than {MAX_NODES} ACTION nodes in a TALK file"),
-                        });
+                    if let Ok(node) = TalkNode::read(child, files, sprite_loads) {
+                        if self.nodes.len() < MAX_NODES {
+                            self.nodes.push(node);
+                        }
                     }
-                    self.nodes.push(TalkNode::read(child, files)?);
                 }
-                "DEFAULT_SPRITE" => self.default_sprite = child.as_str().map(str::to_string),
-                "DEFAULT_SPRITESET_FILE" => {
-                    self.default_set_file = child.as_str().map(str::to_string);
-                }
-                "DEFAULT_SPRITESET" => {
-                    SpriteSet::default().read(child, files)?;
-                }
-                "EDITOR_PROPERTY" => {}
-                other => {
-                    return Err(Error::Invalid {
-                        reason: format!(
-                            "Syntax error in TALK definition: unknown key {other} at line {}",
-                            child.line
-                        ),
-                    });
-                }
+                "DEFAULT_SPRITE" => self.default_sprite = Some(child.text()),
+                "DEFAULT_SPRITESET_FILE" => self.default_set_file = Some(child.text()),
+                // "DEFAULT_SPRITESET": deleted again below by the original.
+                _ => {}
             }
         }
         self.default_set = None;
         if let Some(file) = &self.default_sprite {
-            if !(files.sprite_loads)(file) {
+            if !sprite_loads(file) {
                 return Err(load_error("TALK", file));
             }
         }
         if let Some(file) = &self.default_set_file {
-            self.default_set = Some(load_set(file, files).ok_or_else(|| load_error("TALK", file))?);
+            self.default_set = Some(SpriteSet::load_named(file, files)?);
         }
         Ok(())
     }
@@ -268,18 +289,6 @@ impl TalkDef {
     }
 }
 
-/// `START_TIME` and `END_TIME`: an unsigned number of milliseconds (a
-/// negative value read by the original's `%d` into a `DWORD` is a huge
-/// one).
-fn time_of(node: &Node) -> u32 {
-    node.as_int().unwrap_or(0) as i32 as u32
-}
-
-fn load_set(file: &str, files: &mut SetFiles<'_>) -> Option<SpriteSet> {
-    let bytes = files.read(file)?;
-    SpriteSet::parse_with(&bytes, files).ok()
-}
-
 fn load_error(block: &str, file: &str) -> Error {
     Error::Invalid {
         reason: format!("Error loading {block} definition: '{file}' does not load"),
@@ -291,7 +300,7 @@ mod tests {
     use super::*;
 
     fn parse(text: &str) -> Result<TalkDef> {
-        let mut load = |file: &str| {
+        let mut read = |file: &str| {
             match file {
             "mouth.spriteset" => {
                 Some(b"SPRITESET { LEFT=\"l.sprite\" RIGHT=\"r.sprite\" }".to_vec())
@@ -300,18 +309,18 @@ mod tests {
                 b"TALK { DEFAULT_SPRITE=\"base.sprite\" ACTION { START_TIME=5 END_TIME=6 SPRITE=\"b.sprite\" } }"
                     .to_vec(),
             ),
+            "bad.talk" => Some(
+                b"TALK { ACTION { START_TIME=7 SPRITE=\"c.sprite\" } DEFAULT_SPRITE=\"gone.sprite\" }"
+                    .to_vec(),
+            ),
             _ => None,
         }
         };
         let mut sprite_loads = |file: &str| !file.starts_with("gone");
         TalkDef::parse_with(
             text.as_bytes(),
-            &mut SetFiles {
-                load: &mut load,
-                sprite_loads: &mut sprite_loads,
-                follow_templates: true,
-                files_left: SetFiles::FILE_BUDGET,
-            },
+            &mut Files::new(&mut read),
+            &mut sprite_loads,
         )
     }
 
@@ -380,19 +389,37 @@ mod tests {
     }
 
     #[test]
-    fn what_fails_a_definition_and_what_does_not() {
+    fn what_fails_a_definition_and_what_is_only_skipped() {
+        // The root block, a key the block does not know, and the
+        // defaults, which are loaded with the definition.
         assert!(parse("ACTION { }").is_err());
         assert!(parse("TALK { COLOR=1 }").is_err());
-        assert!(parse("TALK { ACTION { LOOP=TRUE } }").is_err());
-        assert!(parse("TALK { TEMPLATE=\"none.talk\" }").is_err());
         assert!(parse("TALK { DEFAULT_SPRITE=\"gone.sprite\" }").is_err());
         assert!(parse("TALK { DEFAULT_SPRITESET_FILE=\"none.spriteset\" }").is_err());
-        assert!(parse("TALK { DEFAULT_SPRITESET { UP=\"gone.sprite\" } }").is_err());
-        assert!(parse("TALK { ACTION { SPRITESET { UP=\"gone.sprite\" } } }").is_err());
-        assert!(parse("TALK { ACTION { PRECACHE=TRUE SPRITE=\"gone.sprite\" } }").is_err());
-        assert!(
-            parse("TALK { ACTION { PRECACHE=TRUE SPRITESET_FILE=\"none.spriteset\" } }").is_err()
-        );
+        // A template that cannot be read is skipped. One that fails at
+        // its end has been applied by then: its nodes and the default it
+        // named stay, and that default fails this file at its own end.
+        let def = parse("TALK { TEMPLATE=\"none.talk\" ACTION { SPRITE=\"a.sprite\" } }").unwrap();
+        assert_eq!(def.nodes.len(), 1);
+        assert!(parse("TALK { TEMPLATE=\"bad.talk\" }").is_err());
+        let def = parse("TALK { TEMPLATE=\"bad.talk\" DEFAULT_SPRITE=\"ok.sprite\" }").unwrap();
+        assert_eq!(def.nodes.len(), 1);
+        assert_eq!(def.default_sprite(Direction::Up), Some("ok.sprite"));
+        // A node that fails is left out and the reading goes on: a key
+        // it does not know, or with `PRECACHE` a file that does not load.
+        let def = parse(
+            "TALK {
+               ACTION { LOOP=TRUE }
+               ACTION { PRECACHE=TRUE SPRITE=\"gone.sprite\" }
+               ACTION { PRECACHE=TRUE SPRITESET_FILE=\"none.spriteset\" }
+               ACTION { START_TIME=3 SPRITESET { SPEED=1 } }
+               DEFAULT_SPRITESET { SPEED=1 }
+             }",
+        )
+        .unwrap();
+        assert_eq!(def.nodes.len(), 1);
+        assert_eq!(def.nodes[0].start_time, 3);
+        assert_eq!(def.nodes[0].set, None, "a bad inline set is dropped");
         // Without `PRECACHE` a sprite or a set that does not load only
         // leaves the node without it: it stays active and shows nothing.
         let def = parse(

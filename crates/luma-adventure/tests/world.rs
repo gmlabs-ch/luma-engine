@@ -1371,11 +1371,12 @@ fn game() -> std::path::PathBuf {
     let mut pkg = PackageBuilder::new("data");
     pkg.add_file(
         "startup.settings",
-        b"SETTINGS { GAME=\"default.game\" RESOLUTION { 32,32 } }".to_vec(),
+        b"SETTINGS { GAME=\"default.game\" STRING_TABLE=\"string.tab\" RESOLUTION { 32,32 } }"
+            .to_vec(),
     );
     pkg.add_file(
         "default.game",
-        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" STRING_TABLE=\"string.tab\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" THUMBNAIL_WIDTH=8 THUMBNAIL_HEIGHT=4 } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" RESPONSE_BOX=\"responses.def\" }"
+        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" SYSTEM_FONT=\"fonts\\sys.font\" CURSOR=\"sprites\\cursor.sprite\" ACTIVE_CURSOR=\"art\\green.png\" NONINTERACTIVE_CURSOR=\"art\\red.png\" THUMBNAIL_WIDTH=8 THUMBNAIL_HEIGHT=4 } AD_GAME { ITEMS=\"items.items\" INVENTORY_BOX=\"inv.def\" RESPONSE_BOX=\"responses.def\" }"
             .to_vec(),
     );
     pkg.add_file("art\\font.png", png(128, 128, [255, 255, 255, 255]));
@@ -4076,7 +4077,9 @@ fn objects_have_their_own_cursor_caption_slots_and_flags() {
             &mut runtime,
             prop,
             "SetCursor",
-            &[Value::from("missing.sprite")]
+            // A file that is not a sprite: one that does not exist would
+            // load as the placeholder image.
+            &[Value::from("default.game")]
         ),
         Value::Bool(false)
     );
@@ -4261,7 +4264,7 @@ fn talk_sprite_sets_forced_talk_anims_and_sprite_objects() {
             &mut runtime,
             prop,
             "AddTalkSprite",
-            &[Value::from("missing.sprite"), Value::Bool(false)]
+            &[Value::from("default.game"), Value::Bool(false)]
         ),
         Value::Bool(false)
     );
@@ -4385,7 +4388,7 @@ fn talk_sprite_sets_forced_talk_anims_and_sprite_objects() {
             &mut runtime,
             prop,
             "ForceTalkAnim",
-            &[Value::from("missing.sprite")]
+            &[Value::from("default.game")]
         ),
         Value::Bool(true)
     );
@@ -4484,7 +4487,7 @@ fn talk_sprite_sets_forced_talk_anims_and_sprite_objects() {
             &mut runtime,
             actor,
             "AddTalkSprite",
-            &[Value::from("missing.sprite"), Value::Bool(false)]
+            &[Value::from("default.game"), Value::Bool(false)]
         ),
         Value::Bool(false)
     );
@@ -5961,8 +5964,12 @@ fn button_templates_are_read_from_the_game() {
         dir.join("t.window"),
         b"WINDOW { NAME=\"tw\" WIDTH=20 HEIGHT=16
   BUTTON { TEMPLATE=\"t.button\" NAME=\"yes\" WIDTH=7 }
-  BUTTON { TEMPLATE=\"gone.button\" NAME=\"lost\" }
 }",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("lost.window"),
+        b"WINDOW { NAME=\"lw\" BUTTON { TEMPLATE=\"gone.button\" NAME=\"lost\" } }",
     )
     .unwrap();
     std::fs::write(
@@ -5990,20 +5997,376 @@ fn button_templates_are_read_from_the_game() {
     assert_eq!(c.height, 9);
     assert_eq!(c.font.as_deref(), Some("fonts\\test.font"));
     assert!(c.back.is_some());
-    let lost = runtime.world.widget(win, "lost").unwrap();
-    assert!(runtime.world.control(lost).unwrap().font.is_none());
-    let log = runtime.world.take_log();
-    assert_eq!(
-        log.iter()
-            .filter(|l| l.contains("Error opening template file 'gone.button'"))
-            .count(),
-        1,
-        "{log:?}"
-    );
+    assert!(runtime.world.take_log().is_empty());
+    // A template that cannot be loaded fails the button, and the button
+    // fails its window (`CUIButton::LoadBuffer`, `CUIWindow::LoadBuffer`).
+    let windows = runtime.world.window_ids().len();
     assert!(
-        !log.iter().any(|l| l.contains("template file 't.button'")),
+        runtime
+            .world
+            .load_window(&mut runtime.engine, "lost.window")
+            .is_none()
+    );
+    assert_eq!(runtime.world.window_ids().len(), windows);
+    let log = runtime.world.take_log();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Error parsing WINDOW file 'lost.window'")
+                && l.contains("gone.button")),
         "{log:?}"
     );
+}
+
+/// `CBGame::LoadBuffer`: a game without a system font gets the engine's
+/// built-in one, the caption goes through the string table when the file
+/// is read, and a package that cannot be read is logged and skipped
+/// (`CBFileManager::RegisterPackages`).
+#[test]
+fn a_bare_game_gets_the_built_in_font_and_its_caption_is_expanded() {
+    let dir = temp_dir();
+    let mut pkg = PackageBuilder::new("data");
+    pkg.add_file(
+        "startup.settings",
+        b"SETTINGS { GAME=\"default.game\" STRING_TABLE=\"s.tab\" RESOLUTION { 32,32 } }".to_vec(),
+    );
+    pkg.add_file("s.tab", b"CAP\tTranslated\r\n".to_vec());
+    pkg.add_file(
+        "default.game",
+        b"GAME { NAME=\"T\" CAPTION=\"/CAP/Fallback\" SHADOW_IMAGE=\"art\\shadow.png\" SYSTEM_FONT=\"gone.font\" }".to_vec(),
+    );
+    std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
+    std::fs::write(dir.join("broken.dcp"), b"not a package").unwrap();
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    assert_eq!(runtime.world.system_font(), Some("system_font.fnt"));
+    let game = runtime.world.game_id();
+    assert_eq!(
+        runtime.world.get_property(game, "Caption"),
+        Some(Value::from("Translated"))
+    );
+    assert_eq!(
+        runtime.world.game_file().shadow_image.as_deref(),
+        Some("art\\shadow.png")
+    );
+    let log = runtime.world.take_log();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("broken.dcp") && l.contains("Ignoring")),
+        "{log:?}"
+    );
+}
+
+/// `CBScriptHolder::ParseProperty`: the `PROPERTY` blocks of a file are
+/// set on the object as a script's assignment would be, so a name the
+/// object knows sets its own property.
+#[test]
+fn file_properties_are_set_as_a_script_would() {
+    let dir = game();
+    std::fs::write(
+        dir.join("default.game"),
+        b"GAME { NAME=\"Test\" SCRIPT=\"game.script\" PROPERTY { NAME=\"difficulty\" VALUE=\"2\" } }",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("scenes")).unwrap();
+    std::fs::write(
+        dir.join("scenes/props.scene"),
+        b"SCENE {\n NAME=\"p\"\n PROPERTY { NAME=\"mood\" VALUE=\"dark\" }\n LAYER { NAME=\"main\" MAIN=TRUE WIDTH=32 HEIGHT=32\n  ENTITY { NAME=\"lamp\" ACTIVE=TRUE PROPERTY { NAME=\"lit\" VALUE=\"yes\" } PROPERTY { NAME=\"Active\" VALUE=\"false\" } PROPERTY { NAME=\"broken\" } }\n }\n WAYPOINTS { NAME=\"w\" PROPERTY { NAME=\"kind\" VALUE=\"path\" } POINT {1,1} }\n}",
+    )
+    .unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    assert_eq!(
+        runtime.world.get_property(game, "difficulty"),
+        Some(Value::from("2"))
+    );
+    runtime.change_scene("scenes\\props.scene").unwrap();
+    runtime.tick(16);
+    let scene = runtime.world.scene_id();
+    assert_eq!(
+        runtime.world.get_property(scene, "mood"),
+        Some(Value::from("dark"))
+    );
+    let lamp_ref = luma_adventure::EntityRef::Node { layer: 0, index: 0 };
+    let lamp = runtime.world.node_id(lamp_ref).unwrap();
+    assert_eq!(
+        runtime.world.get_property(lamp, "lit"),
+        Some(Value::from("yes"))
+    );
+    // `Active` is a property of the entity itself: the string sets it.
+    assert!(
+        !runtime
+            .world
+            .scene()
+            .unwrap()
+            .entity(lamp_ref)
+            .unwrap()
+            .active
+    );
+    // A block without `VALUE` sets nothing.
+    assert_eq!(runtime.world.get_property(lamp, "broken"), None);
+    let group = runtime.world.waypoint_group_object(0).unwrap();
+    assert_eq!(
+        runtime.world.get_property(group, "kind"),
+        Some(Value::from("path"))
+    );
+}
+
+/// `CAdGame::LoadBuffer STARTUP_SCENE`: the engine keeps the name for
+/// the scripts and never loads the scene by itself.
+#[test]
+fn the_startup_scene_is_only_a_name_for_the_scripts() {
+    let dir = temp_dir();
+    let mut pkg = PackageBuilder::new("data");
+    pkg.add_file(
+        "default.game",
+        b"GAME { NAME=\"T\" } AD_GAME { STARTUP_SCENE=\"scenes\\first.scene\" SCENE_VIEWPORT { -5, 4, 900, 20 } }".to_vec(),
+    );
+    pkg.add_file(
+        "scenes\\first.scene",
+        b"SCENE { NAME=\"first\" LAYER { NAME=\"main\" MAIN=TRUE WIDTH=32 HEIGHT=32 } }".to_vec(),
+    );
+    std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
+    let mut runtime = Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).unwrap();
+    runtime.start();
+    for _ in 0..5 {
+        runtime.tick(16);
+    }
+    assert!(runtime.world.scene().is_none());
+    assert_eq!(runtime.world.startup_scene(), Some("scenes\\first.scene"));
+    // `SCENE_VIEWPORT` is left, top, right, bottom, kept inside the
+    // screen (800 by 600 without settings).
+    assert_eq!(runtime.world.viewport(), (0, 4, 800, 16));
+}
+
+/// `CAdResponseBox::LoadBuffer`: a box without `WINDOW` still offers its
+/// choices, laid out in `AREA` on the screen.
+#[test]
+fn a_response_box_without_a_window_shows_its_choices_on_the_screen() {
+    let dir = game();
+    std::fs::write(
+        dir.join("responses.def"),
+        b"RESPONSE_BOX { AREA { 2, 2, 30, 30 } FONT=\"fonts\\sys.font\" FONT_HOVER=\"gone.font\" }",
+    )
+    .unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let game = runtime.world.game_id();
+    runtime
+        .world
+        .set_property(game, "Interactive", &Value::Bool(true));
+    assert!(
+        runtime
+            .world
+            .attach(&mut runtime.engine, game, "dialogue.script")
+    );
+    runtime.tick(16);
+    runtime
+        .engine
+        .apply_event(&mut runtime.world, game, "dlg", false);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "num"), Value::Int(2));
+    let window = runtime.world.responses_window().unwrap();
+    let buttons: Vec<_> = runtime
+        .world
+        .widgets_of(window)
+        .into_iter()
+        .filter(|w| runtime.world.control(*w).unwrap().name == "response")
+        .collect();
+    assert_eq!(buttons.len(), 2);
+    let second = runtime.world.control(buttons[1]).unwrap();
+    assert!(second.visible);
+    // The area is on the screen: the choices start at its left edge.
+    assert_eq!(second.x, 2);
+    let (x, y) = (second.x + 2, second.y + second.height / 2);
+    runtime.mouse_move(x, y);
+    runtime.tick(16);
+    assert_eq!(runtime.world.active_object(), Some(buttons[1]));
+    runtime.mouse_left_down();
+    runtime.tick(16);
+    runtime.mouse_left_up();
+    runtime.tick(16);
+    runtime.tick(16);
+    assert_eq!(result(&runtime, "chosen"), Value::Int(2));
+}
+
+/// `CUIWindow::LoadBuffer`, `CUIButton::LoadBuffer`: a font, an image,
+/// a background or a cursor that does not load fails the control, and a
+/// control that fails makes its window fail.
+#[test]
+fn a_window_whose_control_names_a_missing_font_does_not_load() {
+    let dir = game();
+    std::fs::write(
+        dir.join("bad.window"),
+        b"WINDOW { NAME=\"bad\" WIDTH=20 HEIGHT=16 BUTTON { NAME=\"b\" FONT=\"gone.font\" } }",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("bad2.window"),
+        b"WINDOW { NAME=\"bad2\" WINDOW { NAME=\"inner\" STATIC { NAME=\"s\" BACK=\"gone.tiled\" } } }",
+    )
+    .unwrap();
+    // A missing image is the placeholder and loads.
+    std::fs::write(
+        dir.join("ok.window"),
+        b"WINDOW { NAME=\"ok\" WIDTH=20 HEIGHT=16 BUTTON { NAME=\"b\" IMAGE=\"gone.png\" } }",
+    )
+    .unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+    let windows = runtime.world.window_ids().len();
+    for file in ["bad.window", "bad2.window"] {
+        assert!(
+            runtime
+                .world
+                .load_window(&mut runtime.engine, file)
+                .is_none(),
+            "{file}"
+        );
+        assert_eq!(runtime.world.window_ids().len(), windows, "{file}");
+    }
+    let log = runtime.world.take_log();
+    assert!(
+        log.iter()
+            .any(|l| l.contains("Error loading WINDOW definition 'bad.window'")),
+        "{log:?}"
+    );
+    let ok = runtime
+        .world
+        .load_window(&mut runtime.engine, "ok.window")
+        .expect("a missing image does not fail the window");
+    let button = runtime.world.widget(ok, "b").unwrap();
+    assert_eq!(runtime.world.control(button).unwrap().width, 64);
+}
+
+/// `CAdGame::LoadBuffer`: an items file, an inventory box or a response
+/// box that cannot be read fails the game file.
+#[test]
+fn a_game_whose_items_file_is_missing_does_not_start() {
+    for ad_game in [
+        "ITEMS=\"gone.items\"",
+        "INVENTORY_BOX=\"gone.def\"",
+        "RESPONSE_BOX=\"bad.def\"",
+    ] {
+        let dir = temp_dir();
+        let mut pkg = PackageBuilder::new("data");
+        pkg.add_file(
+            "default.game",
+            format!("GAME {{ NAME=\"T\" }} AD_GAME {{ {ad_game} }}").into_bytes(),
+        );
+        pkg.add_file("bad.def", b"RESPONSE_BOX { BOGUS=1 }".to_vec());
+        std::fs::write(dir.join("data.dcp"), pkg.build()).unwrap();
+        assert!(
+            Runtime::with_audio(Vfs::open_game(&dir).unwrap(), Audio::null()).is_err(),
+            "{ad_game}"
+        );
+    }
+}
+
+/// `CBGame::LoadSettings`: `SAVED_GAME_EXT` names the extension of the
+/// slot files, and `ALLOW_ACCESSIBILITY_TAB` is read from the settings.
+#[test]
+fn the_settings_name_the_saved_game_extension() {
+    let dir = game();
+    std::fs::write(
+        dir.join("startup.settings"),
+        b"SETTINGS { GAME=\"default.game\" RESOLUTION { 32,32 } SAVED_GAME_EXT=\"sav\" ALLOW_ACCESSIBILITY_TAB=FALSE }",
+    )
+    .unwrap();
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    let path = runtime.world.save_slot_path(7);
+    assert_eq!(path.file_name().unwrap(), "save007.sav");
+    assert!(!runtime.world.settings().allow_accessibility_tab);
+}
+
+/// `TEMPLATE` keys are followed where they stand, through the game's
+/// files: in a scene and its entities, in a window, a tiled image and
+/// the items.
+#[test]
+fn templates_are_loaded_in_place_from_the_game() {
+    let dir = game();
+    let write = |name: &str, body: &str| {
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    };
+    write(
+        "tpl/base.scene",
+        "SCENE { NAME=\"base\" LAYER { NAME=\"main\" MAIN=TRUE WIDTH=32 HEIGHT=32 ENTITY { NAME=\"from_base\" } } }",
+    );
+    write(
+        "tpl/prop.entity",
+        "ENTITY { NAME=\"tpl\" X=3 Y=4 SPRITE=\"art\\red.png\" }",
+    );
+    write(
+        "tpl/room.scene",
+        "SCENE {\n TEMPLATE=\"tpl\\base.scene\"\n NAME=\"mine\"\n ENTITY { NAME=\"free\" TEMPLATE=\"tpl\\prop.entity\" Y=9 }\n}",
+    );
+    write(
+        "tpl/base.window",
+        "WINDOW { NAME=\"base\" WIDTH=20 HEIGHT=16 BUTTON { NAME=\"from_base\" WIDTH=4 HEIGHT=4 } }",
+    );
+    write(
+        "tpl/top.window",
+        "WINDOW {\n BUTTON { NAME=\"first\" WIDTH=4 HEIGHT=4 }\n TEMPLATE=\"tpl\\base.window\"\n NAME=\"top\"\n BUTTON { NAME=\"last\" WIDTH=4 HEIGHT=4 }\n}",
+    );
+    write(
+        "tpl/base.item",
+        "ITEM { NAME=\"base\" CAPTION=\"From the template\" SPRITE=\"art\\red.png\" }",
+    );
+    write(
+        "tpl/more.items",
+        "ITEM { TEMPLATE=\"tpl\\base.item\" NAME=\"templated\" }",
+    );
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.start();
+    runtime.tick(16);
+
+    runtime.change_scene("tpl\\room.scene").unwrap();
+    runtime.tick(16);
+    let view = runtime.world.scene().unwrap();
+    assert_eq!(view.scene.name, "mine");
+    assert_eq!(view.scene.layers.len(), 1);
+    assert_eq!(view.scene.layers[0].entities().count(), 1);
+    let free = &view.scene.free_entities[0];
+    assert_eq!(
+        free.name, "tpl",
+        "the template's name comes after the entity's"
+    );
+    assert_eq!((free.x, free.y), (3, 9));
+    assert_eq!(free.sprite.as_deref(), Some("art\\red.png"));
+
+    let win = runtime
+        .world
+        .load_window(&mut runtime.engine, "tpl\\top.window")
+        .expect("the window loads");
+    let names: Vec<String> = runtime
+        .world
+        .widgets_of(win)
+        .into_iter()
+        .map(|id| runtime.world.control(id).unwrap().name.clone())
+        .collect();
+    assert_eq!(names, ["first", "from_base", "last"]);
+    let window = runtime.world.control(win).unwrap();
+    assert_eq!(window.name, "top");
+    assert_eq!((window.width, window.height), (20, 16));
+
+    assert!(
+        runtime
+            .world
+            .load_items_from(&mut runtime.engine, "tpl\\more.items", true)
+    );
+    let item = runtime.world.item_by_name("templated").unwrap();
+    let def = &runtime.world.item(item).unwrap().def;
+    assert_eq!(def.caption, "From the template");
+    assert_eq!(def.sprite.as_deref(), Some("art\\red.png"));
 }
 
 /// The fixture game plus loose files: a font only some objects name, a
@@ -6064,16 +6427,16 @@ fn defects_runtime() -> (Runtime, std::path::PathBuf) {
 }
 
 #[test]
-fn an_object_loads_the_font_of_its_file_when_it_first_talks() {
+fn an_object_loads_the_font_of_its_file_with_the_file() {
     let (mut runtime, dir) = defects_runtime();
     let talker = runtime.world.find_node("talker").unwrap();
+    // `FONT` is loaded when the entity is (`CAdEntity::LoadBuffer`).
     assert!(
-        runtime.world.fonts().get("fonts\\own.font").is_none(),
-        "nothing else loads the entity's font"
+        runtime.world.fonts().get("fonts\\own.font").is_some(),
+        "the scene loads the entity's font"
     );
     call_native(&mut runtime, talker, "TalkAsync", &[Value::from("Hi")]);
     runtime.tick(16);
-    assert!(runtime.world.fonts().get("fonts\\own.font").is_some());
     let sentence = runtime
         .world
         .sentences()
@@ -6107,16 +6470,14 @@ fn an_object_loads_the_font_of_its_file_when_it_first_talks() {
 }
 
 #[test]
-fn a_missing_object_font_falls_back_to_the_system_font_and_is_logged() {
+fn a_missing_object_font_falls_back_to_the_system_font() {
     let (mut runtime, dir) = defects_runtime();
     let lost = runtime.world.find_node("lost").unwrap();
+    // The font failed when the scene loaded: the entity has none of its
+    // own, as the original's `SetFont` leaves it.
+    assert_eq!(call_native(&mut runtime, lost, "GetFont", &[]), Value::Null);
     call_native(&mut runtime, lost, "TalkAsync", &[Value::from("Lost")]);
-    let log = runtime.world.take_log();
     runtime.tick(16);
-    assert!(
-        log.iter().any(|l| l.contains("Error loading font")),
-        "{log:?}"
-    );
     let sentence = runtime
         .world
         .sentences()

@@ -142,7 +142,9 @@ with an error in the log and leaves the game as it was.
 ## Slots and the save directory
 
 Slots are files `save000.dsv` to `save999.dsv` (`Game.SaveGame` takes
-any integer, formatted on three digits as `GetSaveSlotFilename` does)
+any integer, formatted on three digits as `GetSaveSlotFilename` does;
+`SAVED_GAME_EXT` in `startup.settings` names another extension than
+`dsv`)
 in the **save directory**, which `Game.SaveDirectory` reads:
 
 - the game's own, `LOCAL_SAVE_DIR` of `default.game` under the game's
@@ -308,7 +310,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `15` today |
+| 4 | layout version, little-endian; `17` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -340,13 +342,15 @@ actors' attachments, material overrides and bone emitters, and the
 shadow image and light position every object keeps (`SetShadowImage`,
 `SetLightPosition`). Version 15, after 14, added the start position a
 sound keeps for its later plays and moved the sound event from the
-sound to its object.
-Version 17, after 16, keeps the dialogue-branch context of
-every once-per-game response chosen (it kept the id alone), whether the
-response box's window is the engine's own, and with each sentence being
-said its speech file and position, whether it is hidden by a freeze, and
-its talk definition (`.talk`) with the sprite it is at; the items keep
-what they are doing (a sentence, a played animation).
+sound to its object. Version 17 added to every control whether it was
+ever given a text (an empty text is not the same as none for
+`SizeToFit`). Version 18 follows the definitions the loaders now
+keep: the items' tint always present, the fade flag of a window and the
+response box's window definition. Version 19 keeps the dialogue-branch
+context of every once-per-game response chosen (it kept the id alone);
+with each sentence being said its speech file and position, whether it
+is hidden by a freeze, and its talk definition (`.talk`) with the sprite
+it is at; and what each item is doing (a sentence, a played animation).
 
 ## Checking a game
 

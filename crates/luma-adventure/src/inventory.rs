@@ -395,12 +395,12 @@ impl World {
                 return false;
             }
         };
-        let defs = match ItemDef::parse_all(&bytes) {
-            Ok(defs) => defs,
-            Err(err) => {
-                self.log(format!("Error parsing ITEMS file '{path}': {err}"));
-                return false;
-            }
+        // `CAdGame::LoadItemsBuffer`: the items that load are added even
+        // when the file ends on a syntax error, which fails the load.
+        let (defs, error) = {
+            let vfs = &self.vfs;
+            let mut read = |file: &str| vfs.read(file).ok();
+            ItemDef::parse_all_with(&bytes, &mut luma_formats::Files::new(&mut read))
         };
         if !merge {
             let ids: Vec<NativeId> = self.inventory.items.iter().map(|(id, _)| *id).collect();
@@ -415,6 +415,10 @@ impl World {
                 }
             }
             self.add_item(engine, def);
+        }
+        if let Some(err) = error {
+            self.log(format!("Error parsing ITEMS file '{path}': {err}"));
+            return false;
         }
         true
     }
@@ -471,8 +475,8 @@ impl World {
             self.load_font(font);
         }
         let id = self.objects.insert(Kind::Item);
-        let properties = def.properties.clone();
         let scripts = def.scripts.clone();
+        let properties = def.properties.clone();
         self.inventory.items.push((id, Item::new(def)));
         self.apply_properties(id, &properties);
         for script in scripts {
@@ -512,7 +516,8 @@ impl World {
             }
         };
         let vfs = &self.vfs;
-        let parsed = InventoryBoxDef::parse_with(&bytes, &mut |file| vfs.read(file).ok());
+        let mut read = |file: &str| vfs.read(file).ok();
+        let parsed = InventoryBoxDef::parse_with(&bytes, &mut luma_formats::Files::new(&mut read));
         let mut def = match parsed {
             Ok(def) => def,
             Err(err) => {
@@ -522,18 +527,26 @@ impl World {
         };
         if let Some(window_def) = def.window.take() {
             let window = self.new_window_control(None);
-            self.apply_window_def(engine, window, window_def, None);
+            if !self.apply_window_def(engine, window, window_def, None) {
+                // A window that fails fails the box
+                // (`CAdInventoryBox::LoadBuffer`).
+                self.log(format!("Error loading INVENTORY_BOX definition '{path}'"));
+                self.unload_object(engine, window);
+                return false;
+            }
             for widget in self.widgets_of(window) {
                 if let Some(b) = self.control_mut(widget).and_then(Control::button_mut) {
                     b.listener = Some(ButtonListener::Inventory);
                 }
             }
             self.inventory.window = Some(window);
-            if def.exclusive {
-                let close =
-                    self.new_button_control(Some(window), "close", ButtonListener::Inventory);
-                self.inventory.close_button = Some(close);
-            }
+        }
+        // An exclusive box has its `close` button under the whole screen,
+        // with or without a window.
+        if def.exclusive {
+            let close =
+                self.new_button_control(self.inventory.window, "close", ButtonListener::Inventory);
+            self.inventory.close_button = Some(close);
         }
         self.inventory.visible = def.always_visible;
         self.inventory.def = Some(def);
@@ -974,7 +987,7 @@ impl World {
                 continue;
             };
             let frame = item.anim.as_ref().map_or(0, |a| a.current_frame);
-            let tint = item.def.alpha_color.unwrap_or(Rgba::OPAQUE_WHITE);
+            let tint = item.def.alpha_color;
             self.draw_ui_image(list, path, frame, x, y, tint);
             if item.def.display_amount {
                 let width = self.sprite_size_loaded(path).map_or(0, |(w, _)| w);

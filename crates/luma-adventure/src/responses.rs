@@ -8,7 +8,7 @@
 //! (`StartDlgBranch`/`EndDlgBranch`), one added "once per game" never
 //! again; `ResetResponse` forgets either.
 
-use luma_formats::{ResponseBoxDef, ResponseBoxFile, Rgba, VerticalAlign, WindowDef};
+use luma_formats::{ResponseBoxDef, Rgba, VerticalAlign};
 use luma_render::{DrawList, Texture};
 use luma_script::{Effect, Engine, NativeId, Return, ScriptId, Value};
 
@@ -67,10 +67,6 @@ pub struct Responses {
     pub def: Option<ResponseBoxDef>,
     /// The box's window.
     pub window: Option<NativeId>,
-    /// Whether the window is one the engine made for a box without
-    /// `WINDOW`: it only carries the buttons, and scripts do not see it
-    /// (`GetResponsesWindow` gives `null`).
-    pub window_is_own: bool,
     /// The choices added since the last `GetResponse`.
     pub pending: Vec<Response>,
     /// The buttons showing the pending choices while the box waits.
@@ -88,6 +84,7 @@ pub struct Responses {
     /// chosen in as well (`CAdGame::m_ResponsesGame`): the same id
     /// offered from another branch is a different response.
     pub used_game: Vec<(Option<String>, i32)>,
+
     /// The text of the last response chosen (`Game.LastResponse`).
     pub last_text: Option<String>,
     /// See `last_text`, as the script gave it (`LastResponseOrig`).
@@ -104,69 +101,82 @@ impl World {
 
     /// Loads a response box definition and creates its window
     /// (`Game.LoadResponseBox`, `RESPONSE_BOX` of the game file). The
-    /// box the game had goes first, with its window: when the file
-    /// does not load the game has no response box (`CAdResponseBox::
-    /// LoadFile`, the callers in `AdGame.cpp`).
+    /// box the game had goes first, with its window: when the file does
+    /// not load the game has no response box (the callers of
+    /// `CAdResponseBox::LoadFile` in `AdGame.cpp`).
     pub(crate) fn load_response_box_from(&mut self, engine: &mut Engine, path: &str) -> bool {
         self.clear_responses(engine);
         if let Some(window) = self.responses.window.take() {
             self.unload_control(engine, window);
         }
         self.responses.def = None;
-        self.responses.window_is_own = false;
         self.responses.waiting = None;
         let bytes = match self.vfs.read(path) {
             Ok(bytes) => bytes,
             Err(err) => {
-                self.log(format!(
-                    "CAdResponseBox::LoadFile failed for file '{path}': {err}"
-                ));
+                self.log(format!("Error opening response box '{path}': {err}"));
                 return false;
             }
         };
         let vfs = &self.vfs;
-        let parsed = ResponseBoxDef::parse_checked(
-            &bytes,
-            &mut |file| vfs.read(file).ok(),
-            &mut |kind, file| match kind {
-                ResponseBoxFile::Font => crate::text::Font::load(vfs, file).is_ok(),
-                ResponseBoxFile::Cursor => vfs.read(file).is_ok(),
-            },
-        );
+        let mut read = |file: &str| vfs.read(file).ok();
+        let parsed = ResponseBoxDef::parse_with(&bytes, &mut luma_formats::Files::new(&mut read));
         let mut def = match parsed {
             Ok(def) => def,
             Err(err) => {
-                self.log(format!("Error parsing RESPONSE_BOX file '{path}': {err}"));
+                self.log(format!("Error parsing response box '{path}': {err}"));
                 return false;
             }
         };
-        // A box without `WINDOW` still shows its choices, in `AREA` on
-        // the screen: an empty window of the engine's own carries the
-        // buttons.
-        let own = def.window.is_none();
-        let window_def = def.window.take().unwrap_or_else(|| WindowDef {
-            transparent: true,
-            ..WindowDef::default()
+        self.clear_responses(engine);
+        let mut window = None;
+        if let Some(window_def) = def.window.clone() {
+            let id = self.new_window_control(None);
+            if self.apply_window_def(engine, id, window_def, None) {
+                window = Some(id);
+            } else {
+                // A window that fails leaves the box without one, and the
+                // box goes on (`CAdResponseBox::LoadBuffer`).
+                self.log(format!(
+                    "Error loading the WINDOW of the response box '{path}'"
+                ));
+                self.unload_object(engine, id);
+                def.window = None;
+            }
+        }
+        // A box without a window still shows its choices, in `AREA` on
+        // the screen: they are held by a window that draws nothing and
+        // lets the mouse through, which scripts do not see
+        // (`ResponseBox.GetWindow` is null for it).
+        let window = window.unwrap_or_else(|| {
+            let id = self.new_window_control(None);
+            if let Some(w) = self.control_mut(id).and_then(Control::window_mut) {
+                w.transparent = true;
+            }
+            id
         });
-        let window = self.new_window_control(None);
-        self.apply_window_def(engine, window, window_def, None);
         for widget in self.widgets_of(window) {
             if let Some(b) = self.control_mut(widget).and_then(Control::button_mut) {
                 b.listener = Some(ButtonListener::ResponseBox);
             }
         }
-        let (sw, sh) = (self.settings.width as i32, self.settings.height as i32);
         if let Some(control) = self.control_mut(window) {
             control.visible = false;
-            if own {
-                control.width = sw;
-                control.height = sh;
-            }
         }
         self.responses.window = Some(window);
-        self.responses.window_is_own = own;
-        for font in [&def.font, &def.font_hover].into_iter().flatten() {
-            self.load_font(font);
+        // A font or a cursor that does not load is dropped: the choices
+        // then use the system font.
+        for font in [&mut def.font, &mut def.font_hover] {
+            if font.as_deref().is_some_and(|path| !self.load_font(path)) {
+                *font = None;
+            }
+        }
+        if def
+            .cursor
+            .as_deref()
+            .is_some_and(|path| !self.load_cursor(path))
+        {
+            def.cursor = None;
         }
         self.responses.def = Some(def);
         // `CAdResponseBox::LoadFile` keeps the file name.
@@ -175,12 +185,15 @@ impl World {
         true
     }
 
-    /// The box's window as scripts see it (`GetResponsesWindow`): none
-    /// for a box without `WINDOW`.
-    pub(crate) fn responses_script_window(&self) -> Option<NativeId> {
-        self.responses
-            .window
-            .filter(|_| !self.responses.window_is_own)
+    /// The window of the response box as scripts see it: the one its
+    /// file defines, none when the file has no `WINDOW`.
+    pub(crate) fn response_box_window(&self) -> Option<NativeId> {
+        let defined = self
+            .responses
+            .def
+            .as_ref()
+            .is_some_and(|def| def.window.is_some());
+        self.responses.window.filter(|_| defined)
     }
 
     /// Adds a choice (`AddResponse`, `AddResponseOnce`,
@@ -200,11 +213,11 @@ impl World {
         // `CAdResponse::SetIcon`, `SetIconHover`, `SetIconPressed`,
         // `SetFont`: a file that does not load is logged and the
         // response goes without it (no icon makes a text choice, no
-        // font means the box's).
+        // font means the box's). A missing sprite file loads, as the
+        // engine's placeholder image.
         let image = |world: &mut World, file: Option<String>, setter: &str| {
             file.filter(|f| {
-                // An image is decoded when first drawn: see that it is there.
-                let ok = world.vfs.exists(f) && world.ui.bank.add_sprite(&world.vfs, f);
+                let ok = world.ui.bank.add_sprite(&world.vfs, f);
                 if !ok {
                     world.log(format!("CAdResponse::{setter} failed for file '{f}'"));
                 }
@@ -341,6 +354,7 @@ impl World {
             return Return::value(id);
         }
         let Some(window) = self.responses.window else {
+            self.log("Game.GetResponse: response box is not defined".to_string());
             return Return::null();
         };
         self.create_response_buttons();
@@ -354,9 +368,7 @@ impl World {
     }
 
     /// One button per pending choice, in the box's window
-    /// (`CreateButtons`): the text in the box's fonts (the system font
-    /// without them), or the icons. A choice higher than the area makes
-    /// the area that much higher, for good.
+    /// (`CreateButtons`): the text in the box's fonts, or the icons.
     fn create_response_buttons(&mut self) {
         let Some(window) = self.responses.window else {
             return;
@@ -368,55 +380,54 @@ impl World {
         let pending = self.responses.pending.clone();
         let area_width = def.area.right.saturating_sub(def.area.left);
         let screen_width = self.settings.width as i32;
-        let system_font = self.system_font.clone();
         // The cursor of an icon choice: the box's, else the game's
         // active cursor. A text choice has none of its own.
         let icon_cursor = def.cursor.clone().or_else(|| self.cursors.active.clone());
         for (index, response) in pending.iter().enumerate() {
-            let iconic = response.icon.is_some();
-            let hover = def.font_hover.clone().or_else(|| system_font.clone());
-            let state = if iconic {
-                ButtonState {
-                    listener: Some(ButtonListener::Response(index)),
-                    image_hover: response.icon_hover.clone(),
-                    image_press: response.icon_pressed.clone(),
-                    ..ButtonState::default()
-                }
-            } else {
-                ButtonState {
-                    listener: Some(ButtonListener::Response(index)),
-                    text_align: def.text_align,
-                    font_hover: hover.clone(),
-                    font_press: hover,
-                    ..ButtonState::default()
-                }
+            // A text choice is hovered and pressed in the box's hover
+            // font, the system font when the box names none.
+            let textual = response.icon.is_none();
+            let hover = def
+                .font_hover
+                .clone()
+                .or_else(|| self.system_font.clone())
+                .filter(|_| textual);
+            let mut state = ButtonState {
+                listener: Some(ButtonListener::Response(index)),
+                font_hover: hover.clone(),
+                font_press: hover,
+                ..ButtonState::default()
             };
+            if textual {
+                state.text_align = def.text_align;
+            }
             let id = self.create_control(
                 window,
                 ControlKind::Button(Box::new(state)),
                 Some("response"),
             );
             if let Some(icon) = &response.icon {
-                // Loaded when the response was added; again after a
-                // saved game.
-                for file in [Some(icon), response.icon_hover.as_ref()]
+                self.load_ui_image(icon);
+                for extra in [&response.icon_hover, &response.icon_pressed]
                     .into_iter()
-                    .chain([response.icon_pressed.as_ref()])
                     .flatten()
                 {
-                    self.load_ui_image(file);
+                    self.load_ui_image(extra);
                 }
                 if let Some(control) = self.control_mut(id) {
                     control.image = Some(icon.clone());
                     control.caption = response.text.clone();
-                    control.cursor = icon_cursor.clone();
+                    if let Some(b) = control.button_mut() {
+                        b.image_hover = response.icon_hover.clone();
+                        b.image_press = response.icon_pressed.clone();
+                    }
                 }
             } else {
                 let font = response
                     .font
                     .clone()
                     .or_else(|| def.font.clone())
-                    .or_else(|| system_font.clone());
+                    .or_else(|| self.system_font.clone());
                 if let Some(font) = &font {
                     self.load_font(font);
                 }
@@ -433,9 +444,13 @@ impl World {
             if let Some(control) = self.control_mut(id) {
                 control.can_focus = false;
                 control.visible = false;
+                if !textual {
+                    control.cursor = icon_cursor.clone();
+                }
             }
             self.correct_size(id);
             self.responses.buttons.push(id);
+            // A choice higher than the area makes the area as high.
             let height = self.control(id).map_or(0, |c| c.height);
             if let Some(def) = self.responses.def.as_mut() {
                 let area_height = def.area.bottom.saturating_sub(def.area.top);

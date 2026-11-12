@@ -12,8 +12,10 @@ resolution (the largest that keeps the window at most 1280 points wide,
 or `--scale <n>`; the frame is letterboxed when the window has another
 shape, see [rendering.md](rendering.md#coordinates)), or runs full
 screen (see [Window or full screen](#window-or-full-screen)), loads
-`default.game`, attaches the game's scripts and schedules its
-`STARTUP_SCENE`; `--load <slot>` or `--savegame <file>` then loads a
+`default.game` and attaches the game's scripts. No scene is loaded by
+the engine: the game's script opens the first one
+(`Game.ChangeScene(Game.StartupScene)`), `STARTUP_SCENE` being only the
+name kept for it. `--load <slot>` or `--savegame <file>` then loads a
 saved game before the first frame, as the original's `-savegame` does.
 Every frame then runs, in this order (`Runtime::tick`):
 
@@ -580,7 +582,13 @@ A conversation's choices go through the **response box**
 (`RESPONSE_BOX` in the game file, a `.def` file with `FONT`,
 `FONT_HOVER`, `AREA`, `HORIZONTAL`, `SPACING`, `TEXT_ALIGN`,
 `VERTICAL_ALIGN`, `CURSOR` and a `WINDOW` with `prev` and `next`
-buttons), as the original engine's `CAdResponseBox` does. The script
+buttons), as the original engine's `CAdResponseBox` does. `TEXT_ALIGN`
+is `center`, `right` or (anything else) left; `VERTICAL_ALIGN` is `top`,
+`center` or (anything else, and by default) bottom. A choice is hovered
+and pressed in `FONT_HOVER`, the system font without one; `CURSOR` is
+the cursor of the icon choices. A box without `WINDOW`, or whose window
+does not load, lays its choices out in `AREA` on the screen; an area
+lower than a choice grows to its height. The script
 adds its choices with `Game.AddResponse(id, text)`,
 `AddResponseOnce` (not offered again in the current dialogue branch) or
 `AddResponseOnceGame` (never again), then `Game.GetResponse()` shows
@@ -590,10 +598,10 @@ shown when they do not fit, the window exclusive meanwhile (the keys of
 the file are in [formats/window.md](formats/window.md#the-response-box)).
 The icons and the font a response names are loaded when it is added: one
 that does not load is logged (`CAdResponse::SetIcon failed for file`...)
-and left out, so a response whose icon does not load is a text choice
-and one whose font does not load uses the box's. (For a missing icon
-file the original shows its `invalid.bmp` placeholder as the icon; Luma
-has no placeholder image and makes a text choice.) The pick
+and left out, so a response whose icon does not load (a sprite file
+that does not parse) is a text choice and one whose font does not load
+uses the box's. A missing icon file loads, as the `invalid.bmp`
+placeholder, and makes an icon choice. The pick
 returns the choice's id to the script, sets `Game.LastResponse` and
 `LastResponseOrig`, and closes the box; without any choice left
 `GetResponse` returns `null` at once, and with a single one it returns
@@ -637,7 +645,7 @@ and a front-end can set them through `World::accessibility_mut`.
 Scripts read them as `Game.AccTTSEnabled`, `AccTTSTalk`,
 `AccTTSCaptions`, `AccTTSKeypress`, `AccKeyboardEnabled`,
 `AccKeyboardCursorSkip` and `AccKeyboardPause`, read only, as in the
-original. A game whose `default.game` says `ALLOW_ACCESSIBILITY_TAB =
+original. A game whose `startup.settings` says `ALLOW_ACCESSIBILITY_TAB =
 FALSE` keeps speech, keyboard play and the pause off whatever the file
 says, as the original forces them off.
 

@@ -488,6 +488,19 @@ impl World {
         }
     }
 
+    /// Sets the volume and the start offset an object keeps for its
+    /// sound, without touching a loaded sound: what a definition file's
+    /// `SOUND_VOLUME` and `SOUND_START_TIME` do (they write `m_SFXVolume`
+    /// and `m_SFXStart`).
+    pub(crate) fn set_sfx_fields(&mut self, owner: NativeId, volume: i32, start_ms: u64) {
+        if !self.can_own_sound(owner) {
+            return;
+        }
+        let state = self.sounds.objects.entry(owner).or_default();
+        state.volume = volume;
+        state.start_ms = start_ms;
+    }
+
     /// Sets an object's sound volume (`SetSFXVolume`).
     pub fn set_sfx_volume(&mut self, owner: NativeId, percent: i32) -> bool {
         if !self.can_own_sound(owner) {

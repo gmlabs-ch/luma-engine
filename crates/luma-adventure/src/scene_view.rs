@@ -294,6 +294,16 @@ pub(crate) fn key(path: &str) -> String {
     path.replace('\\', "/").to_ascii_lowercase()
 }
 
+/// The file an image is read from: itself, or the engine's placeholder
+/// when it does not exist (`CBSurfaceStorage::AddSurface`).
+fn placeholder_for<'a>(vfs: &Vfs, image: &'a str) -> &'a str {
+    if !vfs.exists(image) && vfs.exists(crate::resources::INVALID_IMAGE) {
+        crate::resources::INVALID_IMAGE
+    } else {
+        image
+    }
+}
+
 fn texture_key(path: &str, color_key: Rgb) -> String {
     format!(
         "{}|{},{},{}",
@@ -310,9 +320,12 @@ impl SpriteBank {
         SpriteBank::default()
     }
 
-    /// Loads a sprite definition if it is not loaded yet. A missing or
-    /// broken sprite is recorded in [`SpriteBank::missing`], not an
-    /// error. Returns whether the sprite is available.
+    /// Loads a sprite definition if it is not loaded yet
+    /// (`CBSprite::LoadFile`). A file that does not exist is replaced by
+    /// the engine's placeholder image and the sprite loads; the miss is
+    /// recorded in [`SpriteBank::missing`] all the same, for the log. A
+    /// sprite file that cannot be parsed is recorded there too, and is
+    /// not available. Returns whether the sprite is available.
     pub fn add_sprite(&mut self, vfs: &Vfs, path: &str) -> bool {
         let k = key(path);
         if self.sprites.contains_key(&k) {
@@ -321,7 +334,13 @@ impl SpriteBank {
         if self.missing.iter().any(|(p, _)| key(p) == k) {
             return false;
         }
-        let sprite = if Sprite::is_image_path(path) {
+        let sprite = if !vfs.exists(path) && vfs.exists(crate::resources::INVALID_IMAGE) {
+            self.missing.push((
+                path.to_string(),
+                "file not found, the placeholder image is shown".to_string(),
+            ));
+            Sprite::from_image(crate::resources::INVALID_IMAGE)
+        } else if Sprite::is_image_path(path) {
             Sprite::from_image(path)
         } else {
             match vfs
@@ -371,7 +390,7 @@ impl SpriteBank {
                 continue;
             }
             let decoded = vfs
-                .read(&image)
+                .read(placeholder_for(vfs, &image))
                 .map_err(|e| e.to_string())
                 .and_then(|bytes| {
                     luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
@@ -418,9 +437,12 @@ impl SpriteBank {
             if self.missing.iter().any(|(p, _)| *p == path) {
                 return None;
             }
-            let decoded = vfs.read(path).map_err(|e| e.to_string()).and_then(|bytes| {
-                luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
-            });
+            let decoded = vfs
+                .read(placeholder_for(vfs, path))
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| {
+                    luma_formats::image::decode(&bytes, color_key).map_err(|e| e.to_string())
+                });
             match decoded {
                 Ok(image) => {
                     self.masks.insert(k.clone(), Mask::of(&image));
@@ -696,10 +718,15 @@ impl SceneView {
     /// [`SceneView::upload`].
     pub fn load(vfs: &Vfs, path: &str) -> Result<SceneView> {
         let bytes = vfs.read(path)?;
-        let scene = Scene::parse(&bytes).map_err(|source| Error::Format {
-            path: path.to_string(),
-            source,
-        })?;
+        // The `TEMPLATE` files of the scene and of its parts are read
+        // where the keys stand (`CAdScene::LoadBuffer`).
+        let mut read = |file: &str| vfs.read(file).ok();
+        let scene = Scene::parse_with(&bytes, &mut luma_formats::Files::new(&mut read)).map_err(
+            |source| Error::Format {
+                path: path.to_string(),
+                source,
+            },
+        )?;
         let mut view = SceneView {
             scene,
             path: path.to_string(),
@@ -1601,9 +1628,8 @@ impl SceneView {
 }
 
 /// Whether a sprite file loads, as `CBSprite::LoadFile` answers: a file
-/// that is not there does (the original puts its `invalid.bmp`
-/// placeholder in its place; Luma then shows nothing), an image does,
-/// and a sprite definition does when it parses.
+/// that is not there does (the `invalid.bmp` placeholder takes its
+/// place), an image does, and a sprite definition does when it parses.
 pub(crate) fn sprite_file_loads(vfs: &Vfs, path: &str) -> bool {
     if Sprite::is_image_path(path) {
         return true;
@@ -1612,22 +1638,6 @@ pub(crate) fn sprite_file_loads(vfs: &Vfs, path: &str) -> bool {
         Ok(bytes) => Sprite::parse(&bytes).is_ok(),
         Err(_) => true,
     }
-}
-
-/// Runs `read` with the game's files as a sprite set or a talk
-/// definition needs them (`luma_formats::SetFiles`).
-pub(crate) fn with_set_files<T>(
-    vfs: &Vfs,
-    read: impl FnOnce(&mut luma_formats::SetFiles<'_>) -> T,
-) -> T {
-    let mut load = |file: &str| vfs.read(file).ok();
-    let mut sprite_loads = |file: &str| sprite_file_loads(vfs, file);
-    read(&mut luma_formats::SetFiles {
-        load: &mut load,
-        sprite_loads: &mut sprite_loads,
-        follow_templates: true,
-        files_left: luma_formats::SetFiles::FILE_BUDGET,
-    })
 }
 
 /// The regions of a scene's main layer containing a point, as

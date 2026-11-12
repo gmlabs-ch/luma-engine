@@ -6,42 +6,11 @@
 //! `AdSpriteSet.cpp`, Copyright (c) 2011 Jan Nedoma). See `NOTICE` at the
 //! root of the repository.
 
-use crate::def::{Document, Node, Nodes};
+use crate::def::{Document, Node, Nodes, document_keys, keys};
 use crate::error::{Error, Result};
 use crate::image::{BlendMode, Rgba};
 use crate::scene::{Direction, Property, Region, WaypointGroup};
-
-/// The game's files, as reading a sprite set needs them: the bytes of a
-/// `TEMPLATE` file, and whether a sprite file loads.
-pub struct SetFiles<'a> {
-    /// Reads a file of the game; `None` when it cannot be read.
-    pub load: &'a mut dyn FnMut(&str) -> Option<Vec<u8>>,
-    /// Whether a sprite file loads.
-    pub sprite_loads: &'a mut dyn FnMut(&str) -> bool,
-    /// Whether `TEMPLATE` files are read; without it they are only
-    /// recorded (a tool reading one file on its own).
-    pub follow_templates: bool,
-    /// How many more files `load` may be asked for: templates fan out
-    /// (a file may name several, each naming several), so the depth of
-    /// a chain alone does not bound the work. Start at
-    /// [`SetFiles::FILE_BUDGET`].
-    pub files_left: u32,
-}
-
-impl SetFiles<'_> {
-    /// The files one definition may read through its templates and
-    /// sprite set files, all told. The original has no limit.
-    pub const FILE_BUDGET: u32 = 256;
-
-    /// Reads a file of the game, while the budget lasts.
-    pub(crate) fn read(&mut self, file: &str) -> Option<Vec<u8>> {
-        self.files_left = self.files_left.checked_sub(1)?;
-        (self.load)(file)
-    }
-}
-
-/// How many `TEMPLATE` files a sprite set may chain.
-const SET_TEMPLATE_DEPTH: u32 = 8;
+use crate::template::Files;
 
 /// A sprite for each direction (`SPRITESET`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -91,113 +60,62 @@ impl SpriteSet {
         paths
     }
 
-    /// Parses a `.spriteset` file: a `SPRITESET` root block. A
-    /// `TEMPLATE` cannot be followed without the game's files: see
-    /// [`SpriteSet::parse_with`].
+    /// Parses a `.spriteset` file: a `SPRITESET` root block. No other
+    /// file is read.
     pub fn parse(bytes: &[u8]) -> Result<SpriteSet> {
+        SpriteSet::parse_with(bytes, &mut Files::none())
+    }
+
+    /// Parses a `.spriteset` file, reading the `TEMPLATE` files it names
+    /// through `files`.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<SpriteSet> {
         let doc = Document::parse(bytes)?;
-        let root = doc.get("SPRITESET").ok_or_else(|| Error::Invalid {
-            reason: "'SPRITESET' keyword expected".into(),
-        })?;
         let mut set = SpriteSet::default();
-        set.apply(root);
+        set.load_file(&doc, files)?;
         Ok(set)
     }
 
-    /// Parses a `.spriteset` file as `CAdSpriteSet::LoadFile` does, with
-    /// the game's files (see [`SpriteSet::read`]).
-    pub fn parse_with(bytes: &[u8], files: &mut SetFiles<'_>) -> Result<SpriteSet> {
+    /// `CAdSpriteSet::LoadFile`: the set of the `.spriteset` file `name`,
+    /// read through `files`. A file that cannot be read, or whose keys
+    /// are a syntax error, gives no set.
+    pub fn load_named(name: &str, files: &mut Files<'_>) -> Result<SpriteSet> {
         let mut set = SpriteSet::default();
-        set.read_file(bytes, files, 0)?;
+        files.template(name, |doc, files| set.load_file(doc, files))?;
         Ok(set)
     }
 
-    fn read_file(&mut self, bytes: &[u8], files: &mut SetFiles<'_>, depth: u32) -> Result<()> {
-        let doc = Document::parse(bytes)?;
-        let root = doc.get("SPRITESET").ok_or_else(|| Error::Invalid {
+    /// `CAdSpriteSet::LoadBuffer(.., Complete = true)`: the first
+    /// statement of `doc` must be the `SPRITESET` block.
+    fn load_file(&mut self, doc: &Document, files: &mut Files<'_>) -> Result<()> {
+        let root = doc.root("SPRITESET").ok_or_else(|| Error::Invalid {
             reason: "'SPRITESET' keyword expected".into(),
         })?;
-        self.read_at(root, files, depth)
-    }
-
-    /// Reads the keys of a `SPRITESET` block as `CAdSpriteSet::
-    /// LoadBuffer` does: in file order over what is there; a `TEMPLATE`
-    /// file is read into the same set where the key stands; a sprite or
-    /// a template that does not load, and a key the set does not know,
-    /// fail the set.
-    pub fn read(&mut self, node: &Node, files: &mut SetFiles<'_>) -> Result<()> {
-        self.read_at(node, files, 0)
-    }
-
-    fn read_at(&mut self, node: &Node, files: &mut SetFiles<'_>, depth: u32) -> Result<()> {
-        for child in node.nodes() {
-            let direction = match child.key.to_ascii_uppercase().as_str() {
-                "NAME" => {
-                    self.name = text(child);
-                    continue;
-                }
-                "TEMPLATE" => {
-                    let file = text(child);
-                    self.template = Some(file.clone());
-                    if !files.follow_templates {
-                        continue;
-                    }
-                    let bytes = if depth < SET_TEMPLATE_DEPTH {
-                        files.read(&file)
-                    } else {
-                        None
-                    };
-                    let bytes = bytes.ok_or_else(|| Error::Invalid {
-                        reason: format!("CAdSpriteSet::LoadFile failed for file '{file}'"),
-                    })?;
-                    self.read_file(&bytes, files, depth + 1)?;
-                    continue;
-                }
-                "EDITOR_PROPERTY" => continue,
-                "UP" => Direction::Up,
-                "UP_RIGHT" => Direction::UpRight,
-                "RIGHT" => Direction::Right,
-                "DOWN_RIGHT" => Direction::DownRight,
-                "DOWN" => Direction::Down,
-                "DOWN_LEFT" => Direction::DownLeft,
-                "LEFT" => Direction::Left,
-                "UP_LEFT" => Direction::UpLeft,
-                other => {
-                    return Err(Error::Invalid {
-                        reason: format!(
-                            "Syntax error in SPRITESET definition: unknown key {other} at line {}",
-                            child.line
-                        ),
-                    });
-                }
-            };
-            let file = text(child);
-            if !(files.sprite_loads)(&file) {
-                return Err(Error::Invalid {
-                    reason: format!(
-                        "Error loading SPRITESET definition: sprite '{file}' at line {}",
-                        child.line
-                    ),
-                });
-            }
-            self.sprites[usize::from(direction.code())] = Some(file);
-        }
-        Ok(())
+        self.apply_with(root, files)
     }
 
     /// Reads the keys of a `SPRITESET` block into the set, overriding
-    /// what is already there, without the game's files: a `TEMPLATE` is
-    /// only recorded, unknown keys are skipped and no sprite is checked
-    /// (for tools; the engine reads with [`SpriteSet::read`]).
-    pub fn apply(&mut self, node: &Node) {
-        for child in node.nodes() {
-            let direction = match child.key.to_ascii_uppercase().as_str() {
+    /// what is already there. No `TEMPLATE` file is read.
+    pub fn apply(&mut self, node: &Node) -> Result<()> {
+        self.apply_with(node, &mut Files::none())
+    }
+
+    /// `CAdSpriteSet::LoadBuffer`: reads the keys of a `SPRITESET` block
+    /// into the set in order, overriding what is already there. A
+    /// `TEMPLATE` loads the named `.spriteset` file into the same set
+    /// where the key stands. A key that is not in the table is a syntax
+    /// error.
+    pub fn apply_with(&mut self, node: &Node, files: &mut Files<'_>) -> Result<()> {
+        for item in keys(node, SPRITESET_KEYS, "SPRITESET") {
+            let (key, child) = item?;
+            let direction = match key {
                 "NAME" => {
-                    self.name = text(child);
+                    self.name = child.text();
                     continue;
                 }
                 "TEMPLATE" => {
-                    self.template = child.as_str().map(str::to_string);
+                    let name = child.text();
+                    let _ = files.template(&name, |doc, files| self.load_file(doc, files));
+                    self.template = Some(name);
                     continue;
                 }
                 "UP" => Direction::Up,
@@ -210,24 +128,86 @@ impl SpriteSet {
                 "UP_LEFT" => Direction::UpLeft,
                 _ => continue,
             };
-            self.sprites[usize::from(direction.code())] = child.as_str().map(str::to_string);
+            self.sprites[usize::from(direction.code())] = Some(child.text());
         }
+        Ok(())
     }
 
     /// Builds a set from a block holding one `SPRITESET` block (`WALK`,
-    /// `STAND`, `TALK`...).
-    fn from_wrapper(node: &Node, files: &mut SetFiles<'_>) -> Result<SpriteSet> {
-        let inner = node.get("SPRITESET").ok_or_else(|| Error::Invalid {
-            reason: format!(
-                "'SPRITESET' keyword expected in {} at line {}",
-                node.key, node.line
-            ),
-        })?;
+    /// `STAND`, `TALK`...): the text of the block is loaded as a
+    /// `.spriteset` file is.
+    fn from_wrapper(node: &Node, files: &mut Files<'_>) -> Result<SpriteSet> {
+        let inner = node
+            .nodes()
+            .first()
+            .filter(|first| first.key.eq_ignore_ascii_case("SPRITESET"))
+            .ok_or_else(|| Error::Invalid {
+                reason: format!(
+                    "'SPRITESET' keyword expected in {} at line {}",
+                    node.key, node.line
+                ),
+            })?;
         let mut set = SpriteSet::default();
-        set.read(inner, files)?;
+        set.apply_with(inner, files)?;
         Ok(set)
     }
 }
+
+/// The keys of `CAdSpriteSet::LoadBuffer`, in the order of its table.
+const SPRITESET_KEYS: &[&str] = &[
+    "SPRITESET",
+    "NAME",
+    "UP_LEFT",
+    "DOWN_LEFT",
+    "LEFT",
+    "UP_RIGHT",
+    "DOWN_RIGHT",
+    "RIGHT",
+    "UP",
+    "DOWN",
+    "TEMPLATE",
+    "EDITOR_PROPERTY",
+];
+
+/// The keys of `CAdActor::LoadBuffer`, in the order of its table.
+const ACTOR_KEYS: &[&str] = &[
+    "ACTOR",
+    "X",
+    "Y",
+    "TEMPLATE",
+    "NAME",
+    "SCALABLE",
+    "REGISTRABLE",
+    "INTERACTIVE",
+    "SHADOWABLE",
+    "COLORABLE",
+    "ACTIVE",
+    "WALK",
+    "STAND",
+    "TALK_SPECIAL",
+    "TALK",
+    "TURN_LEFT",
+    "TURN_RIGHT",
+    "EVENTS",
+    "FONT",
+    "CURSOR",
+    "SCRIPT",
+    "SOUND_VOLUME",
+    "SOUND_PANNING",
+    "CAPTION",
+    "PROPERTY",
+    "BLOCKED_REGION",
+    "WAYPOINTS",
+    "IGNORE_ITEMS",
+    "ROTABLE",
+    "ROTATABLE",
+    "ALPHA_COLOR",
+    "SCALE",
+    "RELATIVE_SCALE",
+    "ALPHA",
+    "EDITOR_PROPERTY",
+    "ANIMATION",
+];
 
 /// An actor definition (`ACTOR`).
 #[derive(Debug, Clone, PartialEq)]
@@ -237,7 +217,8 @@ pub struct Actor {
     pub name: String,
     /// Caption shown when the mouse is over the actor.
     pub caption: String,
-    /// Actor file loaded first (`TEMPLATE`), to be merged by the caller.
+    /// The last `TEMPLATE` file named; it was applied where the key
+    /// stands.
     pub template: Option<String>,
     /// Starting position.
     pub x: i32,
@@ -273,7 +254,8 @@ pub struct Actor {
     pub tint: Option<Rgba>,
     /// Not clickable while an inventory item is selected.
     pub ignore_items: bool,
-    /// Stop on a block instead of looking for another path.
+    /// Stop on a block instead of looking for another path. Not a key of
+    /// the file: scripts set it.
     pub stop_on_blocked: bool,
     /// The walking sprites.
     pub walk: Option<SpriteSet>,
@@ -350,72 +332,62 @@ impl Default for Actor {
 }
 
 impl Actor {
-    /// Parses an `.actor` file: an `ACTOR` root block. A `TEMPLATE` is
-    /// recorded, not loaded.
+    /// Parses an `.actor` file: an `ACTOR` root block. No other file is
+    /// read: a `TEMPLATE` key fails to load, which the original ignores.
     pub fn parse(bytes: &[u8]) -> Result<Actor> {
+        Actor::parse_with(bytes, &mut Files::none())
+    }
+
+    /// Parses an `.actor` file, reading the `TEMPLATE` files it names
+    /// through `files`.
+    pub fn parse_with(bytes: &[u8], files: &mut Files<'_>) -> Result<Actor> {
         let mut actor = Actor::default();
-        actor.merge(bytes)?;
+        actor.merge_with(bytes, files)?;
         Ok(actor)
     }
 
     /// Reads an `.actor` file over the actor: its keys override what is
-    /// already there, as when a file names another by `TEMPLATE`. The
-    /// sprite sets are read without the game's files: their templates
-    /// are not followed and every sprite is taken to load (see
-    /// [`Actor::merge_with`]).
+    /// already there. No `TEMPLATE` file is read.
     pub fn merge(&mut self, bytes: &[u8]) -> Result<()> {
-        self.merge_with(
-            bytes,
-            &mut SetFiles {
-                load: &mut |_| None,
-                sprite_loads: &mut |_| true,
-                follow_templates: false,
-                files_left: 0,
-            },
-        )
+        self.merge_with(bytes, &mut Files::none())
     }
 
-    /// Reads an `.actor` file over the actor as [`Actor::merge`] does,
-    /// its sprite sets with the game's files ([`SpriteSet::read`]): a
-    /// set that fails fails the actor.
-    pub fn merge_with(&mut self, bytes: &[u8], files: &mut SetFiles<'_>) -> Result<()> {
-        let doc = Document::parse(bytes)?;
-        let root = doc.get("ACTOR").ok_or_else(|| Error::Invalid {
+    /// Reads an `.actor` file over the actor (`CAdActor::LoadBuffer` with
+    /// `Complete`), reading the `TEMPLATE` files it names through `files`.
+    pub fn merge_with(&mut self, bytes: &[u8], files: &mut Files<'_>) -> Result<()> {
+        self.load_file(&Document::parse(bytes)?, files)
+    }
+
+    fn load_file(&mut self, doc: &Document, files: &mut Files<'_>) -> Result<()> {
+        let root = doc.root("ACTOR").ok_or_else(|| Error::Invalid {
             reason: "'ACTOR' keyword expected".into(),
         })?;
         self.apply(root, files)
     }
 
-    /// Adds the `ANIMATION` blocks of a file (`MergeAnims`).
+    /// Adds the `ANIMATION` blocks of a file (`CAdActor::MergeAnims`):
+    /// the statements are read up to the first one that is not an
+    /// `ANIMATION`. A block that cannot be read is left out, the others
+    /// are added, and the error is returned.
     pub fn merge_animations(&mut self, bytes: &[u8]) -> Result<usize> {
-        self.merge_animations_with(
-            bytes,
-            &mut SetFiles {
-                load: &mut |_| None,
-                sprite_loads: &mut |_| true,
-                follow_templates: false,
-                files_left: 0,
-            },
-        )
-    }
-
-    /// Adds the `ANIMATION` blocks of a file as [`Actor::
-    /// merge_animations`] does, read with the game's files.
-    pub fn merge_animations_with(
-        &mut self,
-        bytes: &[u8],
-        files: &mut SetFiles<'_>,
-    ) -> Result<usize> {
         let doc = Document::parse(bytes)?;
-        let mut sets = Vec::new();
-        for node in doc.get_all("ANIMATION") {
+        let mut count = 0;
+        let mut failed = None;
+        for item in document_keys(&doc, &["ANIMATION"], "ANIMATION") {
+            let Ok((_, node)) = item else { break };
             let mut set = SpriteSet::default();
-            set.read(node, files)?;
-            sets.push(set);
+            match set.apply(node) {
+                Ok(()) => {
+                    self.animations.push(set);
+                    count += 1;
+                }
+                Err(err) => failed = Some(err),
+            }
         }
-        let count = sets.len();
-        self.animations.extend(sets);
-        Ok(count)
+        match failed {
+            Some(err) => Err(err),
+            None => Ok(count),
+        }
     }
 
     /// The animation with this name, ignoring case.
@@ -448,84 +420,95 @@ impl Actor {
         paths
     }
 
-    fn apply(&mut self, root: &Node, files: &mut SetFiles<'_>) -> Result<()> {
-        let (mut r, mut g, mut b, mut alpha) = (0i64, 0i64, 0i64, 0i64);
-        for child in root.nodes() {
-            match child.key.to_ascii_uppercase().as_str() {
-                "TEMPLATE" => self.template = child.as_str().map(str::to_string),
-                "NAME" => self.name = text(child),
-                "CAPTION" => self.caption = text(child),
-                "X" => self.x = integer(child),
-                "Y" => self.y = integer(child),
-                "ACTIVE" => self.active = boolean(child),
-                "SCALABLE" => self.scalable = boolean(child),
-                "SCALE" => self.scale = Some(integer(child) as f32),
-                "RELATIVE_SCALE" => self.relative_scale = integer(child) as f32,
-                "ROTATABLE" | "ROTABLE" => self.rotatable = boolean(child),
-                "INTERACTIVE" | "REGISTRABLE" => self.interactive = boolean(child),
-                "COLORABLE" | "SHADOWABLE" => self.colorable = boolean(child),
-                "ALPHA_COLOR" => {
-                    let v = child.as_ints().unwrap_or_default();
-                    r = v.first().copied().unwrap_or(0);
-                    g = v.get(1).copied().unwrap_or(0);
-                    b = v.get(2).copied().unwrap_or(0);
+    /// `CAdActor::LoadBuffer`: the keys of the block in order, over what
+    /// the actor holds. A key that is not in the table is a syntax error
+    /// that fails the load. A sprite set, region or waypoint group that
+    /// cannot be read is left out alone, and so is a `TEMPLATE` that
+    /// cannot be loaded: the original sets an error code that the next
+    /// statement overwrites.
+    fn apply(&mut self, root: &Node, files: &mut Files<'_>) -> Result<()> {
+        let (mut r, mut g, mut b, mut alpha) = (0, 0, 0, 0);
+        // Whether this block names a tint of its own.
+        let mut tinted = false;
+        for item in keys(root, ACTOR_KEYS, "ACTOR") {
+            let (key, child) = item?;
+            match key {
+                "TEMPLATE" => {
+                    // `LoadFile` on the actor itself. (The original then
+                    // answers the template's name as the actor's file;
+                    // the actor keeps its own here.)
+                    let name = child.text();
+                    let _ = files.template(&name, |doc, files| self.load_file(doc, files));
+                    self.template = Some(name);
                 }
-                "ALPHA" => alpha = child.as_int().unwrap_or(0),
-                "IGNORE_ITEMS" => self.ignore_items = boolean(child),
-                "STOP_ON_BLOCKED" => self.stop_on_blocked = boolean(child),
-                "WALK" => self.walk = Some(SpriteSet::from_wrapper(child, files)?),
-                "STAND" => self.stand = Some(SpriteSet::from_wrapper(child, files)?),
-                "TURN_LEFT" => self.turn_left = Some(SpriteSet::from_wrapper(child, files)?),
-                "TURN_RIGHT" => self.turn_right = Some(SpriteSet::from_wrapper(child, files)?),
-                "TALK" => self.talk.push(SpriteSet::from_wrapper(child, files)?),
+                "NAME" => self.name = child.text(),
+                "CAPTION" => self.caption = child.text(),
+                "X" => child.read_int(&mut self.x),
+                "Y" => child.read_int(&mut self.y),
+                "ACTIVE" => child.read_bool(&mut self.active),
+                "SCALABLE" => child.read_bool(&mut self.scalable),
+                "SCALE" => {
+                    let mut scale = 0;
+                    child.read_int(&mut scale);
+                    self.scale = Some(scale as f32);
+                }
+                "RELATIVE_SCALE" => {
+                    let mut scale = 0;
+                    child.read_int(&mut scale);
+                    self.relative_scale = scale as f32;
+                }
+                "ROTATABLE" | "ROTABLE" => child.read_bool(&mut self.rotatable),
+                "INTERACTIVE" | "REGISTRABLE" => child.read_bool(&mut self.interactive),
+                "COLORABLE" | "SHADOWABLE" => child.read_bool(&mut self.colorable),
+                "ALPHA_COLOR" => {
+                    child.read_ints(&mut [&mut r, &mut g, &mut b]);
+                    tinted = true;
+                }
+                "ALPHA" => {
+                    child.read_int(&mut alpha);
+                    tinted = true;
+                }
+                "IGNORE_ITEMS" => child.read_bool(&mut self.ignore_items),
+                "WALK" => self.walk = SpriteSet::from_wrapper(child, files).ok(),
+                "STAND" => self.stand = SpriteSet::from_wrapper(child, files).ok(),
+                "TURN_LEFT" => self.turn_left = SpriteSet::from_wrapper(child, files).ok(),
+                "TURN_RIGHT" => self.turn_right = SpriteSet::from_wrapper(child, files).ok(),
+                "TALK" => self.talk.extend(SpriteSet::from_wrapper(child, files).ok()),
                 "TALK_SPECIAL" => self
                     .talk_special
-                    .push(SpriteSet::from_wrapper(child, files)?),
+                    .extend(SpriteSet::from_wrapper(child, files).ok()),
                 "ANIMATION" => {
                     let mut set = SpriteSet::default();
-                    set.read(child, files)?;
-                    self.animations.push(set);
+                    if set.apply_with(child, files).is_ok() {
+                        self.animations.push(set);
+                    }
                 }
-                "FONT" => self.font = child.as_str().map(str::to_string),
-                "CURSOR" => self.cursor = child.as_str().map(str::to_string),
-                "SCRIPT" => self.scripts.extend(child.as_str().map(str::to_string)),
-                "PROPERTY" => self.properties.extend(Property::from_node(child)?),
-                "BLOCKED_REGION" => self.blocked_region = Some(Region::from_node(child, false)?),
-                "WAYPOINTS" => self.waypoints = Some(WaypointGroup::from_node(child)?),
-                "SOUND_VOLUME" => self.sound_volume = integer(child),
-                "SOUND_PANNING" => self.sound_panning = boolean(child),
+                "FONT" => self.font = Some(child.text()),
+                "CURSOR" => self.cursor = Some(child.text()),
+                "SCRIPT" => self.scripts.push(child.text()),
+                "PROPERTY" => self.properties.extend(Property::from_node(child)),
+                "BLOCKED_REGION" => self.blocked_region = Region::from_node(child, false).ok(),
+                "WAYPOINTS" => {
+                    let mut group = WaypointGroup::default();
+                    self.waypoints = group.load(child, files).is_ok().then_some(group);
+                }
+                "SOUND_VOLUME" => child.read_int(&mut self.sound_volume),
+                "SOUND_PANNING" => child.read_bool(&mut self.sound_panning),
                 _ => {}
             }
         }
-        if alpha != 0 && r == 0 && g == 0 && b == 0 {
-            (r, g, b) = (255, 255, 255);
-        }
-        if (r, g, b, alpha) != (0, 0, 0, 0) {
-            self.tint = Some(Rgba {
-                r: clamp_channel(r),
-                g: clamp_channel(g),
-                b: clamp_channel(b),
-                a: clamp_channel(alpha),
-            });
+        // A file that names no tint keeps the one the actor has: a
+        // template's. (The original computes it again from this file
+        // alone and loses the template's.)
+        if tinted {
+            if alpha != 0 && r == 0 && g == 0 && b == 0 {
+                (r, g, b) = (255, 255, 255);
+            }
+            let tint = Rgba::from_ints(r, g, b, alpha);
+            self.tint = (tint != Rgba::from_ints(0, 0, 0, 0)).then_some(tint);
         }
         Ok(())
     }
-}
-
-fn text(node: &Node) -> String {
-    node.as_str().unwrap_or_default().to_string()
-}
-
-fn boolean(node: &Node) -> bool {
-    node.as_bool().unwrap_or(false)
-}
-
-fn integer(node: &Node) -> i32 {
-    node.as_int().unwrap_or(0) as i32
-}
-
-fn clamp_channel(v: i64) -> u8 {
-    v.clamp(0, 255) as u8
 }
 
 #[cfg(test)]
@@ -542,7 +525,6 @@ ACTOR {
   Y = 460
   SCRIPT="actors\thegirl\theGirl.script"
   FONT = "fonts\outline_red.font"
-  STOP_ON_BLOCKED = TRUE
   ALPHA = 200
   WALK {
     SPRITESET {
@@ -597,7 +579,7 @@ ACTOR {
         assert_eq!(actor.name, "theGirl");
         assert_eq!((actor.x, actor.y), (400, 460));
         assert!(actor.scalable && !actor.interactive && actor.active);
-        assert!(actor.stop_on_blocked);
+        assert!(!actor.stop_on_blocked);
         assert_eq!(actor.scripts, ["actors\\thegirl\\theGirl.script"]);
         assert_eq!(actor.font.as_deref(), Some("fonts\\outline_red.font"));
         assert_eq!(
@@ -673,108 +655,87 @@ ACTOR {
         assert_eq!(set.sprite(Direction::Up), Some("d.sprite"));
     }
 
+    /// `CAdActor::LoadBuffer TEMPLATE`: the template is loaded into the
+    /// actor where the key stands; its tint stays when the outer file
+    /// names none.
+    #[test]
+    fn a_template_is_loaded_in_place() {
+        let base = br#"ACTOR { NAME="base" X=10 Y=20 ALPHA=100 SCALABLE=FALSE
+  WALK { SPRITESET { LEFT="base_walk.sprite" } }
+  TALK { SPRITESET { NAME="t" LEFT="base_talk.sprite" } }
+}"#;
+        let mut read = |name: &str| (name == "base.actor").then(|| base.to_vec());
+        let actor = Actor::parse_with(
+            br#"ACTOR { X=1 CAPTION="Mine" TEMPLATE="base.actor" Y=99
+  STAND { SPRITESET { TEMPLATE="base.spriteset" RIGHT="r.sprite" } }
+}"#,
+            &mut Files::new(&mut read),
+        )
+        .unwrap();
+        assert_eq!(actor.name, "base");
+        assert_eq!((actor.x, actor.y), (10, 99));
+        assert_eq!(actor.caption, "Mine");
+        assert!(!actor.scalable);
+        // The file names no tint: the template's stays.
+        assert_eq!(actor.tint, Some(Rgba::from_ints(255, 255, 255, 100)));
+        assert_eq!(actor.talk.len(), 1);
+        assert_eq!(
+            actor.walk.as_ref().unwrap().sprite(Direction::Left),
+            Some("base_walk.sprite")
+        );
+        // The set's template is missing: skipped, the set goes on.
+        assert_eq!(
+            actor.stand.as_ref().unwrap().sprite(Direction::Right),
+            Some("r.sprite")
+        );
+    }
+
+    /// `CAdSpriteSet::LoadBuffer TEMPLATE`, and `MergeAnims` stopping at
+    /// the first statement that is not an `ANIMATION`.
+    #[test]
+    fn sprite_set_templates_and_merged_animations() {
+        let mut read = |name: &str| {
+            (name == "base.spriteset")
+                .then(|| br#"SPRITESET { NAME="base" LEFT="l.sprite" UP="u.sprite" }"#.to_vec())
+        };
+        let set = SpriteSet::parse_with(
+            br#"SPRITESET { LEFT="mine.sprite" TEMPLATE="base.spriteset" UP="mine_up.sprite" }"#,
+            &mut Files::new(&mut read),
+        )
+        .unwrap();
+        assert_eq!(set.name, "base");
+        assert_eq!(set.sprite(Direction::Left), Some("l.sprite"));
+        assert_eq!(set.sprite(Direction::Up), Some("mine_up.sprite"));
+        assert!(SpriteSet::parse(b"SPRITESET { BOGUS=1 }").is_err());
+
+        let mut actor = Actor::default();
+        let added = actor
+            .merge_animations(b"ANIMATION { NAME=\"a\" } OTHER { } ANIMATION { NAME=\"b\" }")
+            .unwrap();
+        assert_eq!(added, 1);
+        // A block that cannot be read is an error, the others are added.
+        assert!(
+            actor
+                .merge_animations(b"ANIMATION { BOGUS=1 } ANIMATION { NAME=\"c\" }")
+                .is_err()
+        );
+        assert!(actor.animation("c").is_some());
+    }
+
     #[test]
     fn rejects_bad_files() {
         assert!(Actor::parse(b"ENTITY { }").is_err());
-        assert!(Actor::parse(b"ACTOR { WALK { LEFT=\"x\" } }").is_err());
+        // A set that cannot be read (no `SPRITESET` block) is left out.
+        let actor = Actor::parse(b"ACTOR { WALK { LEFT=\"x\" } NAME=\"n\" }").unwrap();
+        assert!(actor.walk.is_none());
+        assert_eq!(actor.name, "n");
+        // `STOP_ON_BLOCKED` is not a key of the original.
+        assert!(Actor::parse(b"ACTOR { STOP_ON_BLOCKED=TRUE }").is_err());
+        assert!(Actor::parse(b"NAME=\"x\"\nACTOR { }").is_err());
         assert!(SpriteSet::parse(b"ACTOR { }").is_err());
     }
 
     /// Every `.actor` file of the local test game parses.
-    #[test]
-    fn a_sprite_set_is_read_with_the_games_files() {
-        let mut load = |file: &str| match file {
-            "base.spriteset" => {
-                Some(b"SPRITESET { NAME=\"base\" LEFT=\"l.sprite\" RIGHT=\"r.sprite\" }".to_vec())
-            }
-            "loop.spriteset" => Some(b"SPRITESET { TEMPLATE=\"loop.spriteset\" }".to_vec()),
-            _ => None,
-        };
-        let mut sprite_loads = |file: &str| !file.starts_with("bad");
-        let mut files = SetFiles {
-            load: &mut load,
-            sprite_loads: &mut sprite_loads,
-            follow_templates: true,
-            files_left: SetFiles::FILE_BUDGET,
-        };
-        // A template is read where the key stands: it overrides the
-        // keys before it, the keys after it override it.
-        let set = SpriteSet::parse_with(
-            b"SPRITESET { LEFT=\"mine.sprite\" TEMPLATE=\"base.spriteset\" RIGHT=\"own.sprite\" NAME=\"n\" }",
-            &mut files,
-        )
-        .unwrap();
-        assert_eq!(set.name, "n");
-        assert_eq!(set.sprite(Direction::Left), Some("l.sprite"));
-        assert_eq!(set.sprite(Direction::Right), Some("own.sprite"));
-        // What fails a set: a template or a sprite that does not load,
-        // a key it does not know, a chain of templates without end.
-        for bad in [
-            &b"SPRITESET { TEMPLATE=\"none.spriteset\" }"[..],
-            b"SPRITESET { UP=\"bad.sprite\" }",
-            b"SPRITESET { SPEED=3 }",
-            b"SPRITESET { TEMPLATE=\"loop.spriteset\" }",
-        ] {
-            assert!(SpriteSet::parse_with(bad, &mut files).is_err());
-        }
-        // Templates that fan out are cut by the file budget.
-        let mut wide = |file: &str| {
-            let level: u32 = file.trim_end_matches(".spriteset").parse().unwrap_or(9);
-            Some(if level >= 6 {
-                b"SPRITESET { }".to_vec()
-            } else {
-                let next = format!("TEMPLATE=\"{}.spriteset\" ", level + 1).repeat(8);
-                format!("SPRITESET {{ {next} }}").into_bytes()
-            })
-        };
-        let mut any = |_: &str| true;
-        let mut budget = SetFiles {
-            load: &mut wide,
-            sprite_loads: &mut any,
-            follow_templates: true,
-            files_left: SetFiles::FILE_BUDGET,
-        };
-        assert!(
-            SpriteSet::parse_with(b"SPRITESET { TEMPLATE=\"0.spriteset\" }", &mut budget).is_err()
-        );
-        assert_eq!(budget.files_left, 0);
-        // The same inside an actor: the set fails the actor.
-        let mut actor = Actor::default();
-        assert!(
-            actor
-                .merge_with(
-                    b"ACTOR { WALK { SPRITESET { TEMPLATE=\"base.spriteset\" } } ANIMATION { NAME=\"wave\" TEMPLATE=\"base.spriteset\" } }",
-                    &mut files
-                )
-                .is_ok()
-        );
-        assert_eq!(
-            actor.walk.as_ref().unwrap().sprite(Direction::Left),
-            Some("l.sprite")
-        );
-        assert_eq!(actor.animations[0].name, "base");
-        assert!(
-            actor
-                .merge_with(
-                    b"ACTOR { STAND { SPRITESET { UP=\"bad.sprite\" } } }",
-                    &mut files
-                )
-                .is_err()
-        );
-        assert!(
-            actor
-                .merge_animations_with(b"ANIMATION { NAME=\"x\" SPEED=1 }", &mut files)
-                .is_err()
-        );
-        // Without the game's files a template is only recorded.
-        let alone =
-            Actor::parse(b"ACTOR { WALK { SPRITESET { TEMPLATE=\"base.spriteset\" } } }").unwrap();
-        assert_eq!(
-            alone.walk.unwrap().template.as_deref(),
-            Some("base.spriteset")
-        );
-    }
-
     #[test]
     #[ignore = "needs the local test game in testdata/local"]
     fn parses_every_local_actor() {

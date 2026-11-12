@@ -65,21 +65,29 @@ The times are counted on the game timer from the moment `Talk` was
 called, not on the position of the sound, so they stop with the game
 when a menu freezes it.
 
-## What fails a definition
+## What fails a definition, and what is only skipped
 
 A definition that fails is logged (`Error parsing TALK file '...'`) and
-the sentence is said without it, with the ordinary talk sprites.
+the sentence is said without it, with the ordinary talk sprites. It
+fails when:
 
-- The root block is not `TALK`, or a block holds a key that is not in
-  its table (a syntax error in the original).
-- A `TEMPLATE` file that cannot be read or fails itself.
-- An inline `SPRITESET` or `DEFAULT_SPRITESET` that fails (see
-  [actor.md](actor.md#spriteset): an unknown key, a template or a sprite
-  that does not load).
-- `DEFAULT_SPRITE` or `DEFAULT_SPRITESET_FILE` that does not load: both
-  are loaded with the definition.
-- With `PRECACHE`, the action's `SPRITE` or `SPRITESET_FILE` that does
-  not load.
+- the root block is not `TALK`, or the `TALK` block holds a key that is
+  not in its table (a syntax error);
+- `DEFAULT_SPRITE` or `DEFAULT_SPRITESET_FILE` does not load: both are
+  loaded with the definition, at the end of the block.
+
+Everything else that goes wrong inside the block is skipped and the
+reading goes on, because the original's loop overwrites the error code
+with the next statement it reads:
+
+- a `TEMPLATE` file that cannot be read or that fails. A template that
+  fails at its own end (its default sprite does not load) has been
+  applied by then: its actions and the defaults it named stay;
+- an `ACTION` that fails is left out: one holding a key that is not in
+  its table, or, with `PRECACHE`, one whose `SPRITE` or
+  `SPRITESET_FILE` does not load;
+- an inline `SPRITESET` with a syntax error leaves its action without
+  that set.
 
 Without `PRECACHE` the engine loads an action's sprite the first time
 the action is reached: `SPRITE` if there is one; the `SPRITESET_FILE`
@@ -90,13 +98,13 @@ sentence starts, with the same result. With `PRECACHE` the set file
 replaces an inline set.
 
 "Does not load" means what `CBSprite::LoadFile` means: a sprite file
-that exists and does not parse. A file that is **missing** loads, in the
-original as its `invalid.bmp` placeholder; Luma shows nothing in its
-place.
+that exists and does not parse. A file that is **missing** loads, as the
+engine's `invalid.bmp` placeholder.
 
-Luma bounds a chain of templates at 8 files, the files one definition
-reads through its templates and sprite set files at 256 in all, and a
-definition at 4096 actions; the original has no limit.
+The `TEMPLATE` and sprite set files are read within the bounds of every
+load (8 deep, 1024 files, see
+[definition-files.md](definition-files.md)); Luma also bounds a
+definition at 4096 actions. The original has no limit.
 
 ## Playing a definition
 

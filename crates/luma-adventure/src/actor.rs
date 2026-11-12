@@ -147,30 +147,16 @@ pub struct Actor {
     current_regions: Vec<(usize, usize)>,
 }
 
-const TEMPLATE_DEPTH: usize = 8;
-
-fn load_definition(
-    def: &mut luma_formats::Actor,
-    vfs: &Vfs,
-    path: &str,
-    depth: usize,
-) -> Result<()> {
+/// Reads an actor file into `def` (`CAdActor::LoadFile`): the `TEMPLATE`
+/// files it names are loaded where the keys stand.
+fn load_definition(def: &mut luma_formats::Actor, vfs: &Vfs, path: &str) -> Result<()> {
     let bytes = vfs.read(path)?;
-    let format = |source| Error::Format {
-        path: path.to_string(),
-        source,
-    };
-    let mut probe = luma_formats::Actor::default();
-    probe.merge(&bytes).map_err(format)?;
-    let merge = |def: &mut luma_formats::Actor| {
-        crate::scene_view::with_set_files(vfs, |files| def.merge_with(&bytes, files))
-    };
-    if let Some(template) = probe.template {
-        if depth < TEMPLATE_DEPTH && !template.eq_ignore_ascii_case(path) {
-            load_definition(def, vfs, &template, depth + 1)?;
-        }
-    }
-    merge(def).map_err(format)
+    let mut read = |file: &str| vfs.read(file).ok();
+    def.merge_with(&bytes, &mut luma_formats::Files::new(&mut read))
+        .map_err(|source| Error::Format {
+            path: path.to_string(),
+            source,
+        })
 }
 
 impl Actor {
@@ -178,7 +164,7 @@ impl Actor {
     /// it names. Missing sprites are recorded in the bank, not errors.
     pub fn load(vfs: &Vfs, path: &str, scene_bound: bool) -> Result<Actor> {
         let mut def = luma_formats::Actor::default();
-        load_definition(&mut def, vfs, path, 0)?;
+        load_definition(&mut def, vfs, path)?;
         let mut bank = SpriteBank::new();
         for sprite in def.sprite_paths() {
             bank.add_sprite(vfs, sprite);
@@ -197,8 +183,8 @@ impl Actor {
             x: def.x,
             y: def.y,
             stop_on_blocked: def.stop_on_blocked,
-            def,
             filename: path.to_string(),
+            def,
             scene_bound,
             dir: Direction::Left,
             state: ActorState::Ready,
@@ -658,10 +644,7 @@ impl Actor {
             return false;
         };
         let before = self.def.animations.len();
-        let merged = crate::scene_view::with_set_files(vfs, |files| {
-            self.def.merge_animations_with(&bytes, files)
-        });
-        if merged.is_err() {
+        if self.def.merge_animations(&bytes).is_err() {
             return false;
         }
         let paths: Vec<String> = self.def.animations[before..]

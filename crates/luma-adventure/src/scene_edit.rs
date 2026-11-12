@@ -159,7 +159,33 @@ impl World {
         for sprite in missing {
             self.log(format!("  missing: {sprite}"));
         }
+        // `FONT` is loaded with the entity; one that does not load leaves
+        // the entity without a font of its own (`SetFont`).
+        if let Some(font) = &entity.font {
+            if !self.load_font(font) {
+                if let Some(e) = self.entity_def_mut(r) {
+                    e.font = None;
+                }
+            }
+        }
+        if entity.region.is_some() && entity.sprite.is_some() {
+            self.log(format!(
+                "Warning: Entity '{}' has both sprite and region.",
+                entity.name
+            ));
+        }
         self.apply_properties(id, &entity.properties);
+        // An entity standing for an item that was taken starts hidden
+        // (`IsItemTaken` at the end of `CAdEntity::LoadBuffer`).
+        if entity
+            .item
+            .as_deref()
+            .is_some_and(|item| self.is_item_taken(item))
+        {
+            if let Some(e) = self.entity_def_mut(r) {
+                e.active = false;
+            }
+        }
         self.load_entity_sound(id);
         self.register_entity_region(id);
         for script in entity.scripts {
@@ -167,18 +193,25 @@ impl World {
         }
     }
 
-    /// Reads an `.entity` file (`CAdEntity::LoadFile`); `None`, logged,
-    /// when it cannot be read or parsed.
+    /// Reads an `.entity` file (`CAdEntity::LoadFile`), with the
+    /// `TEMPLATE` files it names loaded where the keys stand; `None`,
+    /// logged, when it cannot be read or parsed.
     pub(crate) fn read_entity_def(&mut self, path: &str) -> Option<Entity> {
-        match self
-            .vfs
-            .read(path)
-            .map_err(|e| e.to_string())
-            .and_then(|bytes| Entity::parse(&bytes).map_err(|e| e.to_string()))
-        {
+        let bytes = match self.vfs.read(path) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                self.log(format!(
+                    "CAdEntity::LoadFile failed for file '{path}': {err}"
+                ));
+                return None;
+            }
+        };
+        let vfs = &self.vfs;
+        let mut read = |file: &str| vfs.read(file).ok();
+        match Entity::parse_with(&bytes, &mut luma_formats::Files::new(&mut read)) {
             Ok(def) => Some(def),
-            Err(reason) => {
-                self.log(format!("Error loading ENTITY file '{path}': {reason}"));
+            Err(err) => {
+                self.log(format!("Error parsing ENTITY file '{path}': {err}"));
                 None
             }
         }

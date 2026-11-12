@@ -64,6 +64,12 @@ SPRITE {
 | `FRAME` | block, repeatable | | The frames, in order. A sprite with no frame draws nothing. |
 | `EDITOR_MUTED`, `EDITOR_BG_FILE`, `EDITOR_BG_OFFSET_X`, `EDITOR_BG_OFFSET_Y`, `EDITOR_BG_ALPHA`, `EDITOR_PROPERTY` | | | Editor state, ignored by the engine. |
 
+Any other key is a syntax error that fails the sprite, and so is a key
+that is not in the table of a `FRAME`. A `SUBFRAME` with a key that is not
+in its own table (a frame key such as `DELAY` or `MOVE`) is left out and
+its frame goes on. The colour key and the tint written in a `FRAME` only
+reach its own sub-frame when the frame has an `IMAGE`.
+
 ### `FRAME`
 
 A frame is a sub-frame of its own (its image, rectangle, hotspot and
