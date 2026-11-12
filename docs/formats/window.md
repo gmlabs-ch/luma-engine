@@ -301,6 +301,58 @@ window (see [game-loop.md](../game-loop.md#the-focused-window)).
 A window can be dragged by its `DRAG_RECT` while the left button is held
 there.
 
+## The response box
+
+The game names its response box (`RESPONSE_BOX` in `default.game`, a
+`.def` file; `Game.LoadResponseBox` loads another). It lists the
+choices of a dialogue (see [game-loop.md](../game-loop.md#dialogue-responses)).
+
+```
+RESPONSE_BOX
+{
+  FONT = "fonts\outline_white.font"
+  FONT_HOVER = "fonts\outline_red.font"
+  AREA { 10, 600, 1014, 760 }
+  SPACING = 2
+  VERTICAL_ALIGN = "bottom"
+
+  WINDOW
+  {
+    X = 0  Y = 0  WIDTH = 1024  HEIGHT = 768
+    BUTTON { NAME = "prev" IMAGE = "interface\up.png" X = 990 Y = 600 }
+    BUTTON { NAME = "next" IMAGE = "interface\down.png" X = 990 Y = 740 }
+  }
+}
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `TEMPLATE` | string | | Another `.def` file, read where the key stands: its keys override those before it, the keys after it override its own. |
+| `WINDOW` | block | | The box's window, drawn under the choices; its `prev` and `next` buttons scroll them. Without it the choices are shown alone, in `AREA` on the screen. |
+| `AREA` | `left, top, right, bottom` | empty | Where the choices are laid out, relative to the window. |
+| `FONT` | string | system font | Font of the text choices. |
+| `FONT_HOVER` | string | system font | Font of a text choice under the mouse or pressed. |
+| `CURSOR` | string | the game's active cursor | Cursor over an icon choice. Text choices have no cursor of their own. |
+| `HORIZONTAL` | bool | `FALSE` | Choices side by side instead of one under the other. |
+| `SPACING` | int | `0` | Pixels between choices. |
+| `TEXT_ALIGN` | `left`, `center`, `right` | `left` | Alignment of the text of a choice; any other value is `left`. |
+| `VERTICAL_ALIGN` | `top`, `center`, `bottom` | `bottom` | Where the choices sit in the area when they do not fill it; any other value is `bottom`. |
+
+The file is read as `CAdResponseBox::LoadBuffer` reads it, key by key:
+a key that is not in the table is a syntax error and the box is not
+loaded. A template, a font, a cursor or a window that does not load is
+skipped and the reading goes on (the original's error code is
+overwritten by the next statement): the box then has no such font,
+cursor or window. A response box that does not load leaves the game
+without one.
+
+A text choice is as wide as the area (as the screen when the area has
+no width) and as high as its text; an icon choice has the size of its
+image. A choice higher than the area makes the area higher by the
+difference, for good, with a warning in the log. The choices are laid
+out from the scroll offset while they fit; `prev` shows when the offset
+is positive, `next` when a choice did not fit.
+
 ## The inventory
 
 The game names its inventory box (`INVENTORY_BOX` in `default.game`, a
@@ -358,11 +410,24 @@ with an error, after the items before it were added:
 | `CURSOR_COMBINED` | bool | `TRUE` | The item's cursor is drawn over the normal cursor instead of replacing it. |
 | `FONT` | string | | Font of the item's speech and amount. |
 | `AMOUNT`, `DISPLAY_AMOUNT`, `AMOUNT_OFFSET_X`, `AMOUNT_OFFSET_Y`, `AMOUNT_ALIGN`, `AMOUNT_STRING` | | | A count drawn on the item. |
-| `TALK`, `TALK_SPECIAL` | string | | Talk sprites, as for entities. |
+| `TALK`, `TALK_SPECIAL` | string | | Talk sprites, as for entities: an item says sentences (`Talk`) and plays animations (`PlayAnim`) like an entity. |
 | `SCRIPT` | string | | A script attached to the item; repeatable. |
 | `PROPERTY` | block | | A script property. |
 | `ALPHA_COLOR`, `ALPHA` | | `0, 0, 0` and `255` | Tint and opacity. A black colour with an alpha means white: `ALPHA` alone makes the item translucent, and `ALPHA_COLOR { 0,0,0 }` is no tint. |
 | `TEMPLATE` | string | | An item file (an `ITEM` root block), loaded where the key stands. One that cannot be loaded fails the item. |
+
+An item is a talking object like an entity (`CAdItem` is a
+`CAdTalkHolder`): `Talk`, `TalkAsync`, `StopTalk`, `IsTalking`,
+`ForceTalkAnim`, `PlayAnim`, `PlayAnimAsync`, `Reset`, `AddTalkSprite`,
+`SetTalkSprite` and `RemoveTalkSprite` work on it as on an entity (see
+[font.md](font.md#speech)), with its `TALK` and `TALK_SPECIAL` sprites
+and a `.talk` definition beside the speech file. The sentence is placed
+from where the box last drew the item, the middle of its sprite's top
+edge. An item is updated only while the inventory box draws it
+(`CAdInventoryBox::Display` calls `CAdItem::Update`): while the box is
+hidden, or the item scrolled out of it or not taken, its animation and
+its sentence stand still, the text is not shown, and a script waiting
+for it keeps waiting, as in the original.
 
 `Game.TakeItem(name, after)` puts the item in the inventory (again, if
 it was there, after the named item or at the end); `DropItem` takes it

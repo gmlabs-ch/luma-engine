@@ -1604,6 +1604,16 @@ impl Actor3d {
         }
     }
 
+    /// The talking state alone, for a scene the actor cannot be fully
+    /// updated in.
+    pub(crate) fn update_talk_only(&mut self, timer: u64) {
+        if self.model.model.is_none() || self.state != Actor3dState::Talking {
+            return;
+        }
+        self.talk_step(timer);
+        self.ready = self.state == Actor3dState::Ready;
+    }
+
     /// One frame of talking (section 8.2, `STATE_TALKING`): the
     /// sentence's stances play on channel 0, restarted at each change;
     /// without a stance the talk animation plays on its channel, else
@@ -1913,11 +1923,26 @@ impl World {
     /// for the 3D objects): the path finder runs its open request, then
     /// each actor's state machine, position and model advance. The
     /// events raised are queued.
+    /// The talking state of the 3D actors in a scene without geometry
+    /// or camera, where the rest of their update cannot run: a sentence
+    /// still plays its stances, ends, and gives the actor back to the
+    /// scripts waiting for it (the original runs the whole
+    /// `CAdActor3DX::Update` there).
+    fn update_actors3d_talk(&mut self) {
+        let timer = self.timer;
+        for (_, actor) in &mut self.actors3d {
+            if actor.active {
+                actor.update_talk_only(timer);
+            }
+        }
+    }
+
     pub(crate) fn update_actors3d(&mut self) {
         if self.actors3d.is_empty() {
             return;
         }
         let Some(projection) = self.projection_3d() else {
+            self.update_actors3d_talk();
             return;
         };
         self.run_path_finder_3d();
@@ -1926,13 +1951,17 @@ impl World {
         let obstacles: Vec<_> = ids.iter().map(|id| self.obstacles_for(*id)).collect();
         let mut raised: Vec<(NativeId, Vec<ActorEvent>, Vec<String>)> = Vec::new();
         {
+            let Some(scene3d) = self.scene.as_mut().and_then(|v| v.three_d.as_mut()) else {
+                self.update_actors3d_talk();
+                return;
+            };
+            scene3d.set_projection(Some(projection.clone()));
             let Some(view) = self.scene.as_mut() else {
                 return;
             };
             let Some(scene3d) = view.three_d.as_mut() else {
                 return;
             };
-            scene3d.set_projection(Some(projection.clone()));
             let Scene3d {
                 geometry, finder, ..
             } = scene3d;

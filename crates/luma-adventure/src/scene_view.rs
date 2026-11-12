@@ -365,6 +365,15 @@ impl SpriteBank {
         true
     }
 
+    /// Whether a loaded sprite has this `NAME` (the key of its `.sprite`
+    /// file), without regard to case. A sprite without a name, or one
+    /// that is not loaded, has none.
+    pub fn sprite_name_is(&self, path: &str, name: &str) -> bool {
+        self.sprites.get(&key(path)).is_some_and(|loaded| {
+            !loaded.sprite.name.is_empty() && loaded.sprite.name.eq_ignore_ascii_case(name)
+        })
+    }
+
     /// Decodes and uploads the images of every loaded sprite that has no
     /// texture yet. Safe to call every frame.
     pub fn upload(&mut self, vfs: &Vfs, renderer: &Renderer) {
@@ -825,6 +834,9 @@ impl SceneView {
         for (r, talk) in &self.talks {
             paths.extend(talk.sprite.clone());
             paths.extend(talk.forced.clone());
+            if let Some(playback) = &talk.sentence.talk {
+                paths.extend(playback.def.sprite_paths().into_iter().map(str::to_string));
+            }
             if let Some(e) = self.entity(*r) {
                 paths.extend(e.talk_sprites.iter().cloned());
                 paths.extend(e.talk_special_sprites.iter().cloned());
@@ -1068,8 +1080,9 @@ impl SceneView {
     }
 
     /// Removes a talk sprite from an entity (`RemoveTalkSprite`), by file
-    /// name; an entity playing it goes back to its own sprite until the
-    /// next stance.
+    /// name; an entity playing it shows its own sprite in its place
+    /// (`m_TempSprite2 = m_Sprite`) until that sprite has played or the
+    /// sentence ends.
     pub fn remove_talk_sprite(&mut self, r: EntityRef, path: &str, special: bool) {
         let Some(entity) = self.entity_mut(r) else {
             return;
@@ -1079,12 +1092,14 @@ impl SceneView {
         } else {
             &mut entity.talk_sprites
         };
-        if let Some(i) = list.iter().position(|p| key(p) == key(path)) {
-            list.remove(i);
-        }
+        let Some(i) = list.iter().position(|p| key(p) == key(path)) else {
+            return;
+        };
+        list.remove(i);
+        let own = entity.sprite.clone();
         if let Some(talk) = self.talks.get_mut(&r) {
             if talk.sprite.as_deref().is_some_and(|p| key(p) == key(path)) {
-                talk.sprite = None;
+                talk.sprite = own;
             }
         }
     }
@@ -1167,6 +1182,8 @@ impl SceneView {
     /// The talk sprite of an entity for a stance
     /// (`CAdTalkHolder::GetTalkStance`): the special or generic sprite of
     /// that name, else a random generic one, else the entity's sprite.
+    /// The name of a talk sprite is the `NAME` of its `.sprite` file; a
+    /// sprite without one (a plain image) answers to no stance.
     fn talk_stance(&self, r: EntityRef, stance: Option<&str>, random: u32) -> Option<String> {
         let entity = self.entity(r)?;
         if let Some(name) = stance {
@@ -1174,7 +1191,7 @@ impl SceneView {
                 .talk_special_sprites
                 .iter()
                 .chain(&entity.talk_sprites)
-                .find(|s| sprite_name(s).eq_ignore_ascii_case(name));
+                .find(|s| self.bank.sprite_name_is(s, name));
             if let Some(path) = found {
                 return Some(path.clone());
             }
@@ -1191,6 +1208,37 @@ impl SceneView {
     fn talk_step(&mut self, timer: u64, random: u32) {
         let talking: Vec<EntityRef> = self.talks.keys().copied().collect();
         for r in talking {
+            let mut definition_sprite_done = false;
+            // `m_Sentence->Update()`: the sprite the `.talk` definition
+            // gives for this moment replaces the talk stance
+            // (`m_TempSprite2`); an entity faces down for it.
+            if let Some(talk) = self.talks.get_mut(&r) {
+                let shown_done = talk.sprite.as_deref().filter(|p| {
+                    self.anims
+                        .get(&r)
+                        .is_some_and(|a| a.sprite == key(p) && a.finished)
+                });
+                if let Some(path) = shown_done {
+                    talk.sentence.note_sprite_finished(path);
+                }
+                let frame = talk
+                    .sentence
+                    .update_talk(timer, luma_formats::Direction::Down);
+                if let Some(crate::talk::TalkFrame {
+                    sprite: Some(path),
+                    reset,
+                    finished,
+                }) = frame
+                {
+                    if finished {
+                        // Played to its end: the stances take the frame.
+                        definition_sprite_done = true;
+                    } else if reset || self.anims.get(&r).is_none_or(|a| a.sprite != key(&path)) {
+                        self.anims.insert(r, AnimState::new(&path));
+                    }
+                    talk.sprite = Some(path);
+                }
+            }
             let (time_is_up, sprite_done) = {
                 let talk = &self.talks[&r];
                 let done = talk.sprite.as_deref().is_none_or(|p| {
@@ -1198,7 +1246,10 @@ impl SceneView {
                         .get(&r)
                         .is_some_and(|a| a.sprite == key(p) && a.finished)
                 });
-                (talk.sentence.time_is_up(timer), done)
+                (
+                    talk.sentence.time_is_up(timer),
+                    done || definition_sprite_done,
+                )
             };
             if time_is_up {
                 self.talks.remove(&r);
@@ -1576,11 +1627,17 @@ impl SceneView {
     }
 }
 
-/// The name of a sprite file, for talk stances: its file name without
-/// directory and extension.
-fn sprite_name(path: &str) -> &str {
-    let file = path.rsplit(['\\', '/']).next().unwrap_or(path);
-    file.rsplit_once('.').map_or(file, |(name, _)| name)
+/// Whether a sprite file loads, as `CBSprite::LoadFile` answers: a file
+/// that is not there does (the `invalid.bmp` placeholder takes its
+/// place), an image does, and a sprite definition does when it parses.
+pub(crate) fn sprite_file_loads(vfs: &Vfs, path: &str) -> bool {
+    if Sprite::is_image_path(path) {
+        return true;
+    }
+    match vfs.read(path) {
+        Ok(bytes) => Sprite::parse(&bytes).is_ok(),
+        Err(_) => true,
+    }
 }
 
 /// The regions of a scene's main layer containing a point, as

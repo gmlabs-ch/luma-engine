@@ -41,6 +41,8 @@ no code copied):
   crates/luma-formats/src/game.rs
   docs/formats/actor.md
   crates/luma-formats/src/actor.rs
+  docs/formats/talk.md
+  crates/luma-formats/src/talk.rs
   docs/formats/font.md
   crates/luma-formats/src/font.rs
   docs/formats/window.md

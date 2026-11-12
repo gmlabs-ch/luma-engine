@@ -3194,7 +3194,9 @@ impl World {
             right = right.max(-sub.hotspot_x + w);
             bottom = bottom.max(-sub.hotspot_y + h);
         }
-        (left <= right).then_some((right - left, bottom - top))
+        // Lazily: with no subframe measured the bounds are still the
+        // sentinels and their difference overflows.
+        (left <= right).then(|| (right - left, bottom - top))
     }
 
     /// Draws a frame of a sprite of the controls at a point.

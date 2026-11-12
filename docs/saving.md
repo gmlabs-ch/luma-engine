@@ -346,7 +346,11 @@ sound to its object. Version 17 added to every control whether it was
 ever given a text (an empty text is not the same as none for
 `SizeToFit`). Version 18 follows the definitions the loaders now
 keep: the items' tint always present, the fade flag of a window and the
-response box's window definition.
+response box's window definition. Version 19 keeps the dialogue-branch
+context of every once-per-game response chosen (it kept the id alone);
+with each sentence being said its speech file and position, whether it
+is hidden by a freeze, and its talk definition (`.talk`) with the sprite
+it is at; and what each item is doing (a sentence, a played animation).
 
 ## Checking a game
 

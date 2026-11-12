@@ -75,6 +75,15 @@ impl SpriteSet {
         Ok(set)
     }
 
+    /// `CAdSpriteSet::LoadFile`: the set of the `.spriteset` file `name`,
+    /// read through `files`. A file that cannot be read, or whose keys
+    /// are a syntax error, gives no set.
+    pub fn load_named(name: &str, files: &mut Files<'_>) -> Result<SpriteSet> {
+        let mut set = SpriteSet::default();
+        files.template(name, |doc, files| set.load_file(doc, files))?;
+        Ok(set)
+    }
+
     /// `CAdSpriteSet::LoadBuffer(.., Complete = true)`: the first
     /// statement of `doc` must be the `SPRITESET` block.
     fn load_file(&mut self, doc: &Document, files: &mut Files<'_>) -> Result<()> {

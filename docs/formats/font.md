@@ -371,7 +371,8 @@ end of a text in a two-byte code page; that defect is not reproduced.
 
 ## Speech
 
-`Talk(text, sound, duration, stances, align)` on an actor or entity shows
+`Talk(text, sound, duration, stances, align)` on an actor, an entity or
+an inventory item (see [window.md](window.md#the-inventory)) shows
 the text above the object and plays its talk sprites until the sentence
 ends. The text is expanded through the string table.
 
@@ -396,11 +397,18 @@ ends. The text is expanded through the string table.
   `SubtitlesPosRelative` is false), centred on the object when
   `SubtitlesPosXCenter`, and clamped to the screen. The position is kept
   in scene coordinates and follows the scroll, unless the mods are
-  absolute.
+  absolute. "On screen" counts the scene's viewport: a scene position
+  is turned into a screen position by taking off the scroll offset less
+  the viewport's origin (`CAdScene::GetOffsetLeft`, `GetOffsetTop`),
+  when the sentence is placed and again when it is drawn.
 - **Stances.** The `stances` argument lists talk sprite names separated
   by commas, one per sprite played in turn; a name that is not a talk
   sprite, or no name, picks a random `TALK` sprite (a `TALK_SPECIAL`
-  sprite only by name). Actors use the sprite of their direction. When
+  sprite only by name). The name of an entity's talk sprite is the
+  `NAME` key of its `.sprite` file, compared without case, not its
+  file name: a plain image, or a sprite without `NAME`, answers to no
+  stance. An actor's is the `NAME` of the sprite set.
+  Actors use the sprite of their direction. When
   the sprite finishes before the sentence, the next stance starts.
   `ForceTalkAnim(file)` names a sprite file played as the first stance
   of the next sentence only (the stance list still advances under it);
@@ -411,10 +419,20 @@ ends. The text is expanded through the string table.
   replaced plays the new one at once). On actors these three methods
   load the file and nothing else: in Wintermute 1.x an actor's talk
   sets (`CAdActor::m_TalkSprites`) hide the list the methods edit.
+- **Talk definition.** When the sentence has a speech file and the
+  game has a file of the same name with the extension `.talk`, that
+  definition times the sprites of the sentence and replaces the stances
+  while it gives a sprite: see [talk.md](talk.md). A 3D actor ignores
+  it (the original computes the sprite and never shows it).
 - **Skipping.** A left click (or right, or both, per `TALK_SKIP_BUTTON`)
   while the game is not interactive ends every sentence older than 300
   milliseconds.
 - `Game.Subtitles` switches the text off; the talk sprites still play.
+- While the game is frozen (a system-exclusive window) the text of a
+  freezable object's sentence is not drawn; a sentence of an object
+  that is not freezable still is (`CAdGame::DisplaySentences`).
+- A saved game keeps the sentences being said, with their talk
+  definition; the speech sound starts again at the position it had.
 - The text is drawn centred by default; `align` is 0 left, 1 right, 2
   centre.
 

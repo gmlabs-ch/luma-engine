@@ -521,8 +521,14 @@ impl World {
         }
         if self.responses_visible() {
             let mut objects = self.responses.buttons.clone();
+            // The response buttons are widgets of the box's window in
+            // Luma: they are listed once, before the window's own.
             if let Some(window) = self.responses.window {
-                objects.extend(self.window_access_objects(window));
+                let own = self.window_access_objects(window);
+                objects.extend(
+                    own.into_iter()
+                        .filter(|o| !self.responses.buttons.contains(o)),
+                );
             }
             if !objects.is_empty() {
                 return objects;

@@ -99,7 +99,12 @@ file's polygon scaled by the scene's scale level at the actor's `y`
 |-----|------|---------|
 | `NAME` | string | Name of the set (talk stances, animations). |
 | `UP`, `UP_RIGHT`, `RIGHT`, `DOWN_RIGHT`, `DOWN`, `DOWN_LEFT`, `LEFT`, `UP_LEFT` | string | The sprite for each direction. |
-| `TEMPLATE` | string | A `.spriteset` file, loaded into the set where the key stands. |
+| `TEMPLATE` | string | A `.spriteset` file (a `SPRITESET` root block), loaded into the set where the key stands: it overrides the keys before it, the keys after it override it. A template that cannot be loaded is skipped. |
+| `EDITOR_PROPERTY` | block | Editor state, ignored. |
+
+The same block is the root of a `.spriteset` file, which templates and
+talk definitions ([talk.md](talk.md)) name. A set fails only on a key
+that is not in the table (a syntax error).
 
 Directions are numbered clockwise from `UP`: `0` up, `1` up-right, `2`
 right, `3` down-right, `4` down, `5` down-left, `6` left, `7` up-left.

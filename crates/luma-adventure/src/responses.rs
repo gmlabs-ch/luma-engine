@@ -48,6 +48,18 @@ pub struct Response {
     pub kind: ResponseKind,
 }
 
+/// Whether two dialogue-branch contexts are the same: both none, or the
+/// same name without regard to case (`stricmp` in `CAdGame::
+/// BranchResponseUsed`, `GameResponseUsed` and `ResetResponse`). A
+/// context and no context never match.
+fn same_context(a: Option<&String>, b: Option<&String>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        _ => false,
+    }
+}
+
 /// The response box and the dialogue state.
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Responses {
@@ -65,10 +77,14 @@ pub struct Responses {
     pub scroll_offset: usize,
     /// The dialogue branches open, innermost last.
     pub branches: Vec<String>,
-    /// The "once" responses chosen, with the branch they were chosen in.
+    /// The "once" responses chosen, with the branch they were chosen in
+    /// (`CAdGame::m_ResponsesBranch`, a list of `CAdResponseContext`).
     pub used_branch: Vec<(Option<String>, i32)>,
-    /// The "once per game" responses chosen.
-    pub used_game: Vec<i32>,
+    /// The "once per game" responses chosen, with the branch they were
+    /// chosen in as well (`CAdGame::m_ResponsesGame`): the same id
+    /// offered from another branch is a different response.
+    pub used_game: Vec<(Option<String>, i32)>,
+
     /// The text of the last response chosen (`Game.LastResponse`).
     pub last_text: Option<String>,
     /// See `last_text`, as the script gave it (`LastResponseOrig`).
@@ -84,8 +100,17 @@ impl World {
     }
 
     /// Loads a response box definition and creates its window
-    /// (`Game.LoadResponseBox`).
+    /// (`Game.LoadResponseBox`, `RESPONSE_BOX` of the game file). The
+    /// box the game had goes first, with its window: when the file does
+    /// not load the game has no response box (the callers of
+    /// `CAdResponseBox::LoadFile` in `AdGame.cpp`).
     pub(crate) fn load_response_box_from(&mut self, engine: &mut Engine, path: &str) -> bool {
+        self.clear_responses(engine);
+        if let Some(window) = self.responses.window.take() {
+            self.unload_control(engine, window);
+        }
+        self.responses.def = None;
+        self.responses.waiting = None;
         let bytes = match self.vfs.read(path) {
             Ok(bytes) => bytes,
             Err(err) => {
@@ -185,6 +210,31 @@ impl World {
         font: Option<String>,
     ) {
         let expanded = self.expand(text);
+        // `CAdResponse::SetIcon`, `SetIconHover`, `SetIconPressed`,
+        // `SetFont`: a file that does not load is logged and the
+        // response goes without it (no icon makes a text choice, no
+        // font means the box's). A missing sprite file loads, as the
+        // engine's placeholder image.
+        let image = |world: &mut World, file: Option<String>, setter: &str| {
+            file.filter(|f| {
+                let ok = world.ui.bank.add_sprite(&world.vfs, f);
+                if !ok {
+                    world.log(format!("CAdResponse::{setter} failed for file '{f}'"));
+                }
+                ok
+            })
+        };
+        let icon = image(self, icon, "SetIcon");
+        let icon_hover = image(self, icon_hover, "SetIconHover");
+        let icon_pressed = image(self, icon_pressed, "SetIconPressed");
+        let font = font.filter(|f| {
+            let ok = self.fonts.load(&self.vfs, f);
+            self.fonts.take_missing();
+            if !ok {
+                self.log(format!("CAdResponse::SetFont failed for file '{f}'"));
+            }
+            ok
+        });
         self.responses.pending.push(Response {
             id,
             text: expanded,
@@ -197,37 +247,60 @@ impl World {
         });
     }
 
-    /// Whether a "once" response was chosen in the current branch.
+    /// Whether a "once" response was chosen in the current branch
+    /// (`CAdGame::BranchResponseUsed`).
     fn branch_response_used(&self, id: i32) -> bool {
-        let context = self.responses.branches.last().cloned();
+        let context = self.responses.branches.last();
         self.responses
             .used_branch
             .iter()
-            .any(|(ctx, used)| *used == id && *ctx == context)
+            .any(|(ctx, used)| *used == id && same_context(ctx.as_ref(), context))
+    }
+
+    /// Whether a "once per game" response was chosen in the current
+    /// branch (`CAdGame::GameResponseUsed`).
+    fn game_response_used(&self, id: i32) -> bool {
+        let context = self.responses.branches.last();
+        self.responses
+            .used_game
+            .iter()
+            .any(|(ctx, used)| *used == id && same_context(ctx.as_ref(), context))
     }
 
     /// Drops the pending choices already chosen where they may not come
     /// back (`WeedResponses`).
     fn weed_responses(&mut self) {
-        let used_branch: Vec<i32> = self
+        let keep: Vec<bool> = self
             .responses
             .pending
             .iter()
-            .filter(|r| r.kind == ResponseKind::Once && self.branch_response_used(r.id))
-            .map(|r| r.id)
+            .map(|r| match r.kind {
+                ResponseKind::Normal => true,
+                ResponseKind::Once => !self.branch_response_used(r.id),
+                ResponseKind::OnceGame => !self.game_response_used(r.id),
+            })
             .collect();
-        let used_game = self.responses.used_game.clone();
-        self.responses.pending.retain(|r| match r.kind {
-            ResponseKind::Normal => true,
-            ResponseKind::Once => !used_branch.contains(&r.id),
-            ResponseKind::OnceGame => !used_game.contains(&r.id),
-        });
+        let mut keep = keep.into_iter();
+        self.responses
+            .pending
+            .retain(|_| keep.next().unwrap_or(true));
     }
 
-    /// Forgets that a response was chosen (`ResetResponse`).
+    /// Forgets that a response was chosen in the current dialogue branch
+    /// (`CAdGame::ResetResponse`): the first entry of each list with
+    /// this id and the current branch as context. A use noted in
+    /// another branch stays.
     pub(crate) fn reset_response(&mut self, id: i32) {
-        self.responses.used_branch.retain(|(_, used)| *used != id);
-        self.responses.used_game.retain(|used| *used != id);
+        let context = self.responses.branches.last().cloned();
+        let responses = &mut self.responses;
+        for list in [&mut responses.used_game, &mut responses.used_branch] {
+            if let Some(i) = list
+                .iter()
+                .position(|(ctx, used)| *used == id && same_context(ctx.as_ref(), context.as_ref()))
+            {
+                list.remove(i);
+            }
+        }
     }
 
     /// Drops the pending choices and their buttons (`ClearResponses`).
@@ -305,7 +378,7 @@ impl World {
         };
         self.responses.scroll_offset = 0;
         let pending = self.responses.pending.clone();
-        let area_width = def.area.width() as i32;
+        let area_width = def.area.right.saturating_sub(def.area.left);
         let screen_width = self.settings.width as i32;
         // The cursor of an icon choice: the box's, else the game's
         // active cursor. A text choice has none of its own.
@@ -350,7 +423,11 @@ impl World {
                     }
                 }
             } else {
-                let font = response.font.clone().or_else(|| def.font.clone());
+                let font = response
+                    .font
+                    .clone()
+                    .or_else(|| def.font.clone())
+                    .or_else(|| self.system_font.clone());
                 if let Some(font) = &font {
                     self.load_font(font);
                 }
@@ -376,9 +453,12 @@ impl World {
             // A choice higher than the area makes the area as high.
             let height = self.control(id).map_or(0, |c| c.height);
             if let Some(def) = self.responses.def.as_mut() {
-                let area_height = def.area.bottom - def.area.top;
+                let area_height = def.area.bottom.saturating_sub(def.area.top);
                 if area_height < height {
-                    def.area.bottom += height - area_height;
+                    def.area.bottom = def
+                        .area
+                        .bottom
+                        .saturating_add(height.saturating_sub(area_height));
                     let text = response.text.clone();
                     self.log(format!(
                         "Warning: Response '{text}' is too high to be displayed within response box. Correcting."
@@ -475,8 +555,9 @@ impl World {
                 }
             }
             ResponseKind::OnceGame => {
-                if !self.responses.used_game.contains(&response.id) {
-                    self.responses.used_game.push(response.id);
+                if !self.game_response_used(response.id) {
+                    let context = self.responses.branches.last().cloned();
+                    self.responses.used_game.push((context, response.id));
                 }
             }
         }
