@@ -1652,12 +1652,10 @@ AnimationSet swing {
         // and halfway by -45.
         let tip = set.animations[0].sample(2400).unwrap();
         let expected = Mat4::rotation_y(-PI / 4.0) * Mat4::translation(Vec3::new(2.0, 0.0, 0.0));
-        for r in 0..4 {
-            for c in 0..4 {
-                assert!(
-                    close(tip.to_matrix().m[r][c], expected.m[r][c]),
-                    "cell {r},{c}"
-                );
+        let tip_matrix = tip.to_matrix();
+        for (r, (got_row, want_row)) in tip_matrix.m.iter().zip(&expected.m).enumerate() {
+            for (c, (got, want)) in got_row.iter().zip(want_row).enumerate() {
+                assert!(close(*got, *want), "cell {r},{c}");
             }
         }
         let root = set.animations[1].sample(2400).unwrap();
