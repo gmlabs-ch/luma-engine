@@ -240,7 +240,7 @@ sample rate of the WAV file are those of the decoded frames, not the
 `WAVEFORMAT` fields (an MP3 AVI often carries wrong ones; this is
 inferred, the original left it to the machine's ACM codec). A frame that
 does not decode is skipped; a stream whose format changes keeps what
-came before the change; the output stops at 128 million samples; a
+came before the change; the output stops at 32 million samples, and after 10,000 failures in a row; a
 stream with no decodable frame, or with more than two channels, is
 refused (`MPEG audio: no frame could be decoded`). Tested with silent
 frames built in code; no real MP3 file is checked in.

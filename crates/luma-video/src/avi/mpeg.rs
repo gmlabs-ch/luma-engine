@@ -19,9 +19,13 @@ use symphonia::core::meta::MetadataOptions;
 use crate::{Error, Result};
 
 /// The most samples (all channels together) a track may decode to,
-/// 128 million: 256 MiB of 16-bit PCM. A hostile stream of tiny
-/// frames cannot grow past it.
-const MAX_SAMPLES: usize = 128 * 1024 * 1024;
+/// 32 million: 64 MiB of 16-bit PCM (the same again for the WAV
+/// file). A hostile stream of tiny frames cannot grow past it.
+const MAX_SAMPLES: usize = 32 * 1024 * 1024;
+
+/// How many packets or frames in a row may fail before the stream is
+/// given up, so that a reader that does not advance cannot spin.
+const MAX_CONSECUTIVE_ERRORS: u32 = 10_000;
 
 /// The decoded track: interleaved 16-bit samples, the channel count
 /// and the sample rate.
@@ -65,13 +69,22 @@ pub(crate) fn decode(data: &[u8]) -> Result<Decoded> {
     let track_id = track.id;
 
     let mut shape: Option<(u16, u32)> = None;
-    let mut samples: Vec<i16> = Vec::new();
+    // Room for the stream, within the cap (MPEG audio expands up to
+    // about 90 times; the vector grows past this if it must).
+    let mut samples: Vec<i16> = Vec::with_capacity((data.len() * 8).min(MAX_SAMPLES));
+    let mut errors = 0u32;
     let mut frame: Vec<i16> = Vec::new();
     loop {
         let packet = match format.next_packet() {
             Ok(Some(packet)) => packet,
             Ok(None) => break,
-            Err(SymError::DecodeError(_)) => continue,
+            Err(SymError::DecodeError(_)) => {
+                errors += 1;
+                if errors > MAX_CONSECUTIVE_ERRORS {
+                    break;
+                }
+                continue;
+            }
             Err(_) => break,
         };
         if packet.track_id != track_id {
@@ -79,9 +92,16 @@ pub(crate) fn decode(data: &[u8]) -> Result<Decoded> {
         }
         let buffer = match decoder.decode(&packet) {
             Ok(buffer) => buffer,
-            Err(SymError::DecodeError(_)) => continue,
+            Err(SymError::DecodeError(_)) => {
+                errors += 1;
+                if errors > MAX_CONSECUTIVE_ERRORS {
+                    break;
+                }
+                continue;
+            }
             Err(_) => break,
         };
+        errors = 0;
         let spec = buffer.spec();
         let this = match (u16::try_from(spec.channels().count()), spec.rate()) {
             (Ok(c @ 1..=2), rate @ 1..=384_000) => (c, rate),
@@ -156,6 +176,13 @@ mod tests {
         let mut stream = silent_frame(false).repeat(4);
         stream.extend((0..2000u32).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8));
         let _ = decode(&stream);
+        // A long run of headers with bodies that do not decode ends,
+        // by the bound on consecutive errors or by the end of data.
+        let mut bad = silent_frame(false);
+        for (i, b) in bad.iter_mut().enumerate().skip(4) {
+            *b = (i as u32).wrapping_mul(2654435761) as u8 | 0x80;
+        }
+        let _ = decode(&bad.repeat(4000));
         // Every second header byte with a short body.
         for b1 in 0..=255u8 {
             let _ = decode(&[0xff, b1, 0x90, 0x00, 1, 2, 3, 4, 5, 6, 7, 8]);

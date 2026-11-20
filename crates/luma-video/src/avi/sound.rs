@@ -52,6 +52,29 @@ fn wav(channels: u16, sample_rate: u32, bits: u16, data: &[u8]) -> Vec<u8> {
     out
 }
 
+/// A WAV file of 16-bit samples, built straight from them.
+fn wav_16(channels: u16, sample_rate: u32, samples: &[i16]) -> Vec<u8> {
+    let len = (samples.len() * 2).min(u32::MAX as usize - 36) as u32;
+    let mut out = Vec::with_capacity(44 + len as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&WAVE_FORMAT_PCM.to_le_bytes());
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&sample_rate.to_le_bytes());
+    let block = channels * 2;
+    out.extend_from_slice(&sample_rate.saturating_mul(u32::from(block)).to_le_bytes());
+    out.extend_from_slice(&block.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&len.to_le_bytes());
+    for s in samples.iter().take(len as usize / 2) {
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    out
+}
+
 /// The audio stream's data as a WAV file, or an error naming the
 /// format when Luma does not decode it.
 pub(crate) fn to_wav(format: &WaveFormat, data: &[u8]) -> Result<Vec<u8>> {
@@ -84,12 +107,11 @@ pub(crate) fn to_wav(format: &WaveFormat, data: &[u8]) -> Result<Vec<u8>> {
         WAVE_FORMAT_IMA_ADPCM => ima_adpcm(format, data),
         WAVE_FORMAT_MPEG | WAVE_FORMAT_MPEG_LAYER3 => {
             let decoded = super::mpeg::decode(data)?;
-            let bytes: Vec<u8> = decoded
-                .samples
-                .iter()
-                .flat_map(|s| s.to_le_bytes())
-                .collect();
-            return Ok(wav(decoded.channels, decoded.sample_rate, 16, &bytes));
+            return Ok(wav_16(
+                decoded.channels,
+                decoded.sample_rate,
+                &decoded.samples,
+            ));
         }
         tag => {
             return unsupported(format!("sound format tag 0x{tag:04X}{}", tag_name(tag)));
