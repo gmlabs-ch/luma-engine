@@ -205,10 +205,10 @@ pub fn check(story: &Story) -> Vec<Diagnostic> {
     };
     checker.declarations();
     checker.collect_tags();
-    for index in 0..story.knots.len() {
+    for (index, knot) in story.knots.iter().enumerate() {
         checker.current = index;
         checker.temps.clear();
-        checker.knot(&story.knots[index]);
+        checker.knot(knot);
     }
     checker.reachability();
     checker.unused();
