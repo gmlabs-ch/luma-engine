@@ -24,6 +24,7 @@ use crate::error::{Error, Result};
 use crate::fader::{Fader, Transition, TransitionKind};
 use crate::input::{Cursors, HitArea, Keyboard, Mouse};
 use crate::inventory::Inventory;
+use crate::module::ModuleEvent;
 use crate::objects::{Kind, Native, Objects};
 use crate::path::Floor;
 use crate::scene_state::SceneState;
@@ -270,6 +271,8 @@ pub struct World {
     pub(crate) clock: u64,
     pub(crate) log: Vec<String>,
     stubs: HashSet<String>,
+    /// The modules that add script classes ([`crate::module`]).
+    pub(crate) modules: crate::module::Modules,
     pub(crate) rng: u64,
     /// The slot `Game.LoadGame` asked for, loaded at the next frame.
     pub(crate) scheduled_load: Option<i32>,
@@ -473,6 +476,7 @@ impl World {
             clock: 0,
             log: Vec::new(),
             stubs: HashSet::new(),
+            modules: crate::module::Modules::default(),
             rng: clock_seed(),
             scheduled_load: None,
             pending_save: None,
@@ -1476,6 +1480,7 @@ impl World {
                 .map(|v| v.get_string(self))
                 .unwrap_or_else(|| "<unnamed>".to_string()),
             Some(Kind::Class(object)) => object.type_name().to_string(),
+            Some(Kind::Module(object)) => object.class.clone(),
             None => "invalid".to_string(),
         }
     }
@@ -1579,6 +1584,8 @@ impl World {
     pub fn unload_object(&mut self, engine: &mut Engine, id: NativeId) -> bool {
         match self.objects.get(id).map(|n| &n.kind) {
             Some(Kind::Actor | Kind::Actor3D | Kind::Inert(_) | Kind::Object) => {}
+            // The module frees what it kept for the object.
+            Some(Kind::Module(_)) => self.module_destruct(id),
             Some(Kind::Control) => return self.unload_control(engine, id),
             // A free entity is one of the scene's objects (`m_Objects`);
             // a layer node is not, and stays.
@@ -2393,6 +2400,7 @@ impl World {
         if let Some(old) = &self.scene {
             let (name, filename) = (old.scene.name.clone(), old.path.clone());
             let scene_id = self.scene_id;
+            self.apply_module_event(ModuleEvent::SceneShutdown);
             engine.apply_event(self, scene_id, "SceneShutdown", true);
             self.prev_scene_name = name;
             self.prev_scene_filename = filename;
@@ -2621,6 +2629,7 @@ impl World {
         // Every scene has its own fader (`CAdScene::m_Fader`).
         self.scene_fader = Fader::default();
         self.restore_scene_state();
+        self.apply_module_event(ModuleEvent::SceneInit);
         // The regions the game's objects stuck to went with the old scene
         // (`CAdGame::ChangeScene`).
         for (_, slot) in self.objects.iter_mut() {
@@ -3628,6 +3637,7 @@ impl Natives for World {
             Some(Kind::Inert(kind)) => kind.to_ascii_lowercase(),
             Some(Kind::Object) => "object".to_string(),
             Some(Kind::Class(object)) => object.type_name().to_string(),
+            Some(Kind::Module(object)) => object.class.clone(),
             None => String::new(),
         }
     }
@@ -3683,6 +3693,8 @@ impl Natives for World {
             ) => "[object]",
             // `CSXMath` keeps the base class's text.
             Some(Kind::Math | Kind::Inert(_)) => "[native object]",
+            // `CSXPluginObject::ScToString`, for a module's object.
+            Some(Kind::Module(_)) => "[module object]",
             None => "[invalid object]",
         };
         text.to_string()
@@ -3934,6 +3946,7 @@ impl Host for World {
             Some(Kind::Fader) => self.fader.ready,
             Some(Kind::SceneFader) => self.scene_fader.ready,
             Some(Kind::Item) => self.item(id).is_none_or(|i| i.ready),
+            Some(Kind::Module(_)) => self.module_ready(id),
             Some(Kind::ResponseBox) => self.responses.waiting.is_none(),
             Some(Kind::Control) => self
                 .control(id)
@@ -3996,6 +4009,12 @@ impl Host for World {
             }
             _ => None,
         }
+    }
+
+    /// A class a module provides (`CBPluginMgr::HandleExternalCall`),
+    /// after every function of the engine.
+    fn call_extension(&mut self, name: &str, args: &[Value], ctx: Context<'_>) -> Option<Return> {
+        self.module_construct(name, args, &ctx)
     }
 
     fn call_method(
@@ -4174,6 +4193,9 @@ impl Runtime {
         self.world.flush_removed_objects(&mut self.engine);
         self.engine.tick(&mut self.world);
         self.world.flush_removed_objects(&mut self.engine);
+        // `CBPluginMgr::ApplyEvent(WME_EVENT_UPDATE)`, right after the
+        // scripts ran.
+        self.world.apply_module_event(ModuleEvent::Update);
         // `CAdScene::TraverseNodes(true)`: the view takes its scroll step
         // first, then the objects update and the main object sets the
         // next target.
@@ -4195,6 +4217,13 @@ impl Runtime {
         self.world.update_cursor();
         self.world.update_item_cursor(&self.engine);
         self.world.update_transition();
+        // The frame is final: the events around the scene's drawing.
+        // Luma draws from this state without changing it (`draw` takes
+        // `&self`), so both reach a module here, one after the other.
+        if self.world.scene.is_some() {
+            self.world.apply_module_event(ModuleEvent::SceneDrawBegin);
+            self.world.apply_module_event(ModuleEvent::SceneDrawEnd);
+        }
         self.world.apply_pending_events(&mut self.engine);
         self.settle_input();
         self.world.take_log()

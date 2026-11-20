@@ -57,6 +57,12 @@ impl World {
         if let Kind::Class(object) = &self.native(id)?.kind {
             return object.get_property(name, self);
         }
+        // A module's object answers first, then the engine's base object.
+        if matches!(self.native(id)?.kind, Kind::Module(_)) {
+            if let Some(value) = self.module_get(id, name) {
+                return Some(value);
+            }
+        }
         let kind = self.native(id)?.kind.clone();
         if let Some(value) = self.object_get(id, name) {
             return Some(value);
@@ -128,7 +134,7 @@ impl World {
                 "Type" => Some(Value::from("object")),
                 _ => None,
             },
-            Kind::Class(_) => None,
+            Kind::Class(_) | Kind::Module(_) => None,
         }
     }
 
@@ -139,6 +145,11 @@ impl World {
             return self
                 .with_class(id, |object, world| object.set_property(name, value, world))
                 .unwrap_or(false);
+        }
+        if matches!(self.native(id).map(|n| &n.kind), Some(Kind::Module(_)))
+            && self.module_set(id, name, value)
+        {
+            return true;
         }
         let kind = match self.native(id) {
             Some(native) => native.kind.clone(),
@@ -196,7 +207,8 @@ impl World {
             | Kind::SceneFader
             | Kind::Inert(_)
             | Kind::Object
-            | Kind::Class(_) => false,
+            | Kind::Class(_)
+            | Kind::Module(_) => false,
         }
     }
 
@@ -214,6 +226,11 @@ impl World {
                     object.call_method(name, args, world, &ctx)
                 })
                 .flatten();
+        }
+        if matches!(self.native(id)?.kind, Kind::Module(_)) {
+            if let Some(ret) = self.module_call(id, name, args, &ctx) {
+                return Some(ret);
+            }
         }
         let kind = self.native(id)?.kind.clone();
         let mut ctx = ctx;
@@ -284,7 +301,7 @@ impl World {
             Kind::Control => self.control_call(id, name, args, ctx),
             Kind::Item => self.item_call(id, name, args),
             Kind::Emitter(_) => self.emitter_call(id, name, args),
-            Kind::Class(_) | Kind::Object => None,
+            Kind::Class(_) | Kind::Object | Kind::Module(_) => None,
             Kind::Inert(kind) => match name {
                 "GetWidget" | "GetControl" => {
                     let widget = self.inert("Widget");

@@ -460,6 +460,7 @@ pub fn save_game(
     let path = world.save_slot_path(slot);
     world.log(format!("Saving game '{}'...", path.display()));
     let game = world.game_id;
+    world.apply_module_event(crate::module::ModuleEvent::GameBeforeSave);
     engine.apply_event(world, game, "BeforeSave", true);
     // The thumbnail `StoreSaveThumbnail` kept goes into this file and no
     // other (`BPersistMgr::InitSave` destroys the cached one once used).
@@ -477,12 +478,19 @@ pub fn save_game(
     let snapshot = engine.snapshot();
     let sounds = world.sounds_state();
     let videos = world.videos_state();
-    let body = postcard::to_allocvec(&SavedRef {
-        engine: &snapshot,
-        world: WorldRef::of(world, &sounds),
-        videos: &videos,
-    })
-    .map_err(|e| e.to_string())?;
+    // The modules' objects write their bytes into the objects, which
+    // go into the file with the rest and are dropped again.
+    let collected = world.collect_module_state();
+    let body = collected.and_then(|()| {
+        postcard::to_allocvec(&SavedRef {
+            engine: &snapshot,
+            world: WorldRef::of(world, &sounds),
+            videos: &videos,
+        })
+        .map_err(|e| e.to_string())
+    });
+    world.clear_module_state();
+    let body = body?;
     write_file(&path, &header, &body)?;
     world.captures.retain(|c| {
         !matches!(c, Capture::Thumbnail)
@@ -539,13 +547,19 @@ pub fn load_game(world: &mut World, engine: &mut Engine, slot: i32) -> Result<()
     // loading twice does not replay the same draws. The value is still
     // written, to keep the file's layout.
     let rng = world.rng;
+    // The modules make their objects first: a class nobody provides, or
+    // a module that refuses, refuses the load while the game is intact.
+    let restored = world.restore_module_objects(&saved.world.objects)?;
+    let old_modules = world.live_module_objects();
     let sounds = saved.world.apply(world);
+    world.finish_module_restore(restored, old_modules);
     world.rng = rng;
     world.after_restore(sounds);
     engine.restore(saved.engine, world)?;
     // `AfterLoadTheora`: the videos play again where they were.
     world.restore_videos(engine, saved.videos);
     let game = world.game_id;
+    world.apply_module_event(crate::module::ModuleEvent::GameAfterLoad);
     engine.apply_event(world, game, "AfterLoad", true);
     Ok(())
 }

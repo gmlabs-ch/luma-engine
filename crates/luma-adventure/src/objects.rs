@@ -124,6 +124,10 @@ pub enum Kind {
     /// An object of the script library (`new String`, `new Array`,
     /// `new Date`, `new File`, `new MemBuffer`); the class answers for it.
     Class(ClassObject),
+    /// An object of a class a module provides (`new Class(...)` for a
+    /// name the engine does not know, see [`crate::module`]); the module
+    /// answers for it.
+    Module(crate::module::ModuleObject),
 }
 
 /// Which cursor of an object a cursor sprite object stands for.

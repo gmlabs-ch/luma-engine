@@ -59,6 +59,7 @@ pub mod fader;
 pub mod font_face;
 pub mod input;
 pub mod inventory;
+pub mod module;
 mod natives;
 mod natives_actor;
 #[cfg(feature = "3d")]
@@ -112,6 +113,9 @@ pub use fader::{Fader, SCENE_FADE_MS, Transition, TransitionKind};
 pub use input::{Clipboard, Cursors, Keyboard, MemoryClipboard, Mouse};
 pub use inventory::{Inventory, Item};
 pub use luma_audio::Audio;
+pub use module::{
+    Module, ModuleContext, ModuleError, ModuleEvent, ModuleObject, ModuleResult, ObjectId,
+};
 pub use objects::{Attachment, CursorSlot, Kind, Native, ObjectInventory, ObjectState, Objects};
 pub use particles::Emitter;
 pub use path::Floor;
