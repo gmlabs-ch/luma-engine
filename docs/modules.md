@@ -151,8 +151,10 @@ saved state of at most 16 MiB per object. An error a module returns
 becomes a script runtime error, with the script and line of the call
 and the call yielding `null`; a panic does the same and **stops the
 module** (its own state cannot be trusted), so every later call to it
-is an error, and a save that needs it fails rather than write a wrong
-state. The world's state is never half-changed by a module call, since
+is an error, and a save drops its objects (from the game too, with a
+logged warning) rather than fail or write a wrong state; a load that
+has objects of a stopped module is refused. Error and panic messages
+are cut at 1 KiB. The world's state is never half-changed by a module call, since
 the module has no way to change it.
 
 A module object is a native like the engine's: there are no reference
@@ -168,9 +170,11 @@ load makes the objects again with `Module::restore`, before it replaces
 the world, so a class nobody provides, or a module that refuses its
 bytes, refuses the load and leaves the game as it was. The module's
 number for an object (`ObjectId`) is not kept: the module chooses a new
-one when it restores, and must not reuse a number while the module
-lives, because the objects of the world being replaced are destroyed
-after the new ones were made. A module that does not support saved games
+one when it restores. The engine keeps the set of live numbers of each
+module and refuses a `construct` or `restore` that returns one already
+alive (the objects of the world being replaced are destroyed after the
+new ones were made, so a restored number must differ from theirs too);
+a load refused this way leaves the game as it was. A module that does not support saved games
 returns an error from `restore`, and games that use it cannot be loaded.
 Register the modules before the scripts run, and the same modules in
 the game that loads a save as in the game that wrote it.
