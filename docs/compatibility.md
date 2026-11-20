@@ -862,15 +862,15 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 |----------|------|-------|------|
 | `Type` | get | **done** | `tcp-client`. No other member is active in WME 1.x: every method call is an undefined method, the string form is `[tcp-client object]`, any two objects compare equal, and the object is saved with the game. |
 
-### CSXPluginObject (objects of Windows DLL plugins)
+### CSXPluginObject (objects of the classes plugins add)
 
 - WME source: src/engine_core/wme_base/SXPluginObject.cpp
-- Hierarchy and Luma: CBObject → CSXPluginObject; created by `BPluginMgr::RegisterClasses` for classes exported by plugin DLLs
-- Count: 0 done, 0 todo, 1 no-op
+- Hierarchy and Luma: CBObject → CSXPluginObject; Luma: luma-adventure/src/module.rs (`Kind::Module`), the objects of the classes a Rust module provides; see `docs/modules.md`. Plugins are Windows DLLs and Luma does not load them; the module API is what replaces them.
+- Count: 1 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
-| `Ready` | set | **no-op** | Marks a plugin object ready. Plugins are Windows DLLs; Luma does not load them. |
+| `Ready` | set | **done** | Marks a module object ready or not (`WaitFor` waits for it); true at first. A module may answer the property itself, as a plugin could. |
 
 ## 9. Particles
 
@@ -1065,16 +1065,16 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CSXDirectory | 8 | 0 | 2 | 10 |
 | CSXMemBuffer | 19 | 0 | 3 | 22 |
 | CSXTcpClient | 1 | 0 | 0 | 1 |
-| CSXPluginObject | 0 | 0 | 1 | 1 |
+| CSXPluginObject | 1 | 0 | 0 | 1 |
 | CPartEmitter | 79 | 0 | 0 | 79 |
 | CAdObject3D | 38 | 0 | 0 | 38 |
 | CAdActor3D | 0 | 0 | 40 | 40 |
 | CAdActor3DX | 62 | 0 | 5 | 67 |
 | CAdAttach3DX | 7 | 0 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **1089** | **0** | **64** | **1153** |
+| **All** | **1090** | **0** | **63** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1068 done, 0 todo, 64 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1069 done, 0 todo, 63 no-op.
 
 ## WME classes Luma lacks entirely
 
@@ -1085,7 +1085,7 @@ These classes have no done member in Luma: the object does not exist for scripts
 | `CBFrame` | A frame of a sprite (delay, sound, move, sub-frames, events) | 21 |
 | `CBSubFrame` | The image part of a frame (hotspot, mirror, alpha) | 20 |
 
-Classes that exist in WME 1.x with a script interface but that are no-op by design: `CAdActor3D` (the legacy Milkshape 3D actor WME deprecated in 1.6; `LoadActor3D` refuses its files with a clear error), `CSXPluginObject` (Windows DLL plugins), `CUIMarkup` (never instantiated), and the Windows-only parts of `CSXDirectory` (`GetDrives`, the working directory) and `CSXMemBuffer`.
+Classes that exist in WME 1.x with a script interface but that are no-op by design: `CAdActor3D` (the legacy Milkshape 3D actor WME deprecated in 1.6; `LoadActor3D` refuses its files with a clear error), `CUIMarkup` (never instantiated), and the Windows-only parts of `CSXDirectory` (`GetDrives`, the working directory) and `CSXMemBuffer`.
 
 WME classes with no script interface of their own (nothing to port; scripts reach them only through the owner's methods): `CBSound`, `CBFont`/`CBFontBitmap`/`CBFontTT`, `CAdInventory`, `CAdInventoryBox`, `CAdResponseBox`, `CAdResponse`, `CAdSceneNode`, `CAdSentence`, `CAdSpriteSet`, `CAdTalkDef`, `CAdScaleLevel`, `CAdRotLevel`, `CAdWalkplane`, `CAdBlock`, `CAdGeneric`, `CBViewport`, `CBFader`, `CUITiledImage`, `CBPersistMgr`, `CBEventSet`, the video players (`VidTheoraPlayer`, `VidPlayer`), `C3DLight`, `C3DModel`. The inventory, responses, fader and viewport are driven through `Game` methods and properties (`GetInventoryWindow`, `AddResponse`, `FadeOut`, `SetSceneViewport`), which the tables above cover.
 

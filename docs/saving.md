@@ -36,6 +36,9 @@ A saved game holds:
   library objects (`new String`, `Array`, `Date`, `File`, `MemBuffer`)
   with their contents: a file open for reading keeps its content and
   position, one open for writing is closed, as in the original;
+- the objects of the script classes that modules provide
+  ([modules.md](modules.md)): for each, its class, the events it
+  subscribed to, `Ready`, and the bytes its module wrote for it;
 - the current scene as the scripts left it (its entities, regions and
   layers, those the scripts created at run time included, the
   animation and the sentence of each entity), the previous
@@ -116,8 +119,11 @@ What a saved game does **not** hold, and what happens to it:
 `Game.SaveGame(slot, description, quick)` returns `true` to the script
 at once, and the file is written **after the value is on the script's
 stack** (the host's `after_call` hook of the script engine): the saved
-script resumes right after the call. Before the snapshot, `BeforeSave`
-is raised on the game and runs to completion. When the file cannot be
+script resumes right after the call. Before the snapshot, the modules' `GameBeforeSave` event is delivered
+and `BeforeSave` is raised on the game and runs to completion. Each
+module object is then asked for its bytes (`Module::save`); a module
+that refuses, or writes more than 16 MiB for one object, fails the save
+with the error logged and nothing written. When the file cannot be
 written, the error is logged and the script's result becomes `false`,
 as the original engine pops its `true`.
 
@@ -137,8 +143,18 @@ before anything else of it, as the original engine does between two
 frames. Everything the file holds replaces the world and the scripts,
 including the script that called `LoadGame`, which is therefore gone.
 The files the state names are loaded again, the sounds start where they
-were (held by the frozen game when it was frozen), and `AfterLoad` is
-raised on the game and runs to completion.
+were (held by the frozen game when it was frozen), the modules' objects
+are made again, and `AfterLoad` is raised on the game and runs to
+completion.
+
+The module objects are made **before** the world is replaced, from the
+saved class and bytes (`Module::restore`): a saved game with an object of
+a class that no registered module provides, or one a module refuses, is
+refused with the game untouched and the objects already made destroyed.
+Once the world is replaced the module's old objects are destroyed
+(`Module::destruct`), the new ones keep the script handles the file
+holds, and `GameAfterLoad` is delivered to the modules before `AfterLoad`
+runs.
 
 A script whose program cannot be read any more is logged and dropped,
 as the original engine ends it; a script waiting for it gets `null`.
@@ -436,6 +452,13 @@ in the middle of their code.
 
 Version 22 keeps `Scene.ShowGeometry` (the geometry overlay switch) in
 the scene definition, as `CAdScene::Persist` does.
+
+Module objects are one more kind of object (`Kind::Module`, appended to
+the list of kinds) and did not change the layout of any older file, so
+they did not bump the version. The bytes a module writes sit inside the
+object, are private to the module and are not checked by the engine
+beyond their size; a file with module objects is not readable by an
+engine without the variant, which refuses it as a damaged file.
 
 ## Checking a game
 

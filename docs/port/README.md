@@ -39,7 +39,7 @@ python3 docs/port/inventory.py --check
 | `todo` | Luma does not do it and should. |
 | `replaced` | Luma reaches the same result another way (for example the Direct3D renderer by `luma-render`); the note says how. |
 | `n/a` | It has no meaning outside the original program (a Windows dialog, the editor's hooks, the debugger); the note says why. |
-| `excluded` | Left out by a decision of the maintainer; the note says which and when. Today: the Direct3D 9 HLSL material effects, the legacy Milkshape (MS3D) actors, the plugin DLL interface and the `.dsv` saved games of the original engine. |
+| `excluded` | Left out by a decision of the maintainer; the note says which and when. Today: the Direct3D 9 HLSL material effects, the legacy Milkshape (MS3D) actors and the `.dsv` saved games of the original engine. The plugin DLL interface is not ported either (native x86 Windows libraries cannot load), but what it gave a game, new script classes and engine events, is the module API of [modules.md](../modules.md), so its rows are `replaced`. |
 
 A row is `done` only when the function was read in the original and in
 Luma and they agree on every branch, not when a game shows the right
@@ -52,12 +52,12 @@ original does. `partial` and `todo` rows are the work that remains.
 | Table | Functions | Keys | unreviewed | done | partial | todo | replaced | n/a | excluded |
 |---|---|---|---|---|---|---|---|---|---|
 | [The adventure game: scenes, actors, entities, items, dialogue](adventure.md) | 564 | 358 | 0 | 615 | 77 | 0 | 96 | 76 | 58 |
-| [Windows, settings dialogs, hardware detection, plugins, network, debugger](platform.md) | 336 | 0 | 0 | 10 | 10 | 0 | 35 | 266 | 15 |
+| [Windows, settings dialogs, hardware detection, plugins, network, debugger](platform.md) | 336 | 0 | 0 | 10 | 10 | 0 | 50 | 266 | 0 |
 | [Renderers, surfaces, 3D models and scenes](render.md) | 574 | 13 | 0 | 163 | 26 | 0 | 145 | 106 | 147 |
 | [Sound and video](sound-video.md) | 167 | 0 | 0 | 71 | 19 | 0 | 47 | 30 | 0 |
 | [Windows and controls, fonts, text](ui-text.md) | 176 | 174 | 0 | 241 | 37 | 0 | 32 | 40 | 0 |
 | [The script engine, its classes, saved games](script.md) | 406 | 3 | 0 | 174 | 16 | 0 | 96 | 122 | 1 |
 | [Packages, files, the definition-file parser, utilities](files.md) | 127 | 0 | 0 | 27 | 5 | 0 | 68 | 27 | 0 |
 | [The game, its objects, sprites, regions, effects](game.md) | 400 | 124 | 0 | 278 | 39 | 0 | 51 | 155 | 1 |
-| **Total** | **2750** | **672** | **0** | **1579** | **229** | **0** | **570** | **822** | **222** |
+| **Total** | **2750** | **672** | **0** | **1579** | **229** | **0** | **585** | **822** | **207** |
 <!-- /counts -->

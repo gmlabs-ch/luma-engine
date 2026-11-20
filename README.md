@@ -120,7 +120,7 @@ luma compile path/to/project/scripts/scene.script --game path/to/project -o scen
 
 `luma compile` knows the functions and variables the Wintermute 1.x
 adventure runtime gives every script (`Sleep`, `Random`, `Game`, `Math`,
-`new Object`, ...); a game built with a plugin that adds classes names
+`new Object`, ...); a game built with a module that adds classes names
 them with `--native <name>`, once per class. Everything else a script
 uses must be declared by the script or its includes, as the original
 required.

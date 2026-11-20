@@ -88,4 +88,100 @@ mod tests {
     fn the_3d_module_is_reachable_with_its_feature() {
         assert_eq!(crate::three_d::GEOMETRY_EXTENSION, "3ds");
     }
+
+    /// The example of `docs/modules.md`, which a community module follows.
+    #[cfg(feature = "adventure")]
+    mod documented_module {
+        use crate::adventure::{
+            Module, ModuleContext, ModuleError, ModuleEvent, ModuleResult, ObjectId,
+        };
+        use crate::script::Value;
+        use std::collections::HashMap;
+
+        #[derive(Default)]
+        struct Counters {
+            next: ObjectId,
+            values: HashMap<ObjectId, i32>,
+        }
+
+        impl Module for Counters {
+            fn name(&self) -> &str {
+                "counters"
+            }
+
+            fn classes(&self) -> Vec<String> {
+                vec!["Counter".to_string()]
+            }
+
+            fn construct(
+                &mut self,
+                _class: &str,
+                args: &[Value],
+                cx: &mut ModuleContext,
+            ) -> ModuleResult<ObjectId> {
+                let start = match args.first() {
+                    Some(Value::Int(n)) => *n,
+                    None => 0,
+                    Some(_) => return Err(ModuleError::new("Counter takes a number")),
+                };
+                self.next += 1;
+                self.values.insert(self.next, start);
+                cx.subscribe(ModuleEvent::Update);
+                Ok(self.next)
+            }
+
+            fn restore(
+                &mut self,
+                _class: &str,
+                state: &[u8],
+                _cx: &mut ModuleContext,
+            ) -> ModuleResult<ObjectId> {
+                let bytes: [u8; 4] = state
+                    .try_into()
+                    .map_err(|_| ModuleError::new("bad state"))?;
+                self.next += 1;
+                self.values.insert(self.next, i32::from_le_bytes(bytes));
+                Ok(self.next) // the subscriptions came back with the object
+            }
+
+            fn call_method(
+                &mut self,
+                object: ObjectId,
+                name: &str,
+                _args: &[Value],
+                _cx: &mut ModuleContext,
+            ) -> ModuleResult<Option<Value>> {
+                match name {
+                    "Get" => Ok(Some(Value::Int(self.values[&object]))),
+                    _ => Ok(None), // no such method: the engine reports it
+                }
+            }
+
+            fn destruct(&mut self, object: ObjectId) {
+                self.values.remove(&object);
+            }
+
+            fn save(&mut self, object: ObjectId) -> ModuleResult<Vec<u8>> {
+                Ok(self.values[&object].to_le_bytes().to_vec())
+            }
+
+            fn event(
+                &mut self,
+                object: ObjectId,
+                event: ModuleEvent,
+                _cx: &mut ModuleContext,
+            ) -> bool {
+                if event == ModuleEvent::Update {
+                    *self.values.get_mut(&object).unwrap() += 1;
+                }
+                true
+            }
+        }
+
+        #[test]
+        fn the_module_of_the_documentation_builds_against_the_facade() {
+            let module: Box<dyn Module> = Box::new(Counters::default());
+            assert_eq!(module.classes(), vec!["Counter".to_string()]);
+        }
+    }
 }

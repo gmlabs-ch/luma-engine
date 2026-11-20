@@ -457,14 +457,16 @@ publishes (`CBGame::PublishNatives`, `CAdGame::PublishNatives`) [S]:
   GetSValue GetLValue Debug ToString ToInt ToBool ToFloat Actor Entity`
   (the names `String`, `File`, `Date`, `Array`, `Object`, `MemBuffer`,
   `TcpClient`, `Actor`, `Entity` are the "classes" used with `new`);
-  plugin classes registered by loaded plugins are added to this list;
+  the classes of the modules a game registers (`World::module_classes`,
+  see [modules.md](modules.md)) are added to this list, as the original
+  adds the classes of its plugins (`CBPluginMgr::RegisterClasses`);
 - variables (valid receivers and lvalues): `Game Math Directory self this`.
 
 Everything else a script uses (`Scene`, `Keyboard`, `actor`, ...) must be
 declared by the script itself (the games `global`-declare them in an include
 such as `base.inc`). The list is a parameter of the Luma compiler
 (`luma_compiler::Natives`; `Natives::wme()` is the list above, `luma
-compile --native <name>` adds a plugin class); calling any other name that
+compile --native <name>` adds a module's class); calling any other name that
 no script declares is a compile error, as in the original.
 
 ## Output layout
