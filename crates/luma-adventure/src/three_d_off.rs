@@ -65,6 +65,13 @@ impl World {
         let draw3d::Render3d = self.render3d;
     }
 
+    pub(crate) fn draw_geometry_overlay<'a>(
+        &'a self,
+        _: &mut luma_render::DrawList<'a>,
+        _: Option<&'a luma_render::Texture>,
+    ) {
+    }
+
     pub(crate) fn three_d_overlays<'a>(&'a self, _: &mut crate::scene_view::Overlays<'a>) {}
 
     pub(crate) fn reload_3d(&mut self) {}

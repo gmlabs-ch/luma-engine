@@ -325,7 +325,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_ad/AdScene.cpp
 - Hierarchy and Luma: CBObject → CAdScene; Luma: scene (`scene_call`, `scene_get`, `scene_set`, `scene_view.rs`)
-- Count: 81 done, 0 todo, 2 no-op
+- Count: 83 done, 0 todo, 0 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -358,7 +358,7 @@ How the list was made. For every class with a script interface, the names tested
 | `NumLayers`, `NumWaypointGroups`, `MainLayer`, `NumFreeNodes` | get | **done** | Counts and the main layer. |
 | `MouseX`, `MouseY` | get | **done** | Mouse position in scene coordinates. |
 | `AutoScroll` | get/set | **done** | Whether the view follows the main object. |
-| `ShowGeometry` | get/set | **no-op** | Draws the walkplane / geometry as a debug overlay (editor aid). |
+| `ShowGeometry` | get/set | **done** | Draws the geometry as a debug overlay over the scene: walk planes blue, blocks red, generic meshes green, in wireframe, and a `wpt.sprite` marker at each waypoint when the game ships that sprite (`docs/rendering.md`). Needs the `3d` feature. Kept in saved games. |
 | `PersistentState` | get/set | **done** | Whether the scene keeps its state between visits. |
 | `PersistentStateSprites` | get/set | **done** | Whether sprite state is kept too. |
 | `ScrollPixelsX`, `ScrollPixelsY`, `ScrollSpeedX`, `ScrollSpeedY` | get/set | **done** | Auto-scroll step and speed. |
@@ -1036,7 +1036,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CBGame | 155 | 0 | 10 | 165 |
 | CAdGame | 65 | 0 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
-| CAdScene | 81 | 0 | 2 | 83 |
+| CAdScene | 83 | 0 | 0 | 83 |
 | CAdLayer | 18 | 0 | 0 | 18 |
 | CBRegion | 11 | 0 | 0 | 11 |
 | CAdRegion | 11 | 0 | 0 | 11 |
@@ -1072,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 62 | 0 | 5 | 67 |
 | CAdAttach3DX | 7 | 0 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **1087** | **0** | **66** | **1153** |
+| **All** | **1089** | **0** | **64** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1066 done, 0 todo, 66 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1068 done, 0 todo, 64 no-op.
 
 ## WME classes Luma lacks entirely
 

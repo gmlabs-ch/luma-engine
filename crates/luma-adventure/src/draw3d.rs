@@ -25,14 +25,14 @@ use luma_3d::{AnimatedModel, Mat4, Material, Mesh, Model, Plane, ShadowType, Ski
 use luma_formats::image::DEFAULT_COLOR_KEY;
 use luma_formats::{Rgb, Rgba, Sprite};
 use luma_render::{
-    DepthOnlyDraw, Draw3d, Fog, Light, Lights, Matrix, MeshDraw, MeshHandle, MeshMaterial,
-    MeshVertex, Renderer, ShadowVolumeDraw, StencilFill, Texture, matrix,
+    DepthOnlyDraw, Draw3d, DrawList, Fog, Light, Lights, Matrix, MeshDraw, MeshHandle,
+    MeshMaterial, MeshVertex, Renderer, ShadowVolumeDraw, StencilFill, Texture, matrix,
 };
 use luma_script::NativeId;
 use luma_video::Video;
 
 use crate::actor3d::{Actor3dDraw, AttachmentDraw, MaterialOverride, MaterialTexture, ThreeDFrame};
-use crate::scene_view::{AnimState, Overlays};
+use crate::scene_view::{AnimState, Overlays, SpriteBank};
 use crate::video::{VideoPlayer, step_player, upload_frame};
 use crate::world::World;
 
@@ -462,11 +462,34 @@ pub struct Render3d {
     overrides: HashMap<(NativeId, String), ScriptTexture>,
     receivers: Option<Receivers>,
     quad: Option<MeshHandle>,
+    /// The waypoint marker of the geometry overlay (`wpt.sprite`), once
+    /// the overlay is on and the game has one.
+    marker: SpriteBank,
+    marker_tried: bool,
     /// What went wrong, for the world's log.
     log: Vec<String>,
 }
 
 impl Render3d {
+    /// Loads the waypoint marker of the geometry overlay the first time
+    /// the overlay is on (`CAdSceneGeometry::LoadFile` loads it with the
+    /// geometry; the original gets it from the editor's resources, else
+    /// from the game's files, and shows no marker without it) and uploads
+    /// its textures.
+    fn upload_marker(&mut self, world: &World, renderer: &Renderer) {
+        if !world.shows_geometry() {
+            return;
+        }
+        if !self.marker_tried {
+            self.marker_tried = true;
+            if world.vfs.exists(luma_3d::overlay::WAYPOINT_MARKER) {
+                self.marker
+                    .add_sprite(&world.vfs, luma_3d::overlay::WAYPOINT_MARKER);
+            }
+        }
+        self.marker.upload(&world.vfs, renderer);
+    }
+
     /// Uploads and updates what the frame's 3D actors need: their meshes
     /// and their attachments' with the pose of this frame, the textures
     /// of their materials, the textures scripts put on materials (a
@@ -474,6 +497,7 @@ impl Render3d {
     /// the scene's shadow receivers; frees what belongs to actors that
     /// are gone.
     pub(crate) fn upload(&mut self, world: &World, renderer: &Renderer) {
+        self.upload_marker(world, renderer);
         let Some((frame, draws)) = world.three_d_draws() else {
             self.free_gone(renderer, &[], &[]);
             return;
@@ -1100,6 +1124,87 @@ impl World {
             self.log(message);
         }
         self.render3d = render;
+    }
+
+    /// Whether the geometry overlay is on and there is geometry to show
+    /// (`Scene.ShowGeometry`; the original draws it only for a scene that
+    /// has geometry, `m_Geom`).
+    pub(crate) fn shows_geometry(&self) -> bool {
+        self.scene
+            .as_ref()
+            .is_some_and(|v| v.scene.show_geometry && v.three_d.is_some())
+    }
+
+    /// Draws the geometry overlay over the frame
+    /// (`CAdSceneGeometry::Render(true)`, after the layers): the edges of
+    /// the front faces of the active walk planes (blue), blocks (red) and
+    /// generic meshes (green) as translucent lines on the whole screen
+    /// the camera projects to, then the marker sprite at every waypoint.
+    /// Nothing without a white texture, geometry or camera.
+    pub(crate) fn draw_geometry_overlay<'a>(
+        &'a self,
+        list: &mut DrawList<'a>,
+        white: Option<&'a Texture>,
+    ) {
+        let Some(white) = white.filter(|_| self.shows_geometry()) else {
+            return;
+        };
+        let Some(scene3d) = self.scene3d() else {
+            return;
+        };
+        // The camera as this frame sees it (the stored projection is
+        // only kept up to date while 3D actors run).
+        let Some(projection) = self.projection_3d() else {
+            return;
+        };
+        let view_projection = projection.view_projection();
+        let size = (list.width, list.height);
+        // The projection puts a point where the game draws it on the
+        // screen: no scroll offset of a layer applies.
+        let offset = std::mem::replace(&mut list.offset, (0.0, 0.0));
+        for line in luma_3d::overlay::geometry_wireframe(&scene3d.geometry, &view_projection, size)
+        {
+            let color = Rgba {
+                a: (line.color >> 24) as u8,
+                r: (line.color >> 16) as u8,
+                g: (line.color >> 8) as u8,
+                b: line.color as u8,
+            };
+            list.line(
+                white,
+                line.from.0.round() as i32,
+                line.from.1.round() as i32,
+                line.to.0.round() as i32,
+                line.to.1.round() as i32,
+                color,
+            );
+        }
+        let marker = self
+            .render3d
+            .marker
+            .sprite(luma_3d::overlay::WAYPOINT_MARKER)
+            .and_then(|loaded| loaded.sprite.frames.first());
+        if let Some(frame) = marker {
+            let points =
+                luma_3d::overlay::waypoint_positions(&scene3d.geometry, &view_projection, size);
+            for (x, y) in points {
+                for sub in crate::scene_view::drawn_subframes(frame) {
+                    let Some(image) = &sub.image else { continue };
+                    let Some(texture) = self.render3d.marker.texture(image, sub.color_key) else {
+                        continue;
+                    };
+                    list.push(crate::scene_view::place(
+                        sub,
+                        texture,
+                        x.round() as i32,
+                        y.round() as i32,
+                        1.0,
+                        Rgba::OPAQUE_WHITE,
+                    ));
+                }
+            }
+        }
+        list.offset = offset;
     }
 
     /// Adds the 3D items of the frame to the scene's overlays.

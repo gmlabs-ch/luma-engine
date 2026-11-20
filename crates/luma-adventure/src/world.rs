@@ -2286,6 +2286,9 @@ impl World {
             if let Some(white) = white {
                 self.draw_scene_fade(list, white);
             }
+            // `CAdScene::Display` shows the hidden geometry after the
+            // layers (`Scene.ShowGeometry`).
+            self.draw_geometry_overlay(list, white);
             list.set_clip(None);
         }
         self.draw_windows(list, true, white);
