@@ -33,6 +33,38 @@ pub fn to_window(game: (u32, u32), size: (u32, u32), (x, y): (i32, i32)) -> (f64
     )
 }
 
+/// Where the system cursor is put back when a full-screen game's cursor
+/// left the frame for the bars of the letterbox (`CBRenderer::
+/// ClipCursor` confines it to the game's rectangle): the nearest window
+/// position inside the frame, `None` when the cursor is inside already.
+/// The frame's right and bottom edges are outside, as in the clip
+/// rectangle the original gives Windows.
+pub fn clip_to_frame(game: (u32, u32), size: (u32, u32), (x, y): (f64, f64)) -> Option<(f64, f64)> {
+    let (vx, vy, vw, vh) = letterbox(game.0 as f32, game.1 as f32, size.0, size.1);
+    if vw <= 0.0 || vh <= 0.0 {
+        return None;
+    }
+    let (left, top) = (f64::from(vx), f64::from(vy));
+    let (right, bottom) = (left + f64::from(vw), top + f64::from(vh));
+    let inside = x >= left && x < right && y >= top && y < bottom;
+    if inside {
+        return None;
+    }
+    // One physical pixel in from the right and bottom edges.
+    Some((
+        x.clamp(left, (right - 1.0).max(left)),
+        y.clamp(top, (bottom - 1.0).max(top)),
+    ))
+}
+
+/// Whether the system cursor is confined to the frame: while a
+/// full-screen game is active (the window has the focus and is shown).
+/// The original releases it when the window loses the focus (Windows
+/// does) and when the renderer is destroyed.
+pub fn clips_cursor(windowed: bool, focused: bool, occluded: bool) -> bool {
+    !windowed && focused && !occluded
+}
+
 /// Whether the game runs in a window (`CHWManager`): never when the
 /// game forbids it (`ALLOW_WINDOWED_MODE = FALSE`); else what the
 /// player asks on the command line, else the choice kept in the
@@ -56,6 +88,51 @@ mod tests {
         // asked.
         assert!(!windowed_mode(false, None, None));
         assert!(!windowed_mode(false, Some(true), Some(true)));
+    }
+
+    #[test]
+    fn a_cursor_in_the_bars_is_put_back_on_the_frame() {
+        // A 320x200 game in a 1000x500 area: the frame is 800x500 from
+        // x 100 to 900 (the right edge, 900, is outside).
+        let (game, size) = ((320, 200), (1000, 500));
+        assert_eq!(clip_to_frame(game, size, (100.0, 0.0)), None);
+        assert_eq!(clip_to_frame(game, size, (500.0, 250.0)), None);
+        assert_eq!(clip_to_frame(game, size, (899.5, 499.5)), None);
+        assert_eq!(
+            clip_to_frame(game, size, (50.0, 250.0)),
+            Some((100.0, 250.0))
+        );
+        assert_eq!(
+            clip_to_frame(game, size, (990.0, 20.0)),
+            Some((899.0, 20.0))
+        );
+        assert_eq!(
+            clip_to_frame(game, size, (900.0, 500.0)),
+            Some((899.0, 499.0))
+        );
+        assert_eq!(clip_to_frame(game, size, (-5.0, -5.0)), Some((100.0, 0.0)));
+        // Bars above and below: the frame is 800x500 from y 50 to 550.
+        let size = (800, 600);
+        assert_eq!(
+            clip_to_frame(game, size, (400.0, 20.0)),
+            Some((400.0, 50.0))
+        );
+        assert_eq!(
+            clip_to_frame(game, size, (400.0, 580.0)),
+            Some((400.0, 549.0))
+        );
+        // Whatever lands is where the game sees its own edge pixel.
+        let (x, y) = clip_to_frame(game, size, (900.0, 700.0)).unwrap();
+        assert_eq!(to_game(game, size, (x, y)), (319, 199));
+        assert_eq!(clip_to_frame(game, (0, 0), (5.0, 5.0)), None);
+    }
+
+    #[test]
+    fn only_an_active_full_screen_game_confines_the_cursor() {
+        assert!(clips_cursor(false, true, false));
+        assert!(!clips_cursor(true, true, false), "a window is not clipped");
+        assert!(!clips_cursor(false, false, false), "released on focus loss");
+        assert!(!clips_cursor(false, true, true), "and while hidden");
     }
 
     #[test]

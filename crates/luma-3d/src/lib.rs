@@ -20,6 +20,8 @@
 //!   follows;
 //! - [`camera`]: the scene camera, the projection that maps the layer onto
 //!   the 3D world, and the conversions between scene pixels and 3D points;
+//! - [`overlay`]: the edges of the geometry overlay of `Scene.ShowGeometry`
+//!   and the waypoint positions, for a view;
 //! - [`xfile`]: the DirectX `.X` container the actor models are stored
 //!   in, read into a generic object tree; the text form is read there,
 //!   the binary and MSZIP-compressed forms in `xfile_binary`;
@@ -44,6 +46,7 @@ pub mod camera;
 pub mod math;
 pub mod model;
 pub mod node_patterns;
+pub mod overlay;
 pub mod path3d;
 pub mod scene_geometry;
 pub mod three_ds;

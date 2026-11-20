@@ -20,6 +20,7 @@ use luma::render::winit::event::{
     ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
 use luma::render::winit::keyboard::{Key, ModifiersState, NamedKey};
+use luma::render::winit::window::CursorGrabMode;
 use luma::render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig};
 
 const USAGE: &str = "\
@@ -46,6 +47,9 @@ OPTIONS:
     --at <x>,<y>          In headless mode, place the main actor there once the scene is up
     --say <text>          In headless mode, make the main actor say a sentence once the scene is up
     --font <file>         With --say, the font the actor talks with
+    --debug               Draw the debug overlay (video mode, polygons, scripts, mouse, scene
+                          names, timer, active object), as `[Debug] DebugMode=1` does
+    --show-fps            Draw the frame rate at the top left, as `[Debug] ShowFPS=1` does
     --mute                Play no sound (the sounds still run, silently, on the game clock)
     --seed <n|clock>      Seed of the random numbers (Random, particles): a number for a run
                           that draws the same numbers every time, or `clock` for the clock,
@@ -188,6 +192,9 @@ struct Options {
     say: Option<String>,
     font: Option<String>,
     mute: bool,
+    /// `--debug` and `--show-fps`: the overlay of `DisplayDebugInfo`.
+    debug: bool,
+    show_fps: bool,
     /// Window size as a multiple of the game's resolution (`--scale`).
     scale: Option<u32>,
     /// The game's ANSI code page (`--code-page`).
@@ -220,6 +227,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
     let mut say = None;
     let mut font = None;
     let mut mute = false;
+    let mut debug = false;
+    let mut show_fps = false;
     let mut scale = None;
     let mut code_page = None;
     let mut windowed = None;
@@ -270,6 +279,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--say" => say = Some(value(&mut i)?.clone()),
             "--font" => font = Some(value(&mut i)?.clone()),
             "--mute" => mute = true,
+            "--debug" => debug = true,
+            "--show-fps" => show_fps = true,
             "--seed" => {
                 let v = value(&mut i)?;
                 seed =
@@ -476,6 +487,8 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         say,
         font,
         mute,
+        debug,
+        show_fps,
         scale,
         code_page,
         windowed,
@@ -563,6 +576,13 @@ fn headless(vfs: Vfs, options: &Options) -> Result<(), String> {
     };
     let mut runtime = Runtime::with_audio(vfs, audio).map_err(|e| e.to_string())?;
     runtime.world.set_ansi_code_page(options.code_page);
+    // The switches of the settings stay on when the command line says nothing.
+    if options.debug {
+        runtime.world.set_debug_mode(true);
+    }
+    if options.show_fps {
+        runtime.world.set_show_fps(true);
+    }
     // Headless runs are compared with one another: the same random
     // numbers at every run unless the clock is asked for.
     match options.seed {
@@ -1200,6 +1220,13 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         .and_then(|v| v.parse().ok());
     let mut runtime = runtime;
     runtime.world.set_ansi_code_page(options.code_page);
+    // The switches of the settings stay on when the command line says nothing.
+    if options.debug {
+        runtime.world.set_debug_mode(true);
+    }
+    if options.show_fps {
+        runtime.world.set_show_fps(true);
+    }
     // The world is seeded from the clock, as the original; a number
     // makes the run repeatable.
     if let Some(Seed::Fixed(seed)) = options.seed {
@@ -1254,6 +1281,8 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         windowed,
         window_position: None,
         warp_failed: false,
+        clip_warp: None,
+        cursor_clipped: false,
         focused: true,
         occluded: false,
     };
@@ -1304,6 +1333,11 @@ struct GamePlayer {
     window_position: Option<(i32, i32)>,
     /// The system refused to move its cursor (said once).
     warp_failed: bool,
+    /// Where to put the system cursor back after it left the frame of a
+    /// full-screen game (`CBRenderer::ClipCursor`).
+    clip_warp: Option<PhysicalPosition<f64>>,
+    /// Whether the system was asked to confine the cursor to the window.
+    cursor_clipped: bool,
     /// Whether the window has the keyboard focus.
     focused: bool,
     /// Whether the window is minimised or wholly hidden.
@@ -1320,6 +1354,39 @@ impl GamePlayer {
         let active = focused && !occluded;
         if active != self.runtime.is_active() {
             self.runtime.activate(active, false);
+        }
+    }
+
+    /// Confines the system cursor to the full-screen frame while the
+    /// game is active and releases it when the window loses the focus
+    /// or is hidden (`CBRenderer::ClipCursor`, `UnclipCursor`): the
+    /// window system is asked to keep the cursor in the window where it
+    /// can (not macOS), and the cursor found in the bars of the
+    /// letterbox is moved back onto the frame, which the original gets
+    /// from its clip rectangle. The grab goes with the window when the
+    /// game exits.
+    fn clip_cursor(&mut self, window: &luma::render::winit::window::Window) {
+        let want = view::clips_cursor(self.windowed, self.focused, self.occluded);
+        if want != self.cursor_clipped {
+            self.cursor_clipped = want;
+            // Refused where the system cannot confine a cursor; the
+            // move back below still holds it on the frame.
+            let _ = window.set_cursor_grab(if want {
+                CursorGrabMode::Confined
+            } else {
+                CursorGrabMode::None
+            });
+        }
+        if !want {
+            self.clip_warp = None;
+        }
+        if let Some(point) = self.clip_warp.take() {
+            if let Err(err) = window.set_cursor_position(point) {
+                if !self.warp_failed {
+                    self.warp_failed = true;
+                    eprintln!("cannot move the system cursor: {err}");
+                }
+            }
         }
     }
 
@@ -1367,8 +1434,19 @@ impl App for GamePlayer {
                 let (mut x, mut y) = self.to_game(position.x, position.y);
                 if !self.windowed {
                     // Full screen keeps the cursor on the game's frame
-                    // (`CBRenderer::ClipCursor`).
+                    // (`CBRenderer::ClipCursor`): the game sees it on the
+                    // edge, and the system cursor is put back there next
+                    // frame (and held in the window where the system can
+                    // confine it).
                     let settings = self.runtime.world.settings();
+                    if view::clips_cursor(self.windowed, self.focused, self.occluded) {
+                        self.clip_warp = view::clip_to_frame(
+                            (settings.width, settings.height),
+                            (self.size.width, self.size.height),
+                            (position.x, position.y),
+                        )
+                        .map(|(x, y)| PhysicalPosition::new(x, y));
+                    }
                     x = x.clamp(0, settings.width as i32 - 1);
                     y = y.clamp(0, settings.height as i32 - 1);
                 }
@@ -1508,6 +1586,7 @@ impl App for GamePlayer {
         if self.runtime.world.quit_requested() {
             return Flow::Exit;
         }
+        self.clip_cursor(frame.window);
         if let Some(point) = self.runtime.world.take_cursor_warp() {
             // The game moved the mouse (`Game.SetMousePos`, the mouse
             // lock...): the system cursor follows, where the window
@@ -1682,6 +1761,10 @@ mod tests {
         assert_eq!((options.windowed, options.load), (Some(true), Some(2)));
         assert!(parse_args(&args(&["game", "--savegame", "x.txt"])).is_err());
         assert_eq!(options.seed, None);
+        let options = parse_args(&args(&["game", "--debug", "--show-fps"])).unwrap();
+        assert!(options.debug && options.show_fps);
+        let options = parse_args(&args(&["game"])).unwrap();
+        assert!(!options.debug && !options.show_fps);
         let options = parse_args(&args(&["game", "--seed", "42"])).unwrap();
         assert_eq!(options.seed, Some(Seed::Fixed(42)));
         let options = parse_args(&args(&["game", "--seed", "Clock"])).unwrap();

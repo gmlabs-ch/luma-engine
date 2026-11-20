@@ -332,8 +332,28 @@ stencil differs from the reference and sets it to the reference
 (`NotEqual` / `Replace`), so that the overlapping triangles of a
 translucent silhouette darken the floor once (the flat shadows).
 
-Not drawn: the geometry debug overlay (`Scene.ShowGeometry`, wireframe
-in the original).
+### The geometry overlay
+
+`Scene.ShowGeometry` (a script property, off by default) draws the
+scene's hidden geometry over the finished scene, after the layers and
+the scene's fader and before the windows (`CAdScene::Display`,
+`CAdSceneGeometry::Render(true)`). The original draws each mesh's
+triangles in wireframe, unlit, without a depth test, with alpha
+blending and `D3DCULL_CCW`, in one colour per kind: the active walk
+planes blue (`0x700000FF`), the active blocks red (`0x70FF0000`), the
+active generic meshes green (`0x7000FF00`), in that order. Luma has no
+wireframe pipeline, so `luma_3d::overlay::geometry_wireframe` computes
+the edges: each triangle that is not counter-clockwise on the screen
+(a plane or a block shows only the faces turned to the camera) gives its
+three edges, clipped to the view volume and mapped to the screen the
+meshes are drawn on, and `World::draw_geometry_overlay` draws them with
+`DrawList::line`, one pixel wide, so a shared edge is drawn twice and
+shows darker, as in the original. Then, if the game ships a sprite named
+`wpt.sprite`, its first frame is drawn at the projected position of every
+waypoint (the original takes that sprite from its own resources, which
+Luma does not have: without a file of the game, no marker). It needs the
+`3d` feature, a scene with geometry and a camera, and the flag is kept
+in saved games.
 
 ## Not yet
 

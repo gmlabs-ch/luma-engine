@@ -197,7 +197,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `C3DMaterial::SetTexture` | partial | deliberate: `model.rs` `load_material` (the material's name is the texture file's base name) and `luma-adventure/src/draw3d.rs` `ensure_texture` (default colour key): the texture is uploaded with ONE mip level as the original asks D3DX for (`MipLevels = 1`; `docs/rendering.md` corrected). A missing file is `invalid.bmp` in the original; Luma draws the material untextured (opaque). |
 | `C3DMaterial::SetSprite` | done | `draw3d.rs` `ScriptTexture::Sprite`, `Still`: the sprite replaces the texture; the material keeps its name. |
 | `C3DMaterial::SetTheora` | done | `draw3d.rs` `ScriptTexture::Video`: the video replaces the texture; the material keeps its name. |
-| `C3DMaterial::SetEffect` | todo | Attaches or clears an effect and its parameters on the material; see `C3DEffect::CreateFromFile`. |
+| `C3DMaterial::SetEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 | `C3DMaterial::GetSurface` | done | `draw3d.rs` `update_override`, `override_texture`: the video's current frame, else the sprite's current frame (stepped on the game timer), else the material's texture. |
 
 ## `wme_base/3DMesh.cpp`
@@ -207,11 +207,11 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `C3DMesh::C3DMesh` | partial | For the scene geometry: `luma-3d/src/scene_geometry.rs` meshes (visible/active by default). The material index and the per-mesh visibility of Milkshape models have no counterpart (see `C3DModel::LoadFile`). |
 | `C3DMesh::~C3DMesh` | replaced | Rust ownership. |
 | `C3DMesh::Cleanup` | replaced | Rust ownership. |
-| `C3DMesh::FillVertexBuffer` | todo | Fills the vertex buffer of a Milkshape model mesh (position, normal, texture coordinates per face corner). Not in Luma with the Milkshape models. |
-| `C3DMesh::CreateVertexBuffer` | todo | Allocates that vertex buffer. Not in Luma with the Milkshape models. |
-| `C3DMesh::FillVertexBuffer #2` | todo | Fills a coloured vertex buffer for the geometry overlay (`Scene.ShowGeometry`: walk planes blue `0x700000FF`, blocks red `0x70FF0000`, generic meshes green `0x7000FF00`). Luma does not draw the overlay (`docs/rendering.md`, Not yet). |
-| `C3DMesh::ComputeNormals` | todo | Averages the face normals per vertex (`(v2 - v1) x (v3 - v2)`, normalised) for the geometry meshes; only the overlay drawing uses them. Comes with the overlay. |
-| `C3DMesh::Persist` | todo | Saves a mesh's visibility (Milkshape `ShowMesh`/`HideMesh`). Not in Luma; the geometry nodes' active flags are saved separately (`scene3d.rs` `Saved::nodes`). |
+| `C3DMesh::FillVertexBuffer` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
+| `C3DMesh::CreateVertexBuffer` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
+| `C3DMesh::FillVertexBuffer #2` | done | `luma-3d/src/overlay.rs` `geometry_wireframe`: the coloured buffer is the list of edges drawn for the mesh in its colour: walk planes blue `0x700000FF`, blocks red `0x70FF0000`, generic meshes green `0x7000FF00`, with the position of each face corner (`Faces` index into the vertices). Luma has no vertex buffer to fill; the normals and texture coordinates the buffer also holds play no part in the wireframe (unlit, untextured). See `docs/rendering.md`. |
+| `C3DMesh::ComputeNormals` | done | `luma-3d/src/scene_geometry.rs` `TriangleMesh::compute_normals`, called by `TriangleMesh::new` for every geometry mesh: the normalised face normal `(v2 - v1) x (v3 - v2)` is added to its three vertices and each sum normalised (a zero sum stays zero, as `D3DXVec3Normalize` gives); a face with an index out of range is skipped where the original reads past the array. Luma keeps the normal per vertex, the original copies it to each face corner, which holds the same values. The overlay does not light, so only the shadow receivers use them. |
+| `C3DMesh::Persist` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
 
 ## `wme_base/3DModel.cpp`
 
@@ -319,8 +319,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
 | `C3DUtils::IntersectTriangle` | done | `luma-3d/src/math.rs` `intersect_triangle`: single-sided, `det < 0.0001` fails, no `t >= 0` test, the result is where the line meets the triangle's plane. |
-| `C3DUtils::MatrixSetTranslation` | todo | Writes a translation into a matrix; used only by the Milkshape model (`C3DModel::AnimSetupJoints`, `AnimAdvance`). Comes with it. |
-| `C3DUtils::MatrixSetRotation` | todo | Writes the rotation of three Euler angles (Milkshape order) into a matrix; used only by the Milkshape model. Comes with it. |
+| `C3DUtils::MatrixSetTranslation` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
+| `C3DUtils::MatrixSetRotation` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
 | `C3DUtils::PickMakeRay` | n/a | Never called by the engine. |
 | `C3DUtils::PickGetIntersect` | done | `math.rs` `pick_get_intersect`: segment against the triangle's plane only, normal `(v1 - v0) x (v2 - v1)`, parallel below `0.00001`, position within 0 to 1. |
 | `C3DUtils::DecomposeMatrixSimple` | done | `math.rs` `decompose_simple`: translation row, column lengths as the scale, the quaternion of the matrix as it is. |
@@ -426,7 +426,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBRenderD3D::DisplayShadow` | done | `luma-adventure/src/draw3d.rs`: the simple and flat shadows are emitted only when the effective shadow type is above none; see the `C3DShadowGen` rows for the drawing itself. |
 | `CBRenderD3D::DumpData` | n/a | Debug dump of texture sizes to a CSV file (`Game.DumpTextureStats`), tied to Direct3D texture padding; a no-op native in Luma. |
 | `CBRenderD3D::SetSpriteBlendMode` | done | `luma-render/src/renderer.rs` `blend_state`: normal `src_alpha, 1 - src_alpha`, additive `src_alpha, one`, subtractive `zero, 1 - src_color`; the alpha channel of the target is kept covered (not visible on screen). |
-| `CBRenderD3D::DisplayDebugInfo` | todo | Draws `PolyCount: N` at the right, 20 pixels down, with the system font when the game runs in debug mode. Luma draws no debug overlay (see `CBGame::DisplayDebugInfo` in the game table). |
+| `CBRenderD3D::DisplayDebugInfo` | done | `PolyCount: n` right-aligned at y 20. The count is `DrawList::polygon_count` (two per quad, the triangles of each lit and depth-only mesh drawn, as `m_NumPolygons` is incremented), shown one frame late because the text is laid out before the frame is drawn. |
 | `CBRenderD3D::StencilSupported` | done | `Game.IsShadowTypeSupported(3)` reads true: Luma always has a stencil buffer (`luma-adventure/src/natives.rs`). |
 | `CBRenderD3D::GetName` | n/a | Renderer name for the debug overlay (`Direct3D8`, `Direct3D9`, with `HW T&L`); comes with `DisplayDebugInfo` if that is ported. |
 | `CBRenderD3D::GetMaxActiveLights` | done | `luma-adventure/src/scene3d.rs` `MAX_LIGHTS` = 8 and `Game.MaxActiveLights` = 8 (`natives.rs`), the figure of the fixed-function devices; the original asks the device and reads 100 when the device says unlimited. |
@@ -466,7 +466,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
 | `CBRenderer::CBRenderer` | partial | `luma-render/src/renderer.rs` `Renderer::new` and `window.rs` `WindowConfig`. `m_DrawOffsetX/Y` (letterbox) is `renderer::letterbox`; `m_Windowed` has no counterpart (Luma has no full-screen mode); `m_ForceAlphaColor` is the per-window tint in `luma-adventure/src/ui.rs` (see `CBRenderD3D::DrawSpriteEx`). |
-| `CBRenderer::~CBRenderer` | replaced | Rust ownership; the hit list is a `Vec` of `World`. No cursor clip to release (see `CBRenderer::ClipCursor`). |
+| `CBRenderer::~CBRenderer` | replaced | Rust ownership; the hit list is a `Vec` of `World`. The cursor confinement goes with the window (see `CBRenderer::UnclipCursor`). |
 | `CBRenderer::InitLoop` | done | `luma-adventure/src/input.rs`: `World::hits` is rebuilt from scratch every frame before `object_at`, as `DeleteRectList` empties `m_RectList`. |
 | `CBRenderer::GetObjectAt` | partial | deliberate: `luma-adventure/src/input.rs` `World::object_at`, `PixelArea::contains` (last drawn first, `PtInRect` bounds, the viewport's cut of `CBActiveRect::ClipRect`, frame formula with the source corner added before the zoom division, mirror as `Width - XX`, a pixel opaque from alpha 128). Deliberate difference: a rotated sprite is hit where it is drawn, the original tests the unrotated rectangle (documented in `unrotate`). 3D rows: a 3D model's rectangle is tested inclusive of right and bottom (`<=`), `PtInRect` excludes them; the `m_Model` (`C3DModel`, MS3D) branch has no counterpart. |
 | `CBRenderer::DeleteRectList` | replaced | `World::hits` is a `Vec` cleared and refilled each frame. |
@@ -488,8 +488,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBRenderer::SetScreenViewport` | done | `DrawList::set_clip(None)`: no scissor, the whole game rectangle (`World::draw` after the scene). |
 | `CBRenderer::SetViewport #2` | done | `DrawList::set_clip` takes the rectangle in game pixels; the letterbox offset and scale are applied by `renderer.rs` `scissor`. |
 | `CBRenderer::TakeScreenshot` | replaced | Base stub; see `CBRenderD3D::TakeScreenshot`. |
-| `CBRenderer::ClipCursor` | todo | In full-screen mode confines the system cursor to the game rectangle (`m_DrawOffset`, `m_Width`, `m_Height`), so the mouse cannot go into the letterbox bars. Luma has neither a full-screen mode nor a cursor grab (`luma-render/src/window.rs`); the mouse can leave the game area and positions outside it are passed on. |
-| `CBRenderer::UnclipCursor` | todo | Releases the cursor confinement of `ClipCursor` (on exit and when the window loses focus). Comes with `ClipCursor`. |
+| `CBRenderer::ClipCursor` | done | `luma-player/src/main.rs` `GamePlayer::clip_cursor` and `view.rs` `clip_to_frame`/`clips_cursor`: in full screen only (the original's `!m_Windowed`), while the window is active, a cursor that left the game's frame for the bars of the letterbox is put back on the nearest frame pixel (the right and bottom edges are outside, as in the `RECT` given to `::ClipCursor`), and the game already saw it clamped to its screen. Where the window system can confine a cursor to the window (`CursorGrabMode::Confined`: Windows, X11, Wayland) the player asks for it too; macOS refuses, and the move back alone holds the cursor. The original calls it when the device is created or reset and when the window moves; Luma checks every frame and on every mouse move. Tested for the geometry only (no window is opened in the tests). |
+| `CBRenderer::UnclipCursor` | done | `GamePlayer::clip_cursor` releases the grab and drops the pending move when the window loses the focus or is hidden (`view::clips_cursor`), which is what Windows does to a clipped cursor on deactivation; the grab goes with the window on exit (`~CBRenderer`'s call). |
 | `CBRenderer::PointInViewport` | partial | Used by `CAdGame::ValidMouse` to ignore the mouse outside the game rectangle (inclusive of `m_DrawOffset + m_Width/Height`). Luma maps window pixels through `renderer::letterbox` in the player but has no test rejecting a position in the bars; check `ValidMouse` in the adventure table. |
 
 ## `wme_base/BSurface.cpp`
@@ -510,8 +510,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBSurface::Create #2` | replaced | Base stub; see `CBSurfaceD3D::Create #2`. |
 | `CBSurface::StartPixelOp` | replaced | Base stub; see `CBSurfaceD3D::StartPixelOp`. |
 | `CBSurface::EndPixelOp` | replaced | Base stub; see `CBSurfaceD3D::EndPixelOp`. |
-| `CBSurface::GetPixel` | todo | Base stub; see `CBSurfaceD3D::GetPixel`. |
-| `CBSurface::PutPixel` | todo | Base stub; see `CBSurfaceD3D::PutPixel`. |
+| `CBSurface::GetPixel` | replaced | Base stub (returns failure); see `CBSurfaceD3D::GetPixel`. |
+| `CBSurface::PutPixel` | replaced | Base stub (returns failure); see `CBSurfaceD3D::PutPixel`. |
 | `CBSurface::ComparePixel` | n/a | Base stub; never called by the engine. |
 | `CBSurface::IsTransparentAtLite` | replaced | Base stub; see `CBSurfaceD3D::IsTransparentAtLite`. |
 | `CBSurface::Invalidate` | replaced | Base stub; see `CBSurfaceD3D::Invalidate`. |
@@ -535,10 +535,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBSurfaceD3D::Create #2` | replaced | Empty texture for video frames: `Renderer::texture_from_rgba` and `write_texture` (`luma-adventure/src/video.rs`). |
 | `CBSurfaceD3D::CreateEmptyTexture` | n/a | Tile textures for images larger than the device limit and the 16-bit fallback; no meaning with wgpu. |
 | `CBSurfaceD3D::GetTextureFormat` | n/a | Direct3D texture format query; Luma textures are always `Rgba8Unorm`. |
-| `CBSurfaceD3D::StartPixelOp` | replaced | Locks the texture for CPU access; Luma reads the decoded `Image` or `Mask` kept on the CPU side. See `GetPixel` and `PutPixel` for what is missing. |
+| `CBSurfaceD3D::StartPixelOp` | replaced | Locks the texture for CPU access; Luma reads the decoded `Image` or `Mask` kept on the CPU side. See `GetPixel` and `PutPixel`. |
 | `CBSurfaceD3D::EndPixelOp` | replaced | See `StartPixelOp`. |
-| `CBSurfaceD3D::GetPixel` | todo | Reads a pixel of a surface as A, R, G, B. Reached from scripts through `CBSubFrame::GetPixel` (the sub-frame object's pixel methods, to be confirmed in the game table) and from the tile loader. Luma has no pixel read on a sprite image. |
-| `CBSurfaceD3D::PutPixel` | todo | Writes a pixel (alpha kept when the `A` argument is not above 0). Reached from scripts through `CBSubFrame::PutPixel` and used by the video renderers (replaced there by `write_texture`). Luma cannot modify a sprite image. |
+| `CBSurfaceD3D::GetPixel` | replaced | Checked on 20 November 2026 against every caller in the sources: no script method reaches it (`CBSubFrame::GetPixel` is only in the `IWmeSubFrame` plugin interface, `n/a`), and nothing else in the engine reads a locked texture pixel (`CBFontBitmap` uses `IsTransparentAtLite`). Luma keeps the decoded `Image` on the CPU side (`Image::pixel`, used for the hit tests and the font widths), which is what a read of the surface would give, in 8-bit RGBA rather than the device's 16-bit formats. |
+| `CBSurfaceD3D::PutPixel` | replaced | Callers in the sources: `CBImage::CopyToTexture` (the loader writing a decoded image into a texture: Luma uploads the decoded `Image` whole, with its colour key and alpha already applied by `luma-formats`), `CVidRendererD3D` and `CVidTheoraPlayer` (video frames: `Renderer::write_texture`), and the `IWmeSubFrame` plugin interface (`n/a`). No script method writes a pixel, so nothing is missing from the scripting interface. |
 | `CBSurfaceD3D::ComparePixel` | n/a | Never called by the engine. |
 | `CBSurfaceD3D::IsTransparentAtLite` | done | Used by `CBFontBitmap::GetWidths` (`AUTO_WIDTH`): `luma-formats/src/font.rs` `measure_tile` counts a pixel unless its alpha is 0. Its "not transparent" answer outside the image is never reached: `GetWidths` skips the pixels outside the image itself, as `measure_tile` stays inside it. |
 | `CBSurfaceD3D::Invalidate` | replaced | Frees the texture of a surface not used for its lifetime; Luma frees textures with their bank (scene change, object removal). Memory only. |
@@ -707,8 +707,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXFrameNode::HasChildren` | done | `model.rs` `Model::from_xfile` fails with `NoFrame` when the root has no child frame. |
 | `CXFrameNode::SetMaterialSprite` | done | `luma-adventure/src/actor3d.rs` `set_material_texture` and `draw3d.rs` `override_texture`: by material name without case, on every mesh of the actor's model. |
 | `CXFrameNode::SetMaterialTheora` | done | Same path as `SetMaterialSprite` with `MaterialTexture::Theora`. |
-| `CXFrameNode::SetMaterialEffect` | todo | Passes an effect to the meshes' materials of that name; Luma has no effects (see `C3DEffect::CreateFromFile`). |
-| `CXFrameNode::RemoveMaterialEffect` | todo | Removes the effect from the materials of that name; see `C3DEffect::CreateFromFile`. |
+| `CXFrameNode::SetMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CXFrameNode::RemoveMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 | `CXFrameNode::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
 | `CXFrameNode::RestoreDeviceObjects` | n/a | Direct3D device loss. |
 
@@ -727,8 +727,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXMesh::PickPoly` | done | `animation.rs` `AnimatedModel::pick` with `math::intersect_triangle`, NaN vertices skipped. |
 | `CXMesh::SetMaterialSprite` | partial | `draw3d.rs` `override_texture`: the sprite's current frame, first sub-frame, textures the material. Difference: when the sprite's frame has no usable image Luma falls back to the material's own texture; the original draws the material untextured. |
 | `CXMesh::SetMaterialTheora` | done | `draw3d.rs` `ScriptTexture::Video`: the video frame textures the material. |
-| `CXMesh::SetMaterialEffect` | todo | Sets an effect and its parameters on the materials of that name; see `C3DEffect::CreateFromFile`. |
-| `CXMesh::RemoveMaterialEffect` | todo | Clears the effect of the materials of that name; see `C3DEffect::CreateFromFile`. |
+| `CXMesh::SetMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CXMesh::RemoveMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 | `CXMesh::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
 | `CXMesh::RestoreDeviceObjects` | n/a | Direct3D device loss. |
 
@@ -774,10 +774,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXModel::ParseEvent FRAME` | done | `AnimationEventDef::frame`, clamped by `AnimationSet::add_event`. |
 | `CXModel::SetMaterialSprite` | done | `luma-adventure/src/natives_actor3d.rs` and `actor3d.rs` `set_material_texture`: one entry per material name, replaced when set again; `draw3d.rs` loads the sprite. |
 | `CXModel::SetMaterialTheora` | partial | Same with `MaterialTexture::Theora`, looping. Difference: the original calls `Play(VID_PLAY_POS, 0, 0, false, false, true)` with the default volume, so a video with a sound track is heard at the sound-effects volume; Luma's `VideoPlayer::texture_loop` (`luma-adventure/src/video.rs`) plays it without sound: the player of a material lives in the drawing cache (`draw3d.rs` `update_override`), which has no access to the sound system; it has to move to the world's update for the track to play. |
-| `CXModel::SetMaterialEffect` | todo | Loads an effect file and puts it on the materials of a name (`Actor3D.SetEffect`, `EFFECT` block). Luma's native logs a stub and returns false (`natives_actor3d.rs`); see `C3DEffect::CreateFromFile`. |
-| `CXModel::RemoveMaterialEffect` | todo | Removes the effect of a material (`Actor3D.RemoveEffect`); stub in Luma. |
-| `CXModel::SetMaterialEffectParam` | todo | Stores a named effect parameter from a script value (`Actor3D.SetEffectParam`); stub in Luma. |
-| `CXModel::SetMaterialEffectParam #2` | todo | Stores a named effect parameter as a vector (`SetEffectParamVector`, `SetEffectParamColor`); stub in Luma. |
+| `CXModel::SetMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CXModel::RemoveMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CXModel::SetMaterialEffectParam` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CXModel::SetMaterialEffectParam #2` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 | `CXModel::InitializeSimple` | partial | After loading a saved game: Luma puts the material textures back (`materials` are saved and `draw3d.rs` reopens them). The effects and the `ParentModel` bone lookup are missing with those features. |
 | `CXModel::Persist` | partial | `luma-adventure/src/actor3d.rs` `ModelSlot` (animation state, channels), `merged_files`, `materials`; the model is reloaded from its file and merged files. Not saved: effect files and parameters (no effects), and the shadow model. The box, rectangle and pick matrices are recomputed. |
 | `CXModel::InvalidateDeviceObjects` | n/a | Direct3D device loss. |

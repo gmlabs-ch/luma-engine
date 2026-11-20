@@ -174,6 +174,10 @@ pub struct Scene {
     /// Ambient light colour for 3D actors (`AMBIENT_LIGHT_COLOR`), black
     /// by default.
     pub ambient_light_color: Rgb,
+    /// Whether the geometry overlay is drawn (`Scene.ShowGeometry`, which
+    /// scripts set; the file key `EDITOR_SHOW_GEOMETRY` is forced off
+    /// outside the editor).
+    pub show_geometry: bool,
     /// The layers, in drawing order.
     pub layers: Vec<Layer>,
     /// Waypoint groups for path finding.

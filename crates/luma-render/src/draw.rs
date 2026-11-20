@@ -56,7 +56,14 @@ pub const MAX_LIGHTS: usize = 8;
 
 /// A mesh uploaded with [`Renderer::upload_mesh`](crate::Renderer::upload_mesh).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MeshHandle(pub(crate) u64);
+pub struct MeshHandle(pub(crate) u64, pub(crate) u32);
+
+impl MeshHandle {
+    /// The number of triangles of the whole mesh.
+    pub fn triangles(&self) -> u32 {
+        self.1
+    }
+}
 
 /// One vertex of a mesh: position, normal and texture coordinates
 /// (`D3DFVF_XYZ | NORMAL | TEX1`), in model space.
@@ -495,6 +502,27 @@ impl<'a> DrawList<'a> {
         self.draws_3d.clear();
     }
 
+    /// The polygons the list makes the renderer draw, as the original
+    /// engine's counter `CBRenderD3D::m_NumPolygons` (`PolyCount` of the
+    /// debug overlay) counts them: two triangles per quad, and the
+    /// triangles of each lit mesh (the drawn part of it) and of each
+    /// depth-only mesh. Shadow volumes are not counted.
+    pub fn polygon_count(&self) -> u32 {
+        let meshes: u32 = self
+            .draws_3d
+            .iter()
+            .map(|placed| match &placed.draw {
+                Draw3d::Mesh(draw) => match &draw.indices {
+                    Some(range) => range.end.saturating_sub(range.start) / 3,
+                    None => draw.mesh.triangles(),
+                },
+                Draw3d::DepthOnly(draw) => draw.mesh.triangles(),
+                Draw3d::ShadowVolume(_) | Draw3d::StencilFill(_) => 0,
+            })
+            .sum();
+        self.quads.len() as u32 * 2 + meshes
+    }
+
     /// The quads, in drawing order.
     pub fn quads(&self) -> &[Quad<'a>] {
         &self.quads
@@ -742,5 +770,29 @@ mod tests {
         assert_eq!(lights.len(), MAX_LIGHTS);
         assert_eq!(Lights::from_slice(&[light; 10]).len(), MAX_LIGHTS);
         assert_eq!(Lights::from_slice(&[light; 3]).as_slice().len(), 3);
+    }
+
+    #[test]
+    fn polygon_count_adds_the_triangles_the_list_draws() {
+        let mut list = DrawList::new(100.0, 100.0);
+        assert_eq!(list.polygon_count(), 0);
+        let mesh = MeshHandle(1, 12);
+        list.push_mesh(MeshDraw::new(mesh, IDENTITY, IDENTITY));
+        // A material's part of the mesh counts for its own triangles.
+        let mut part = MeshDraw::new(mesh, IDENTITY, IDENTITY);
+        part.indices = Some(6..15);
+        list.push_mesh(part);
+        list.push_depth_only(DepthOnlyDraw {
+            mesh: MeshHandle(2, 5),
+            world: IDENTITY,
+            view_projection: IDENTITY,
+            cull_backfaces: true,
+        });
+        list.push_shadow_volume(ShadowVolumeDraw {
+            vertices: vec![[0.0; 3]; 9],
+            world: IDENTITY,
+            view_projection: IDENTITY,
+        });
+        assert_eq!(list.polygon_count(), 12 + 3 + 5);
     }
 }

@@ -95,7 +95,13 @@ it; the original changes the display mode to the game's resolution, or
 keeps the desktop's with the aspect ratio maintained when the player
 asks (`DesktopRes`, `MaintainAspect`), which is what Luma always does.
 The mouse stays on the game's frame, as the original confines the
-cursor to the visible area (`CBRenderer::ClipCursor`).
+cursor to the visible area (`CBRenderer::ClipCursor`): the game sees a
+position clamped to its screen, and the player puts the system cursor
+back on the frame when it strays into the bars (and asks the window
+system to confine it to the window where that exists: Windows, X11,
+Wayland; macOS has no such grab). The confinement ends when the window
+loses the focus or is hidden (`UnclipCursor`) and with the window on
+exit; a window is never clipped.
 `Game.WindowedMode` tells the scripts which of the two the game runs in.
 
 In a window, the window opens where it was when the game last ended:
@@ -148,6 +154,33 @@ last the messages of `Game.Msg`: short
 texts in the system font from 20 pixels down the left edge, each for
 three seconds of the game timer, five at most (the oldest goes), as the
 original engine's `QuickMessage`; nothing shows without a system font.
+
+### The debug overlay
+
+After the quick messages the engine draws its debug lines in the system
+font (`CBGame::DisplayDebugInfo`, `CAdGame::DisplayDebugInfo`,
+`CBRenderD3D::DisplayDebugInfo`; `crates/luma-adventure/src/debug_info.rs`).
+Two switches turn it on, read when the game starts from the `Debug`
+section of `settings.ini` (else of the game's `wme.ini`), or set by
+`luma-player --debug` and `--show-fps`:
+
+- `ShowFPS`: `FPS: n` at the top left (a box of width 100).
+- `DebugMode` (what `Game.DebugMode` reads): right-aligned in the
+  screen width, at `y` 0 the video mode and renderer (`Mode: 640x480x32
+  (wgpu)`, or `Mode: 640x480 windowed (wgpu)`), at 20 `PolyCount: n`, at
+  70 `Running scripts: total (r:running w:waiting p:persistent)`, at 90
+  `Mouse: x, y (scene: x, y)` (the scene position adds the scroll offset
+  and removes the viewport's), at 110 `Scene: name (prev: name)` (`???`
+  for a name that is not there), at 130 `Timer: n` (the game timer) and
+  at 150 the name of the object under the mouse.
+
+`PolyCount` is the original's `m_NumPolygons`: two per quad plus the
+triangles of each lit and depth-only mesh the frame draws
+(`DrawList::polygon_count`); the line shows the previous frame's count,
+because the text is laid out in the update step and the count is known
+only once the frame is drawn. The renderer name is `wgpu` (the original's
+`Direct3D9`) and a full-screen mode says 32 bits. The original also
+opens a `wme.log` in debug mode; Luma does not.
 
 While a window is **system exclusive** (see
 [formats/window.md](formats/window.md)) the game is frozen: the timer

@@ -103,6 +103,7 @@ no code copied):
   crates/luma-adventure/src/registry.rs
   crates/luma-adventure/src/capture.rs
   crates/luma-adventure/src/accessibility.rs
+  crates/luma-adventure/src/debug_info.rs
   crates/luma-audio/src/audio.rs
   crates/luma-adventure/src/objects.rs
   crates/luma-adventure/src/natives_object.rs
@@ -116,6 +117,7 @@ no code copied):
   crates/luma-3d/src/scene_geometry.rs
   crates/luma-3d/src/path3d.rs
   crates/luma-3d/src/camera.rs
+  crates/luma-3d/src/overlay.rs
   docs/formats/xfile.md
   crates/luma-3d/src/xfile.rs
   crates/luma-3d/src/model.rs

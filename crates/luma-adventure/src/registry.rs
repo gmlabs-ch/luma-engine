@@ -36,6 +36,13 @@ pub const GAME_INI: &str = "wme.ini";
 /// The largest `wme.ini` read; a settings file is a few lines.
 const GAME_INI_MAX: u64 = 1 << 20;
 
+/// The section of the debug switches, and their keys.
+pub const DEBUG_SECTION: &str = "Debug";
+/// `Debug/DebugMode`: the game runs in debug mode.
+pub const DEBUG_MODE_KEY: &str = "DebugMode";
+/// `Debug/ShowFPS`: the frame rate is drawn.
+pub const SHOW_FPS_KEY: &str = "ShowFPS";
+
 /// The section the sound volumes live in.
 pub const AUDIO_SECTION: &str = "Audio";
 
@@ -243,6 +250,25 @@ impl World {
             let wave = volume as u32;
             self.sounds.audio.set_raw_master_volume((wave >> 16) as u16);
         }
+    }
+
+    /// Reads the `DebugMode` and `ShowFPS` switches of the `Debug`
+    /// section (`WinMain`): the player's `settings.ini`, else the game's
+    /// `wme.ini`. A switch already on (set by the front-end) stays on.
+    /// Called when the game starts.
+    pub(crate) fn init_debug(&mut self) {
+        let path = self.save_directory().join(SETTINGS_INI);
+        let own = std::fs::read_to_string(path)
+            .map(|text| Ini::parse(&text))
+            .unwrap_or_default();
+        let game = self.read_game_ini();
+        let on = |key: &str| {
+            own.get(DEBUG_SECTION, key)
+                .or_else(|| game.get(DEBUG_SECTION, key))
+                .is_some_and(|value| luma_script::atoi(value) != 0)
+        };
+        self.debug_mode |= on(DEBUG_MODE_KEY);
+        self.show_fps |= on(SHOW_FPS_KEY);
     }
 
     /// Writes the four volumes to the settings file, for the next run

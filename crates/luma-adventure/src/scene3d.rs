@@ -393,6 +393,7 @@ impl World {
             "WaypointsHeight" => {
                 Value::Float(scene3d.map_or(0.0, |s| f64::from(s.geometry.waypoint_height)))
             }
+            "ShowGeometry" => Value::Bool(self.scene().is_some_and(|v| v.scene.show_geometry)),
             "NumLights" => Value::Int(scene3d.map_or(0, |s| s.geometry.lights.len() as i32)),
             "MaxShadowType" => Value::Int(
                 self.scene()
@@ -413,6 +414,12 @@ impl World {
                 let height = value.get_float(self) as f32;
                 if let Some(scene3d) = self.scene3d_mut() {
                     scene3d.geometry.set_waypoint_height(height);
+                }
+            }
+            "ShowGeometry" => {
+                let show = value.get_bool(self);
+                if let Some(view) = self.scene_mut() {
+                    view.scene.show_geometry = show;
                 }
             }
             "MaxShadowType" => {

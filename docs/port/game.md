@@ -27,7 +27,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CBActiveRect::CBActiveRect` | n/a | The empty constructor is never used by the engine. |
 | `CBActiveRect::CBActiveRect #2` | done | `HitShape::Pixels` with `PixelArea` (`luma-adventure/src/input.rs`): owner, sub-frame image, rectangle, zoom per axis, `precise`. |
-| `CBActiveRect::CBActiveRect #3` | todo | The bounding rectangle of a legacy MS3D model (`C3DModel`, `CAdActor3D`). Luma refuses legacy 3D actors (`docs/3d-actors.md` section 13). |
+| `CBActiveRect::CBActiveRect #3` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
 | `CBActiveRect::CBActiveRect #4` | done | `HitArea::model3d` (`HitShape::Model3D`): the projected rectangle of an X model, confirmed by a pick into the model. |
 | `CBActiveRect::CBActiveRect #5` | done | `HitShape::Polygon` with `HitArea::layer_offset`: the region's points tested with the offset added back, as the rectangle is moved by `-Offset` and the offset kept. |
 | `CBActiveRect::~CBActiveRect` | replaced | Rust ownership. |
@@ -330,7 +330,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBGame::OnPaint` | n/a | Repaints a windowed DirectDraw surface on `WM_PAINT`; the window system and wgpu present the frame. |
 | `CBGame::OnWindowClose` | done | `Runtime::window_close` (`world.rs`), `GamePlayer::close_requested`. |
 | `CBGame::OnWinsock` | n/a | Winsock window message for the network manager. |
-| `CBGame::DisplayDebugInfo` | todo | Draws in the system font `FPS: n` (when `m_DEBUG_ShowFPS`) and, in debug mode, the video mode and renderer name, the script counts, the timer and the active object's name. Luma has no debug overlay. |
+| `CBGame::DisplayDebugInfo` | done | `crates/luma-adventure/src/debug_info.rs` `World::update_debug_info`: `FPS: n` (when `[Debug] ShowFPS` or `--show-fps`) at (0, 0) in a box of 100, and in debug mode (`[Debug] DebugMode` or `--debug`) the mode and renderer (`wgpu`, 32 bits when full screen), the script counts of `CScEngine::GetNumScripts` (`ScriptCounts::of`), the timer and the active object's name, right-aligned at the original's rows, in the system font after the quick messages. See `docs/game-loop.md`. |
 | `CBGame::SetMaxShadowType` | done | `World::game_set` `MaxShadowType`: clamped to 0..3; the downgrade of flat shadows without real-time support never applies (Luma supports them). |
 | `CBGame::GetMaxShadowType` | done | `World::three_d_draws` (`luma-adventure/src/actor3d.rs`): the lowest of the game's type and the scene's (`CAdGame`'s override), then the actor's own. |
 | `CBGame::GetDebugMgr` | n/a | The debugger. |

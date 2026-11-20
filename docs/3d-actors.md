@@ -1780,9 +1780,10 @@ timer, the scene's path) and `luma-3d` stays free of the renderer.
   as the original's texture stage ignores it (10.1).
 - **Shadows**: 10.4.
 - **Picking** uses the skinned triangles on the CPU (10.3), untouched.
-- **Not done**: the geometry overlay of `Scene.ShowGeometry` (wireframe in the
-  original, which needs a line pipeline the renderer does not have; the
-  flag is not stored either).
+- The geometry overlay of `Scene.ShowGeometry` is drawn from the edges
+  `luma_3d::overlay` computes, with `DrawList::line` (see
+  [rendering.md](rendering.md#the-geometry-overlay)); the flag is stored in
+  the scene and kept in saved games.
 
 ### 12.5 `luma-adventure`
 
@@ -1998,9 +1999,8 @@ models are not part of it.
 12. **Texture formats.** 3D textures in real games are `.bmp`, `.jpg`, `.tga`,
     `.png`, all loaded by `luma_formats::Image`; power-of-two limits do not
     apply on modern GPUs.
-13. **`ShowGeometry` overlay** is a debugging aid; is it wanted in the
-    player's UI or only in tests? Not drawn yet (12.4): the original's is
-    a wireframe and the renderer has no line pipeline.
+13. **`ShowGeometry` overlay** is a debugging aid, drawn when a script
+    sets the property (12.4, [rendering.md](rendering.md#the-geometry-overlay)).
 
 ## 17. Index of source locations
 

@@ -19,6 +19,7 @@ use luma_script::{Context, Engine, Host, NativeId, Natives, Return, State, Value
 
 use crate::accessibility::{Accessibility, SpeechKind};
 use crate::actor::{Actor, ActorEvent, WalkContext, scene_obstacles};
+use crate::debug_info::ScriptCounts;
 use crate::error::{Error, Result};
 use crate::fader::{Fader, Transition, TransitionKind};
 use crate::input::{Cursors, HitArea, Keyboard, Mouse};
@@ -236,6 +237,13 @@ pub struct World {
     pub(crate) fps: i32,
     pub(crate) fps_time: u64,
     pub(crate) fps_frames: i32,
+    /// Debug mode and the frame rate switch (`m_DEBUG_DebugMode`,
+    /// `m_DEBUG_ShowFPS`), the polygons the last frame drew
+    /// (`m_NumPolygons`) and the overlay's lines (`debug_info.rs`).
+    pub(crate) debug_mode: bool,
+    pub(crate) show_fps: bool,
+    pub(crate) polygons: std::cell::Cell<u32>,
+    pub(crate) debug_lines: Vec<crate::debug_info::DebugLine>,
     /// The messages of `Game.Msg` on screen, oldest first.
     pub(crate) quick_messages: Vec<QuickMessage>,
     /// Screenshots and thumbnails asked for, done with the next frame.
@@ -448,6 +456,10 @@ impl World {
             fps: 0,
             fps_time: 0,
             fps_frames: 0,
+            debug_mode: false,
+            show_fps: false,
+            polygons: std::cell::Cell::new(0),
+            debug_lines: Vec::new(),
             quick_messages: Vec::new(),
             captures: Vec::new(),
             loading_screen: None,
@@ -2274,6 +2286,9 @@ impl World {
             if let Some(white) = white {
                 self.draw_scene_fade(list, white);
             }
+            // `CAdScene::Display` shows the hidden geometry after the
+            // layers (`Scene.ShowGeometry`).
+            self.draw_geometry_overlay(list, white);
             list.set_clip(None);
         }
         self.draw_windows(list, true, white);
@@ -4068,6 +4083,7 @@ impl Runtime {
     pub fn start(&mut self) {
         self.world.init_accessibility();
         self.world.init_volumes();
+        self.world.init_debug();
         self.world.load_items(&mut self.engine);
         self.world.load_inventory_box(&mut self.engine);
         self.world.load_response_box(&mut self.engine);
@@ -4144,6 +4160,7 @@ impl Runtime {
             // (`CAdGame::DisplayContent`).
             self.world.update_video(&mut self.engine);
             self.world.update_quick_messages();
+            self.world.update_debug_info(ScriptCounts::of(&self.engine));
             self.world.update_loading_icon();
             self.settle_input();
             return self.world.take_log();
@@ -4173,6 +4190,7 @@ impl Runtime {
         self.world.update_inventory(&mut self.engine);
         self.world.prepare_inventory_texts();
         self.world.update_quick_messages();
+        self.world.update_debug_info(ScriptCounts::of(&self.engine));
         self.world.update_loading_icon();
         self.world.update_cursor();
         self.world.update_item_cursor(&self.engine);
@@ -4202,6 +4220,9 @@ impl Runtime {
     ) {
         let camera = self.world.camera();
         self.world.draw(list, &camera, white);
+        // `CBGame::DisplayDebugInfo` follows the quick messages.
+        self.world.draw_debug_info(list);
+        self.world.note_polygons(list.polygon_count());
     }
 
     /// Moves the mouse to a point in game pixels.

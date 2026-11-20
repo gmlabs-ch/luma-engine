@@ -383,7 +383,7 @@ Luma saved game is:
 | Bytes | Content |
 |-------|---------|
 | 8 | `LUMASAVE` |
-| 4 | layout version, little-endian; `21` today |
+| 4 | layout version, little-endian; `22` today |
 | 4 | length of the header, little-endian |
 | header | `SaveHeader` (game name, description, timestamp in seconds since the Unix epoch, optional PNG thumbnail), serialized with `postcard` |
 | rest | the body, `postcard` serialized and `zlib` compressed |
@@ -433,6 +433,9 @@ Version 21 keeps the caption slots 2 to 7 in the remembered scene
 states, the `SaveState` flag of region nodes, the sounds of sprite
 frames still playing, the videos, and the bytecode of the scripts saved
 in the middle of their code.
+
+Version 22 keeps `Scene.ShowGeometry` (the geometry overlay switch) in
+the scene definition, as `CAdScene::Persist` does.
 
 ## Checking a game
 
