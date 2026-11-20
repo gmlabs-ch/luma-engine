@@ -123,7 +123,11 @@ script resumes right after the call. Before the snapshot, the modules' `GameBefo
 and `BeforeSave` is raised on the game and runs to completion. Each
 module object is then asked for its bytes (`Module::save`); a module
 that refuses, or writes more than 16 MiB for one object, fails the save
-with the error logged and nothing written. When the file cannot be
+with the error logged and nothing written; all the objects together may
+write at most 64 MiB. The objects of a module that panicked are dropped
+from the game and the file, with a logged warning, so that the failure
+does not block saving. A file with more than 4096 objects of one module
+is refused at load. When the file cannot be
 written, the error is logged and the script's result becomes `false`,
 as the original engine pops its `true`.
 

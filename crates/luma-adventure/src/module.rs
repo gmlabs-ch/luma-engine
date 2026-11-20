@@ -60,6 +60,12 @@ pub const MAX_OBJECTS_PER_MODULE: usize = 4096;
 /// The most modules a world takes.
 pub const MAX_MODULES: usize = 64;
 
+/// The longest error or panic message kept, in bytes; a longer one is cut.
+pub const MAX_ERROR_BYTES: usize = 1024;
+
+/// The most state bytes all the objects of a world may save together.
+pub const MAX_TOTAL_STATE_BYTES: usize = 64 * 1024 * 1024;
+
 /// The most log lines a module may write in one call; the rest are dropped.
 pub const MAX_LOG_LINES_PER_CALL: usize = 32;
 
@@ -81,7 +87,15 @@ pub struct ModuleError(String);
 impl ModuleError {
     /// An error with a message for the script's author.
     pub fn new(message: impl Into<String>) -> ModuleError {
-        ModuleError(message.into())
+        let mut message = message.into();
+        if message.len() > MAX_ERROR_BYTES {
+            let mut end = MAX_ERROR_BYTES;
+            while !message.is_char_boundary(end) {
+                end -= 1;
+            }
+            message.truncate(end);
+        }
+        ModuleError(message)
     }
 
     /// The message.
@@ -106,7 +120,7 @@ impl From<&str> for ModuleError {
 
 impl From<String> for ModuleError {
     fn from(message: String) -> ModuleError {
-        ModuleError(message)
+        ModuleError::new(message)
     }
 }
 
@@ -346,8 +360,8 @@ struct Slot {
     name: String,
     /// Set by a panic: the module is not called again.
     stopped: Cell<bool>,
-    /// The module's objects that are alive.
-    live: usize,
+    /// The numbers of the module's objects that are alive.
+    live: std::collections::HashSet<ObjectId>,
 }
 
 impl Slot {
@@ -469,7 +483,8 @@ impl World {
     /// classes of its objects, and it only loads in a world that provides
     /// them all.
     pub fn register_module(&mut self, module: Box<dyn Module>) -> Result<(), ModuleError> {
-        let name = module.name().to_string();
+        let name = catch_unwind(AssertUnwindSafe(|| module.name().to_string()))
+            .map_err(|_| ModuleError::new("a module panicked in `name`"))?;
         let modules = &mut self.modules;
         if modules.slots.len() >= MAX_MODULES {
             return Err(ModuleError::new(format!(
@@ -519,7 +534,7 @@ impl World {
             module,
             name,
             stopped: Cell::new(false),
-            live: 0,
+            live: std::collections::HashSet::new(),
         });
         Ok(())
     }
@@ -602,7 +617,7 @@ impl World {
             world.module_script_error(ctx, &format!("new {class}"), &error);
             Some(Return::constructed(Value::Null))
         };
-        if self.modules.slots[slot].live >= MAX_OBJECTS_PER_MODULE {
+        if self.modules.slots[slot].live.len() >= MAX_OBJECTS_PER_MODULE {
             let error = ModuleError::new(format!(
                 "module '{}' already has {MAX_OBJECTS_PER_MODULE} objects",
                 self.modules.slots[slot].name
@@ -619,8 +634,12 @@ impl World {
             .and_then(|result| result);
         self.flush_module_log(slot, &mut cx);
         match made {
+            Ok(id) if self.modules.slots[slot].live.contains(&id) => {
+                let error = ModuleError::new(format!("object number {id} is already in use"));
+                fail(self, error)
+            }
             Ok(id) => {
-                self.modules.slots[slot].live += 1;
+                self.modules.slots[slot].live.insert(id);
                 let native = self.objects.insert(Kind::Module(ModuleObject {
                     class: class.to_string(),
                     id,
@@ -748,7 +767,7 @@ impl World {
 
     fn destruct_in(&mut self, slot: usize, object: ObjectId) {
         let entry = &mut self.modules.slots[slot];
-        entry.live = entry.live.saturating_sub(1);
+        entry.live.remove(&object);
         if let Err(error) = entry.guard(|module| module.destruct(object)) {
             self.log(error.to_string());
         }
@@ -795,7 +814,33 @@ impl World {
     /// objects, for a saved game to write; [`World::clear_module_state`]
     /// takes them out again. Fails, with nothing written, when a module
     /// refuses or writes more than [`MAX_STATE_BYTES`].
-    pub(crate) fn collect_module_state(&mut self) -> Result<(), String> {
+    pub(crate) fn collect_module_state(
+        &mut self,
+        engine: &mut luma_script::Engine,
+    ) -> Result<(), String> {
+        // The objects of a module that panicked cannot be saved: they
+        // are dropped from the game, with a warning, so that the module's
+        // failure does not stop every later save.
+        let stopped: Vec<NativeId> = self
+            .objects
+            .iter()
+            .filter_map(|(id, _)| {
+                let (slot, _) = self.module_object(id)?;
+                self.modules.slots[slot].stopped.get().then_some(id)
+            })
+            .collect();
+        for id in stopped {
+            if let Some((slot, object)) = self.module_object(id) {
+                self.log(format!(
+                    "Warning: a '{}' object of the stopped module '{}' is dropped from the saved game and the game",
+                    object.class, self.modules.slots[slot].name
+                ));
+                self.modules.slots[slot].live.remove(&object.id);
+                self.objects.remove(id);
+            }
+        }
+        self.flush_removed_objects(engine);
+        let mut total = 0usize;
         let handles: Vec<NativeId> = self
             .objects
             .iter()
@@ -818,6 +863,12 @@ impl World {
                     "{}: {} bytes of state are over the limit of {MAX_STATE_BYTES}",
                     object.class,
                     bytes.len()
+                ));
+            }
+            total += bytes.len();
+            if total > MAX_TOTAL_STATE_BYTES {
+                return Err(format!(
+                    "the module objects' state is over the limit of {MAX_TOTAL_STATE_BYTES} bytes together"
                 ));
             }
             if let Some(Kind::Module(o)) = self.objects.get_mut(id).map(|native| &mut native.kind) {
@@ -868,6 +919,19 @@ impl World {
                 ));
             }
         }
+        // No module may be made to hold more objects than it may have.
+        let mut per_slot: HashMap<usize, usize> = HashMap::new();
+        for (_, object) in &wanted {
+            let count = per_slot
+                .entry(self.modules.by_class[&object.class])
+                .or_insert(0);
+            *count += 1;
+            if *count > MAX_OBJECTS_PER_MODULE {
+                return Err(format!(
+                    "the saved game has more than {MAX_OBJECTS_PER_MODULE} objects of one module"
+                ));
+            }
+        }
         let mut made: Vec<Restored> = Vec::new();
         for (native, object) in wanted {
             let slot = self.modules.by_class[&object.class];
@@ -876,9 +940,21 @@ impl World {
                 .guard(|module| module.restore(&object.class, &object.state, &mut cx))
                 .and_then(|result| result);
             self.flush_module_log(slot, &mut cx);
+            // A number alive already, an object of the world being
+            // replaced or one just made, is not the module's to give
+            // again: the load is refused, atomically like any failure.
+            let result = result.and_then(|id| {
+                if self.modules.slots[slot].live.contains(&id) {
+                    Err(ModuleError::new(format!(
+                        "object number {id} is already in use"
+                    )))
+                } else {
+                    Ok(id)
+                }
+            });
             match result {
                 Ok(id) => {
-                    self.modules.slots[slot].live += 1;
+                    self.modules.slots[slot].live.insert(id);
                     made.push(Restored {
                         native,
                         id,

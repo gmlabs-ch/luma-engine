@@ -475,12 +475,12 @@ pub fn save_game(
     // itself: the picture is the frame the front-end renders next, and
     // goes into the file then (`World::deliver_frame`).
     let late_thumbnail = header.thumbnail.is_none() && world.thumbnail_size().is_some();
+    // The modules' objects write their bytes into the objects, which
+    // go into the file with the rest and are dropped again.
+    let collected = world.collect_module_state(engine);
     let snapshot = engine.snapshot();
     let sounds = world.sounds_state();
     let videos = world.videos_state();
-    // The modules' objects write their bytes into the objects, which
-    // go into the file with the rest and are dropped again.
-    let collected = world.collect_module_state();
     let body = collected.and_then(|()| {
         postcard::to_allocvec(&SavedRef {
             engine: &snapshot,

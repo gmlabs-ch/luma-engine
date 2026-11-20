@@ -561,11 +561,158 @@ fn a_module_that_panics_is_stopped_and_the_world_goes_on() {
             .unwrap_or(Value::Null),
         Value::Null
     );
-    // The world still runs: its frames go on and a save, which needs the
-    // stopped module's bytes, fails cleanly instead of writing a lie.
+    // The world still runs and a save still works: the stopped module's
+    // objects are dropped, with a warning, instead of blocking it.
     runtime.tick(16);
-    assert!(runtime.save_game(4, "x", true).is_err());
+    runtime.save_game(4, "x", true).unwrap();
+    let log = runtime.world.take_log();
+    assert!(
+        log.iter()
+            .any(|l| l.starts_with("Warning:") && l.contains("stopped module 'counter'")),
+        "{log:?}"
+    );
+    assert_eq!(module_objects(&runtime), 0);
+    runtime.load_game(4).unwrap();
     assert!(runtime.world.objects().len() > 3);
+}
+
+/// A module with set numbers and sizes, for the limits.
+struct Fixed {
+    id: ObjectId,
+    step: ObjectId,
+    state: usize,
+    panic_in_name: bool,
+}
+
+impl Fixed {
+    fn new(id: ObjectId, step: ObjectId, state: usize) -> Fixed {
+        Fixed {
+            id,
+            step,
+            state,
+            panic_in_name: false,
+        }
+    }
+
+    fn next(&mut self) -> ObjectId {
+        let id = self.id;
+        self.id += self.step;
+        id
+    }
+}
+
+impl Module for Fixed {
+    fn name(&self) -> &str {
+        assert!(!self.panic_in_name, "no name");
+        "fixed"
+    }
+    fn classes(&self) -> Vec<String> {
+        vec!["Counter".into()]
+    }
+    fn construct(&mut self, _: &str, _: &[Value], _: &mut ModuleContext) -> ModuleResult<ObjectId> {
+        Ok(self.next())
+    }
+    fn restore(&mut self, _: &str, _: &[u8], _: &mut ModuleContext) -> ModuleResult<ObjectId> {
+        Ok(self.next())
+    }
+    fn call_method(
+        &mut self,
+        _: ObjectId,
+        _: &str,
+        _: &[Value],
+        _: &mut ModuleContext,
+    ) -> ModuleResult<Option<Value>> {
+        Ok(None)
+    }
+    fn destruct(&mut self, _: ObjectId) {}
+    fn save(&mut self, _: ObjectId) -> ModuleResult<Vec<u8>> {
+        Ok(vec![0; self.state])
+    }
+}
+
+fn open_fixed(script: &str, fixed: Fixed) -> Runtime {
+    let dir = game(script);
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    runtime.world.register_module(Box::new(fixed)).unwrap();
+    runtime.start();
+    runtime
+}
+
+fn module_objects(runtime: &Runtime) -> usize {
+    runtime
+        .world
+        .objects()
+        .iter()
+        .filter(|(_, n)| matches!(n.kind, Kind::Module(_)))
+        .count()
+}
+
+#[test]
+fn a_module_cannot_hand_out_a_number_that_is_alive() {
+    let script = "global a = new Counter(); global b = new Counter();";
+    let mut runtime = open_fixed(script, Fixed::new(7, 0, 0));
+    let log = runtime.tick(16);
+    assert!(
+        errors(&log).iter().any(|l| l.contains("already in use")),
+        "{log:?}"
+    );
+    assert_eq!(module_objects(&runtime), 1, "the second was refused");
+    assert_eq!(runtime.engine.global("b").cloned(), Some(Value::Null));
+}
+
+#[test]
+fn a_load_whose_numbers_collide_is_refused_and_changes_nothing() {
+    let mut runtime = open_fixed("global a = new Counter();", Fixed::new(7, 0, 0));
+    runtime.tick(16);
+    runtime.save_game(5, "x", true).unwrap();
+    // The module answers 7 again for the restored object, the number of
+    // the live one.
+    let err = runtime.load_game(5).unwrap_err();
+    assert!(err.contains("already in use"), "{err}");
+    assert_eq!(module_objects(&runtime), 1);
+    runtime.tick(16);
+}
+
+#[test]
+fn the_state_of_all_objects_together_is_bounded() {
+    let script = "global a = new Counter(); global b = new Counter(); \
+        global c = new Counter(); global d = new Counter(); global e = new Counter();";
+    let big = luma_adventure::module::MAX_STATE_BYTES;
+    let mut runtime = open_fixed(script, Fixed::new(1, 1, big));
+    runtime.tick(16);
+    assert_eq!(module_objects(&runtime), 5);
+    // Each is within its own limit; together they are over 64 MiB.
+    let err = runtime.save_game(6, "big", true).unwrap_err();
+    assert!(err.contains("together"), "{err}");
+    // Nothing of the failed save stays in the live objects.
+    assert!(
+        runtime
+            .world
+            .objects()
+            .iter()
+            .all(|(_, n)| !matches!(&n.kind, Kind::Module(o) if !o.state.is_empty()))
+    );
+}
+
+#[test]
+fn error_messages_are_capped_on_a_character_boundary() {
+    let long = "\u{e9}".repeat(4000);
+    let error = ModuleError::new(long.clone());
+    assert!(error.message().len() <= luma_adventure::module::MAX_ERROR_BYTES);
+    assert!(long.starts_with(error.message()));
+    assert_eq!(ModuleError::from(long).message(), error.message());
+}
+
+#[test]
+fn a_module_that_panics_in_name_is_refused() {
+    let dir = game(GAME_SCRIPT);
+    let vfs = Vfs::open_game(&dir).unwrap();
+    let mut runtime = Runtime::with_audio(vfs, Audio::null()).unwrap();
+    let mut fixed = Fixed::new(0, 0, 0);
+    fixed.panic_in_name = true;
+    let err = runtime.world.register_module(Box::new(fixed)).unwrap_err();
+    assert!(err.message().contains("name"), "{err}");
 }
 
 #[test]
