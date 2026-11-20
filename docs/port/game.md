@@ -27,7 +27,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 |---|---|---|
 | `CBActiveRect::CBActiveRect` | n/a | The empty constructor is never used by the engine. |
 | `CBActiveRect::CBActiveRect #2` | done | `HitShape::Pixels` with `PixelArea` (`luma-adventure/src/input.rs`): owner, sub-frame image, rectangle, zoom per axis, `precise`. |
-| `CBActiveRect::CBActiveRect #3` | todo | The bounding rectangle of a legacy MS3D model (`C3DModel`, `CAdActor3D`). Luma refuses legacy 3D actors (`docs/3d-actors.md` section 13). |
+| `CBActiveRect::CBActiveRect #3` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
 | `CBActiveRect::CBActiveRect #4` | done | `HitArea::model3d` (`HitShape::Model3D`): the projected rectangle of an X model, confirmed by a pick into the model. |
 | `CBActiveRect::CBActiveRect #5` | done | `HitShape::Polygon` with `HitArea::layer_offset`: the region's points tested with the offset added back, as the rectangle is moved by `-Offset` and the offset kept. |
 | `CBActiveRect::~CBActiveRect` | replaced | Rust ownership. |

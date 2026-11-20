@@ -197,7 +197,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `C3DMaterial::SetTexture` | partial | deliberate: `model.rs` `load_material` (the material's name is the texture file's base name) and `luma-adventure/src/draw3d.rs` `ensure_texture` (default colour key): the texture is uploaded with ONE mip level as the original asks D3DX for (`MipLevels = 1`; `docs/rendering.md` corrected). A missing file is `invalid.bmp` in the original; Luma draws the material untextured (opaque). |
 | `C3DMaterial::SetSprite` | done | `draw3d.rs` `ScriptTexture::Sprite`, `Still`: the sprite replaces the texture; the material keeps its name. |
 | `C3DMaterial::SetTheora` | done | `draw3d.rs` `ScriptTexture::Video`: the video replaces the texture; the material keeps its name. |
-| `C3DMaterial::SetEffect` | todo | Attaches or clears an effect and its parameters on the material; see `C3DEffect::CreateFromFile`. |
+| `C3DMaterial::SetEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 | `C3DMaterial::GetSurface` | done | `draw3d.rs` `update_override`, `override_texture`: the video's current frame, else the sprite's current frame (stepped on the game timer), else the material's texture. |
 
 ## `wme_base/3DMesh.cpp`
@@ -207,11 +207,11 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `C3DMesh::C3DMesh` | partial | For the scene geometry: `luma-3d/src/scene_geometry.rs` meshes (visible/active by default). The material index and the per-mesh visibility of Milkshape models have no counterpart (see `C3DModel::LoadFile`). |
 | `C3DMesh::~C3DMesh` | replaced | Rust ownership. |
 | `C3DMesh::Cleanup` | replaced | Rust ownership. |
-| `C3DMesh::FillVertexBuffer` | todo | Fills the vertex buffer of a Milkshape model mesh (position, normal, texture coordinates per face corner). Not in Luma with the Milkshape models. |
-| `C3DMesh::CreateVertexBuffer` | todo | Allocates that vertex buffer. Not in Luma with the Milkshape models. |
+| `C3DMesh::FillVertexBuffer` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
+| `C3DMesh::CreateVertexBuffer` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
 | `C3DMesh::FillVertexBuffer #2` | todo | Fills a coloured vertex buffer for the geometry overlay (`Scene.ShowGeometry`: walk planes blue `0x700000FF`, blocks red `0x70FF0000`, generic meshes green `0x7000FF00`). Luma does not draw the overlay (`docs/rendering.md`, Not yet). |
 | `C3DMesh::ComputeNormals` | todo | Averages the face normals per vertex (`(v2 - v1) x (v3 - v2)`, normalised) for the geometry meshes; only the overlay drawing uses them. Comes with the overlay. |
-| `C3DMesh::Persist` | todo | Saves a mesh's visibility (Milkshape `ShowMesh`/`HideMesh`). Not in Luma; the geometry nodes' active flags are saved separately (`scene3d.rs` `Saved::nodes`). |
+| `C3DMesh::Persist` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
 
 ## `wme_base/3DModel.cpp`
 
@@ -319,8 +319,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
 | `C3DUtils::IntersectTriangle` | done | `luma-3d/src/math.rs` `intersect_triangle`: single-sided, `det < 0.0001` fails, no `t >= 0` test, the result is where the line meets the triangle's plane. |
-| `C3DUtils::MatrixSetTranslation` | todo | Writes a translation into a matrix; used only by the Milkshape model (`C3DModel::AnimSetupJoints`, `AnimAdvance`). Comes with it. |
-| `C3DUtils::MatrixSetRotation` | todo | Writes the rotation of three Euler angles (Milkshape order) into a matrix; used only by the Milkshape model. Comes with it. |
+| `C3DUtils::MatrixSetTranslation` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
+| `C3DUtils::MatrixSetRotation` | excluded | excluded on 20 November 2026: the legacy Milkshape (MS3D) actors are not ported (decision of the maintainer); Luma refuses them (`docs/3d-actors.md` section 13) |
 | `C3DUtils::PickMakeRay` | n/a | Never called by the engine. |
 | `C3DUtils::PickGetIntersect` | done | `math.rs` `pick_get_intersect`: segment against the triangle's plane only, normal `(v1 - v0) x (v2 - v1)`, parallel below `0.00001`, position within 0 to 1. |
 | `C3DUtils::DecomposeMatrixSimple` | done | `math.rs` `decompose_simple`: translation row, column lengths as the scale, the quaternion of the matrix as it is. |
@@ -707,8 +707,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXFrameNode::HasChildren` | done | `model.rs` `Model::from_xfile` fails with `NoFrame` when the root has no child frame. |
 | `CXFrameNode::SetMaterialSprite` | done | `luma-adventure/src/actor3d.rs` `set_material_texture` and `draw3d.rs` `override_texture`: by material name without case, on every mesh of the actor's model. |
 | `CXFrameNode::SetMaterialTheora` | done | Same path as `SetMaterialSprite` with `MaterialTexture::Theora`. |
-| `CXFrameNode::SetMaterialEffect` | todo | Passes an effect to the meshes' materials of that name; Luma has no effects (see `C3DEffect::CreateFromFile`). |
-| `CXFrameNode::RemoveMaterialEffect` | todo | Removes the effect from the materials of that name; see `C3DEffect::CreateFromFile`. |
+| `CXFrameNode::SetMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CXFrameNode::RemoveMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 | `CXFrameNode::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
 | `CXFrameNode::RestoreDeviceObjects` | n/a | Direct3D device loss. |
 
@@ -727,8 +727,8 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXMesh::PickPoly` | done | `animation.rs` `AnimatedModel::pick` with `math::intersect_triangle`, NaN vertices skipped. |
 | `CXMesh::SetMaterialSprite` | partial | `draw3d.rs` `override_texture`: the sprite's current frame, first sub-frame, textures the material. Difference: when the sprite's frame has no usable image Luma falls back to the material's own texture; the original draws the material untextured. |
 | `CXMesh::SetMaterialTheora` | done | `draw3d.rs` `ScriptTexture::Video`: the video frame textures the material. |
-| `CXMesh::SetMaterialEffect` | todo | Sets an effect and its parameters on the materials of that name; see `C3DEffect::CreateFromFile`. |
-| `CXMesh::RemoveMaterialEffect` | todo | Clears the effect of the materials of that name; see `C3DEffect::CreateFromFile`. |
+| `CXMesh::SetMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CXMesh::RemoveMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 | `CXMesh::InvalidateDeviceObjects` | n/a | Direct3D device loss. |
 | `CXMesh::RestoreDeviceObjects` | n/a | Direct3D device loss. |
 
@@ -774,10 +774,10 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CXModel::ParseEvent FRAME` | done | `AnimationEventDef::frame`, clamped by `AnimationSet::add_event`. |
 | `CXModel::SetMaterialSprite` | done | `luma-adventure/src/natives_actor3d.rs` and `actor3d.rs` `set_material_texture`: one entry per material name, replaced when set again; `draw3d.rs` loads the sprite. |
 | `CXModel::SetMaterialTheora` | partial | Same with `MaterialTexture::Theora`, looping. Difference: the original calls `Play(VID_PLAY_POS, 0, 0, false, false, true)` with the default volume, so a video with a sound track is heard at the sound-effects volume; Luma's `VideoPlayer::texture_loop` (`luma-adventure/src/video.rs`) plays it without sound: the player of a material lives in the drawing cache (`draw3d.rs` `update_override`), which has no access to the sound system; it has to move to the world's update for the track to play. |
-| `CXModel::SetMaterialEffect` | todo | Loads an effect file and puts it on the materials of a name (`Actor3D.SetEffect`, `EFFECT` block). Luma's native logs a stub and returns false (`natives_actor3d.rs`); see `C3DEffect::CreateFromFile`. |
-| `CXModel::RemoveMaterialEffect` | todo | Removes the effect of a material (`Actor3D.RemoveEffect`); stub in Luma. |
-| `CXModel::SetMaterialEffectParam` | todo | Stores a named effect parameter from a script value (`Actor3D.SetEffectParam`); stub in Luma. |
-| `CXModel::SetMaterialEffectParam #2` | todo | Stores a named effect parameter as a vector (`SetEffectParamVector`, `SetEffectParamColor`); stub in Luma. |
+| `CXModel::SetMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CXModel::RemoveMaterialEffect` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CXModel::SetMaterialEffectParam` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
+| `CXModel::SetMaterialEffectParam #2` | excluded | excluded on 11 November 2026: Direct3D 9 HLSL material effects are not ported (decision of the maintainer); models draw with the standard lighting |
 | `CXModel::InitializeSimple` | partial | After loading a saved game: Luma puts the material textures back (`materials` are saved and `draw3d.rs` reopens them). The effects and the `ParentModel` bone lookup are missing with those features. |
 | `CXModel::Persist` | partial | `luma-adventure/src/actor3d.rs` `ModelSlot` (animation state, channels), `merged_files`, `materials`; the model is reloaded from its file and merged files. Not saved: effect files and parameters (no effects), and the shadow model. The box, rectangle and pick matrices are recomputed. |
 | `CXModel::InvalidateDeviceObjects` | n/a | Direct3D device loss. |

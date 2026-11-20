@@ -63,7 +63,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBPlugin::CBPlugin` | n/a | Holds the handle and path of a Windows DLL. |
 | `CBPlugin::~CBPlugin` | n/a | Frees the DLL. |
 | `CBPlugin::Create` | n/a | Reads a DLL's exports (`GetPluginInfo`, `GetSupportedClasses`), refuses plugins built for WME older than 1.5.2 and keeps the list of script class names the plugin provides. What Luma lacks is in `HandleExternalCall`. |
-| `CBPlugin::HandleExternalCall` | todo | A script calling `new <Class>(...)` with a class name a plugin declared gets a plugin object built by that plugin. Luma has no way for a module to add a script class to the adventure game: `World::call_function` (`crates/luma-adventure/src/world.rs`) only knows its built-in classes, so games written for a plugin (`wme_*.dll`: Steam, SQLite, snow, HTTP...) lose those classes. |
+| `CBPlugin::HandleExternalCall` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
 
 ## `wme_base/BPluginMgr.cpp`
 
@@ -75,14 +75,14 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBPluginMgr::RegisterPlugins #2` | n/a | `_findfirst` over `wme_*.dll` in one directory. |
 | `CBPluginMgr::RegisterPlugin` | n/a | `LoadLibrary` of one DLL (skipping `wme_report.dll` and `wme_console.dll`), kept only when it exports `GetPluginInfo`, `GetSupportedClasses` and `GetClassDefinition`. |
 | `CBPluginMgr::RegisterClasses` | done | Declares each plugin class name to the script compiler as an external function (`ExtDefineFunction`): `Natives::function` in `crates/luma-compiler/src/lib.rs` adds a name to the compiler's list the same way. Running such a class is the missing part, see `HandleExternalCall`. |
-| `CBPluginMgr::HandleExternalCall` | todo | Called by `CBGame::ExternalCall` for any name the engine does not know: each plugin is tried in turn. No equivalent hook in Luma: see `CBPlugin::HandleExternalCall`. |
+| `CBPluginMgr::HandleExternalCall` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
 | `CBPluginMgr::GetDllHandle` | n/a | Finds the DLL of a class name, to rebuild plugin objects after a load. |
 | `CBPluginMgr::AddObject` | n/a | Bookkeeping of live plugin objects; Luma's object table would hold them once plugin classes exist. |
 | `CBPluginMgr::RemoveObject` | n/a | Bookkeeping of live plugin objects; Luma's object table would hold them once plugin classes exist. |
-| `CBPluginMgr::SubscribeEvent` | todo | `IWmeGame::SubscribeEvent`: a plugin object asks to receive one of seven engine events (see `ApplyEvent`). Luma has no event subscription for modules. |
-| `CBPluginMgr::UnsubscribeEvent` | todo | Counterpart of `SubscribeEvent`. |
-| `CBPluginMgr::ApplyEvent` | todo | Sends an engine event to every subscribed plugin object: `UPDATE` (each frame the game updates), `SCENE_DRAW_BEGIN` and `SCENE_DRAW_END` (around the scene's display, with the scene), `SCENE_INIT` and `SCENE_SHUTDOWN` (scene change), `GAME_BEFORE_SAVE` and `GAME_AFTER_LOAD`. Luma raises none of these to code outside `luma-adventure`: a module cannot run per frame, draw with the scene or react to a save. |
-| `CBPluginMgr::ValidObject` | todo | Lets `CBGame::ValidObject` accept plugin objects as script values. Nothing to accept in Luma until plugin classes exist. |
+| `CBPluginMgr::SubscribeEvent` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
+| `CBPluginMgr::UnsubscribeEvent` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
+| `CBPluginMgr::ApplyEvent` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
+| `CBPluginMgr::ValidObject` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
 
 ## `wme_base/BRegistry.cpp`
 
@@ -176,7 +176,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CDlgPageDisplay::UpdateMultisample` | n/a | Fills the anti-aliasing list from the Direct3D modes; the choice itself is in `OnFSAASelected`. |
 | `CDlgPageDisplay::OnDeviceSelected` | replaced | Choice of the video adapter: `Gpu::with_surface` (`luma-render`) takes the adapter wgpu proposes for the window; the player cannot pick another. |
 | `CDlgPageDisplay::OnColorsSelected` | n/a | 16 or 32 bit full-screen colour depth of a Direct3D mode; Luma always renders in 32 bits. |
-| `CDlgPageDisplay::OnFSAASelected` | todo | Anti-aliasing level (none, 2x to 16x) the player picks when the game allows advanced settings; `CBRenderD3D` creates its device with it, which smooths the edges of 3D characters. `luma-render` always renders with one sample (`sample_count: 1`) and has no setting for it. |
+| `CDlgPageDisplay::OnFSAASelected` | n/a | The anti-aliasing choice of the Win32 settings dialog, which Luma does not have. `luma-render` always renders with one sample (`sample_count: 1`) and offers no setting for it, so the edges of 3D characters are not smoothed by multisampling |
 | `CDlgPageDisplay::OnAccelerated` | n/a | Switch between Direct3D and the DirectDraw software renderer. |
 | `CDlgPageDisplay::OnWindowed` | partial | deliberate: no dialog; the choice is made by `luma-player` (`play` in `crates/luma-player/src/main.rs`, `view::windowed_mode`): full screen only when the game forbids the window (`ALLOW_WINDOWED_MODE`, `GameSettings::allow_windowed`, overridden by `Debug/AllowWindowed`), else `--fullscreen` or `--windowed`, else `Video/Windowed` of `settings.ini`, else a window. Full screen is a borderless window over the desktop with the frame letterboxed (`WindowConfig::fullscreen`, `crates/luma-render/src/window.rs`); `Game.WindowedMode` tells which (`World::set_windowed`). Kept different: without a choice Luma opens a window, where the original's dialog proposes full screen (`Video/Windowed` false until chosen). |
 | `CDlgPageDisplay::OnTL` | n/a | Direct3D hardware transform and lighting. |
@@ -194,7 +194,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CDlgPageSound::RegisterControls` | n/a | Fills the device list and shows a warning when `REQUIRE_SOUND` is set and no sound card exists. |
 | `CDlgPageSound::IsValid` | n/a | OK is greyed while no audio device is selected (only possible when the game requires sound and there is none). |
 | `CDlgPageSound::UpdateDevices` | n/a | Fills the DirectSound device list. |
-| `CDlgPageSound::OnDeviceSelected` | todo | The player picks the output device, or `[no sound]` (offered unless the game sets `REQUIRE_SOUND`), kept in `Audio/DeviceGuid` and `Audio/NoSound` for the next launches. Luma plays on the system's default device; silence is only the `--mute` option of `luma-player`, given at each launch, and `REQUIRE_SOUND` is not read. |
+| `CDlgPageSound::OnDeviceSelected` | replaced | The output device choice of the Win32 settings dialog. Luma plays on the system's default device; silence is the `--mute` option of `luma-player`, given at each launch. `REQUIRE_SOUND` is not read |
 
 ## `wme_base/DlgSettings.cpp`
 
@@ -317,16 +317,16 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 
 | Function or key | Status | Luma, or what is missing |
 |---|---|---|
-| `CSXPluginObject::CSXPluginObject` | todo | The script object of a plugin class: a table of eight callbacks (construct, construct empty, destruct, call method, set and get property, serialize, receive event), an id the plugin chose and the subscribed events, all cleared. No equivalent in Luma. |
-| `CSXPluginObject::~CSXPluginObject` | todo | Calls the plugin's `Destruct` with the object's id when the script object dies. |
+| `CSXPluginObject::CSXPluginObject` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
+| `CSXPluginObject::~CSXPluginObject` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
 | `CSXPluginObject::Initialize` | n/a | Fetches the class's callback table from the DLL (`GetClassDefinition`). |
-| `CSXPluginObject::Construct` | todo | Calls the plugin's `Construct` with the owner object, the game, the calling script and its stack (the constructor's arguments); without one, the arguments are dropped. |
-| `CSXPluginObject::ScCallMethod` | todo | Offers the method to the plugin's `CallMethod` first, with the script and the stack; falls back to `CBObject`'s methods when the plugin does not handle it. |
-| `CSXPluginObject::ScGetProperty` | todo | Offers the property to the plugin's `GetProperty` first, then `CBObject`'s. |
-| `CSXPluginObject::ScSetProperty` | todo | Offers the property to the plugin's `SetProperty` first; else `Ready` sets the object's ready flag (which `WaitFor` polls), else `CBObject`'s. `docs/compatibility.md` lists `Ready` as a no-op. |
-| `CSXPluginObject::ScToString` | todo | `[plugin object]`. |
-| `CSXPluginObject::Persist` | todo | Saves the class name, the subscribed events and whatever the plugin's `Serialize` writes; on load, rebuilds the object with `ConstructEmpty` and fails the load ('Error restoring plugin class') when the class is gone. Luma's saved games have no slot for a module's state. |
-| `CSXPluginObject::ApplyEvent` | todo | Calls the plugin's `ReceiveEvent` when the object subscribed to the event; see `CBPluginMgr::ApplyEvent`. |
+| `CSXPluginObject::Construct` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
+| `CSXPluginObject::ScCallMethod` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
+| `CSXPluginObject::ScGetProperty` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
+| `CSXPluginObject::ScSetProperty` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
+| `CSXPluginObject::ScToString` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
+| `CSXPluginObject::Persist` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
+| `CSXPluginObject::ApplyEvent` | excluded | excluded on 20 November 2026: the plugin DLL interface (`wme_*.dll`, `IWmeGame`, native x86 Windows libraries) is not ported (the plugin ABI is out of scope, 20 November 2026); Luma's counterpart is the module system (`docs/modules.md`), in Rust, in the same build, with no hook that adds a script class or receives engine events yet |
 
 ## `wme_base/SXTcpClient.cpp`
 
