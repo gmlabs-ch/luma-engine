@@ -520,9 +520,8 @@ impl World {
             "SuspendedRendering" => Value::Bool(self.suspended_rendering),
             "SoundAvailable" => Value::Bool(self.sounds.audio.device().is_some()),
             "SuppressScriptErrors" => Value::Bool(self.suppress_script_errors),
-            "DebugMode" | "AutorunDisabled" | "AutoSaveOnExit" | "CursorHidden" => {
-                Value::Bool(false)
-            }
+            "DebugMode" => Value::Bool(self.debug_mode),
+            "AutorunDisabled" | "AutoSaveOnExit" | "CursorHidden" => Value::Bool(false),
             "AcceleratedMode" | "Accelerated" => Value::Bool(true),
             "SFXVolume" | "SpeechVolume" | "MusicVolume" | "MasterVolume" => {
                 return Some(self.volume_property(name));

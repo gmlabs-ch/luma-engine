@@ -51,6 +51,7 @@ pub mod actor;
 pub mod actor3d;
 pub mod capture;
 pub mod code_page;
+pub mod debug_info;
 #[cfg(feature = "3d")]
 pub mod draw3d;
 mod error;

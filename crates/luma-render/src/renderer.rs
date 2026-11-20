@@ -496,7 +496,7 @@ impl Renderer {
                 index_count: indices.len() as u32,
             },
         );
-        MeshHandle(id)
+        MeshHandle(id, (indices.len() / 3) as u32)
     }
 
     /// Replaces the vertices of a mesh (the skinned positions and normals

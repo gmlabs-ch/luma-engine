@@ -330,7 +330,7 @@ Every function and definition-file key of these Wintermute 1.x source files. Gen
 | `CBGame::OnPaint` | n/a | Repaints a windowed DirectDraw surface on `WM_PAINT`; the window system and wgpu present the frame. |
 | `CBGame::OnWindowClose` | done | `Runtime::window_close` (`world.rs`), `GamePlayer::close_requested`. |
 | `CBGame::OnWinsock` | n/a | Winsock window message for the network manager. |
-| `CBGame::DisplayDebugInfo` | todo | Draws in the system font `FPS: n` (when `m_DEBUG_ShowFPS`) and, in debug mode, the video mode and renderer name, the script counts, the timer and the active object's name. Luma has no debug overlay. |
+| `CBGame::DisplayDebugInfo` | done | `crates/luma-adventure/src/debug_info.rs` `World::update_debug_info`: `FPS: n` (when `[Debug] ShowFPS` or `--show-fps`) at (0, 0) in a box of 100, and in debug mode (`[Debug] DebugMode` or `--debug`) the mode and renderer (`wgpu`, 32 bits when full screen), the script counts of `CScEngine::GetNumScripts` (`ScriptCounts::of`), the timer and the active object's name, right-aligned at the original's rows, in the system font after the quick messages. See `docs/game-loop.md`. |
 | `CBGame::SetMaxShadowType` | done | `World::game_set` `MaxShadowType`: clamped to 0..3; the downgrade of flat shadows without real-time support never applies (Luma supports them). |
 | `CBGame::GetMaxShadowType` | done | `World::three_d_draws` (`luma-adventure/src/actor3d.rs`): the lowest of the game's type and the scene's (`CAdGame`'s override), then the actor's own. |
 | `CBGame::GetDebugMgr` | n/a | The debugger. |

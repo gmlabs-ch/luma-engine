@@ -161,7 +161,7 @@ How the list was made. For every class with a script interface, the names tested
 
 - WME source: src/engine_core/wme_base/BGame.cpp
 - Hierarchy and Luma: CBObject → CBGame → CAdGame; Luma: World (`game_call`, `game_get`, `game_set`, `natives_sound.rs`, `accessibility.rs`)
-- Count: 154 done, 0 todo, 11 no-op
+- Count: 155 done, 0 todo, 10 no-op
 
 | WME name | Kind | State | Note |
 |----------|------|-------|------|
@@ -230,7 +230,7 @@ How the list was made. For every class with a script interface, the names tested
 | `ActiveObject` | get | **done** | The object under the mouse. |
 | `ScreenWidth`, `ScreenHeight` | get | **done** | Game resolution. |
 | `Interactive` | get/set | **done** | Whether the player can interact (false in cutscenes). |
-| `DebugMode` | get | **no-op** | True in debug mode (`-debug`); Luma has none and reads false. |
+| `DebugMode` | get | **done** | True in debug mode: `[Debug] DebugMode=1` of `settings.ini` or the game's `wme.ini`, or `luma-player --debug`. Debug mode draws the overlay (`docs/game-loop.md`); the original also opens a `wme.log` file, which Luma does not (its log goes to the front-end). |
 | `SoundAvailable` | get | **done** | True when a sound device is present (an audio device was opened). |
 | `SFXVolume`, `SpeechVolume`, `MusicVolume`, `MasterVolume` | get/set | **done** | Global volumes (percent), the property form of the `SetGlobal...Volume` methods. WME logs an "obsolete" warning at every access; Luma once, on write. |
 | `Keyboard` | get | **done** | The keyboard state object. |
@@ -1033,7 +1033,7 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | Script values | 1 | 0 | 0 | 1 |
 | CBScriptHolder | 10 | 0 | 1 | 11 |
 | CBObject | 72 | 0 | 0 | 72 |
-| CBGame | 154 | 0 | 11 | 165 |
+| CBGame | 155 | 0 | 10 | 165 |
 | CAdGame | 65 | 0 | 0 | 65 |
 | Window hook defined in CAdGame | 1 | 0 | 0 | 1 |
 | CAdScene | 81 | 0 | 2 | 83 |
@@ -1072,9 +1072,9 @@ A frame with a single sub-frame answers that sub-frame's properties and methods 
 | CAdActor3DX | 62 | 0 | 5 | 67 |
 | CAdAttach3DX | 7 | 0 | 0 | 7 |
 | Events raised on objects | 21 | 0 | 0 | 21 |
-| **All** | **1086** | **0** | **67** | **1153** |
+| **All** | **1087** | **0** | **66** | **1153** |
 
-Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1065 done, 0 todo, 67 no-op.
+Of the total, 21 are events (21 done, 0 todo) and the rest are methods, properties, functions, constructors and global variables: 1066 done, 0 todo, 66 no-op.
 
 ## WME classes Luma lacks entirely
 
