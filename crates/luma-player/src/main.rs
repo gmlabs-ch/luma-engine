@@ -20,6 +20,7 @@ use luma::render::winit::event::{
     ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent,
 };
 use luma::render::winit::keyboard::{Key, ModifiersState, NamedKey};
+use luma::render::winit::window::CursorGrabMode;
 use luma::render::{App, DrawList, Flow, Frame, Gpu, Offscreen, Renderer, WindowConfig};
 
 const USAGE: &str = "\
@@ -1280,6 +1281,8 @@ fn play(vfs: Vfs, settings: GameSettings, options: &Options) -> Result<(), Strin
         windowed,
         window_position: None,
         warp_failed: false,
+        clip_warp: None,
+        cursor_clipped: false,
         focused: true,
         occluded: false,
     };
@@ -1330,6 +1333,11 @@ struct GamePlayer {
     window_position: Option<(i32, i32)>,
     /// The system refused to move its cursor (said once).
     warp_failed: bool,
+    /// Where to put the system cursor back after it left the frame of a
+    /// full-screen game (`CBRenderer::ClipCursor`).
+    clip_warp: Option<PhysicalPosition<f64>>,
+    /// Whether the system was asked to confine the cursor to the window.
+    cursor_clipped: bool,
     /// Whether the window has the keyboard focus.
     focused: bool,
     /// Whether the window is minimised or wholly hidden.
@@ -1346,6 +1354,39 @@ impl GamePlayer {
         let active = focused && !occluded;
         if active != self.runtime.is_active() {
             self.runtime.activate(active, false);
+        }
+    }
+
+    /// Confines the system cursor to the full-screen frame while the
+    /// game is active and releases it when the window loses the focus
+    /// or is hidden (`CBRenderer::ClipCursor`, `UnclipCursor`): the
+    /// window system is asked to keep the cursor in the window where it
+    /// can (not macOS), and the cursor found in the bars of the
+    /// letterbox is moved back onto the frame, which the original gets
+    /// from its clip rectangle. The grab goes with the window when the
+    /// game exits.
+    fn clip_cursor(&mut self, window: &luma::render::winit::window::Window) {
+        let want = view::clips_cursor(self.windowed, self.focused, self.occluded);
+        if want != self.cursor_clipped {
+            self.cursor_clipped = want;
+            // Refused where the system cannot confine a cursor; the
+            // move back below still holds it on the frame.
+            let _ = window.set_cursor_grab(if want {
+                CursorGrabMode::Confined
+            } else {
+                CursorGrabMode::None
+            });
+        }
+        if !want {
+            self.clip_warp = None;
+        }
+        if let Some(point) = self.clip_warp.take() {
+            if let Err(err) = window.set_cursor_position(point) {
+                if !self.warp_failed {
+                    self.warp_failed = true;
+                    eprintln!("cannot move the system cursor: {err}");
+                }
+            }
         }
     }
 
@@ -1393,8 +1434,19 @@ impl App for GamePlayer {
                 let (mut x, mut y) = self.to_game(position.x, position.y);
                 if !self.windowed {
                     // Full screen keeps the cursor on the game's frame
-                    // (`CBRenderer::ClipCursor`).
+                    // (`CBRenderer::ClipCursor`): the game sees it on the
+                    // edge, and the system cursor is put back there next
+                    // frame (and held in the window where the system can
+                    // confine it).
                     let settings = self.runtime.world.settings();
+                    if view::clips_cursor(self.windowed, self.focused, self.occluded) {
+                        self.clip_warp = view::clip_to_frame(
+                            (settings.width, settings.height),
+                            (self.size.width, self.size.height),
+                            (position.x, position.y),
+                        )
+                        .map(|(x, y)| PhysicalPosition::new(x, y));
+                    }
                     x = x.clamp(0, settings.width as i32 - 1);
                     y = y.clamp(0, settings.height as i32 - 1);
                 }
@@ -1534,6 +1586,7 @@ impl App for GamePlayer {
         if self.runtime.world.quit_requested() {
             return Flow::Exit;
         }
+        self.clip_cursor(frame.window);
         if let Some(point) = self.runtime.world.take_cursor_warp() {
             // The game moved the mouse (`Game.SetMousePos`, the mouse
             // lock...): the system cursor follows, where the window

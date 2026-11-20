@@ -95,7 +95,13 @@ it; the original changes the display mode to the game's resolution, or
 keeps the desktop's with the aspect ratio maintained when the player
 asks (`DesktopRes`, `MaintainAspect`), which is what Luma always does.
 The mouse stays on the game's frame, as the original confines the
-cursor to the visible area (`CBRenderer::ClipCursor`).
+cursor to the visible area (`CBRenderer::ClipCursor`): the game sees a
+position clamped to its screen, and the player puts the system cursor
+back on the frame when it strays into the bars (and asks the window
+system to confine it to the window where that exists: Windows, X11,
+Wayland; macOS has no such grab). The confinement ends when the window
+loses the focus or is hidden (`UnclipCursor`) and with the window on
+exit; a window is never clipped.
 `Game.WindowedMode` tells the scripts which of the two the game runs in.
 
 In a window, the window opens where it was when the game last ended:
