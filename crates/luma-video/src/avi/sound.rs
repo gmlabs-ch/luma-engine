@@ -1,7 +1,8 @@
 //! The sound of an AVI file as a WAV file of PCM samples: PCM is
 //! passed on as it is; Microsoft ADPCM and IMA ADPCM (both described in
 //! Microsoft's "Multimedia Data Standards Update" and the IMA's
-//! recommended practices) are decoded to 16 bits.
+//! recommended practices) are decoded to 16 bits, and so is MPEG audio
+//! (`mpeg.rs`).
 
 use super::WaveFormat;
 use crate::{Error, Result};
@@ -9,6 +10,8 @@ use crate::{Error, Result};
 const WAVE_FORMAT_PCM: u16 = 0x0001;
 const WAVE_FORMAT_ADPCM: u16 = 0x0002;
 const WAVE_FORMAT_IMA_ADPCM: u16 = 0x0011;
+const WAVE_FORMAT_MPEG: u16 = 0x0050;
+const WAVE_FORMAT_MPEG_LAYER3: u16 = 0x0055;
 const WAVE_FORMAT_EXTENSIBLE: u16 = 0xfffe;
 
 /// The names of the format tags a game's AVI may carry, for the log.
@@ -79,6 +82,15 @@ pub(crate) fn to_wav(format: &WaveFormat, data: &[u8]) -> Result<Vec<u8>> {
         }
         WAVE_FORMAT_ADPCM => ms_adpcm(format, data),
         WAVE_FORMAT_IMA_ADPCM => ima_adpcm(format, data),
+        WAVE_FORMAT_MPEG | WAVE_FORMAT_MPEG_LAYER3 => {
+            let decoded = super::mpeg::decode(data)?;
+            let bytes: Vec<u8> = decoded
+                .samples
+                .iter()
+                .flat_map(|s| s.to_le_bytes())
+                .collect();
+            return Ok(wav(decoded.channels, decoded.sample_rate, 16, &bytes));
+        }
         tag => {
             return unsupported(format!("sound format tag 0x{tag:04X}{}", tag_name(tag)));
         }
@@ -302,9 +314,10 @@ mod tests {
             Err(Error::UnsupportedCodec(name)) => name,
             other => panic!("{other:?}"),
         };
+        assert_eq!(name(&format(0x55, 2, 1, 0)), "MPEG audio: no frame found");
         assert_eq!(
-            name(&format(0x55, 2, 1, 0)),
-            "sound format tag 0x0055 (MP3)"
+            name(&format(0x92, 2, 1, 0)),
+            "sound format tag 0x0092 (AC-3)"
         );
         assert_eq!(name(&format(0x1234, 2, 1, 0)), "sound format tag 0x1234");
         assert_eq!(name(&format(1, 6, 12, 16)), "sound with 6 channels");

@@ -14,6 +14,7 @@ ogg.workspace = true
 oxideav-theora.workspace = true
 oxideav-core.workspace = true
 image.workspace = true
+symphonia.workspace = true
 
 [dev-dependencies]
 luma-audio.workspace = true

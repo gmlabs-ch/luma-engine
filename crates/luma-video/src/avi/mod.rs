@@ -11,6 +11,7 @@ mod build;
 mod cinepak;
 mod dib;
 mod mjpeg;
+mod mpeg;
 mod msvideo1;
 mod rle;
 mod sound;
@@ -1099,6 +1100,30 @@ mod tests {
     }
 
     #[test]
+    fn mp3_sound_is_decoded_whatever_the_chunk_boundaries() {
+        // Six silent layer 3 frames (417 bytes, 1152 samples each at
+        // 44.1 kHz, mono), cut into chunks that do not follow the
+        // frames; the header of the file says something else.
+        let mut frame = vec![0u8; 417];
+        frame[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0xc0]);
+        let stream = frame.repeat(6);
+        let mut sound = pcm(10);
+        sound.tag = 0x55;
+        sound.sample_rate = 22_050;
+        sound.chunks = stream.chunks(500).map(<[u8]>::to_vec).collect();
+        let mut file = spec(vec![plain(1, 2, 3)]);
+        file.sound = Some(sound);
+        let video = AviVideo::open(build_avi(&file)).unwrap();
+        let wav = video.sound_track().unwrap().unwrap();
+        assert_eq!(&wav[..4], b"RIFF");
+        assert_eq!(&wav[20..24], &[1, 0, 1, 0], "PCM, one channel");
+        assert_eq!(&wav[24..28], &44_100u32.to_le_bytes(), "the stream's rate");
+        let data = u32::from_le_bytes(wav[40..44].try_into().unwrap()) as usize;
+        assert_eq!(data, wav.len() - 44);
+        assert!(data >= 1152 * 3 * 2 && data % (1152 * 2) == 0, "{data}");
+    }
+
+    #[test]
     fn codecs_luma_does_not_decode_are_named() {
         let name = |compression: u32, bits: u16| {
             let mut file = spec(vec![vec![0; 16]]);
@@ -1123,9 +1148,7 @@ mod tests {
         let video = AviVideo::open(build_avi(&file)).unwrap();
         assert_eq!(
             video.sound_track(),
-            Err(Error::UnsupportedCodec(
-                "sound format tag 0x0055 (MP3)".into()
-            ))
+            Err(Error::UnsupportedCodec("MPEG audio: no frame found".into()))
         );
         // The handler is named too when it differs.
         let mut bytes = build_avi(&{

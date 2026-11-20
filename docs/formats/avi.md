@@ -221,11 +221,29 @@ left to right.
 | 0x0001 | PCM | 8, 16, 24 or 32 bits, one or two channels. |
 | 0x0002 | Microsoft ADPCM | Decoded to 16 bits. |
 | 0x0011 | IMA ADPCM | Decoded to 16 bits. |
+| 0x0050 | MPEG audio, layers 1 and 2 | Decoded to 16 bits. |
+| 0x0055 | MPEG audio, layer 3 (MP3) | Decoded to 16 bits. |
 | 0xFFFE | Extensible | Read as the format its sub-format names. |
 
 The sound is handed to the audio engine as a WAV file of PCM samples
-(`AviFile::sound_track`). Any other tag is refused with its number:
-`sound format tag 0x0055 (MP3)`; the video then plays without sound.
+(`AviFile::sound_track`). Any other tag is refused with its number,
+for example `sound format tag 0x0092 (AC-3)`; the video then plays
+without sound.
+
+**MPEG audio.** The chunks of the stream, joined, are an MPEG audio
+elementary stream (frames that may straddle chunks, each starting with a
+sync word and a header). Luma hands it to the `symphonia` MPEG audio
+decoder (MPL-2.0, `crates/luma-video/src/avi/mpeg.rs`), which accepts
+layers 1, 2 and 3 of MPEG-1, 2 and 2.5. Both tags are decoded the same
+way, by the frame headers, not by the tag. The channel count and the
+sample rate of the WAV file are those of the decoded frames, not the
+`WAVEFORMAT` fields (an MP3 AVI often carries wrong ones; this is
+inferred, the original left it to the machine's ACM codec). A frame that
+does not decode is skipped; a stream whose format changes keeps what
+came before the change; the output stops at 128 million samples; a
+stream with no decodable frame, or with more than two channels, is
+refused (`MPEG audio: no frame could be decoded`). Tested with silent
+frames built in code; no real MP3 file is checked in.
 
 **Microsoft ADPCM.** A block (`nBlockAlign` bytes) starts, per channel,
 with the number of a predictor (one byte each), then the step, the

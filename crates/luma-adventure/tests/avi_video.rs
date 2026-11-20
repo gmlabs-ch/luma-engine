@@ -142,7 +142,7 @@ fn game() -> std::path::PathBuf {
         "mp3.avi",
         avi_with(|spec| {
             spec.sound = Some(AviSound {
-                tag: 0x55,
+                tag: 0x92,
                 channels: 2,
                 sample_rate: 44100,
                 block_align: 1,
@@ -338,7 +338,7 @@ fn a_video_that_cannot_play_is_logged_and_the_script_goes_on() {
     let log = raise(&mut runtime, "PlayMp3");
     assert!(
         log.iter().any(|l| l
-            == "Error initializing sound buffer for AVI file 'mp3.avi': unsupported codec: sound format tag 0x0055 (MP3)"),
+            == "Error initializing sound buffer for AVI file 'mp3.avi': unsupported codec: sound format tag 0x0092 (AC-3)"),
         "{log:?}"
     );
     let player = runtime.world.video().unwrap();

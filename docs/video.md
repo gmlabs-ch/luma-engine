@@ -293,6 +293,7 @@ machine and not on another. Luma decodes the AVI container
 | PCM, 8 to 32 bits, mono or stereo | 0x0001 |
 | Microsoft ADPCM | 0x0002 |
 | IMA ADPCM | 0x0011 |
+| MPEG audio layers 1 to 3 (MP3) | 0x0050, 0x0055 |
 
 **Not decoded**, among the codecs games of those years shipped:
 
@@ -302,7 +303,6 @@ machine and not on another. Luma decodes the AVI container
 | Microsoft MPEG-4 | `MP42`, `MP43`, `DIV3`, `DIV4` | The same. |
 | Intel Indeo | `IV31`, `IV32`, `IV41`, `IV50` | No public specification and no usable decoder. |
 | H.264, WMV, others | `H264`, `WMV1` to `WMV3`, ... | Rare in AVI files of the time; no decoder in the engine. |
-| MP3 | 0x0055 | No MP3 decoder is built into the audio engine today. |
 | AC-3, WMA, Vorbis in AVI, others | 0x2000, 0x0160 to 0x0163, ... | No decoder. |
 
 A video whose **picture** codec is not decoded does not play: the call
@@ -317,7 +317,7 @@ ended (the engine did the same on a machine without the codec). A video
 whose **sound** codec is not decoded plays without sound, after
 
 ```
-Error initializing sound buffer for AVI file 'intro.avi': unsupported codec: sound format tag 0x0055 (MP3)
+Error initializing sound buffer for AVI file 'intro.avi': unsupported codec: sound format tag 0x0092 (AC-3)
 ```
 
 (the engine, too, played on when its sound buffer could not be made).
@@ -332,7 +332,7 @@ one of the codecs above.
 - **Sound codecs.** The engine gave the stream's format to DirectSound
   as it was, which takes PCM only (inferred from `CBSoundAVI`: the
   buffer is created with the stream's own format): a video with ADPCM
-  sound played silent there. Luma decodes the two ADPCM codecs.
+  sound played silent there. Luma decodes the two ADPCM codecs and MPEG audio (MP3).
 - **Sound volume.** The engine marked the AVI's sound as a sound effect
   but never set a volume on its buffer, so it played at full level
   whatever the player's sound effects volume. Luma plays it at the sound
@@ -492,7 +492,7 @@ The file is read as the engine reads it (`CVidSubtitler::LoadSubtitles`):
 ## Not yet
 
 - The AVI codecs listed as not decoded under
-  [Codecs](#codecs); MP3 sound is the one most likely to be met.
+  [Codecs](#codecs).
 - `SetTheoraTexture` on 3D actors, with the rest of the 3D module.
 - The White Chamber's own videos (`assets\data0001.ogg` and the others)
   are not in the itch.io release: there the engine logs the missing file
