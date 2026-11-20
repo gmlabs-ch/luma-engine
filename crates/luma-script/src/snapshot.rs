@@ -648,6 +648,15 @@ mod tests {
         ) -> Option<Return> {
             self.0.call_function(name, args, ctx)
         }
+
+        fn call_extension(
+            &mut self,
+            name: &str,
+            args: &[Value],
+            ctx: Context<'_>,
+        ) -> Option<Return> {
+            self.0.call_extension(name, args, ctx)
+        }
     }
 
     #[test]

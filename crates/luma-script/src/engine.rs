@@ -1122,7 +1122,8 @@ impl Engine {
                 } else {
                     let ret = host
                         .call_function(&name, &args, self.context(i))
-                        .or_else(|| self.builtin(i, host, &name, &args));
+                        .or_else(|| self.builtin(i, host, &name, &args))
+                        .or_else(|| host.call_extension(&name, &args, self.context(i)));
                     let Some(i) = self.index_of(id) else {
                         return false;
                     };

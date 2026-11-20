@@ -166,6 +166,21 @@ pub trait Host: Natives {
     /// engine tries its own built-ins (`Sleep`, `Random`, `ToString`...).
     fn call_function(&mut self, name: &str, args: &[Value], ctx: Context<'_>) -> Option<Return>;
 
+    /// A global function nobody else knew: neither [`Host::call_function`]
+    /// nor the engine's own built-ins answered. It is the last stop of an
+    /// `EXTERNAL_CALL` before the engine reports `Call to undefined
+    /// function`, and the place a host offers the name to code that adds
+    /// script classes (`CBPluginMgr::HandleExternalCall`, which
+    /// `CBGame::ExternalCall` tries last). The default knows nothing.
+    fn call_extension(
+        &mut self,
+        _name: &str,
+        _args: &[Value],
+        _ctx: Context<'_>,
+    ) -> Option<Return> {
+        None
+    }
+
     /// A method of a native object (`obj.Method(args)`). `None` means the
     /// object has no such method.
     fn call_method(
